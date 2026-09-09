@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""
+Sidebar Manager
+Handles sidebar components (tree, preview) visibility and management
+"""
+
+import os
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import QApplication
+
+
+class SidebarManager:
+    """Manages sidebar components (tree, preview, rename status)"""
+    
+    def __init__(self, main_window):
+        """
+        Initialize the sidebar manager
+        
+        Args:
+            main_window: Reference to the main ImageBrowserWindow instance
+        """
+        self.main_window = main_window
+        if hasattr(main_window, 'event_bus') and main_window.event_bus:
+            from event_bus import VIEW_MODE_CHANGED
+            main_window.event_bus.subscribe(VIEW_MODE_CHANGED, self._on_view_mode_changed)
+        
+        # Debounce timer for sidebar resize to avoid excessive thumbnail layout recalculations
+        self._sidebar_resize_timer = QTimer()
+        self._sidebar_resize_timer.setSingleShot(True)
+        self._sidebar_resize_timer.timeout.connect(self._on_sidebar_resize_debounced)
+        
+        # Track sidebar width for detecting significant resize changes
+        self._last_sidebar_width = None
+
+        # Debounce naming-consistency checks after rename operations (batch + F2)
+        self._pending_rename_status_directories: set = set()
+        self._rename_status_after_rename_timer = QTimer()
+        self._rename_status_after_rename_timer.setSingleShot(True)
+        self._rename_status_after_rename_timer.timeout.connect(self._flush_scheduled_rename_status_check)
+        self._rename_status_after_rename_delay_ms = 400
+
+    def _on_view_mode_changed(self, mode: str):
+        """Handle VIEW_MODE_CHANGED - sidebar state may need refresh (manage_sidebar_visibility called by view switch)"""
+        pass  # manage_sidebar_visibility_for_view_mode is called by view switch code
+
+    def _leave_browse_then(self, callback):
+        """Run callback after leaving browse mode (left sidebar is thumbnail/list only)."""
+        if getattr(self.main_window, "current_view_mode", None) == "browse":
+            if hasattr(self.main_window, "close_browse_view"):
+                self.main_window.close_browse_view()
+            QTimer.singleShot(50, callback)
+        else:
+            callback()
+
+    def _leave_browse_then_toggle_pane(self, is_displayed_fn, set_visible_fn, toggle_fn=None):
+        """Exit browse then reveal a pane; outside browse, toggle normally.
+
+        In browse mode the combined sidebar is hidden but pane visibility flags stay
+        set. A naive toggle after close_browse_view would hide a pane that was already
+        visible before browse (e.g. F9 with chat + tree showing).
+
+        is_displayed_fn reflects on-screen visibility (chat cover counts as hidden).
+        """
+        was_browse = getattr(self.main_window, "current_view_mode", None) == "browse"
+        was_displayed = is_displayed_fn()
+
+        def callback():
+            if was_browse:
+                if not was_displayed:
+                    set_visible_fn(True)
+            elif toggle_fn is not None:
+                toggle_fn()
+            else:
+                set_visible_fn(not is_displayed_fn())
+
+        self._leave_browse_then(callback)
+    
+    def toggle_file_tree(self):
+        """Toggle the visibility of the file tree and resize canvas accordingly"""
+        cs = self.main_window.combined_sidebar
+        mw = self.main_window
+        if mw._should_reveal_sidebar_only('left'):
+            return mw._toggle_pane_with_chrome_restore(
+                cs.is_tree_visible, cs.set_tree_visible, 'left_tree_visible', 'left'
+            )
+        mw._exit_partial_chrome_for_side('left')
+        if mw._show_sidebar_container_if_pane_active('left', cs.is_tree_visible):
+            return cs.is_tree_visible()
+        self._leave_browse_then_toggle_pane(
+            cs.is_tree_displayed,
+            cs.set_tree_visible,
+            cs.toggle_tree_visibility,
+        )
+        return cs.is_tree_visible()
+    
+    def toggle_preview(self):
+        """Toggle the visibility of the preview widget and resize canvas accordingly"""
+        cs = self.main_window.combined_sidebar
+        mw = self.main_window
+        if mw._should_reveal_sidebar_only('left'):
+            return mw._toggle_pane_with_chrome_restore(
+                cs.is_preview_visible, cs.set_preview_visible, 'left_preview_visible', 'left'
+            )
+        mw._exit_partial_chrome_for_side('left')
+        if mw._show_sidebar_container_if_pane_active('left', cs.is_preview_visible):
+            return cs.is_preview_visible()
+        self._leave_browse_then_toggle_pane(
+            cs.is_preview_displayed,
+            cs.set_preview_visible,
+            cs.toggle_preview_visibility,
+        )
+        return cs.is_preview_visible()
+
+    def toggle_jobs(self):
+        """Toggle jobs sidebar pane (J key); switch from panel mode when needed."""
+        try:
+            from bundle_capabilities import model_jobs_ui_enabled
+
+            if not model_jobs_ui_enabled():
+                return False
+        except ImportError:
+            pass
+        from imagegen_plugins.jobs_display_mode import (
+            JOBS_DISPLAY_PANE,
+            get_jobs_display_mode,
+            hide_jobs_pane,
+            is_jobs_pane_showing,
+            show_jobs_pane,
+            sync_jobs_menu_actions,
+        )
+
+        rs = getattr(self.main_window, "right_sidebar", None)
+        if get_jobs_display_mode(self.main_window) != JOBS_DISPLAY_PANE:
+            show_jobs_pane(self.main_window)
+            return True
+
+        if rs is None:
+            show_jobs_pane(self.main_window)
+            return True
+
+        if self.main_window._should_reveal_sidebar_only('right'):
+            if not rs.is_jobs_visible():
+                rs.set_jobs_visible(True)
+                show_jobs_pane(self.main_window)
+                return True
+            self.main_window._toggle_pane_with_chrome_restore(
+                rs.is_jobs_visible,
+                rs.set_jobs_visible,
+                'right_jobs_visible',
+                'right',
+            )
+            self.main_window.jobs_visible = rs.is_jobs_visible()
+            sync_jobs_menu_actions(self.main_window)
+            return rs.is_jobs_visible()
+
+        self.main_window._exit_partial_chrome_for_side('right')
+        if self.main_window._show_sidebar_container_if_pane_active(
+            'right', rs.is_jobs_visible
+        ):
+            self.main_window.jobs_visible = rs.is_jobs_visible()
+            sync_jobs_menu_actions(self.main_window)
+            return rs.is_jobs_visible()
+
+        if is_jobs_pane_showing(self.main_window):
+            hide_jobs_pane(self.main_window)
+            return False
+
+        show_jobs_pane(self.main_window)
+        return True
+
+    def toggle_jobs_display_mode(self) -> str:
+        from imagegen_plugins.jobs_display_mode import toggle_jobs_display_mode
+
+        return toggle_jobs_display_mode(self.main_window)
+
+    def toggle_chat(self):
+        """Toggle the visibility of the chat pane in the left combined sidebar."""
+        if hasattr(self.main_window, "combined_sidebar"):
+            cs = self.main_window.combined_sidebar
+            mw = self.main_window
+            if mw._should_reveal_sidebar_only('left'):
+                return mw._toggle_pane_with_chrome_restore(
+                    cs.is_chat_visible, cs.set_chat_visible, 'left_chat_visible', 'left'
+                )
+            mw._exit_partial_chrome_for_side('left')
+            if mw._show_sidebar_container_if_pane_active('left', cs.is_chat_visible):
+                return cs.is_chat_visible()
+            cs.set_chat_visible(not cs.is_chat_visible())
+            return cs.is_chat_visible()
+        return False
+    
+    def update_preview_if_visible(self):
+        """Update preview widget if it's visible"""
+        if hasattr(self.main_window, 'preview_widget') and self.main_window.preview_widget.isVisible():
+            self.main_window.preview_widget.update_preview()
+    
+    def ensure_tree_initialized(self):
+        """Ensure the file tree is initialized"""
+        if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+            self.main_window.file_tree_handler.ensure_tree_initialized()
+    
+    def focus_tree(self):
+        """Focus the file tree"""
+        if hasattr(self.main_window, 'tree_container'):
+            self.main_window.tree_container.setFocus()
+    
+    def focus_canvas(self):
+        """Focus the canvas"""
+        if hasattr(self.main_window, 'thumbnail_container'):
+            self.main_window.thumbnail_container.setFocus()
+    
+    def toggle_rename_status(self):
+        """Toggle rename status checking"""
+        if not hasattr(self.main_window, 'rename_status_manager'):
+            return
+        
+        enabled = self.main_window.rename_status_manager.is_enabled()
+        new_enabled = not enabled
+        
+        self.main_window.rename_status_manager.set_enabled(new_enabled)
+        
+        # Update menu checkmark
+        if hasattr(self.main_window, 'show_rename_status_action'):
+            self.main_window.show_rename_status_action.setChecked(new_enabled)
+        
+        # Update button icon in file tree
+        if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+            if hasattr(self.main_window.file_tree_handler, 'update_rename_status_button_icon'):
+                self.main_window.file_tree_handler.update_rename_status_button_icon()
+        
+        if new_enabled:
+            # Load existing status from file
+            self.main_window.rename_status_manager.load_all_status()
+            # Perform full scan of all relevant dirs when turned on - use timer to ensure tree is ready
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: self.update_rename_status(full_scan=True))
+        else:
+            # Clear status and refresh tree to remove checkmarks
+            if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+                if self.main_window.file_tree_handler.is_tree_initialized():
+                    self.main_window.file_tree_handler.rebuild_tree()
+    
+    def schedule_rename_status_check_after_rename(self, *directories):
+        """Schedule a naming-consistency tree check after rename(s) finish.
+
+        Debounced so rapid or batched renames trigger one check after the last one.
+        No-op when Show Naming Consistency in Tree is off.
+        """
+        if not hasattr(self.main_window, 'rename_status_manager'):
+            return
+        if not self.main_window.rename_status_manager.is_enabled():
+            return
+        for directory in directories:
+            if directory:
+                self._pending_rename_status_directories.add(os.path.normpath(directory))
+        if not self._pending_rename_status_directories:
+            return
+        self._rename_status_after_rename_timer.start(self._rename_status_after_rename_delay_ms)
+
+    def _flush_scheduled_rename_status_check(self):
+        """Run pending naming-consistency checks for directories affected by renames."""
+        directories = list(self._pending_rename_status_directories)
+        self._pending_rename_status_directories.clear()
+        for directory in directories:
+            try:
+                self.update_rename_status_for_directory(directory)
+            except Exception:
+                pass
+
+    def update_rename_status_for_directory(self, directory: str):
+        """Update rename status for a specific directory and refresh its checkmark without rebuilding tree."""
+        if not hasattr(self.main_window, 'rename_status_manager'):
+            return
+        if not self.main_window.rename_status_manager.is_enabled():
+            return
+        
+        # Get config values - use same keys as rename operations (rename_custom_prefix, rename_increment_length)
+        config = self.main_window.config.load_settings()
+        rename_prefix_template = config.get('rename_custom_prefix', 'image-%d')
+        increment_length = config.get('rename_increment_length', 5)
+        max_depth = config.get('rename_status_max_depth', 3)
+        filter_pattern = self.main_window.filter_pattern or ''
+        
+        # Get image extensions
+        from thumbnails.thumbnail_constants import get_image_extensions
+        extensions = get_image_extensions()
+        
+        # Update status for this directory and its immediate children
+        self.main_window.rename_status_manager.update_status_for_directory_tree(
+            root_directory=directory,
+            max_depth=max_depth,
+            rename_prefix_template=rename_prefix_template,
+            increment_length=increment_length,
+            filter_pattern=filter_pattern,
+            extensions=extensions,
+            visible_directories=[directory]
+        )
+        
+        # Refresh tree view to show updated checkmark
+        if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+            if self.main_window.file_tree_handler.is_tree_initialized():
+                from PySide6.QtCore import Qt
+                filter_proxy = self.main_window.file_tree_handler.filter_proxy
+                file_model = self.main_window.file_tree_handler.file_model
+                
+                if filter_proxy and file_model:
+                    try:
+                        # Get source index from file model
+                        index = file_model.index(directory)
+                        if index.isValid():
+                            # Map to proxy index
+                            proxy_index = filter_proxy.mapFromSource(index)
+                            if proxy_index.isValid():
+                                # Emit dataChanged with DecorationRole to trigger icon redraw
+                                filter_proxy.dataChanged.emit(
+                                    proxy_index, proxy_index, [Qt.DecorationRole]
+                                )
+                    except Exception:
+                        # Fallback: refresh entire tree view
+                        if hasattr(self.main_window.file_tree_handler, 'file_tree'):
+                            self.main_window.file_tree_handler.file_tree.viewport().update()
+    
+    def update_rename_status(self, full_scan=False):
+        """Update rename status for directories in tree.
+        
+        When full_scan=True: scan all relevant dirs from enabled root directories (used when
+        toggle is turned on, after mass rename, or on cmd-R). Otherwise scan visible (expanded) dirs.
+        """
+        if not hasattr(self.main_window, 'rename_status_manager'):
+            return
+        if not self.main_window.rename_status_manager.is_enabled():
+            return
+
+        # Get config values - use same keys as rename operations (rename_custom_prefix, rename_increment_length)
+        config = self.main_window.config.load_settings()
+        rename_prefix_template = config.get('rename_custom_prefix', 'image-%d')
+        increment_length = config.get('rename_increment_length', 5)
+        max_depth = config.get('rename_status_max_depth', 3)
+        filter_pattern = self.main_window.filter_pattern or ''
+        
+        # Get image extensions
+        from thumbnails.thumbnail_constants import get_image_extensions
+        extensions = get_image_extensions()
+
+        if full_scan:
+            # Full scan: scan all enabled root directories recursively (all relevant dirs)
+            from files.file_tree_handler import get_enabled_root_directories
+            root_directories = [d for d in get_enabled_root_directories() if d and os.path.isdir(d)]
+            if not root_directories and hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
+                root_directories = [self.main_window.current_directory]
+            if not root_directories:
+                return
+            status_map = {}
+            for root_directory in root_directories:
+                scan_result = self.main_window.rename_status_manager.scan_directory_tree(
+                    root_directory=root_directory,
+                    max_depth=max_depth,
+                    rename_prefix_template=rename_prefix_template,
+                    increment_length=increment_length,
+                    filter_pattern=filter_pattern,
+                    extensions=extensions,
+                    visible_directories=None  # Full recursive scan
+                )
+                status_map.update(scan_result)
+            for root_directory in root_directories:
+                self.main_window.rename_status_manager.update_status_for_directory_tree(
+                    root_directory=root_directory,
+                    max_depth=max_depth,
+                    rename_prefix_template=rename_prefix_template,
+                    increment_length=increment_length,
+                    filter_pattern=filter_pattern,
+                    extensions=extensions,
+                    visible_directories=None
+                )
+        else:
+            # Normal scan: visible (expanded) directories only
+            visible_directories = []
+            if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+                if self.main_window.file_tree_handler.is_tree_initialized():
+                    visible_directories = self.main_window.file_tree_handler.get_expanded_directories()
+            
+            if not visible_directories and hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
+                visible_directories = [self.main_window.current_directory]
+            
+            if not visible_directories and (hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler and self.main_window.file_tree_handler.is_tree_initialized()):
+                if hasattr(self.main_window.file_tree_handler, 'file_model'):
+                    root_path = self.main_window.file_tree_handler.file_model.rootPath()
+                    if root_path and root_path != '/':
+                        visible_directories = [root_path]
+                    elif hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
+                        visible_directories = [self.main_window.current_directory]
+            
+            if not visible_directories:
+                return
+
+            root_directory = self.main_window.current_directory if hasattr(self.main_window, 'current_directory') and self.main_window.current_directory else visible_directories[0]
+            
+            status_map = self.main_window.rename_status_manager.scan_directory_tree(
+                root_directory=root_directory,
+                max_depth=max_depth,
+                rename_prefix_template=rename_prefix_template,
+                increment_length=increment_length,
+                filter_pattern=filter_pattern,
+                extensions=extensions,
+                visible_directories=visible_directories
+            )
+            
+            self.main_window.rename_status_manager.update_status_for_directory_tree(
+                root_directory=root_directory,
+                max_depth=max_depth,
+                rename_prefix_template=rename_prefix_template,
+                increment_length=increment_length,
+                filter_pattern=filter_pattern,
+                extensions=extensions,
+                visible_directories=visible_directories
+            )
+        
+        # Refresh tree view to show updated checkmarks
+        # Emit dataChanged for each VISIBLE directory (scanned dirs may be filtered out of tree)
+        if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+            if self.main_window.file_tree_handler.is_tree_initialized():
+                from PySide6.QtCore import Qt
+                handler = self.main_window.file_tree_handler
+                if hasattr(handler, 'get_all_visible_directory_proxy_indices'):
+                    for proxy_index in handler.get_all_visible_directory_proxy_indices():
+                        try:
+                            handler.filter_proxy.dataChanged.emit(
+                                proxy_index, proxy_index, [Qt.DecorationRole]
+                            )
+                        except Exception:
+                            continue
+                if hasattr(handler, 'file_tree'):
+                    handler.file_tree.viewport().update()
+    
+    def _get_thumbnail_cell_width(self):
+        """Get current thumbnail cell width including borders and spacing"""
+        try:
+            from thumbnails.thumbnail_constants import BORDER_SPACE, THUMBNAIL_SPACING
+            
+            # Get current thumbnail size from canvas or main window
+            thumbnail_size = 0
+            if hasattr(self.main_window, 'thumbnail_container') and hasattr(self.main_window.thumbnail_container, 'canvas'):
+                canvas = self.main_window.thumbnail_container.canvas
+                if hasattr(canvas, 'thumbnail_size'):
+                    thumbnail_size = canvas.thumbnail_size
+            elif hasattr(self.main_window, 'current_thumbnail_size'):
+                thumbnail_size = self.main_window.current_thumbnail_size
+            
+            if thumbnail_size > 0:
+                # Cell width = thumbnail_size + border_space + spacing
+                return thumbnail_size + BORDER_SPACE + THUMBNAIL_SPACING
+            
+            # Fallback: use a reasonable default
+            return 200  # Approximate cell width for medium thumbnails
+        except Exception:
+            return 200  # Fallback on error
+    
+    def _on_sidebar_resized(self):
+        """Handle sidebar resize events - debounced to avoid excessive recalculations"""
+        # Get current sidebar width
+        if hasattr(self.main_window, 'combined_sidebar'):
+            current_width = self.main_window.combined_sidebar.width()
+        else:
+            current_width = getattr(self.main_window, 'sidebar_width', 0)
+        
+        # Get current thumbnail cell width (including borders and spacing)
+        cell_width = self._get_thumbnail_cell_width()
+        
+        # Check if change since last refresh exceeds thumbnail cell width
+        if self._last_sidebar_width is not None and cell_width > 0:
+            width_change = abs(current_width - self._last_sidebar_width)
+            if width_change >= cell_width:
+                # Significant change - force immediate recalculation
+                self._sidebar_resize_timer.stop()
+                self._on_sidebar_resize_debounced()
+                return
+        
+        # Small change - use debounce timer
+        self._sidebar_resize_timer.stop()
+        self._sidebar_resize_timer.start(150)  # 150ms debounce delay
+    
+    def _on_sidebar_resize_debounced(self):
+        """Handle debounced sidebar resize events"""
+        # Update canvas layout when sidebar is resized
+        self.main_window.update_max_thumbnail_size()
+        
+        # Update tracked sidebar width after recalculation
+        if hasattr(self.main_window, 'combined_sidebar'):
+            self._last_sidebar_width = self.main_window.combined_sidebar.width()
+        else:
+            self._last_sidebar_width = getattr(self.main_window, 'sidebar_width', 0)
+        
+        # Handle browse mode - resize image container when combined sidebar is resized
+        # Delay to allow Qt to finish updating the layout before recalculating fit-to-screen
+        if self.main_window.current_view_mode == 'browse':
+            QTimer.singleShot(100, self.main_window._resize_browse_view_image_container)
+        
+        # Handle list view mode - update row rectangles and header when sidebar is resized
+        if self.main_window.current_view_mode == 'list':
+            if hasattr(self.main_window, 'list_view_container') and self.main_window.list_view_container:
+                QTimer.singleShot(100, self.main_window.list_view_container._handle_viewport_resize)

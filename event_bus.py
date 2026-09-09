@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""
+Event Bus
+Central event dispatch for the image browser. Components subscribe to events
+and react independently, enabling loose coupling and event-driven architecture.
+"""
+
+from typing import Any, Callable, Dict, List
+from PySide6.QtCore import QObject, QThread, QTimer
+from PySide6.QtWidgets import QApplication
+
+
+# Event type constants
+DIRECTORY_REQUESTED = "directory_requested"  # payload: (path: str, external_load: bool)
+DIRECTORY_LOADED = "directory_loaded"  # payload: str (path)
+DIRECTORY_CHANGED = "directory_changed"  # payload: str (path)
+DISPLAYED_IMAGES_CHANGED = "displayed_images_changed"  # payload: List[str]
+CURRENT_IMAGE_CHANGED = "current_image_changed"  # payload: str (path)
+CURRENT_INDEX_CHANGED = "current_index_changed"  # payload: int (index in displayed_images)
+SELECTION_CHANGED = "selection_changed"  # payload: Set[str]
+FILES_CHANGED_ON_DISK = "files_changed_on_disk"  # payload: str (directory path)
+REFRESH_REQUESTED = "refresh_requested"  # payload: bool (force)
+VIEW_MODE_CHANGED = "view_mode_changed"  # payload: str (mode)
+THUMBNAIL_CLICKED = "thumbnail_clicked"  # payload: (index, cmd_pressed, shift_pressed, macos_ctrl_pressed)
+SETTINGS_CHANGED = "settings_changed"  # payload: dict (changed settings)
+FILTER_PATTERN_CHANGED = "filter_pattern_changed"  # payload: str
+FILTER_TREE_MODE_CHANGED = "filter_tree_mode_changed"  # payload: str
+FILE_OPERATION_COMPLETE = "file_operation_complete"  # payload: (operation_type, paths, success)
+DELETED_PLACEHOLDERS_CHANGED = "deleted_placeholders_changed"  # payload: None - views should repaint
+FILE_METADATA_CHANGED = "file_metadata_changed"  # payload: (path: str, fields: Optional[set])
+
+
+class EventBus(QObject):
+    """
+    Central event bus for the image browser.
+    Components subscribe to event types and receive callbacks when events are emitted.
+    Uses QTimer.singleShot for main-thread execution when emitting from background threads.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._subscribers: Dict[str, List[Callable]] = {}
+        self._next_token = 0
+        self._tokens: Dict[int, tuple] = {}  # token -> (event_type, callback)
+
+    def subscribe(self, event_type: str, callback: Callable) -> int:
+        """
+        Subscribe to an event type.
+        Returns a subscription token for bookkeeping.
+        """
+        if event_type not in self._subscribers:
+            self._subscribers[event_type] = []
+        self._subscribers[event_type].append(callback)
+        token = self._next_token
+        self._next_token += 1
+        self._tokens[token] = (event_type, callback)
+        return token
+
+    def emit(self, event_type: str, payload: Any = None) -> None:
+        """
+        Emit an event to all subscribers.
+        If called from a non-main thread, defers to main thread via QTimer.singleShot.
+        """
+        if event_type not in self._subscribers or not self._subscribers[event_type]:
+            return
+
+        callbacks = list(self._subscribers[event_type])
+
+        def invoke():
+            for cb in callbacks:
+                try:
+                    if payload is not None:
+                        # Only unpack tuples (multi-arg payloads like path, external_load, refresh_mode)
+                        # Never unpack lists - they are single payloads (e.g. displayed_images)
+                        if isinstance(payload, tuple) and len(payload) > 1:
+                            cb(*payload)
+                        else:
+                            cb(payload)
+                    else:
+                        cb()
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+
+        # Invoke synchronously on main thread; defer from background threads.
+        app = QApplication.instance()
+        on_main_thread = (
+            app is None or QThread.currentThread() == app.thread()
+        )
+        if on_main_thread:
+            invoke()
+        else:
+            QTimer.singleShot(0, invoke)

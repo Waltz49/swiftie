@@ -1,0 +1,599 @@
+#!/usr/bin/env python3
+"""
+Centralized constants for thumbnail layout calculations.
+All hardcoded layout values should be defined here to ensure consistency.
+
+Table of contents (sections below):
+  1. Global — keyboard symbols, re-exports from sibling modules
+  2. Thumbnail sizing — min/max size limits
+  3. Thumbnail generation — worker threads and batch queue tuning
+  4. Thumbnail grid layout — spacing, margins, canvas insets
+  5. Thumbnail borders & overlay — selection highlight, filename overlay metrics
+  6. Thumbnail drag auto-scroll — scroll speeds while dragging over the grid
+  7. Browse image history — in-memory recent-images cap
+  8. Image generation prompts — LoRA trigger-word placement
+  9. Image generation controller — restored job queue startup timing
+ 10. Sidebar jobs pane — size-mode cycling and auto-resize behavior
+ 11. File tree — expansion depth, debounce, excluded extensions
+ 12. File tree drag auto-scroll — scroll speeds while dragging over the tree
+ 13. Face scanning — downscale threshold for detection performance
+ 14. Chat & LM Studio — rejection phrases, vision errors, dialog helpers
+ 15. Context menus (QMenu) — shared menu item metrics for toolbar/status/tree
+ 16. Main-window chrome — splitter handles and status-bar border widths
+ 17. Theme border widths — slider/stored border width limits
+ 18. Theme colors & paint — synced palette, canvas paint extras, inset helpers
+ 19. Debug terminal colors — ANSI escape codes for log output
+"""
+
+from typing import Set, List
+import os
+
+from cache.idle_and_cache_constants import (
+    BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS,
+    FEATURE_CACHE_UNLOAD_TIMEOUT_SECONDS,
+)
+from files.image_extensions_helpers import (
+    MIN_THUMBNAIL_SIZE,
+    IMAGE_EXTENSIONS,
+    clear_image_extensions_cache,
+    get_image_extensions,
+)
+
+
+# =============================================================================
+# 1. GLOBAL — Keyboard symbols
+# -----------------------------------------------------------------------------
+# macOS modifier and action symbols used in UI labels, shortcuts sidebar,
+# help dialog, and settings.
+# =============================================================================
+
+CMD_SYMBOL = "⌘"
+OPTION_SYMBOL = "⌥"
+CTRL_SYMBOL = "⌃"
+SHIFT_SYMBOL = "⇧"
+ENTER_SYMBOL = "↩"
+COPY_SYMBOL = "⧉"
+
+MODIFIER_SYMBOLS = {
+    "Cmd": CMD_SYMBOL,
+    "Shift": SHIFT_SYMBOL,
+    "Ctrl": CTRL_SYMBOL,
+    "Control": CTRL_SYMBOL,
+    "Alt": OPTION_SYMBOL,
+    "Option": OPTION_SYMBOL,
+}
+
+
+# =============================================================================
+# 2. THUMBNAIL SIZING — Size limits
+# -----------------------------------------------------------------------------
+# Upper bound for thumbnail cell size; MIN_THUMBNAIL_SIZE is imported from
+# files.image_extensions_helpers.
+# =============================================================================
+
+MAX_THUMBNAIL_SIZE = 450  # Default value, will be dynamically updated based on container size
+
+
+# =============================================================================
+# 3. THUMBNAIL GENERATION — Worker threads and batch queue tuning
+# -----------------------------------------------------------------------------
+# Parallel thumbnail creation and UI-responsiveness batching for the queue
+# and worker thread.
+# =============================================================================
+
+# Cap at 4 to reduce GIL contention; 7+ worker threads competing for GIL can deadlock
+# when main thread drops GIL during Qt signal connections (e.g. QTimer.singleShot)
+THUMBNAIL_GENERATION_THREADS = min(4, max(1, (os.cpu_count() or 2) - 1))
+
+# Batch processing constants for UI responsiveness
+THUMBNAIL_QUEUE_BATCH_SIZE = 50  # Number of thumbnails to queue before calling processEvents
+THUMBNAIL_QUEUE_BATCH_PAUSE_MS = 10  # Milliseconds to pause between batches (allows UI to process events)
+THUMBNAIL_WORKER_BATCH_SIZE = 10  # Number of thumbnails worker thread processes before pausing
+THUMBNAIL_WORKER_BATCH_PAUSE_MS = 5  # Milliseconds worker thread pauses between batches
+
+
+# =============================================================================
+# 4. THUMBNAIL GRID LAYOUT — Spacing, margins, and canvas insets
+# -----------------------------------------------------------------------------
+# Grid cell spacing and container margin values used by layout calculations.
+# =============================================================================
+
+# Spacing constants for grid layout
+THUMBNAIL_SPACING = 4  # Space between thumbnails (both horizontal and vertical)
+
+# Margin constants for layout calculations
+BASE_MARGIN = 20  # Base margin for thumbnail container
+
+# Canvas layout margins
+CANVAS_TOP_MARGIN = 10  # Top margin for canvas
+CANVAS_BOTTOM_MARGIN = 10  # Bottom margin for canvas
+CANVAS_TOP_BORDER = 10  # Top border space
+
+
+# =============================================================================
+# 5. THUMBNAIL BORDERS & OVERLAY — Selection highlight and filename overlay
+# -----------------------------------------------------------------------------
+# Per-cell border space, highlight width, and overlay text metrics for row
+# height calculation.
+# =============================================================================
+
+# Border and spacing constants for individual thumbnails
+BORDER_SPACE = 4  # Space around each thumbnail for borders/highlighting
+HIGHLIGHT_BORDER_WIDTH = 5  # Width of highlight border for selected thumbnails
+
+# Overlay text (filename/size) constants for row height calculation
+# Used by thumbnail_operations_manager for fast size calculation - no QFontMetrics
+# Must match canvas QFontMetrics for Arial 14pt (~16px on macOS)
+OVERLAY_LINE_HEIGHT = 16
+OVERLAY_SPACING = 4  # Space between image and overlay box
+OVERLAY_PADDING = 4  # Padding inside overlay box (2px top/bottom)
+
+# Calculated margin constants (derived from grid layout and border space above)
+CANVAS_TOTAL_TOP_MARGIN = CANVAS_TOP_MARGIN + BORDER_SPACE  # 14px
+CANVAS_TOTAL_BOTTOM_MARGIN = CANVAS_BOTTOM_MARGIN  # 10px
+CANVAS_TOTAL_HEIGHT_MARGINS = CANVAS_TOTAL_TOP_MARGIN + CANVAS_TOTAL_BOTTOM_MARGIN  # 24px
+CANVAS_TOTAL_WIDTH_MARGINS = BASE_MARGIN * 2  # 40px
+
+
+# =============================================================================
+# 6. THUMBNAIL DRAG AUTO-SCROLL — Grid viewport scroll while dragging
+# -----------------------------------------------------------------------------
+# Distance-from-edge thresholds and scroll speeds when dragging selections
+# over the thumbnail grid. Entries ordered largest distance to smallest.
+# =============================================================================
+
+# Auto-scroll during drag operations
+# Table of (distance_from_edge_px, scroll_speed_percent_of_screen_per_second)
+# Distance is measured in pixels from the top or bottom edge of the viewport
+# Speed is percentage of viewport height to scroll per second
+# Entries should be ordered from largest distance to smallest (for proper interpolation)
+DRAG_AUTO_SCROLL_SPEEDS = [
+    (100, 25.6),   # 100px from edge -> 25.6% scroll speed
+    (90, 51.2),    # 90px from edge  -> 51.2% scroll speed
+    (80, 76.8),    # 80px from edge  -> 76.8% scroll speed
+    (70, 102.4),   # 70px from edge  -> 102.4% scroll speed
+    (60, 128.0),   # 60px from edge  -> 128.0% scroll speed
+    (50, 153.6),   # 50px from edge  -> 153.6% scroll speed
+    (40, 179.2),   # 40px from edge  -> 179.2% scroll speed
+    (30, 204.8),   # 30px from edge  -> 204.8% scroll speed
+    (20, 230.4),   # 20px from edge  -> 230.4% scroll speed
+    (10, 256.0),   # 10px from edge  -> 256.0% scroll speed
+]
+
+
+# =============================================================================
+# 7. BROWSE IMAGE HISTORY — In-memory recent browse images
+# -----------------------------------------------------------------------------
+# Cap for File ▸ Image History and the F3 specific-files view. Debounce delay
+# is separately user-configurable (Settings ▸ General ▸ Browse Settings).
+# =============================================================================
+
+BROWSE_IMAGE_HISTORY_MAX = 60  # ucust: max entries in browse image history
+# Debounce delay is user-configurable (Settings ▸ General ▸ Browse Settings: "Save to history after ms")
+
+
+# =============================================================================
+# 8. IMAGE GENERATION PROMPTS — LoRA trigger-word placement
+# -----------------------------------------------------------------------------
+# Where auto-added LoRA trigger words are inserted in the generation prompt.
+# =============================================================================
+
+# Image generation: where auto-added LoRA trigger words are inserted in the prompt.
+# 0 = top, 1 = bottom, 2 = both (top and bottom).
+TRIGGER_POSITION = 0
+
+
+# =============================================================================
+# 9. IMAGE GENERATION CONTROLLER — Restored job queue startup timing
+# -----------------------------------------------------------------------------
+# Defer auto-start of a persisted job queue until after startup layout settles.
+# =============================================================================
+
+STARTUP_QUEUE_RELEASE_DELAY_MS = 6_000
+
+
+# =============================================================================
+# 10. SIDEBAR JOBS PANE — Size-mode cycling and auto-resize
+# -----------------------------------------------------------------------------
+# Tolerance for double-click mode cycle and optional refit on job start/end.
+# =============================================================================
+
+# Sidebar jobs pane: height-change tolerance for double-click mode cycle (px).
+JOBS_PANE_SIZE_CHANGE_TOLERANCE_PX = 10
+
+# When True, refit the jobs pane to the current size mode on job start/end.
+JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE = False  # ucust: auto-resize jobs pane when jobs start/end
+
+# Debounce job-card reflow while the right sidebar is resized horizontally (ms).
+JOBS_PANE_HORIZ_RESIZE_DEBOUNCE_MS = 75
+
+
+# =============================================================================
+# 11. FILE TREE — Expansion depth, debounce, and excluded extensions
+# -----------------------------------------------------------------------------
+# Navigation defaults and bundle/system filetypes hidden from the tree.
+# =============================================================================
+
+# File tree constants
+EXPANSION_LEVELS = 4          # Number of levels to expand the file tree  # ucust
+TREE_UPDATE_DEBOUNCE_TIMER = 130  # ms - debounce when holding scroll key to coalesce rapid updates
+
+# Excluded file extensions (system/bundle files that should not be shown in file tree)
+EXCLUDED_EXTENSIONS: Set[str] = {
+    '.app', '.pxd', '.framework', '.bundle', '.plugin', '.component',
+    '.pkg', '.egg', '.pages', '.whl', '.ipa', '.apk', '.deb', '.rpm'
+}
+
+# Skipped patterns for find command (excluded bundle/filetypes to skip)
+SKIPPED_PATTERNS: List[str] = [
+    '*.app', '*.framework', '*.bundle',
+    '*.pkg', '*.pages'
+]
+
+
+# =============================================================================
+# 12. FILE TREE DRAG AUTO-SCROLL — Tree viewport scroll while dragging
+# -----------------------------------------------------------------------------
+# Narrow-band, slow scroll speeds when dragging over the file tree.
+# =============================================================================
+
+TREE_DRAG_AUTO_SCROLL_TIMER_MS = 20  # ms - timer interval for auto-scroll of tree during drag
+
+TREE_DRAG_AUTO_SCROLL_SPEEDS: List[tuple] = [
+    (30, 1.5),    # 30px from edge -> 1.5% scroll speed
+    (20, 3.0),    # 20px from edge -> 3.0% scroll speed
+    (10, 8.0),     # 10px from edge  -> 8.0% scroll speed
+]
+
+
+# =============================================================================
+# 13. FACE SCANNING — Detection performance tuning
+# -----------------------------------------------------------------------------
+# Max image dimension before downscaling for face_engine detection.
+# =============================================================================
+
+# Face scanning (face_engine): max dimension; larger images are downscaled for faster detection
+FACE_SCANNING_DOWNSCALE_THRESHOLD = 2000
+
+
+# =============================================================================
+# 14. CHAT & LM STUDIO — Rejection phrases, vision errors, dialog helpers
+# -----------------------------------------------------------------------------
+# Phrases that trigger chat retry, vision-model-required messaging, and
+# helpers to classify LM Studio exceptions and dialog text.
+# =============================================================================
+
+# Chat LM Studio: apology/refusal phrases that trigger response retry (case-insensitive match)
+CHAT_REJECTED_RESPONSE_PHRASES: List[str] = [
+    "an AI"
+    "I'm sorry",
+    "I apologize",
+    "I'm unable",
+    "I am unable",
+    "i cannot",
+    "I can not",
+    "I cannot",
+    "I won't",
+    "I can't",
+    "I will not",
+    "not comply",
+    "harmful",
+    "ethical",
+    "guidelines",
+    "norms",
+    "standards",
+]
+
+# LM Studio: shown when a loaded model cannot accept image input
+VISION_REQUIRED_MSG = (
+    "The loaded LM Studio model does not support image input.\n\n"
+    "Please load a vision-capable model in LMStudio."
+)
+VISION_REQUIRED_ICON = "no_vision.webp"
+VISION_REQUIRED_ICON_DIALOG_PX = 64
+
+
+def is_vision_required_error(message: str) -> bool:
+    """Return True when *message* is (or contains) the vision-model-required text."""
+    if not message:
+        return False
+    return VISION_REQUIRED_MSG in message
+
+
+# LM Studio runtime failures that mention "image" but are not missing-vision errors.
+_LMSTUDIO_VISION_RUNTIME_EXCLUDE: tuple[str, ...] = (
+    "image features and image tokens",
+    "image token",
+    "do not match",
+    "merge_input_ids_with_image",
+    "could not prepare image",
+    "prepare image for",
+    "pixel_values",
+    "failed to process",
+    "image preprocessing",
+)
+
+_LMSTUDIO_VISION_CAPABILITY_MARKERS: tuple[str, ...] = (
+    "does not support vision",
+    "does not support image",
+    "not support vision",
+    "not support image",
+    "cannot accept image",
+    "can't accept image",
+    "not a vision",
+    "non-vision",
+    "non vision",
+    "no vision",
+    "vision not supported",
+    "vision is not supported",
+    "without vision support",
+    "lacks vision",
+    "not multimodal",
+    "non-multimodal",
+    "non multimodal",
+    "text-only model",
+    "text only model",
+    "not a vlm",
+    "not vlm",
+    "only supports text",
+    "visual input is not supported",
+)
+
+
+def lmstudio_exception_implies_vision_required(exc: BaseException) -> bool:
+    """Return True when an LM Studio generation error means the loaded model lacks vision."""
+    err_lower = str(exc).lower()
+    if not err_lower:
+        return False
+    for phrase in _LMSTUDIO_VISION_RUNTIME_EXCLUDE:
+        if phrase in err_lower:
+            return False
+    for phrase in _LMSTUDIO_VISION_CAPABILITY_MARKERS:
+        if phrase in err_lower:
+            return True
+    if "vision" in err_lower and any(
+        p in err_lower
+        for p in (
+            "not support",
+            "unsupported",
+            "does not support",
+            "cannot support",
+            "can't support",
+            "no vision",
+            "without vision",
+        )
+    ):
+        return True
+    if "multimodal" in err_lower and any(
+        p in err_lower for p in ("not ", "non-", "non ", "without ")
+    ):
+        return True
+    if "vlm" in err_lower and "not" in err_lower:
+        return True
+    if "image" in err_lower and any(
+        p in err_lower
+        for p in (
+            "not support",
+            "unsupported",
+            "does not support",
+            "cannot accept",
+            "can't accept",
+            "not accept",
+        )
+    ):
+        return True
+    return False
+
+
+_LMSTUDIO_ERROR_DIALOG_MARKERS: tuple[str, ...] = (
+    "Please start LMStudio and enable the local API server.",
+    "Start LM Studio, enable the local API server",
+    "LMStudio server is not running",
+    "Could not contact LMStudio server",
+    "LM Studio is not available",
+    "The LMStudio Python SDK is not installed",
+    "Chat generation failed",
+    "Caption generation failed",
+    "Prompt refinement failed",
+)
+
+
+def is_lmstudio_error_dialog_message(message: str) -> bool:
+    """True when the LM Studio error dialog (with Open LM Studio button) should be used."""
+    if not message:
+        return False
+    if is_vision_required_error(message):
+        return True
+    return any(marker in message for marker in _LMSTUDIO_ERROR_DIALOG_MARKERS)
+
+
+# =============================================================================
+# 15. CONTEXT MENUS (QMenu) — Shared menu item metrics
+# -----------------------------------------------------------------------------
+# Dimensions and font size for toolbar, status bar, thumbnail, and file tree
+# menus (shared QMenu QSS).
+# =============================================================================
+
+# Context menu item metrics (toolbar, status bar, thumbnail, file tree — shared QMenu QSS)
+QMENU_ITEM_MIN_HEIGHT = 20
+QMENU_ITEM_PADDING_V = 0
+QMENU_ITEM_PADDING_H = 16
+QMENU_ITEM_TEXT_LEFT = 6       # gap between checkmark column and label text
+QMENU_INDICATOR_SIZE = 14
+QMENU_INDICATOR_LEFT = 8
+QMENU_FONT_SIZE_PT = 13
+
+
+# =============================================================================
+# 16. MAIN-WINDOW CHROME — Splitter handles and status-bar borders
+# -----------------------------------------------------------------------------
+# Border widths for splitter handles and status bar top edge, synced from the
+# active theme.
+# =============================================================================
+
+MIN_VIEW_CHROME_BORDER_WIDTH_PX = 0
+MAX_VIEW_CHROME_BORDER_WIDTH_PX = 8
+VIEW_BORDER_WIDTH_PX = 2
+
+
+# =============================================================================
+# 17. THEME BORDER WIDTHS — Slider and stored border width limits
+# -----------------------------------------------------------------------------
+# Max px for theme-controlled image/cell border strokes (drawn inset inside the
+# cell rect). Live widths are CURRENT_IMAGE_BORDER_WIDTH_PX and related synced
+# values below.
+# =============================================================================
+
+# Theme sliders / stored border widths (px); strokes are drawn inset inside the cell rect
+MAX_THEME_BORDER_WIDTH_PX = 10
+
+
+# =============================================================================
+# 18. THEME COLORS & PAINT — Synced palette and canvas paint extras
+# -----------------------------------------------------------------------------
+# Module-level color names synced from the active theme dataclass via
+# sync_to_thumbnail_constants(). Includes inset stroke helpers for cell rects.
+# =============================================================================
+
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QColor
+
+from theme.theme_base import asset_path, asset_file_url, asset_url as _asset_url
+
+from theme.dark_theme_definitions import DEFAULT_DARK_THEME
+from theme.theme_service import get_dark_theme_stylesheet, sync_to_thumbnail_constants
+
+
+def inset_rect_for_stroke(rect: QRect, border_width: int) -> QRect:
+    """Inset rect so a pen stroke of width border_width lies fully inside rect."""
+    if border_width <= 0:
+        return rect
+    h = border_width // 2
+    r = border_width - h
+    return rect.adjusted(h, h, -r, -r)
+
+
+def inset_corner_radius(base_radius: int, border_width: int) -> int:
+    """Corner radius for an inset stroke so corners stay inside the cell."""
+    return max(0, base_radius - border_width // 2)
+
+
+# Legacy module-level names — single source of truth is the active theme dataclass; sync keeps these updated.
+CURRENT_IMAGE_BACKGROUND_COLOR_HEX = ""
+CURRENT_IMAGE_BACKGROUND_COLOR = QColor()
+CURRENT_IMAGE_BORDER_COLOR_HEX = ""
+CURRENT_IMAGE_BORDER_COLOR = QColor()
+DEFAULT_IMAGE_BORDER_WIDTH_PX = 1
+CURRENT_IMAGE_BORDER_WIDTH_PX = 2
+MULTISELECT_BORDER_WIDTH_PX = 2
+MULTISELECT_BACKGROUND_COLOR_HEX = ""
+MULTISELECT_BACKGROUND_COLOR = QColor()
+MULTISELECT_BORDER_COLOR_HEX = ""
+MULTISELECT_BORDER_COLOR = QColor()
+DEFAULT_BACKGROUND_COLOR_HEX = ""
+DEFAULT_BACKGROUND_COLOR = QColor()
+THUMBNAIL_GRID_BACKGROUND_COLOR_HEX = ""
+THUMBNAIL_GRID_BACKGROUND_COLOR = QColor()
+DEFAULT_BORDER_COLOR_HEX = ""
+DEFAULT_BORDER_COLOR = QColor()
+DEFAULT_IMAGE_BACKGROUND_COLOR_HEX = ""
+DEFAULT_IMAGE_BACKGROUND_COLOR = QColor()
+DEFAULT_IMAGE_COLOR_HEX = ""
+DEFAULT_IMAGE_COLOR = QColor()
+TEXT_COLOR_HEX = ""
+TEXT_COLOR = QColor()
+THUMBNAIL_TEXT_COLOR_HEX = ""
+THUMBNAIL_TEXT_COLOR = QColor()
+QMENU_DEFAULT_STYLE_SHEET = ""
+TAB_BUTTON_FOCUS_BACKGROUND_COLOR_HEX = ""
+TAB_BUTTON_FOCUS_BORDER_COLOR_HEX = ""
+HEADING_COLOR = QColor()
+HEADING_COLOR_HEX = ""
+DIALOG_TEXT_COLOR = QColor()
+DIALOG_TEXT_COLOR_HEX = ""
+DIALOG_BACKGROUND_HEX = ""
+DIALOG_INPUT_BACKGROUND_HEX = ""
+WIDGET_BG_HOVER_HEX = ""
+WIDGET_BG_PRESSED_HEX = ""
+WIDGET_BG_DISABLED_HEX = ""
+TEXT_DISABLED_HEX = ""
+DIALOG_TEXT_MUTED_HEX = ""
+DIALOG_TEXT_MUTED = QColor()
+SIDEBAR_TEXT_MUTED_HEX = ""
+SIDEBAR_TEXT_MUTED = QColor()
+STATUS_BAR_TEXT_MUTED_HEX = ""
+STATUS_BAR_TEXT_MUTED = QColor()
+DIALOG_MUTED_BLEND_PERCENT = 50
+SIDEBAR_MUTED_BLEND_PERCENT = 50
+STATUS_BAR_MUTED_BLEND_PERCENT = 50
+BORDER_DEFAULT_HEX = ""
+BORDER_HOVER_HEX = ""
+CHROME_BORDER_HEX = ""
+BUTTON_BG_DEFAULT_HEX = ""
+BUTTON_TEXT_DEFAULT_HEX = ""
+BUTTON_BORDER_DEFAULT_HEX = ""
+BUTTON_BG_HOVER_HEX = ""
+BUTTON_TEXT_HOVER_HEX = ""
+BUTTON_BORDER_HOVER_HEX = ""
+BUTTON_BG_PRESSED_HEX = ""
+BUTTON_FOCUS_TEXT_HEX = ""
+BUTTON_DEFAULT_BG_HEX = ""
+BUTTON_DEFAULT_BORDER_HEX = ""
+SIDEBAR_HEADER_BG_HEX = ""
+SIDEBAR_HEADER_BORDER_HEX = ""
+SIDEBAR_HEADER_TEXT_HEX = ""
+SIDEBAR_SPLITTER_HANDLE_HEX = ""
+TREE_HEADER_FOCUS_BG_HEX = ""
+ERROR_COLOR_HEX = ""
+VALIDATION_SUCCESS_COLOR_HEX = ""
+ACCENT_COLOR_HEX = ""
+TAB_BUTTON_HOVER_BG_HEX = ""
+LOCKED_FILE_BACKGROUND_COLOR = QColor()
+TREE_FOLDER_WITH_IMAGES_COLOR = QColor()
+
+# Thumbnail canvas paint extras (synced from active theme in theme_service)
+THUMBNAIL_FILENAME_OVERLAY_BOX_COLOR = QColor()
+THUMBNAIL_EMPTY_FILTER_BTN_BG = QColor()
+THUMBNAIL_EMPTY_FILTER_BTN_BG_HOVER = QColor()
+THUMBNAIL_EMPTY_FILTER_BTN_BORDER = QColor()
+THUMBNAIL_EMPTY_FILTER_BTN_BORDER_HOVER = QColor()
+THUMBNAIL_EMPTY_FILTER_BTN_TEXT_HOVER = QColor()
+
+sync_to_thumbnail_constants(DEFAULT_DARK_THEME)
+
+
+# =============================================================================
+# 19. DEBUG TERMINAL COLORS — ANSI escape codes for log output
+# -----------------------------------------------------------------------------
+# Named color constants for terminal/debug print styling.
+# =============================================================================
+
+RED = "\033[91m"
+RESET = "\033[0m"
+GREEN = "\033[92m"
+BLUE = "\033[94m"
+YELLOW = "\033[93m"
+MAGENTA = "\033[95m"
+CYAN = "\033[96m"
+WHITE = "\033[97m"
+GRAY = "\033[90m"
+LIGHT_GRAY = "\033[37m"
+DARK_GRAY = "\033[90m"
+LIGHT_RED = "\033[91m"
+LIGHT_GREEN = "\033[92m"
+LIGHT_YELLOW = "\033[93m"
+LIGHT_MAGENTA = "\033[95m"
+LIGHT_CYAN = "\033[96m"
+ORANGE = "\033[38;5;208m"
+AMBER = "\033[38;5;208m"
+YELLOW = "\033[38;5;226m"
+LIME = "\033[38;5;118m"
+GREEN = "\033[38;5;118m"
+TEAL = "\033[38;5;38m"
+CYAN = "\033[38;5;51m"
+BLUE = "\033[38;5;21m"
+INDIGO = "\033[38;5;63m"
+VIOLET = "\033[38;5;99m"
+PINK = "\033[38;5;205m"
+ROSE = "\033[38;5;198m"
+BEIGE = "\033[38;5;187m"

@@ -1,0 +1,1898 @@
+#!/usr/bin/env python3
+"""Pre-formatted status-bar task info for image generation and AI caption jobs."""
+
+from __future__ import annotations
+
+import html
+import os
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+from imagegen_plugins.image_gen_field_blocks import is_series_continuous_copies
+from imagegen_plugins.image_gen_model_availability import model_display_name
+from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
+from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+
+if TYPE_CHECKING:
+    from imagegen_plugins.job_status_views import (
+        ActiveJobStripView,
+        QueueJobStatusView,
+    )
+
+
+# Streaming AI prompt refinement progress (display steps 0..total).
+_AI_REFINE_PROGRESS_TOTAL = 100
+# Rough streamed character count that maps to a full progress bar.
+_AI_REFINE_PROGRESS_CHAR_BUDGET = 800
+# Refresh job progress UI when progress advances by this many percent.
+_AI_REFINE_PROGRESS_REFRESH_PERCENT = 20
+
+
+@dataclass(frozen=True)
+class ActiveJobStatusView:
+    """Structured live status for the active generation job (timing + progress bars)."""
+
+    elapsed_seconds: float | None
+    estimate_seconds: float | None
+    step: int | None
+    step_total: int | None
+    cooldown_seconds_remaining: int
+    series_progress: tuple[int, int] | None
+    queue_jobs_progress: int | None
+    steps_label: str
+
+
+def build_active_job_status_view(controller) -> ActiveJobStatusView:
+    elapsed, estimate, step, step_total = (
+        controller.snapshot_generation_timing_for_info_panel()
+    )
+    return ActiveJobStatusView(
+        elapsed_seconds=elapsed,
+        estimate_seconds=estimate,
+        step=step,
+        step_total=step_total,
+        cooldown_seconds_remaining=controller.copy_cooldown_seconds_remaining(),
+        series_progress=controller.snapshot_series_progress_for_active_job_strip(),
+        queue_jobs_progress=controller.snapshot_queue_jobs_progress_for_active_job_strip(),
+        steps_label=controller.active_job_timing_steps_label(),
+    )
+
+
+def ai_refine_progress_step_from_chars(chars_received: int) -> int:
+    """Map streamed character count to a 0..total-1 progress step."""
+    total = _AI_REFINE_PROGRESS_TOTAL
+    if total <= 1 or chars_received <= 0:
+        return 0
+    budget = max(total - 1, _AI_REFINE_PROGRESS_CHAR_BUDGET)
+    return min(total - 1, int(chars_received * (total - 1) / budget))
+
+
+def ai_refine_progress_bucket(step: int) -> int:
+    """Progress bucket for throttling UI refresh (0 = 0–19%, 1 = 20–39%, …)."""
+    total = _AI_REFINE_PROGRESS_TOTAL
+    if total <= 0:
+        return 0
+    refresh = max(1, _AI_REFINE_PROGRESS_REFRESH_PERCENT)
+    pct = min(100, int(round(100.0 * max(0, step) / total)))
+    return pct // refresh
+
+
+def ai_refine_progress_display_step(step: int) -> int:
+    """Quantize a raw step to the nearest refresh boundary for display."""
+    total = _AI_REFINE_PROGRESS_TOTAL
+    if total <= 0 or step <= 0:
+        return 0
+    refresh = max(1, _AI_REFINE_PROGRESS_REFRESH_PERCENT)
+    bucket = ai_refine_progress_bucket(step)
+    return min(total - 1, bucket * refresh)
+
+
+def _escape(text: str) -> str:
+    return html.escape(text or "", quote=True)
+
+
+PROMPT_DISPLAY_MAX_LEN = 100
+PROMPT_DISPLAY_MAX_LINES = 2
+TASK_STATUS_PROMPT_MARGIN_PX = 4
+_QUANT_STATUS_LABEL = "Q:"
+
+
+def normalize_prompt_for_display(text: str) -> str:
+    """Collapse runs of whitespace (including newlines) for compact card display."""
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _truncate(text: str, limit: int = PROMPT_DISPLAY_MAX_LEN) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
+
+
+
+
+def full_prompt_tooltip_text(
+    full_prompt: str,
+    *,
+    displayed_prompt: str | None = None,
+    display_max_len: int | None = None,
+) -> str:
+    """Return full prompt for a hover tooltip when status display truncates it."""
+    full = (full_prompt or "").strip()
+    if not full:
+        return ""
+    if displayed_prompt is not None:
+        shown = normalize_prompt_for_display(displayed_prompt)
+        if shown == full or not shown:
+            return ""
+        return full
+    limit = PROMPT_DISPLAY_MAX_LEN if display_max_len is None else max(1, int(display_max_len))
+    if _truncate(full, limit) == full:
+        return ""
+    return full
+
+
+def _table_row(label: str, value: str) -> str:
+    return (
+        f"<tr><td><b>{_escape(label)}</b></td>"
+        f"<td><b>{_escape(value)}</b></td></tr>"
+    )
+
+
+def _table_row_prompt(label: str, value: str) -> str:
+    """Prompt row with vertical spacing above and below (TASK_STATUS_PROMPT_MARGIN_PX)."""
+    m = TASK_STATUS_PROMPT_MARGIN_PX
+    pad = f"padding-top:{m}px;padding-bottom:{m}px;"
+    return (
+        f"<tr>"
+        f'<td style="{pad}"><b>{_escape(label)}</b></td>'
+        f'<td style="{pad}">{_escape(value)}</td></tr>'
+    )
+
+
+
+_QUEUE_FIELD_SEP = "\u00A0" * 3
+_LABEL_VALUE_NBSP = "\u00A0"
+
+
+def _inline_field_sep_before(label: str, previous_label: str | None) -> str:
+    if label in ("Elapsed:", "Time:", "Est:"):
+        return " "
+    return _QUEUE_FIELD_SEP
+
+
+def _normalize_reference_paths(*path_groups: list[str] | str | None) -> list[str]:
+    """Unique existing paths in order (for task reference thumbnails)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in path_groups:
+        if isinstance(group, str):
+            group = [group] if group else []
+        elif not group:
+            continue
+        for raw in group:
+            p = os.path.normpath(str(raw or ""))
+            if not p or not os.path.isfile(p) or p in seen:
+                continue
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+_EXPAND_ELAPSED_ROW_RE = re.compile(
+    r"(<tr><td><b>Elapsed:</b></td><td>)(.*?)(</td></tr>)",
+    re.DOTALL,
+)
+def _table_title_row(title: str, *, running: bool = False) -> str:
+    display = f"{title} (Running)" if running else title
+    return (
+        '<tr><td colspan="2" align="center" style="padding-bottom:1px;">'
+        f'<b><span style="font-size:12px;">{_escape(display)}</span></b>'
+        "</td></tr>"
+    )
+
+
+def _series_queued_value(count: int) -> str:
+    noun = "image" if count == 1 else "images"
+    return f"{count} {noun}."
+
+
+def _series_refinement_suffix(values: Dict[str, Any]) -> str:
+    """Suffix when image or text series refinement is enabled."""
+    parts: list[str] = []
+    if values.get("series_refinement"):
+        parts.append("Image Refinement")
+    if values.get("series_prompt_refinement"):
+        parts.append("Text Refinement")
+    if not parts:
+        return ""
+    return "\u00A0\u00A0\u00A0\u00A0(" + ", ".join(parts) + ")"
+
+
+def format_series_line_value(base: str, values: Dict[str, Any]) -> str:
+    """Series cell text with optional refinement label."""
+    return base + _series_refinement_suffix(values)
+
+
+def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
+    try:
+        mode = get_pipeline(pipeline_id)
+    except KeyError:
+        return "Generate an image from text"
+    if mode.prompt_status_label == "Outfill:":
+        return "Expand Image"
+    if mode.prompt_status_label == "Infill:":
+        return "Infill image"
+    if mode.requires_source_image and mode.prompt_label == "Edit prompt":
+        return "Modify with AI"
+    return "Generate from text"
+
+
+
+# Jobs-pane active-job strip (pixel widths — Qt rich text ignores CSS %).
+_INFO_PANEL_ACTIVE_JOB_CELL_H_PAD = 8  # 4px left + 4px right (matches job-queue browser pad)
+_INFO_PANEL_CANCEL_ICON_W = 22
+_INFO_PANEL_LABEL_W = 52  # ~Elapsed: at 12px bold; aligns with queue status label column
+_INFO_PANEL_PREFIX_W = 40
+_INFO_PANEL_POSTFIX_W = 48
+_INFO_PANEL_BAR_MIN_W = 48
+_INFO_PANEL_BAR_H = 10
+_INFO_PANEL_PROGRESS_BAR_FILL_HEX = "#3478F6" # Progress Bar Color
+_INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W = 1
+_INFO_PANEL_NOWRAP = 'nowrap="1" style="white-space:nowrap;"'
+# QFrame border (2) + stylesheet padding 4px top/bottom (8).
+_ACTIVE_JOB_STRIP_FRAME_CHROME_V = (
+    2 * _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W + 8
+)
+
+
+def active_job_strip_layout_widths(
+    strip_content_width_px: int,
+    *,
+    min_frame_width_px: int | None = None,
+) -> tuple[int, int]:
+    """Return (frame_outer_w, browser_content_w) for the bordered QFrame strip."""
+    if min_frame_width_px is None:
+        min_frame_width_px = 80
+    frame_w = max(min_frame_width_px, int(strip_content_width_px))
+    chrome_h = 2 * _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W + _INFO_PANEL_ACTIVE_JOB_CELL_H_PAD
+    browser_w = max(min_frame_width_px - chrome_h, frame_w - chrome_h)
+    return frame_w, browser_w
+
+
+def _information_panel_row_content_width(
+    td_content_width_px: int, *, has_icon: bool
+) -> int:
+    """Usable row width for label / prefix / bar / postfix columns."""
+    inner = max(80, int(td_content_width_px))
+    if has_icon:
+        inner -= _INFO_PANEL_CANCEL_ICON_W
+    return inner
+
+
+def _information_panel_bar_width(row_width: int) -> int:
+    reserved = _INFO_PANEL_LABEL_W + _INFO_PANEL_PREFIX_W + _INFO_PANEL_POSTFIX_W
+    # Nested progress bar table uses border=1 (2px horizontal in QTextBrowser).
+    return max(_INFO_PANEL_BAR_MIN_W, row_width - reserved - 2)
+
+
+def _information_panel_nowrap_td(
+    width: int, content: str, *, align: str = ""
+) -> str:
+    align_attr = f' align="{align}"' if align else ""
+    return (
+        f'<td width="{width}" {_INFO_PANEL_NOWRAP}{align_attr}>{content}</td>'
+    )
+
+
+def _queue_data_dim_color_hex(*, running: bool = False) -> str:
+    from theme.theme_service import get_active_theme
+
+    # All queue cards use the same label color as the active (running) job card.
+    return get_active_theme().job_queue_text_muted_hex(running=True)
+
+
+def _queue_data_bright_color_hex() -> str:
+    from theme.theme_service import get_active_theme
+
+    return get_active_theme().sidebar_text_color_hex
+
+
+def _queue_label_html(label: str, *, running: bool = False) -> str:
+    color = _queue_data_dim_color_hex(running=running)
+    return f'<span style="color:{color};">{_escape(label)}</span>'
+
+
+def _queue_value_html(value: str) -> str:
+    color = _queue_data_bright_color_hex()
+    return f'<span style="color:{color};">{_escape(value)}</span>'
+
+
+def _queue_inline_field_suffix(
+    label: str, value: str, *, previous_label: str | None = None, running: bool = False
+) -> str:
+    prefix = _inline_field_sep_before(label, previous_label)
+    return (
+        f"{prefix}{_queue_label_html(label, running=running)}{_LABEL_VALUE_NBSP}"
+        f"{_queue_value_html(value)}\u00A0 "
+    )
+
+
+def _queue_table_row(label: str, value: str, *, running: bool = False) -> str:
+    """Job-queue status row with fixed label column (matches active-job strip)."""
+    return (
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label, running=running))}"
+        f"<td>{_queue_value_html(value)}</td></tr>"
+    )
+
+
+
+def _queue_table_row_prompt(label: str, value: str, *, running: bool = False) -> str:
+    m = TASK_STATUS_PROMPT_MARGIN_PX
+    pad = f"padding-top:{m}px;padding-bottom:{m}px;"
+    label_td = (
+        f'<td width="{_INFO_PANEL_LABEL_W}" {_INFO_PANEL_NOWRAP} '
+        f'style="{pad}">{_queue_label_html(label, running=running)}</td>'
+    )
+    return (
+        f"<tr>{label_td}"
+        f'<td style="{pad}">{_queue_value_html(value)}</td></tr>'
+    )
+
+
+def _queue_table_row_primary_plus_inline(
+    label: str,
+    value: str,
+    inline_parts: list[tuple[str, str]],
+    *,
+    running: bool = False,
+) -> str:
+    cell = _queue_value_html(value)
+    previous: str | None = None
+    for extra_label, extra_value in inline_parts:
+        cell += _queue_inline_field_suffix(
+            extra_label, extra_value, previous_label=previous, running=running
+        )
+        previous = extra_label
+    return (
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label, running=running))}"
+        f"<td>{cell}</td></tr>"
+    )
+
+
+def _information_panel_progress_bar_outer_style(border_hex: str) -> str:
+    return (
+        f"border:1px solid {border_hex}; table-layout:fixed; "
+        "border-collapse:collapse; margin:0; padding:0;"
+    )
+
+
+_CONTINUOUS_SERIES_SLOT_TEXT = "Continuous"
+_COMPLETING_SLOT_TEXT = "Completing..."
+
+
+def _active_job_time_progress_row(
+    elapsed_seconds: float,
+    estimate_seconds: float | None,
+) -> _ProgressRow:
+    """Time/Elapsed strip row; plain text when estimate is exhausted."""
+    has_estimate = estimate_seconds is not None and estimate_seconds > 0
+    if has_estimate:
+        total_time = elapsed_seconds + float(estimate_seconds)
+        fill_percent = (
+            0
+            if total_time <= 0
+            else int(round(100.0 * elapsed_seconds / total_time))
+        )
+        return (
+            "Elapsed:",
+            _format_duration(elapsed_seconds),
+            _format_duration(float(estimate_seconds)),
+            str(fill_percent),
+        )
+    if estimate_seconds is not None and float(estimate_seconds) <= 0:
+        return (
+            "Elapsed:",
+            _format_duration(elapsed_seconds),
+            "",
+            "0",
+            _COMPLETING_SLOT_TEXT,
+        )
+    return ("Elapsed:", _format_duration(elapsed_seconds), "", "0")
+
+# (label, prefix, postfix, fill_percent) or with optional 5th bar_slot_text
+# (centered plain text in the bar column; fill_percent ignored when present).
+# (label, value) — text-only row (no bar); used for compact Jobs count.
+_ProgressRow = tuple[str, str, str, str] | tuple[str, str, str, str, str]
+_CountRow = tuple[str, str]
+_PanelRow = _ProgressRow | _CountRow
+
+
+def _information_panel_progress_bar_html(
+    fill_percent: int,
+    bar_width_px: int,
+    *,
+    fill_hex: str,
+    border_hex: str,
+    bg_hex: str,
+    show_pending_start_indicator: bool = False,
+) -> str:
+    """Single-row table bar with explicit pixel widths (QTextBrowser-safe)."""
+    bar_width_px = max(_INFO_PANEL_BAR_MIN_W, int(bar_width_px))
+    fill_percent = max(0, min(100, int(fill_percent)))
+    h = _INFO_PANEL_BAR_H
+    outer_style = _information_panel_progress_bar_outer_style(border_hex)
+    outer_open = (
+        f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
+        f'style="{outer_style}"><tr>'
+    )
+    if show_pending_start_indicator and fill_percent <= 0:
+        # Match empty progress-bar cell height (small font/line-height on <td> shrinks in QTextBrowser).
+        return (
+            outer_open
+            + f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
+            f'align="center" valign="middle" style="color:#FFFFFF;border:none;">'
+            f"\u2192</td></tr></table>"
+        )
+    filled_w = max(0, min(bar_width_px, int(round(bar_width_px * fill_percent / 100.0))))
+    inner_bar = ""
+    if filled_w > 0:
+        inner_bar = (
+            f'<table width="{filled_w}" cellspacing="0" cellpadding="0" '
+            f'style="border:none;margin:0;padding:0;"><tr>'
+            f'<td width="{filled_w}" bgcolor="{fill_hex}" height="{h}" '
+            f'style="border:none;padding:0;"></td></tr></table>'
+        )
+    return (
+        outer_open
+        + f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
+        f'style="border:none;padding:0;">{inner_bar}</td>'
+        f"</tr></table>"
+    )
+
+
+def _information_panel_progress_rows_html(
+    rows: list[_PanelRow],
+    row_width: int,
+    bar_width: int,
+    *,
+    fill_hex: str,
+    border_hex: str,
+    bg_hex: str,
+    text_hex: str,
+    show_pending_start_indicator: bool = False,
+    pending_start_indicator_label: str | None = None,
+) -> str:
+    """Stacked Elapsed/Est/Steps/Series rows in one table so columns stay aligned."""
+    tr_parts: list[str] = []
+    for row in rows:
+        if len(row) == 2:
+            label, value = row
+            tr_parts.append(
+                "<tr valign=\"middle\">"
+                + _information_panel_nowrap_td(
+                    _INFO_PANEL_LABEL_W, f"<b>{_escape(label)}</b>"
+                )
+                + f"<td>{_escape(value)}</td>"
+                + "</tr>"
+            )
+            continue
+        if len(row) == 5:
+            label, prefix, postfix, fill_percent, slot_text = row
+        else:
+            label, prefix, postfix, fill_percent = row
+            slot_text = ""
+        if slot_text:
+            bar_cell = (
+                f'<span style="color:{text_hex};">{_escape(slot_text)}</span>'
+            )
+            bar_td = _information_panel_nowrap_td(
+                bar_width, bar_cell, align="center"
+            )
+        else:
+            bar_cell = _information_panel_progress_bar_html(
+                int(fill_percent),
+                bar_width,
+                fill_hex=fill_hex,
+                border_hex=border_hex,
+                bg_hex=bg_hex,
+                show_pending_start_indicator=(
+                    show_pending_start_indicator
+                    and int(fill_percent) <= 0
+                    and pending_start_indicator_label is not None
+                    and label == pending_start_indicator_label
+                ),
+            )
+            bar_td = _information_panel_nowrap_td(bar_width, bar_cell)
+        tr_parts.append(
+            "<tr valign=\"middle\">"
+            + _information_panel_nowrap_td(
+                _INFO_PANEL_LABEL_W, f"<b>{_escape(label)}</b>"
+            )
+            + _information_panel_nowrap_td(
+                _INFO_PANEL_PREFIX_W, _escape(prefix) if prefix else "&nbsp;"
+            )
+            + bar_td
+            + _information_panel_nowrap_td(
+                _INFO_PANEL_POSTFIX_W, _escape(postfix), align="right"
+            )
+            + "</tr>"
+        )
+    return (
+        f'<table width="{row_width}" cellspacing="0" cellpadding="0" '
+        f'style="table-layout:fixed;">'
+        f'{"".join(tr_parts)}</table>'
+    )
+
+
+def _series_progress_row(
+    completed_series: int, total_series: int
+) -> _ProgressRow | None:
+    """One Series progress-bar row, or None when not a multi-image batch."""
+    if total_series <= 1:
+        return None
+    series_total = int(total_series)
+    if is_series_continuous_copies(series_total):
+        return ("Copies:", "", "", "0", _CONTINUOUS_SERIES_SLOT_TEXT)
+    series_done = max(0, min(int(completed_series), series_total))
+    if series_done > 0:
+        remaining_series = series_total - series_done
+        fill_percent = int(round(100.0 * series_done / series_total))
+        return (
+            "Copies:",
+            f"{series_done}/{series_total}",
+            str(remaining_series),
+            str(fill_percent),
+        )
+    return ("Copies:", f"0/{series_total}", "", "0")
+
+
+def _steps_progress_row(
+    completed_steps: int,
+    total_steps: int,
+    *,
+    steps_label: str = "Steps:",
+) -> _ProgressRow | None:
+    """One Steps progress-bar row (prefix / bar / postfix), or None when no steps."""
+    total_i = int(total_steps)
+    if total_i <= 0:
+        return None
+    step_i = max(0, min(int(completed_steps), total_i))
+    if step_i > 0:
+        remaining_steps = total_i - step_i
+        fill_percent = int(round(100.0 * step_i / total_i))
+        return (
+            steps_label,
+            _format_steps_progress_display(step_i, total_i),
+            str(remaining_steps),
+            str(fill_percent),
+        )
+    return (steps_label, _format_steps_progress_display(0, total_i), "", "0")
+
+
+def _queue_jobs_count_row(total_jobs: int) -> _CountRow | None:
+    """Compact pane: ``Jobs:`` plus live queue count (no progress bar)."""
+    total = int(total_jobs)
+    if total <= 1:
+        return None
+    return ("Jobs:", str(total))
+
+
+def format_information_generation_timing_cell_html(
+    elapsed_seconds: float,
+    estimate_seconds: float | None = None,
+    *,
+    cancel_icon_html: str = "",
+    completed_series: int | None = None,
+    total_series: int | None = None,
+    total_queue_jobs: int | None = None,
+    completed_steps: int | None = None,
+    total_steps: int | None = None,
+    content_width_px: int = 0,
+    steps_label: str = "Steps:",
+) -> str:
+    """Elapsed/Est, series, and step progress for the active-job timing strip."""
+    from theme.theme_service import get_active_theme
+
+    th = get_active_theme()
+    fill_hex = _INFO_PANEL_PROGRESS_BAR_FILL_HEX
+    border_hex = th.progress_bar_border_hex
+    bg_hex = th.progress_bar_bg_hex
+    has_icon = bool(cancel_icon_html)
+    td_content_w = max(80, int(content_width_px or 0))
+    row_width = _information_panel_row_content_width(
+        td_content_w, has_icon=has_icon
+    )
+    bar_w = _information_panel_bar_width(row_width)
+
+    progress_rows: list[_PanelRow] = []
+    progress_rows.append(
+        _active_job_time_progress_row(elapsed_seconds, estimate_seconds)
+    )
+
+    if completed_steps is not None and total_steps is not None:
+        steps_row = _steps_progress_row(
+            completed_steps, total_steps, steps_label=steps_label
+        )
+        if steps_row is not None:
+            progress_rows.append(steps_row)
+
+    if completed_series is not None and total_series is not None:
+        series_row = _series_progress_row(completed_series, total_series)
+        if series_row is not None:
+            progress_rows.append(series_row)
+
+    if total_queue_jobs is not None:
+        jobs_row = _queue_jobs_count_row(total_queue_jobs)
+        if jobs_row is not None:
+            progress_rows.append(jobs_row)
+
+    pending_start = (
+        completed_steps is not None
+        and total_steps is not None
+        and total_steps > 0
+        and int(completed_steps) <= 0
+    )
+    table_html = _information_panel_progress_rows_html(
+        progress_rows,
+        row_width,
+        bar_w,
+        fill_hex=fill_hex,
+        border_hex=border_hex,
+        bg_hex=bg_hex,
+        text_hex=th.progress_bar_text_hex,
+        show_pending_start_indicator=pending_start,
+        pending_start_indicator_label="Elapsed:" if pending_start else None,
+    )
+    body = table_html
+
+    if not has_icon:
+        return body
+    return (
+        f'<table width="{td_content_w}" cellspacing="0" cellpadding="0" '
+        f'style="table-layout:fixed;">'
+        f"<tr valign=\"middle\">"
+        f'<td width="{row_width}" {_INFO_PANEL_NOWRAP}>{body}</td>'
+        f'<td width="{_INFO_PANEL_CANCEL_ICON_W}" {_INFO_PANEL_NOWRAP} '
+        f'align="right" valign="middle">{cancel_icon_html}</td>'
+        f"</tr></table>"
+    )
+
+
+def _information_panel_inline_row_html(text_html: str, icon_html: str = "") -> str:
+    """Simple text + trailing icon row (cooldown display)."""
+    if not icon_html:
+        return text_html
+    return (
+        '<table cellspacing="0" cellpadding="0">'
+        f"<tr valign=\"middle\"><td>{text_html}</td>"
+        f'<td style="padding-left:6px;">{icon_html}</td></tr></table>'
+    )
+
+
+def _information_panel_skip_cooldown_icon_html(*, hovered: bool = False) -> str:
+    from theme.theme_base import asset_file_url
+
+    url = asset_file_url("skip_cooldown_icon.png")
+    hover_style = "opacity:0.65;" if hovered else ""
+    return (
+        f'<a href="skipcooldown://" title="Skip cooldown" '
+        f'style="text-decoration:none;line-height:0;{hover_style}">'
+        f'<img src="{url}" width="16" height="16" '
+        f'style="display:block;margin:0;padding:0;border:none;">'
+        f"</a>"
+    )
+
+
+def format_information_generation_cooldown_cell_html(
+    remaining_seconds: int,
+    *,
+    cancel_hovered: bool = False,
+    skip_hovered: bool = False,
+    completed_series: int | None = None,
+    total_series: int | None = None,
+    total_queue_jobs: int | None = None,
+    content_width_px: int = 0,
+) -> str:
+    """Cooldown row for the jobs-pane strip; optional series progress below."""
+    from theme.theme_service import get_active_theme
+
+    remaining = max(0, int(remaining_seconds))
+    text = f"Cooldown: ({remaining})"
+    icons = (
+        _information_panel_skip_cooldown_icon_html(hovered=skip_hovered)
+        + '<span style="display:inline-block;width:4px;"></span>'
+        + generation_cancel_icon_html(hovered=cancel_hovered)
+    )
+    body = _information_panel_inline_row_html(text, icons)
+
+    progress_rows: list[_PanelRow] = []
+    if completed_series is not None and total_series is not None:
+        series_row = _series_progress_row(completed_series, total_series)
+        if series_row is not None:
+            progress_rows.append(series_row)
+    if total_queue_jobs is not None:
+        jobs_row = _queue_jobs_count_row(total_queue_jobs)
+        if jobs_row is not None:
+            progress_rows.append(jobs_row)
+    if not progress_rows:
+        return body
+
+    th = get_active_theme()
+    row_width = _information_panel_row_content_width(
+        content_width_px or 250, has_icon=False
+    )
+    bar_w = _information_panel_bar_width(row_width)
+    progress_html = _information_panel_progress_rows_html(
+        progress_rows,
+        row_width,
+        bar_w,
+        fill_hex=_INFO_PANEL_PROGRESS_BAR_FILL_HEX,
+        border_hex=th.progress_bar_border_hex,
+        bg_hex=th.progress_bar_bg_hex,
+        text_hex=th.progress_bar_text_hex,
+    )
+    return f"{body}<br>{progress_html}"
+
+
+def generation_cancel_icon_html(*, hovered: bool = False) -> str:
+    """Inline cancel-generation icon for the File Information timing row."""
+    from theme.theme_base import asset_file_url
+
+    asset = "trash_icon_hover.png" if hovered else "trash_icon.png"
+    url = asset_file_url(asset)
+    return (
+        f'<a href="cancelgen://" title="Cancel generation" '
+        f'style="text-decoration:none;line-height:0;">'
+        f'<img src="{url}" width="16" height="16" '
+        f'style="display:block;margin:0;padding:0;border:none;">'
+        f"</a>"
+    )
+
+
+def active_job_timing_progress_row_count(
+    controller, *, include_queue_jobs_row: bool = False
+) -> int:
+    """Stacked progress-bar rows in the active-job strip (excludes cooldown text row).
+
+    Keep in sync with progress_rows built in format_information_generation_timing_cell_html.
+    """
+    remaining = controller.copy_cooldown_seconds_remaining()
+    series_progress = controller.snapshot_series_progress_for_active_job_strip()
+    series_rows = 0
+    if series_progress is not None and series_progress[1] > 1:
+        series_rows = 1
+    queue_jobs_rows = 0
+    if include_queue_jobs_row:
+        queue_progress = controller.snapshot_queue_jobs_progress_for_active_job_strip()
+        if queue_progress is not None and queue_progress > 1:
+            queue_jobs_rows = 1
+    if remaining > 0:
+        return series_rows + queue_jobs_rows
+
+    elapsed, estimate, step, step_total = (
+        controller.snapshot_generation_timing_for_info_panel()
+    )
+    if elapsed is None:
+        return 0
+    count = 1
+    if step_total is not None and int(step_total) > 0:
+        count += 1
+    count += series_rows + queue_jobs_rows
+    return count
+
+
+def build_active_job_timing_cell_html(
+    controller,
+    *,
+    content_width_px: int,
+    cancel_hovered: bool = False,
+    skip_hovered: bool = False,
+    include_queue_jobs_row: bool = False,
+) -> str | None:
+    """Elapsed/Est progress or cooldown row for the jobs-pane active-job strip.
+
+    content_width_px is the QTextBrowser content width inside the bordered QFrame.
+    """
+    series_progress = controller.snapshot_series_progress_for_active_job_strip()
+    completed_series = None
+    total_series = None
+    if series_progress is not None:
+        completed_series, total_series = series_progress
+
+    total_queue_jobs = None
+    if include_queue_jobs_row:
+        total_queue_jobs = controller.snapshot_queue_jobs_progress_for_active_job_strip()
+
+    remaining = controller.copy_cooldown_seconds_remaining()
+    if remaining > 0:
+        return format_information_generation_cooldown_cell_html(
+            remaining,
+            cancel_hovered=cancel_hovered,
+            skip_hovered=skip_hovered,
+            completed_series=completed_series,
+            total_series=total_series,
+            total_queue_jobs=total_queue_jobs,
+            content_width_px=content_width_px,
+        )
+    elapsed, estimate, step, step_total = (
+        controller.snapshot_generation_timing_for_info_panel()
+    )
+    if elapsed is None:
+        return None
+    return format_information_generation_timing_cell_html(
+        elapsed,
+        estimate,
+        cancel_icon_html=generation_cancel_icon_html(hovered=cancel_hovered),
+        completed_series=completed_series,
+        total_series=total_series,
+        total_queue_jobs=total_queue_jobs,
+        completed_steps=step,
+        total_steps=step_total,
+        content_width_px=content_width_px,
+        steps_label=controller.active_job_timing_steps_label(),
+    )
+
+
+def wrap_active_job_timing_table_html(
+    cell_html: str,
+    *,
+    content_width_px: int,
+) -> str:
+    """Clip cell HTML to browser width; border is drawn by the jobs-pane QFrame."""
+    w = max(120, int(content_width_px))
+    return (
+        f'<div style="max-width:{w}px; overflow:hidden;">{cell_html}</div>'
+    )
+
+
+def _steps_row_inline_parts(
+    fields: dict[str, str],
+    *,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> list[tuple[str, str]]:
+    """Inline label/value pairs after the Steps cell (Elapsed, Time)."""
+    parts: list[tuple[str, str]] = []
+    if elapsed_seconds is not None:
+        parts.append(("Elapsed:", _format_duration(elapsed_seconds)))
+        if estimate_seconds is not None and estimate_seconds > 0:
+            parts.append(("Time:", _format_duration(estimate_seconds)))
+    return parts
+
+
+def _generation_status_queue_table_rows(
+    fields: dict[str, str],
+    *,
+    steps_value: str | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+    omit_live_steps_row: bool = False,
+    running: bool = False,
+) -> list[str]:
+    """Compact job-queue rows: combine short fields on one line where possible."""
+    rows: list[str] = []
+    if fields.get("model"):
+        rows.append(_queue_table_row("Model:", fields["model"], running=running))
+
+    if fields.get("lora"):
+        rows.append(_queue_table_row("LoRA:", fields["lora"], running=running))
+
+    quant = fields.get("quant")
+    quant_on_size = False
+    if fields.get("size"):
+        if quant:
+            rows.append(
+                _queue_table_row_primary_plus_inline(
+                    "Size:",
+                    fields["size"],
+                    [(_QUANT_STATUS_LABEL, quant)],
+                    running=running,
+                )
+            )
+            quant_on_size = True
+        else:
+            rows.append(_queue_table_row("Size:", fields["size"], running=running))
+
+    if not omit_live_steps_row:
+        steps_display = steps_value if steps_value is not None else fields.get("steps", "")
+        steps_inline = _steps_row_inline_parts(
+            fields,
+            elapsed_seconds=elapsed_seconds,
+            estimate_seconds=estimate_seconds,
+        )
+        if steps_display and steps_inline:
+            rows.append(
+                _queue_table_row_primary_plus_inline(
+                    "Steps:", steps_display, steps_inline, running=running
+                )
+            )
+        elif steps_display:
+            rows.append(_queue_table_row("Steps:", steps_display, running=running))
+
+    if quant and not quant_on_size:
+        rows.append(_queue_table_row(_QUANT_STATUS_LABEL, quant, running=running))
+
+    if fields.get("prompt"):
+        rows.append(
+            _queue_table_row_prompt(
+                fields["prompt_label"], fields["prompt"], running=running
+            )
+        )
+    if fields.get("neg"):
+        rows.append(_queue_table_row("Neg:", fields["neg"], running=running))
+    return rows
+
+
+def _format_steps_progress_display(step: int, total: int) -> str:
+    """Steps fraction for cards and strip prefix (e.g. ``0/9``, ``3/9``)."""
+    total_i = int(total)
+    if total_i <= 0:
+        return ""
+    step_i = max(0, min(int(step), total_i))
+    return f"{step_i}/{total_i}"
+
+
+def _steps_display_with_progress(
+    fields_steps: str,
+    *,
+    step: int | None = None,
+    step_total: int | None = None,
+) -> str:
+    """Steps cell text (step count only; timing is appended inline on the Steps row)."""
+    steps_value = fields_steps or ""
+    if step is not None and step_total is not None and step_total > 0:
+        steps_value = _format_steps_progress_display(step, step_total)
+    return steps_value
+
+
+def refresh_expand_task_status_html_for_display(
+    html_text: str,
+    *,
+    elapsed_seconds: float | None,
+    estimate_seconds: float | None = None,
+    source_path: str = "",
+    base_path: str = "",
+    reference_paths: list[str] | None = None,
+) -> tuple[str, list[str]]:
+    """Refresh elapsed timing and resolve reference paths for thumbnails."""
+    if not html_text:
+        return html_text, []
+
+    if elapsed_seconds is not None:
+        html_text = remove_elapsed_row(html_text)
+        html_text = _set_steps_row_timing(
+            html_text, elapsed_seconds, estimate_seconds=estimate_seconds
+        )
+    ref_paths = _normalize_reference_paths(reference_paths, source_path)
+    base_norm = (
+        os.path.normpath(base_path)
+        if base_path and os.path.isfile(base_path)
+        else ""
+    )
+    if base_norm and base_norm not in ref_paths:
+        ref_paths.append(base_norm)
+    return html_text, ref_paths
+
+
+def _table_html(
+    rows: list[str], *, title: Optional[str] = None, running: bool = False
+) -> str:
+    if not rows and not title:
+        return ""
+    parts: list[str] = []
+    if title:
+        parts.append(_table_title_row(title, running=running))
+    parts.extend(rows)
+    return "<table cellspacing=\"0\" cellpadding=\"0\">" + "".join(parts) + "</table>"
+
+
+def _generation_model_id_for_status(
+    plugin: ImageGenModelPlugin,
+    effective: Dict[str, Any],
+) -> str:
+    """Model id for status display (full Hugging Face repo id)."""
+    raw = str(effective.get("hf_model_id") or "").strip()
+    plugin_id = str(getattr(plugin, "hf_model_id", "") or "").strip()
+    if raw and "/" in raw:
+        return raw
+    return plugin_id or raw
+
+
+def _collect_generation_status_fields(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+) -> dict[str, str]:
+    """Collect generation status labels/values keyed by logical field name."""
+    pipeline_id = plugin.pipeline_id
+    effective = dict(values)
+    if payload:
+        effective.update(payload)
+    fields: dict[str, str] = {}
+    raw_hf_id = _generation_model_id_for_status(plugin, effective)
+    if raw_hf_id:
+        fields["model"] = model_display_name(pipeline_id, raw_hf_id)
+
+    if getattr(plugin, "lora_host_id", None):
+        from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
+
+        lora_label = lora_name_for_exif_from_values(
+            effective, pipeline_id=plugin.pipeline_id
+        )
+        if lora_label:
+            fields["lora"] = lora_label
+
+    from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
+    from imagegen_plugins.image_gen_pipeline_modes import generation_status_display_size
+
+    display_size = generation_status_display_size(
+        pipeline_id,
+        values,
+        payload,
+        effective_max_side=effective_max_for_plugin(plugin),
+    )
+    if display_size is not None:
+        w, h = display_size
+        fields["size"] = f"{w} x {h}"
+
+    steps = effective.get("steps")
+    if steps is not None:
+        try:
+            fields["steps"] = str(int(steps))
+        except (TypeError, ValueError):
+            pass
+
+    quant = plugin.quantize_status_value(effective)
+    if quant is not None:
+        fields["quant"] = quant
+
+    from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
+
+    prompt = _truncate(effective_job_prompt_for_tooltip(effective))
+    if prompt:
+        fields["prompt"] = prompt
+        fields["prompt_label"] = get_pipeline(pipeline_id).prompt_status_label
+
+    neg = _truncate(str(effective.get("negative_prompt") or ""))
+    if neg:
+        fields["neg"] = neg
+
+    return fields
+
+
+def format_image_generation_queue_status_html(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    step: int | None = None,
+    step_total: int | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+    source_path: str = "",
+    base_path: str = "",
+    running: bool = False,
+    series_copies_total: int | None = None,
+    omit_live_steps_row: bool = False,
+    with_ai: bool = False,
+) -> str:
+    """Rich-text block for the job queue — same field order as the status-bar menu."""
+    from imagegen_plugins.flux_prompt_job import (
+        has_flux_prompt_ai_job,
+        job_title_with_ai_suffix,
+    )
+
+    pipeline_id = plugin.pipeline_id
+    fields = _collect_generation_status_fields(plugin, values, payload)
+    steps_value = _steps_display_with_progress(
+        fields.get("steps", ""),
+        step=step,
+        step_total=step_total,
+    )
+    show_timing = (
+        step is not None
+        and step_total is not None
+        and step_total > 0
+        and elapsed_seconds is not None
+    )
+    rows = _generation_status_queue_table_rows(
+        fields,
+        steps_value=steps_value,
+        elapsed_seconds=elapsed_seconds if show_timing else None,
+        estimate_seconds=estimate_seconds if show_timing else None,
+        omit_live_steps_row=omit_live_steps_row,
+        running=running,
+    )
+
+    if series_copies_total is not None and series_copies_total > 1:
+        rows.append(
+            _queue_table_row(
+                "Copies:",
+                format_series_line_value(
+                    _series_queued_value(series_copies_total), values
+                ),
+                running=running,
+            )
+        )
+
+    title = _task_menu_title_for_pipeline(pipeline_id)
+    if with_ai or has_flux_prompt_ai_job(values):
+        title = job_title_with_ai_suffix(title)
+
+    return _table_html(
+        rows,
+        title=title,
+        running=running,
+    )
+
+
+def format_job_ai_stage_queue_status_html(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    *,
+    running: bool = False,
+    step: int | None = None,
+    step_total: int | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Job queue status while the LM Studio prompt-refinement stage runs."""
+    from imagegen_plugins.flux_prompt_job import (
+        flux_prompt_ai_user_prompt,
+        job_title_with_ai_suffix,
+    )
+
+    pipeline_id = plugin.pipeline_id
+    title = job_title_with_ai_suffix(_task_menu_title_for_pipeline(pipeline_id))
+    rows: list[str] = []
+    prompt = _truncate(flux_prompt_ai_user_prompt(values))
+    if prompt:
+        rows.append(
+            _queue_table_row_prompt(
+                get_pipeline(pipeline_id).prompt_status_label,
+                prompt,
+                running=running,
+            )
+        )
+    ai_steps_value = _steps_display_with_progress(
+        "",
+        step=step,
+        step_total=step_total,
+    )
+    if ai_steps_value and step_total is not None and step_total > 0:
+        show_timing = step is not None and step > 0 and elapsed_seconds is not None
+        ai_inline = _steps_row_inline_parts(
+            {},
+            elapsed_seconds=elapsed_seconds if show_timing else None,
+            estimate_seconds=estimate_seconds if show_timing else None,
+        )
+        if ai_inline:
+            rows.append(
+                _queue_table_row_primary_plus_inline(
+                    "AI:", ai_steps_value, ai_inline, running=running
+                )
+            )
+        else:
+            rows.append(_queue_table_row("AI:", ai_steps_value, running=running))
+    rows.append(_queue_table_row("Stage:", "AI prompt refinement", running=running))
+    return _table_html(rows, title=title, running=running)
+
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds as hh:mm:ss, omitting hours when zero."""
+    total = max(0, int(round(seconds)))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+
+_STEPS_QUANT_SUFFIX_RE = re.compile(
+    rf"((?:\u00A0){{2,}}(?:<b>{re.escape(_QUANT_STATUS_LABEL)}</b>"
+    rf"|<span[^>]*>{re.escape(_QUANT_STATUS_LABEL)}</span>)"
+    rf"\u00A0\d+)$"
+)
+_STEPS_TIMING_SUFFIX_RE = re.compile(
+    r"((?: |\u00A0|\u00A0{2,4})"
+    r"(?:<b>Elapsed:</b>|<span[^>]*>Elapsed:</span>)\u00A0[\d:]+"
+    r"(?: (?: |\u00A0{2,5})(?:<b>(?:Time|Est):</b>|<span[^>]*>(?:Time|Est):</span>)\u00A0[\d:]+)?"
+    r")"
+)
+_STEPS_ROW_RE = re.compile(
+    r"(<tr><td><b>Steps:</b></td><td>)(.*?)(</td></tr>)",
+    re.DOTALL,
+)
+
+
+def _steps_cell_timing_suffix(
+    elapsed_seconds: float,
+    estimate_seconds: float | None = None,
+    *,
+    after_quant: bool = False,
+) -> str:
+    suffix = ""
+    previous: str | None = _QUANT_STATUS_LABEL if after_quant else None
+    for label, value in _steps_row_inline_parts(
+        {},
+        elapsed_seconds=elapsed_seconds,
+        estimate_seconds=estimate_seconds,
+    ):
+        suffix += _queue_inline_field_suffix(label, value, previous_label=previous)
+        previous = label
+    return suffix
+
+
+def _strip_steps_timing_suffix(cell_html: str) -> str:
+    return _STEPS_TIMING_SUFFIX_RE.sub("", cell_html or "", count=1)
+
+
+def _set_steps_row_timing(
+    html_text: str,
+    elapsed_seconds: float,
+    *,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Set or replace inline Elapsed/Est on the Steps row."""
+    if not html_text:
+        return html_text
+    def _replace_steps_cell(match: re.Match[str]) -> str:
+        cell = _strip_steps_timing_suffix(match.group(2))
+        after_quant = bool(_STEPS_QUANT_SUFFIX_RE.search(cell))
+        timing_suffix = _steps_cell_timing_suffix(
+            elapsed_seconds, estimate_seconds, after_quant=after_quant
+        )
+        return match.group(1) + cell + timing_suffix + match.group(3)
+
+    updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
+    if count:
+        return _EXPAND_ELAPSED_ROW_RE.sub("", updated, count=1)
+    return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
+
+
+def update_status_html_steps_progress(
+    html_text: str,
+    step: int,
+    total: int,
+    *,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Replace the Steps line; Elapsed/Est stay inline on that row when running."""
+    if not html_text or total <= 0:
+        return html_text
+    step = max(0, min(int(step), int(total)))
+    total = int(total)
+
+    step_value = _format_steps_progress_display(step, total)
+
+    def _replace_steps_cell(match: re.Match[str]) -> str:
+        cell = _strip_steps_timing_suffix(match.group(2))
+        quant_suffix = ""
+        quant_match = _STEPS_QUANT_SUFFIX_RE.search(cell)
+        if quant_match:
+            quant_suffix = quant_match.group(1)
+            cell = cell[: quant_match.start()]
+        timing_suffix = ""
+        if elapsed_seconds is not None:
+            timing_suffix = _steps_cell_timing_suffix(
+                elapsed_seconds,
+                estimate_seconds,
+                after_quant=bool(quant_suffix),
+            )
+        return match.group(1) + _escape(step_value) + quant_suffix + timing_suffix + match.group(3)
+
+    updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
+    if count:
+        return _EXPAND_ELAPSED_ROW_RE.sub("", updated, count=1)
+    return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
+
+
+
+def remove_elapsed_row(html_text: str) -> str:
+    """Remove standalone Elapsed row and inline timing from the Steps row."""
+    if not html_text:
+        return html_text
+    html_text = _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
+
+    def _replace_steps_cell(match: re.Match[str]) -> str:
+        cell = _strip_steps_timing_suffix(match.group(2))
+        cell = _strip_cooldown_from_steps_cell(cell)
+        return match.group(1) + cell + match.group(3)
+
+    updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
+    return updated if count else html_text
+
+
+def freeze_status_html_generation_elapsed(
+    html_text: str,
+    elapsed_seconds: float,
+    *,
+    step: int | None = None,
+    step_total: int | None = None,
+) -> str:
+    """Lock elapsed/estimate inline on the Steps row."""
+    if not html_text:
+        return html_text
+    if step is not None and step_total is not None and step_total > 0:
+        html_text = update_status_html_steps_progress(
+            html_text,
+            step,
+            step_total,
+            elapsed_seconds=elapsed_seconds,
+        )
+        return html_text
+    return _set_steps_row_timing(html_text, elapsed_seconds)
+
+
+_STEPS_ROW_FOR_COOLDOWN_RE = _STEPS_ROW_RE
+_COOLDOWN_SUFFIX_RE = re.compile(r"\s+\(Cooldown\)\s+\d+")
+_SKIP_COOLDOWN_LINK_RE = re.compile(
+    r'\s*<a href="skipcooldown://".*?</a>',
+    re.DOTALL,
+)
+_CACHED_SKIP_COOLDOWN_ICON_HTML: str | None = None
+
+
+def _strip_cooldown_from_steps_cell(cell: str) -> str:
+    cell = _SKIP_COOLDOWN_LINK_RE.sub("", cell or "")
+    cell = _COOLDOWN_SUFFIX_RE.sub("", cell)
+    return cell.rstrip()
+
+
+def cooldown_skip_icon_html() -> str:
+    """Inline skip-cooldown icon (16×16 PNG) for task-info HTML."""
+    global _CACHED_SKIP_COOLDOWN_ICON_HTML
+    cached = _CACHED_SKIP_COOLDOWN_ICON_HTML
+    if cached is not None:
+        return cached
+    from theme.theme_base import asset_file_url
+
+    url = asset_file_url("skip_cooldown_icon.png")
+    cached = (
+        f'<a href="skipcooldown://" title="Skip cooldown">'
+        f'<img src="{url}" width="16" height="16" '
+        f'style="margin:0 0 0 4px;padding:0;vertical-align:middle;border:none;">'
+        f"</a>"
+    )
+    _CACHED_SKIP_COOLDOWN_ICON_HTML = cached
+    return cached
+
+
+def apply_cooldown_to_status_html(
+    html_text: str,
+    remaining_seconds: int,
+    *,
+    skip_icon_html: str = "",
+) -> str:
+    """Append cooldown countdown and skip icon at the end of the Steps row."""
+    if not html_text:
+        return html_text
+    remaining = max(0, int(remaining_seconds))
+    suffix = f"   (Cooldown) {remaining}"
+    if skip_icon_html:
+        suffix += f" {skip_icon_html}"
+
+    def _replace_steps_row(match: re.Match[str]) -> str:
+        prefix, cell, closing = match.group(1), match.group(2), match.group(3)
+        clean = _strip_cooldown_from_steps_cell(cell)
+        return prefix + clean + suffix + closing
+
+    updated, count = _STEPS_ROW_FOR_COOLDOWN_RE.subn(
+        _replace_steps_row, html_text, count=1
+    )
+    if count:
+        return updated
+
+    def _replace_elapsed_row(match: re.Match[str]) -> str:
+        prefix, content, closing = match.group(1), match.group(2), match.group(3)
+        clean = _SKIP_COOLDOWN_LINK_RE.sub("", content)
+        clean = _COOLDOWN_SUFFIX_RE.sub("", clean).rstrip()
+        return prefix + clean + suffix + closing
+
+    updated, count = _EXPAND_ELAPSED_ROW_RE.subn(_replace_elapsed_row, html_text, count=1)
+    return updated if count else html_text
+
+
+def strip_cooldown_from_status_html(html_text: str) -> str:
+    """Remove cooldown countdown and skip icon from Steps timing or Elapsed row."""
+    if not html_text:
+        return html_text
+
+    def _replace_steps_row(match: re.Match[str]) -> str:
+        prefix, cell, closing = match.group(1), match.group(2), match.group(3)
+        return prefix + _strip_cooldown_from_steps_cell(cell) + closing
+
+    updated, count = _STEPS_ROW_FOR_COOLDOWN_RE.subn(
+        _replace_steps_row, html_text, count=1
+    )
+    if count:
+        return updated
+
+    def _replace_elapsed_row(match: re.Match[str]) -> str:
+        prefix, content, closing = match.group(1), match.group(2), match.group(3)
+        clean = _strip_cooldown_from_steps_cell(content)
+        return prefix + clean + closing
+
+    updated, count = _EXPAND_ELAPSED_ROW_RE.subn(_replace_elapsed_row, html_text, count=1)
+    return updated if count else html_text
+
+
+def _caption_model_name() -> str:
+    from imagegen_plugins.lmstudio_caption import _get_last_lm_model_key
+
+    saved = _get_last_lm_model_key()
+    if saved:
+        return saved
+    return ""
+
+
+def _caption_prompt_text(user_prompt_override: Optional[str]) -> str:
+    from config import CAPTION_DEFAULTS, get_config
+
+    settings = get_config().load_settings()
+    word_count = settings.get(
+        "caption_max_words", CAPTION_DEFAULTS["caption_max_words"]
+    )
+    if user_prompt_override and user_prompt_override.strip():
+        return user_prompt_override.strip()
+    user_prompt = settings.get("caption_user_prompt") or CAPTION_DEFAULTS[
+        "caption_user_prompt"
+    ]
+    return user_prompt.format(CAPTION_WORD_COUNT=word_count)
+
+
+def format_caption_status_html(user_prompt_override: Optional[str] = None) -> str:
+    """Rich-text block for the status-bar task menu (AI caption / text generation)."""
+    rows: list[str] = []
+    model = _caption_model_name()
+    if model:
+        rows.append(_table_row("Model:", model))
+
+    prompt = _truncate(_caption_prompt_text(user_prompt_override))
+    if prompt:
+        rows.append(_table_row_prompt("Prompt:", prompt))
+
+    return _table_html(rows, title="Text Generation")
+
+
+def _generation_status_queue_view_rows(
+    fields: dict[str, str],
+    *,
+    steps_value: str | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+    omit_live_steps_row: bool = False,
+) -> list:
+    """Compact job-queue view rows (native widget path)."""
+    from imagegen_plugins.job_status_views import (
+        QueueInlineRow,
+        QueueLabelValueRow,
+        QueuePromptRow,
+    )
+
+    rows: list = []
+    if fields.get("model"):
+        rows.append(QueueLabelValueRow("Model:", fields["model"]))
+
+    if fields.get("lora"):
+        rows.append(QueueLabelValueRow("LoRA:", fields["lora"]))
+
+    quant = fields.get("quant")
+    quant_on_size = False
+    if fields.get("size"):
+        if quant:
+            rows.append(
+                QueueInlineRow(
+                    "Size:",
+                    fields["size"],
+                    ((_QUANT_STATUS_LABEL, quant),),
+                )
+            )
+            quant_on_size = True
+        else:
+            rows.append(QueueLabelValueRow("Size:", fields["size"]))
+
+    if not omit_live_steps_row:
+        steps_display = steps_value if steps_value is not None else fields.get("steps", "")
+        steps_inline = tuple(
+            _steps_row_inline_parts(
+                fields,
+                elapsed_seconds=elapsed_seconds,
+                estimate_seconds=estimate_seconds,
+            )
+        )
+        if steps_display and steps_inline:
+            rows.append(
+                QueueInlineRow("Steps:", steps_display, steps_inline)
+            )
+        elif steps_display:
+            rows.append(QueueLabelValueRow("Steps:", steps_display))
+
+    if quant and not quant_on_size:
+        rows.append(QueueLabelValueRow(_QUANT_STATUS_LABEL, quant))
+
+    if fields.get("prompt"):
+        rows.append(
+            QueuePromptRow(fields["prompt_label"], fields["prompt"])
+        )
+    if fields.get("neg"):
+        rows.append(QueueLabelValueRow("Neg:", fields["neg"]))
+    return rows
+
+
+def _collect_generation_status_fields_for_view(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+) -> dict[str, str]:
+    """Like _collect_generation_status_fields but with normalized prompt for cards."""
+    fields = _collect_generation_status_fields(plugin, values, payload)
+    if fields.get("prompt"):
+        fields = dict(fields)
+        fields["prompt"] = normalize_prompt_for_display(fields["prompt"])
+    if fields.get("neg"):
+        fields = dict(fields)
+        fields["neg"] = normalize_prompt_for_display(fields["neg"])
+    return fields
+
+
+def build_queue_job_status_view(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    step: int | None = None,
+    step_total: int | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+    running: bool = False,
+    series_copies_total: int | None = None,
+    omit_live_steps_row: bool = False,
+    with_ai: bool = False,
+) -> QueueJobStatusView:
+    """Structured status view for job queue cards."""
+    from imagegen_plugins.flux_prompt_job import (
+        has_flux_prompt_ai_job,
+        job_title_with_ai_suffix,
+    )
+    from imagegen_plugins.job_status_views import (
+        QueueJobStatusView,
+        QueueLabelValueRow,
+        QueueTitleRow,
+    )
+
+    pipeline_id = plugin.pipeline_id
+    fields = _collect_generation_status_fields_for_view(plugin, values, payload)
+    steps_value = _steps_display_with_progress(
+        fields.get("steps", ""),
+        step=step,
+        step_total=step_total,
+    )
+    show_timing = (
+        step is not None
+        and step_total is not None
+        and step_total > 0
+        and elapsed_seconds is not None
+    )
+    rows = _generation_status_queue_view_rows(
+        fields,
+        steps_value=steps_value,
+        elapsed_seconds=elapsed_seconds if show_timing else None,
+        estimate_seconds=estimate_seconds if show_timing else None,
+        omit_live_steps_row=omit_live_steps_row,
+    )
+
+    if series_copies_total is not None and series_copies_total > 1:
+        rows.append(
+            QueueLabelValueRow(
+                "Copies:",
+                format_series_line_value(
+                    _series_queued_value(series_copies_total), values
+                ),
+            )
+        )
+
+    title = _task_menu_title_for_pipeline(pipeline_id)
+    if with_ai or has_flux_prompt_ai_job(values):
+        title = job_title_with_ai_suffix(title)
+
+    view_rows: list = []
+    if title:
+        view_rows.append(QueueTitleRow(title, running=running))
+    view_rows.extend(rows)
+    return QueueJobStatusView(
+        rows=tuple(view_rows),
+        running=running,
+    )
+
+
+def build_job_ai_stage_queue_status_view(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    *,
+    running: bool = False,
+    step: int | None = None,
+    step_total: int | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> QueueJobStatusView:
+    from imagegen_plugins.flux_prompt_job import (
+        flux_prompt_ai_user_prompt,
+        job_title_with_ai_suffix,
+    )
+    from imagegen_plugins.job_status_views import (
+        QueueInlineRow,
+        QueueJobStatusView,
+        QueueLabelValueRow,
+        QueuePromptRow,
+        QueueTitleRow,
+    )
+
+    pipeline_id = plugin.pipeline_id
+    title = job_title_with_ai_suffix(_task_menu_title_for_pipeline(pipeline_id))
+    rows: list = []
+    prompt = normalize_prompt_for_display(flux_prompt_ai_user_prompt(values))
+    if prompt:
+        rows.append(
+            QueuePromptRow(
+                get_pipeline(pipeline_id).prompt_status_label,
+                prompt,
+            )
+        )
+    ai_steps_value = _steps_display_with_progress(
+        "",
+        step=step,
+        step_total=step_total,
+    )
+    if ai_steps_value and step_total is not None and step_total > 0:
+        show_timing = step is not None and step > 0 and elapsed_seconds is not None
+        ai_inline = tuple(
+            _steps_row_inline_parts(
+                {},
+                elapsed_seconds=elapsed_seconds if show_timing else None,
+                estimate_seconds=estimate_seconds if show_timing else None,
+            )
+        )
+        if ai_inline:
+            rows.append(QueueInlineRow("AI:", ai_steps_value, ai_inline))
+        else:
+            rows.append(QueueLabelValueRow("AI:", ai_steps_value))
+    rows.append(QueueLabelValueRow("Stage:", "AI prompt refinement"))
+    view_rows: list = [QueueTitleRow(title, running=running)]
+    view_rows.extend(rows)
+    return QueueJobStatusView(rows=tuple(view_rows), running=running)
+
+
+def build_queue_job_title_only_view(
+    plugin: ImageGenModelPlugin | None,
+    values: dict[str, Any],
+    *,
+    plugin_id: str = "",
+    function: str = "",
+    plugin_unavailable: bool = False,
+) -> QueueJobStatusView:
+    """Minimal title-only status for deferred startup card shells."""
+    from imagegen_plugins.flux_prompt_job import (
+        has_flux_prompt_ai_job,
+        job_title_with_ai_suffix,
+    )
+    from imagegen_plugins.job_status_views import QueueJobStatusView, QueueTitleRow
+
+    if plugin is None or plugin_unavailable:
+        title = f"Unavailable model ({function} / {plugin_id})"
+    else:
+        title = _task_menu_title_for_pipeline(plugin.pipeline_id)
+        if has_flux_prompt_ai_job(values):
+            title = job_title_with_ai_suffix(title)
+    return QueueJobStatusView(rows=(QueueTitleRow(title),))
+
+
+def build_unavailable_queue_status_view(
+    plugin_id: str,
+    function: str,
+    values: dict[str, Any],
+    *,
+    copies_total: int,
+) -> QueueJobStatusView:
+    from imagegen_plugins.job_status_views import (
+        QueueJobStatusView,
+        QueueUnavailableRow,
+    )
+
+    prompt = normalize_prompt_for_display(str(values.get("prompt") or ""))
+    preview = prompt[:48] + ("…" if len(prompt) > 48 else "")
+    heading = f"Unavailable model ({function} / {plugin_id})"
+    return QueueJobStatusView(
+        rows=(
+            QueueUnavailableRow(
+                heading,
+                f"Copies: {copies_total}",
+                f"Prompt: {preview or '—'}",
+            ),
+        ),
+    )
+
+
+def build_caption_queue_status_view(
+    user_prompt_override: Optional[str] = None,
+) -> QueueJobStatusView:
+    from imagegen_plugins.job_status_views import (
+        QueueJobStatusView,
+        QueueLabelValueRow,
+        QueuePromptRow,
+        QueueTitleRow,
+    )
+
+    rows: list = [QueueTitleRow("Text Generation")]
+    model = _caption_model_name()
+    if model:
+        rows.append(QueueLabelValueRow("Model:", model))
+    prompt = normalize_prompt_for_display(_caption_prompt_text(user_prompt_override))
+    if prompt:
+        rows.append(QueuePromptRow("Prompt:", prompt))
+    return QueueJobStatusView(rows=tuple(rows))
+
+
+def refresh_expand_task_status_view_for_display(
+    view: QueueJobStatusView,
+    *,
+    elapsed_seconds: float | None,
+    estimate_seconds: float | None = None,
+    source_path: str = "",
+    base_path: str = "",
+    reference_paths: list[str] | None = None,
+) -> tuple[QueueJobStatusView, list[str]]:
+    """Refresh elapsed timing on view and resolve reference paths for thumbnails."""
+    from imagegen_plugins.job_status_views import set_queue_status_steps_timing
+
+    if view.is_empty():
+        return view, []
+    if elapsed_seconds is not None:
+        view = set_queue_status_steps_timing(
+            view, elapsed_seconds, estimate_seconds=estimate_seconds
+        )
+    ref_paths = _normalize_reference_paths(reference_paths, source_path)
+    base_norm = (
+        os.path.normpath(base_path)
+        if base_path and os.path.isfile(base_path)
+        else ""
+    )
+    if base_norm and base_norm not in ref_paths:
+        ref_paths.append(base_norm)
+    return view, ref_paths
+
+
+def _panel_rows_to_strip_view_rows(
+    progress_rows: list[_PanelRow],
+    *,
+    steps_label: str = "Steps:",
+    show_pending_start_indicator: bool = False,
+    pending_start_indicator_label: str | None = None,
+) -> list:
+    from imagegen_plugins.job_status_views import StripBarRow, StripCountRow
+
+    out: list = []
+    for row in progress_rows:
+        if len(row) == 2:
+            label, value = row
+            out.append(StripCountRow(label, value))
+            continue
+        if len(row) == 5:
+            label, prefix, postfix, fill_percent, slot_text = row
+        else:
+            label, prefix, postfix, fill_percent = row
+            slot_text = ""
+        out.append(
+            StripBarRow(
+                label,
+                prefix,
+                postfix,
+                int(fill_percent),
+                slot_text=slot_text,
+                show_pending_start=(
+                    show_pending_start_indicator
+                    and int(fill_percent) <= 0
+                    and label
+                    == (pending_start_indicator_label or steps_label)
+                ),
+            )
+        )
+    return out
+
+
+def build_active_job_strip_view(
+    controller,
+    *,
+    cancel_hovered: bool = False,
+    skip_hovered: bool = False,
+    include_queue_jobs_row: bool = False,
+) -> ActiveJobStripView:
+    """Structured active-job strip view (native widget path)."""
+    from imagegen_plugins.job_status_views import ActiveJobStripView
+
+    series_progress = controller.snapshot_series_progress_for_active_job_strip()
+    completed_series = None
+    total_series = None
+    if series_progress is not None:
+        completed_series, total_series = series_progress
+
+    total_queue_jobs = None
+    if include_queue_jobs_row:
+        total_queue_jobs = controller.snapshot_queue_jobs_progress_for_active_job_strip()
+
+    remaining = controller.copy_cooldown_seconds_remaining()
+    if remaining > 0:
+        progress_rows: list[_PanelRow] = []
+        if completed_series is not None and total_series is not None:
+            series_row = _series_progress_row(completed_series, total_series)
+            if series_row is not None:
+                progress_rows.append(series_row)
+        if total_queue_jobs is not None:
+            jobs_row = _queue_jobs_count_row(total_queue_jobs)
+            if jobs_row is not None:
+                progress_rows.append(jobs_row)
+        strip_rows = _panel_rows_to_strip_view_rows(progress_rows)
+        remaining_i = max(0, int(remaining))
+        return ActiveJobStripView(
+            rows=tuple(strip_rows),
+            mode="cooldown",
+            cooldown_text="Cooldown:",
+            cooldown_count_text=f"({remaining_i})",
+            show_skip_icon=True,
+            show_cancel_icon=True,
+            skip_hovered=skip_hovered,
+            cancel_hovered=cancel_hovered,
+        )
+
+    elapsed, estimate, step, step_total = (
+        controller.snapshot_generation_timing_for_info_panel()
+    )
+    if elapsed is None:
+        return ActiveJobStripView()
+
+    steps_label = controller.active_job_timing_steps_label()
+    progress_rows = []
+    progress_rows.append(_active_job_time_progress_row(elapsed, estimate))
+
+    if step_total is not None and int(step_total) > 0:
+        steps_row = _steps_progress_row(
+            int(step or 0),
+            int(step_total),
+            steps_label=steps_label,
+        )
+        if steps_row is not None:
+            progress_rows.append(steps_row)
+
+    if completed_series is not None and total_series is not None:
+        series_row = _series_progress_row(completed_series, total_series)
+        if series_row is not None:
+            progress_rows.append(series_row)
+    if total_queue_jobs is not None:
+        jobs_row = _queue_jobs_count_row(total_queue_jobs)
+        if jobs_row is not None:
+            progress_rows.append(jobs_row)
+
+    pending_start = (
+        step_total is not None
+        and int(step_total) > 0
+        and int(step or 0) <= 0
+    )
+    strip_rows = _panel_rows_to_strip_view_rows(
+        progress_rows,
+        steps_label=steps_label,
+        show_pending_start_indicator=pending_start,
+        pending_start_indicator_label="Elapsed:" if pending_start else None,
+    )
+    return ActiveJobStripView(
+        rows=tuple(strip_rows),
+        mode="timing",
+        show_cancel_icon=True,
+        cancel_hovered=cancel_hovered,
+    )
+

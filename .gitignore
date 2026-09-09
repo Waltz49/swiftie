@@ -1,0 +1,32 @@
+# Python / tooling
+.DS_Store
+.cache/
+.pytest_cache/
+.vscode/
+__pycache__/
+*.pyc
+venv/
+venv_image_browser/
+
+# Local media (app assets are whitelisted below)
+*.backup
+*.bak
+*.heic
+*.heif
+*.jpeg
+*.jpg
+*.pdf
+*.png
+!assets/*.png
+!background.png
+*.pxd
+*.webp
+!assets/*.webp
+
+# Scratch / local-only
+profile.stats
+*.fix
+*.cmdhfix
+
+# Editor
+.cursor/

@@ -1,0 +1,974 @@
+#!/usr/bin/env python3
+"""
+Dialog for editing EXIF UserComment on a single image file.
+"""
+
+import os
+from PySide6.QtWidgets import (
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QPlainTextEdit, QPushButton, QWidget, QSizePolicy
+)
+from PySide6.QtCore import Qt, QSize, QTimer, QByteArray, QEvent
+from PySide6.QtGui import QKeyEvent, QTextCursor
+from thumbnails.information_action_nav import (
+    INFO_NAV_ACTION_ORDER_NO_EDIT,
+    InformationActionNavBar,
+)
+from thumbnails.thumbnail_constants import (
+    MULTISELECT_BORDER_COLOR_HEX,
+    BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX, BUTTON_BORDER_DEFAULT_HEX,
+    BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
+    BUTTON_BG_PRESSED_HEX, BUTTON_FOCUS_TEXT_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX,
+    TEXT_DISABLED_HEX,
+    CMD_SYMBOL, ENTER_SYMBOL,
+)
+from config import get_config
+from exif.exif_utils import truncate_usercomment_before_prompt, usercomment_text_for_clipboard
+from theme.theme_service import get_active_theme
+from utils import get_main_window, get_standard_dialog_stylesheet
+from widgets.gear_button_styles import create_dialog_gear_button, dialog_gear_button_stylesheet
+
+
+def _lmstudio_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import lmstudio_ui_enabled
+
+        return lmstudio_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _voice_input_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import voice_input_ui_enabled
+
+        return voice_input_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _imagegen_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        return imagegen_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _audio_output_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import audio_output_ui_enabled
+
+        return audio_output_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _install_cmd_enter_accept(dialog, *widgets) -> None:
+    """Cmd/Ctrl+Return accepts the dialog; avoids importing chat_plugins in --min bundles."""
+    try:
+        from chat_plugins.chat_ui_common import install_cmd_enter_accept
+
+        install_cmd_enter_accept(dialog, *widgets)
+        return
+    except ImportError:
+        pass
+
+    from PySide6.QtCore import QObject
+
+    class _CmdEnterAcceptFilter(QObject):
+        def __init__(self, dlg):
+            super().__init__(dlg)
+            self._dialog = dlg
+
+        def eventFilter(self, watched, event):
+            if (
+                event.type() == QEvent.Type.KeyPress
+                and isinstance(event, QKeyEvent)
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+            ):
+                mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+                cmd = mods & (
+                    Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier
+                )
+                if cmd:
+                    other = mods & ~(
+                        Qt.KeyboardModifier.ControlModifier
+                        | Qt.KeyboardModifier.MetaModifier
+                    )
+                    if other in (Qt.KeyboardModifier.NoModifier, 0):
+                        self._dialog.accept()
+                        return True
+            return super().eventFilter(watched, event)
+
+    filt = _CmdEnterAcceptFilter(dialog)
+    for widget in widgets:
+        widget.installEventFilter(filt)
+
+
+def _is_lmstudio_services_available() -> bool:
+    if not _lmstudio_ui_enabled():
+        return False
+    try:
+        from imagegen_plugins.lmstudio_caption import get_lmstudio_ui_available
+
+        return get_lmstudio_ui_available()
+    except ImportError:
+        return False
+
+
+def _imagegen_create_from_text_available() -> bool:
+    if not _imagegen_ui_enabled():
+        return False
+    try:
+        from imagegen_plugins.image_gen_menu import imagegen_create_from_text_available
+
+        return imagegen_create_from_text_available()
+    except ImportError:
+        return False
+
+
+def _initial_prompt_from_usercomment(text: str):
+    if not _imagegen_ui_enabled():
+        return text.strip()
+    try:
+        from imagegen_plugins.image_gen_menu import initial_prompt_from_usercomment
+
+        return initial_prompt_from_usercomment(text)
+    except ImportError:
+        return text.strip()
+
+
+def _imagegen_edit_ai_available() -> bool:
+    if not _imagegen_ui_enabled():
+        return False
+    try:
+        from imagegen_plugins.image_gen_menu import imagegen_edit_plugins_available
+
+        return imagegen_edit_plugins_available()
+    except ImportError:
+        return False
+
+
+def _open_imagegen_create_from_text_dialog(main_window, *, user_comment: str) -> None:
+    if not _imagegen_ui_enabled():
+        return
+    try:
+        from imagegen_plugins.image_gen_menu import open_imagegen_create_from_text_dialog
+
+        open_imagegen_create_from_text_dialog(main_window, user_comment=user_comment)
+    except ImportError:
+        return
+
+
+def _maybe_wrap_plain_text_edit_with_voice_mic(edit):
+    if not _voice_input_ui_enabled():
+        return edit
+    try:
+        from whisper_voice_input import maybe_wrap_plain_text_edit_with_voice_mic
+
+        return maybe_wrap_plain_text_edit_with_voice_mic(edit)
+    except ImportError:
+        return edit
+
+
+def _stop_whisper_dictation() -> None:
+    if not _voice_input_ui_enabled():
+        return
+    try:
+        from whisper_voice_input import stop_whisper_dictation
+
+        stop_whisper_dictation()
+    except ImportError:
+        pass
+
+
+def _speak_or_stop(text: str) -> bool:
+    if not _audio_output_ui_enabled():
+        return False
+    from speech_utils import speak_or_stop
+
+    return speak_or_stop(text)
+
+
+def _overlay_chip_stylesheet() -> str:
+    """Green chip styling matching File Information copy-feedback overlays."""
+    th = get_active_theme()
+    success_hex = th.validation_success_color_hex
+    chip_bg = th.information_action_chip_bg_hex
+    return f"""
+        QPushButton {{
+            background-color: {chip_bg};
+            color: {success_hex};
+            border: 1px solid {success_hex};
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 11pt;
+            min-width: 0;
+        }}
+        QPushButton:hover:enabled {{
+            border: 1px solid {BUTTON_BORDER_HOVER_HEX};
+        }}
+        QPushButton:disabled {{
+            color: {TEXT_DISABLED_HEX};
+            border: 1px solid {TEXT_DISABLED_HEX};
+        }}
+    """
+
+
+def _edit_exif_usercomment_stylesheet() -> str:
+    """Standard dialog chrome plus EXIF-editor-specific controls."""
+    th = get_active_theme()
+    splitter_handle = th.chrome_border_hex
+    splitter_handle_hover = th.splitter_handle_hover_hex
+    extras = f"""
+        QLabel#editExifFilename {{
+            font-size: 16px;
+        }}
+        {dialog_gear_button_stylesheet()}
+        QPushButton#instructions_btn {{
+            background-color: {th.button_bg_default_hex};
+            color: {th.text_disabled_hex};
+            border: 1px solid {th.button_border_default_hex};
+            border-radius: 6px;
+            min-width: 24px;
+            max-width: 24px;
+            min-height: 24px;
+            max-height: 24px;
+            padding: 2px;
+            font-size: 16px;
+        }}
+        QPushButton#instructions_btn:hover {{
+            color: {th.button_text_hover_hex};
+            border: 1px solid {th.button_border_hover_hex};
+        }}
+        QPushButton#voice_mic_btn {{
+            background-color: transparent;
+            border: none;
+            padding: 0px;
+            margin: 0px;
+            min-width: 0px;
+            max-width: 24px;
+            min-height: 0px;
+            max-height: 24px;
+        }}
+        QSplitter::handle {{
+            background-color: {splitter_handle};
+            border: none;
+        }}
+        QSplitter::handle:vertical {{
+            height: 6px;
+        }}
+        QSplitter::handle:vertical:hover,
+        QSplitter::handle:vertical:pressed {{
+            background-color: {splitter_handle_hover};
+        }}
+    """
+    return get_standard_dialog_stylesheet() + extras
+
+
+class EditExifUserCommentDialog(QDialog):
+    """Dialog for viewing and editing the EXIF UserComment of a single image."""
+
+    def __init__(self, file_path: str, original_text: str, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.original_text = original_text
+        self._caption_connected = False
+        self._caption_cancelled_on_close = False
+        self._text_before_ai = original_text
+        self._ai_caption_error_dialog_open = False
+        self._base_filename = os.path.basename(file_path)
+        self._dot_phase = 0
+        self._dot_timer = QTimer(self)
+        self._dot_timer.setInterval(400)
+        self._dot_timer.timeout.connect(self._on_dot_tick)
+        self._text_edit_container = None
+        self.ai_btn = None
+        self._action_nav: InformationActionNavBar | None = None
+        self._delete_action_nav: InformationActionNavBar | None = None
+        self.settings_btn = None
+
+        self.setWindowTitle("Edit EXIF User Comment")
+        self.setMinimumWidth(480)
+        self.setMinimumHeight(320)
+        self.setWindowModality(Qt.WindowModality.NonModal)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(20, 18, 20, 18)
+
+        # Header: thumbnail on left, filename on right
+        header_row = QHBoxLayout()
+        header_row.setSpacing(14)
+
+        from utils import create_dialog_thumbnail_label
+        self.thumb_label = create_dialog_thumbnail_label(file_path, 128)
+        self.thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.thumb_label.setToolTip("Click to open in browse mode")
+        self.thumb_label.mousePressEvent = self._make_thumb_click_handler()
+        self.thumb_label.installEventFilter(self)
+        header_row.addWidget(self.thumb_label)
+
+        self.filename_label = QLabel(f"<b>{self._base_filename}</b>")
+        self.filename_label.setObjectName("editExifFilename")
+        self.filename_label.setWordWrap(True)
+        self.filename_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        self.settings_btn = create_dialog_gear_button(
+            self,
+            tooltip="Open Captioning settings",
+        )
+        self.settings_btn.clicked.connect(self._on_open_captioning_settings)
+        if not _lmstudio_ui_enabled():
+            self.settings_btn.hide()
+
+        self._action_nav = InformationActionNavBar(
+            self,
+            action_order=INFO_NAV_ACTION_ORDER_NO_EDIT,
+            include_stretch=True,
+            contents_margins=(0, 6, 0, 0),
+        )
+        self._action_nav.action_triggered.connect(self._on_info_action)
+        self._delete_action_nav = InformationActionNavBar(
+            self,
+            action_order=("delete",),
+            right_pinned_action_ids=frozenset(),
+            include_stretch=False,
+            contents_margins=(0, 6, 0, 0),
+        )
+        self._delete_action_nav.action_triggered.connect(self._on_info_action)
+        delete_btn = self._delete_action_nav.button("delete")
+        if delete_btn is not None:
+            delete_btn.setToolTip("Clear comment text")
+        from speech_utils import register_speech_state_listener
+
+        register_speech_state_listener(self._on_speech_state_changed)
+
+        header_info_col = QVBoxLayout()
+        header_info_col.setSpacing(0)
+        header_info_col.setContentsMargins(0, 0, 0, 0)
+        header_info_col.addWidget(self.filename_label)
+        header_action_row = QHBoxLayout()
+        header_action_row.setContentsMargins(0, 0, 0, 0)
+        header_action_row.setSpacing(4)
+        header_action_row.addWidget(self._action_nav, 1)
+        header_info_col.addLayout(header_action_row)
+
+        header_row.addLayout(header_info_col, 1)
+
+        if _lmstudio_ui_enabled():
+            try:
+                from imagegen_plugins.lmstudio_caption import (
+                    is_lmstudio_sdk_installed,
+                    probe_lmstudio_services,
+                )
+
+                if is_lmstudio_sdk_installed():
+                    probe_lmstudio_services(reason="exif_dialog_open")
+            except ImportError:
+                pass
+
+        self._instructions_pane = None
+        self.instructions_btn = None
+        if _is_lmstudio_services_available():
+            from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
+
+            self._instructions_pane = LmStudioInstructionsPane(
+                self,
+                toggle_tooltip=(
+                    "Show/hide Instructions field (override AI user prompt)"
+                ),
+            )
+            self.instructions_btn = self._instructions_pane.toggle_button()
+            header_action_row.addWidget(
+                self.instructions_btn,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+        if _is_lmstudio_services_available() or _lmstudio_ui_enabled():
+            header_action_row.addWidget(
+                self.settings_btn,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+        header_action_row.addWidget(
+            self._delete_action_nav,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        main_layout.addLayout(header_row)
+
+        # Instructions + user comment (resizable when LMS available)
+        self.text_edit = QPlainTextEdit()
+        self.text_edit.setPlainText(original_text)
+        self.text_edit.setPlaceholderText("Enter user comment…")
+        self.text_edit.setMinimumHeight(80)
+        self.text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.text_edit.textChanged.connect(self._update_action_nav_state)
+        self._text_edit_display = _maybe_wrap_plain_text_edit_with_voice_mic(self.text_edit)
+        text_edit_widget = self._wrap_text_edit_with_overlays()
+
+        if _is_lmstudio_services_available() and self._instructions_pane is not None:
+            self._instructions_widget = self._instructions_pane.widget()
+            self.instructions_edit = self._instructions_pane.instructions_edit()
+
+            self._text_splitter = self._instructions_pane.wrap_above_in_splitter(
+                text_edit_widget
+            )
+            main_layout.addWidget(self._text_splitter, 1)
+        else:
+            self._instructions_widget = None
+            self.instructions_edit = None
+            self._text_splitter = None
+            main_layout.addWidget(text_edit_widget, 1)
+
+        # Buttons row: Reset on left, Cancel + Save on right
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        reset_btn = QPushButton("Reset")
+        reset_btn.setToolTip(
+            "Reset text to original value\n"
+            "(stops AI captioning if in progress)"
+        )
+        reset_btn.clicked.connect(self._on_reset)
+        btn_row.addWidget(reset_btn)
+
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        save_btn = QPushButton(f"Save ({CMD_SYMBOL}{ENTER_SYMBOL})")
+        save_btn.setDefault(True)
+        save_btn.clicked.connect(self.accept)
+        btn_row.addWidget(save_btn)
+
+        main_layout.addLayout(btn_row)
+
+        cmd_enter_widgets = [self.text_edit]
+        if self.instructions_edit is not None:
+            cmd_enter_widgets.append(self.instructions_edit)
+        _install_cmd_enter_accept(self, *cmd_enter_widgets)
+
+        # Config for geometry persistence (use parent's config when available for profile consistency)
+        self._config = parent.config if (parent and hasattr(parent, 'config')) else get_config()
+
+        # Save geometry when dialog finishes (closeEvent is NOT called for accept/reject)
+        self.finished.connect(self._save_geometry)
+
+        self._apply_theme_styles()
+        self._update_action_nav_state()
+        self.text_edit.setFocus()
+
+    def _repolish_theme_text_inputs(self) -> None:
+        """Pick up global QDialog input rules after dialog chrome stylesheet changes."""
+        for edit in (self.text_edit, self.instructions_edit):
+            if edit is None:
+                continue
+            style = edit.style()
+            style.unpolish(edit)
+            style.polish(edit)
+            edit.update()
+
+    def _apply_theme_styles(self) -> None:
+        self.setStyleSheet(_edit_exif_usercomment_stylesheet())
+        self.thumb_label.setStyleSheet(
+            f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
+        )
+        if self._action_nav is not None:
+            self._action_nav.refresh_theme_styles()
+            from speech_utils import is_speaking
+
+            self._action_nav.set_speak_highlighted(is_speaking())
+        if self._delete_action_nav is not None:
+            self._delete_action_nav.refresh_theme_styles()
+        if self.ai_btn is not None:
+            self.ai_btn.setStyleSheet(_overlay_chip_stylesheet())
+        if self._instructions_pane is not None:
+            self._instructions_pane.sync_toggle_highlight()
+        self._repolish_theme_text_inputs()
+
+    def refresh_theme_styles(self) -> None:
+        """Re-apply palette while the dialog stays open across a theme change."""
+        self._apply_theme_styles()
+        self._update_action_nav_state()
+
+    def _wrap_text_edit_with_overlays(self) -> QWidget:
+        """Wrap the comment editor so the Recaption chip can overlay the lower-right corner."""
+        if not _is_lmstudio_services_available():
+            return self._text_edit_display
+
+        self._text_edit_container = QWidget()
+        container_layout = QVBoxLayout(self._text_edit_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addWidget(self._text_edit_display)
+
+        self.ai_btn = QPushButton("Recaption", self._text_edit_container)
+        self.ai_btn.setToolTip(
+            "Generate an AI caption using LMStudio\n"
+            "(requires a vision model loaded in LMStudio)"
+        )
+        self.ai_btn.clicked.connect(self._on_ai_caption)
+        self.ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ai_btn.setStyleSheet(_overlay_chip_stylesheet())
+
+        self._text_edit_container.installEventFilter(self)
+        self._position_text_edit_overlays()
+        return self._text_edit_container
+
+    def _voice_mic_overlay_reserve(self) -> int:
+        """Horizontal space to leave at the bottom-right for the voice mic."""
+        mic = getattr(self._text_edit_display, "_mic_btn", None)
+        if mic is None or not mic.isVisible():
+            return 0
+        return mic.width() + 2 + 4  # mic width + right inset + gap before chips
+
+    def _position_text_edit_overlays(self) -> None:
+        if self._text_edit_container is None:
+            return
+        container = self._text_edit_container
+        right = container.width() - 2 - self._voice_mic_overlay_reserve()
+        bottom = container.height() - 2
+
+        if self.ai_btn is not None:
+            btn = self.ai_btn
+            btn.adjustSize()
+            btn.move(right - btn.width(), bottom - btn.height())
+            btn.raise_()
+
+    def _action_nav_specs(self) -> dict[str, dict[str, object]]:
+        text = self.text_edit.toPlainText()
+        has_comment = bool(text.strip())
+        in_progress = self._ai_caption_in_progress()
+        return {
+            "copy": {"visible": True, "enabled": has_comment},
+            "speak": {
+                "visible": _audio_output_ui_enabled(),
+                "enabled": has_comment,
+            },
+            "delete": {"visible": True, "enabled": has_comment},
+            "create": {
+                "visible": _imagegen_create_from_text_available(),
+                "enabled": self._has_caption_for_generate() and not in_progress,
+            },
+            "editai": {
+                "visible": _imagegen_edit_ai_available(),
+                "enabled": True,
+            },
+        }
+
+    def _update_action_nav_state(self) -> None:
+        if self._action_nav is None:
+            return
+        specs = self._action_nav_specs()
+        self._action_nav.apply_specs(specs)
+        if self._delete_action_nav is not None:
+            self._delete_action_nav.apply_specs(specs)
+
+    def _on_info_action(self, action_id: str) -> None:
+        if action_id == "copy":
+            self._on_copy_to_clipboard()
+        elif action_id == "speak":
+            self._on_read_aloud()
+        elif action_id == "delete":
+            self._on_delete_user_comment()
+        elif action_id == "create":
+            self._on_generate_image_from_caption()
+        elif action_id == "editai":
+            self._on_edit_with_ai()
+
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._sync_speak_action_highlight)
+
+    def _sync_speak_action_highlight(self) -> None:
+        if self._action_nav is None:
+            return
+        from speech_utils import is_speaking
+
+        self._action_nav.set_speak_highlighted(is_speaking())
+
+    def _unregister_speech_state_listener(self) -> None:
+        from speech_utils import unregister_speech_state_listener
+
+        unregister_speech_state_listener(self._on_speech_state_changed)
+
+    def eventFilter(self, obj, event):
+        """Swap icon buttons to hover/normal icons on enter/leave; thumbnail border on hover."""
+        if (
+            self._text_edit_container is not None
+            and obj is self._text_edit_container
+            and event.type() == QEvent.Type.Resize
+        ):
+            self._position_text_edit_overlays()
+        if event.type() == QEvent.Type.Enter:
+            if obj is self.thumb_label:
+                self.thumb_label.setStyleSheet(
+                    f"border: 1px solid {BUTTON_BORDER_HOVER_HEX}; border-radius: 5px;"
+                )
+        elif event.type() == QEvent.Type.Leave:
+            if obj is self.thumb_label:
+                self.thumb_label.setStyleSheet(
+                    f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
+                )
+        return super().eventFilter(obj, event)
+
+    def _save_geometry(self):
+        """Persist dialog geometry and Instructions field for future sessions."""
+        try:
+            self._config.update_setting('edit_exif_usercomment_dialog_geometry', self.saveGeometry().data().hex())
+        except Exception:
+            pass
+        if self._text_splitter is not None:
+            try:
+                self._config.update_setting(
+                    'edit_exif_usercomment_splitter_sizes',
+                    self._text_splitter.sizes(),
+                )
+            except Exception:
+                pass
+        if self.instructions_edit is not None and self._instructions_pane is not None:
+            try:
+                self._config.update_setting(
+                    'edit_exif_usercomment_instructions',
+                    self._instructions_pane.plain_text(),
+                )
+                self._config.update_setting(
+                    'edit_exif_usercomment_instructions_visible',
+                    self._instructions_pane.is_visible(),
+                )
+            except Exception:
+                pass
+
+    def showEvent(self, event):
+        """Restore saved geometry and Instructions field when dialog is about to be shown."""
+        try:
+            settings = self._config.load_settings()
+            geom_hex = settings.get('edit_exif_usercomment_dialog_geometry')
+            if geom_hex:
+                self.restoreGeometry(QByteArray(bytes.fromhex(geom_hex)))
+            if self._instructions_pane is not None:
+                self._instructions_pane.set_plain_text(
+                    settings.get('edit_exif_usercomment_instructions', '')
+                )
+                self._instructions_pane.set_visible(
+                    settings.get('edit_exif_usercomment_instructions_visible', False)
+                )
+                self.instructions_edit = self._instructions_pane.instructions_edit()
+            if self._text_splitter is not None:
+                saved_sizes = settings.get('edit_exif_usercomment_splitter_sizes')
+                if (
+                    isinstance(saved_sizes, list)
+                    and len(saved_sizes) == 2
+                    and sum(saved_sizes) > 0
+                ):
+                    self._text_splitter.setSizes(saved_sizes)
+        except Exception:
+            pass
+        self._update_action_nav_state()
+        self._position_text_edit_overlays()
+        super().showEvent(event)
+
+    def reject(self):
+        _stop_whisper_dictation()
+        self._cancel_active_ai_caption()
+        self._unregister_speech_state_listener()
+        super().reject()
+
+    def accept(self):
+        _stop_whisper_dictation()
+        self._cancel_active_ai_caption()
+        self._unregister_speech_state_listener()
+        super().accept()
+
+    def closeEvent(self, event):
+        """Save geometry when closed via X button (accept/reject use finished signal)."""
+        _stop_whisper_dictation()
+        self._cancel_active_ai_caption()
+        self._unregister_speech_state_listener()
+        self._save_geometry()
+        super().closeEvent(event)
+
+    def _make_thumb_click_handler(self):
+        """Return a mousePressEvent handler that opens the image in browse mode."""
+        def handler(event):
+            if event.button() == Qt.MouseButton.LeftButton:
+                parent = self.parent()
+                if parent and hasattr(parent, 'load_file_with_directory_thumbnails'):
+                    parent.load_file_with_directory_thumbnails(self.file_path)
+        return handler
+
+    def _on_reset(self):
+        self._stop_active_caption(disconnect=False)
+        self.text_edit.setPlainText(self.original_text)
+        self._update_action_nav_state()
+
+    def _has_caption_for_generate(self) -> bool:
+        return bool(_initial_prompt_from_usercomment(self.text_edit.toPlainText()))
+
+    def _on_generate_image_from_caption(self):
+        main_window = get_main_window() or self.parent()
+        if main_window is None:
+            return
+        _open_imagegen_create_from_text_dialog(
+            main_window, user_comment=self.text_edit.toPlainText()
+        )
+
+    def _on_open_captioning_settings(self):
+        parent = self.parent()
+        if parent and hasattr(parent, 'show_settings'):
+            parent.show_settings(tab_id="captioning_settings")
+
+    def _on_read_aloud(self):
+        text = self.text_edit.toPlainText().strip()
+        text = truncate_usercomment_before_prompt(text)
+        _speak_or_stop(text)
+        QTimer.singleShot(0, self._sync_speak_action_highlight)
+
+    def _on_copy_to_clipboard(self):
+        mods = QApplication.keyboardModifiers()
+        copy_full = bool(mods & Qt.KeyboardModifier.AltModifier)
+        text = usercomment_text_for_clipboard(
+            self.text_edit.toPlainText(),
+            copy_full=copy_full,
+        )
+        from copy_feedback import copy_text_to_clipboard
+
+        copy_text_to_clipboard(text, anchor=self.text_edit)
+
+    def _on_delete_user_comment(self) -> None:
+        """Clear the comment editor without modifying the file on disk."""
+        self._stop_active_caption(disconnect=False)
+        self.text_edit.setPlainText("")
+        self._update_action_nav_state()
+
+    def _on_edit_with_ai(self) -> None:
+        main_window = get_main_window() or self.parent()
+        if main_window is None:
+            return
+        try:
+            from imagegen_plugins.image_gen_menu import open_imagegen_edit_from_text_dialog
+        except ImportError:
+            return
+        open_imagegen_edit_from_text_dialog(
+            main_window,
+            user_comment=self.text_edit.toPlainText(),
+            source_image_paths=[self.file_path],
+        )
+
+    def _on_dot_tick(self):
+        if self._ai_caption_error_dialog_open:
+            return
+        self._dot_phase = (self._dot_phase + 1) % 4
+        dots = "." * (self._dot_phase + 1)  # 1, 2, 3, or 4 periods
+        self.text_edit.setPlainText(dots)
+
+    def _abort_ai_caption_waiting_ui(self) -> None:
+        """Stop the waiting animation and put back the text from before [AI] caption."""
+        self._dot_timer.stop()
+        self.text_edit.setPlainText(self._text_before_ai)
+
+    def _restore_filename(self):
+        self._dot_timer.stop()
+
+    def _imagegen_controller(self):
+        from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+        mw = get_main_window() or self.parent()
+        if mw is None:
+            return None
+        return get_imagegen_controller(mw)
+
+    def _ai_caption_in_progress(self) -> bool:
+        return self.ai_btn is not None and not self.ai_btn.isEnabled()
+
+    def _disconnect_caption_signals(self) -> None:
+        if not self._caption_connected:
+            return
+        controller = self._imagegen_controller()
+        if controller is not None:
+            for signal, slot in (
+                (controller.caption_chunk, self._on_caption_chunk),
+                (controller.caption_ready, self._on_caption_ready),
+                (controller.caption_error, self._on_caption_error),
+                (controller.caption_finished, self._on_caption_finished),
+            ):
+                try:
+                    signal.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+        self._caption_connected = False
+
+    def _stop_active_caption(self, *, disconnect: bool) -> None:
+        """Halt an in-flight AI caption and restore the Recaption button."""
+        if not self._ai_caption_in_progress():
+            return
+        self._caption_cancelled_on_close = True
+        self._dot_timer.stop()
+        self._streaming_started = False
+        controller = self._imagegen_controller()
+        if controller is not None:
+            controller.cancel_caption()
+        if disconnect:
+            self._disconnect_caption_signals()
+        if self.ai_btn is not None:
+            self.ai_btn.setEnabled(True)
+            self.ai_btn.setText("Recaption")
+            self._position_text_edit_overlays()
+        self._update_action_nav_state()
+        if not disconnect:
+            self._caption_cancelled_on_close = False
+
+    def _cancel_active_ai_caption(self) -> None:
+        """Stop worker caption and reset app state when the dialog closes (Esc/Cancel/X)."""
+        if self._caption_cancelled_on_close:
+            return
+        self._stop_active_caption(disconnect=True)
+
+    def _on_ai_caption(self):
+        if self.ai_btn is None:
+            return
+        controller = self._imagegen_controller()
+        if controller is None:
+            return
+        if controller.has_pending_work():
+            from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
+            show_ai_caption_error_dialog(
+                self,
+                "Wait for the job queue to finish or cancel queued jobs "
+                "before starting AI caption.",
+                on_run_foreground=lambda: self._start_ai_caption(foreground=True),
+            )
+            return
+        self._start_ai_caption(foreground=False)
+
+    def _start_ai_caption(self, *, foreground: bool = False):
+        if self.ai_btn is None:
+            return
+        controller = self._imagegen_controller()
+        if controller is None:
+            return
+        if foreground and controller.is_foreground_caption_running():
+            from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
+            show_ai_caption_error_dialog(
+                self,
+                "A foreground AI caption is already running.",
+            )
+            return
+        self.ai_btn.setEnabled(False)
+        self.ai_btn.setText("…")
+        self._position_text_edit_overlays()
+        self._update_action_nav_state()
+        self._text_before_ai = self.text_edit.toPlainText()
+        self._dot_phase = 0
+        self._dot_timer.start()
+        user_override = None
+        if self._instructions_pane is not None:
+            user_override = self._instructions_pane.effective_override_text()
+        if not self._caption_connected:
+            controller.caption_chunk.connect(self._on_caption_chunk)
+            controller.caption_ready.connect(self._on_caption_ready)
+            controller.caption_error.connect(self._on_caption_error)
+            controller.caption_finished.connect(self._on_caption_finished)
+            self._caption_connected = True
+        self._streaming_started = False
+        if foreground:
+            started = controller.start_caption_foreground(
+                self.file_path, user_override
+            )
+        else:
+            started = controller.start_caption(self.file_path, user_override)
+        if started:
+            self._caption_cancelled_on_close = False
+        else:
+            self._abort_ai_caption_waiting_ui()
+            self._on_caption_finished()
+            self._show_ai_caption_error(
+                "Could not start AI caption (another task may be running).",
+            )
+
+    def _scroll_text_edit_to_bottom(self, edit: QPlainTextEdit) -> None:
+        bar = edit.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _set_text_edit_streaming_content(self, edit: QPlainTextEdit, text: str) -> None:
+        """Replace all text without resetting scroll to top (caption stream start / final)."""
+        cursor = edit.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(text)
+        cursor.endEditBlock()
+        edit.setTextCursor(cursor)
+        self._scroll_text_edit_to_bottom(edit)
+
+    def _append_text_edit_streaming(self, edit: QPlainTextEdit, text: str) -> None:
+        """Append streamed tokens at the end and keep the viewport pinned to the bottom."""
+        if not text:
+            return
+        cursor = edit.textCursor()
+        cursor.beginEditBlock()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(text)
+        cursor.endEditBlock()
+        edit.setTextCursor(cursor)
+        self._scroll_text_edit_to_bottom(edit)
+
+    def _on_caption_chunk(self, chunk: str):
+        if not chunk or self._caption_cancelled_on_close:
+            return
+        edit = self.text_edit
+        edit.blockSignals(True)
+        try:
+            if not self._streaming_started:
+                self._streaming_started = True
+                self._dot_timer.stop()
+                self._set_text_edit_streaming_content(edit, chunk)
+            else:
+                self._append_text_edit_streaming(edit, chunk)
+        finally:
+            edit.blockSignals(False)
+
+    def _on_caption_ready(self, caption: str):
+        self.text_edit.blockSignals(True)
+        try:
+            self._set_text_edit_streaming_content(self.text_edit, caption)
+        finally:
+            self.text_edit.blockSignals(False)
+        self._update_action_nav_state()
+
+    def _show_ai_caption_error(self, error_msg: str) -> None:
+        if self._ai_caption_error_dialog_open:
+            return
+        self._abort_ai_caption_waiting_ui()
+        self._ai_caption_error_dialog_open = True
+        try:
+            from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
+
+            show_ai_caption_error_dialog(self, error_msg)
+        finally:
+            self._ai_caption_error_dialog_open = False
+            self._abort_ai_caption_waiting_ui()
+
+    def _on_caption_error(self, error_msg: str):
+        self._show_ai_caption_error(error_msg)
+
+    def _on_caption_finished(self):
+        if self._caption_cancelled_on_close:
+            return
+        self._dot_timer.stop()
+        if self._ai_caption_error_dialog_open:
+            self.text_edit.setPlainText(self._text_before_ai)
+        self._restore_filename()
+        if self.ai_btn is not None:
+            self.ai_btn.setEnabled(True)
+            self.ai_btn.setText("Recaption")
+            self._position_text_edit_overlays()
+        self._update_action_nav_state()
+
+    def get_text(self) -> str:
+        return self.text_edit.toPlainText()

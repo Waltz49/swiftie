@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Shared horizontal action bar for File Information and related panes."""
+
+from __future__ import annotations
+
+from typing import Dict, Iterable, Optional
+
+from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+
+from theme.theme_service import get_active_theme
+from thumbnails.thumbnail_constants import OPTION_SYMBOL
+from widgets.icon_hover_swap import (
+    IconHoverSwap,
+    attach_icon_hover_swap,
+    icon_pair_from_assets,
+)
+
+INFO_ACTION_ICON_PX = 18
+INFO_ACTION_BTN_PX = 26
+INFO_NAV_ACTION_ORDER = ("edit", "copy", "speak", "create", "editai", "delete")
+INFO_NAV_ACTION_ORDER_NO_EDIT = ("copy", "speak", "create", "editai")
+_RIGHT_PINNED_ACTION_IDS = frozenset({"delete"})
+
+INFO_ACTION_TOOLTIPS = {
+    "speak": "Read aloud (click again to stop)",
+    "copy": (
+        f"Copy prompt to clipboard.\n"
+        f"{OPTION_SYMBOL}+click to copy full user comment."
+    ),
+    "edit": "Edit user comment",
+    "create": "Create image from this prompt",
+    "editai": "Edit this image with AI",
+    "delete": "Delete user comment",
+}
+
+_IMAGE_ACTION_IDS = frozenset({"edit", "copy", "create", "editai", "delete", "speak"})
+_IMAGE_ICON_PATHS = {
+    "edit": ("comment_icon.png", "comment_icon_hover.png"),
+    "copy": ("copy.png", "copy_hover.png"),
+    "create": ("fromText.png", "fromText_hover.png"),
+    "editai": ("editAI.png", "editAI_hover.png"),
+    "delete": ("trash_icon.png", "trash_icon_hover.png"),
+    "speak": ("bullhorn.png", "bullhorn_hover.png"),
+}
+
+
+def info_action_button_stylesheet(*, text_button: bool = False) -> str:
+    """Shared chrome for File Information and pane toolbar action buttons."""
+    th = get_active_theme()
+    hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
+    px = INFO_ACTION_BTN_PX
+    text_rules = ""
+    hover_text_rules = ""
+    if text_button:
+        text_rules = f"""
+            color: {th.dialog_text_color_hex};
+            font-size: 14px;
+        """
+        hover_text_rules = f"""
+        QPushButton:hover:enabled {{
+            color: {hover_border};
+        }}"""
+    return f"""
+        QPushButton {{
+            background-color: {th.information_action_chip_bg_hex};
+            border: 0px;
+            border-radius: 6px;
+            padding: 0px;
+            opacity: 1;
+            {text_rules}
+            min-width: {px}px;
+            max-width: {px}px;
+            min-height: {px}px;
+            max-height: {px}px;
+        }}
+        QPushButton:hover:enabled {{
+            opacity: 1;
+        }}
+        {hover_text_rules}
+        QPushButton:disabled {{
+            opacity: 0.35;
+        }}
+        QPushButton:hover:disabled {{
+            opacity: 0.35;
+        }}
+    """
+
+
+class InformationActionNavBar(QWidget):
+    """Horizontal row of File Information action buttons."""
+
+    action_triggered = Signal(str)
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        action_order: Iterable[str] = INFO_NAV_ACTION_ORDER,
+        right_pinned_action_ids: frozenset[str] | None = None,
+        include_stretch: bool = True,
+        contents_margins: tuple[int, int, int, int] = (0, 4, 0, 0),
+    ):
+        super().__init__(parent)
+        self._action_order = tuple(action_order)
+        self._include_stretch = include_stretch
+        self._buttons: Dict[str, QPushButton] = {}
+        self._icon_hovers: Dict[str, IconHoverSwap] = {}
+        pinned_ids = (
+            right_pinned_action_ids
+            if right_pinned_action_ids is not None
+            else _RIGHT_PINNED_ACTION_IDS
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(*contents_margins)
+        layout.setSpacing(4)
+
+        left_ids = [
+            action_id
+            for action_id in self._action_order
+            if action_id not in pinned_ids
+        ]
+        right_ids = [
+            action_id
+            for action_id in self._action_order
+            if action_id in pinned_ids
+        ]
+
+        for action_id in left_ids + right_ids:
+            btn = QPushButton()
+            btn.setToolTip(INFO_ACTION_TOOLTIPS.get(action_id, ""))
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+            btn.setFixedSize(INFO_ACTION_BTN_PX, INFO_ACTION_BTN_PX)
+            btn.setIconSize(QSize(INFO_ACTION_ICON_PX, INFO_ACTION_ICON_PX))
+            btn.clicked.connect(
+                lambda _checked=False, aid=action_id: self.action_triggered.emit(aid)
+            )
+            self._buttons[action_id] = btn
+
+        for action_id in left_ids:
+            layout.addWidget(self._buttons[action_id])
+
+        if include_stretch or right_ids:
+            layout.addStretch(1)
+
+        for action_id in right_ids:
+            layout.addWidget(self._buttons[action_id])
+
+        self.refresh_theme_styles()
+
+    def button(self, action_id: str) -> Optional[QPushButton]:
+        return self._buttons.get(action_id)
+
+    def action_icon(self, action_id: str) -> QIcon:
+        btn = self._buttons.get(action_id)
+        if btn is not None:
+            return btn.icon()
+        return QIcon()
+
+    def apply_specs(self, specs: Dict[str, Dict[str, object]]) -> bool:
+        """Apply visibility/enabled state. Returns True when any button is visible."""
+        any_visible = False
+        for action_id, btn in self._buttons.items():
+            spec = specs.get(action_id, {})
+            visible = bool(spec.get("visible", True))
+            btn.setVisible(visible)
+            btn.setEnabled(bool(spec.get("enabled", True)))
+            if visible:
+                any_visible = True
+        return any_visible
+
+    def set_speak_highlighted(self, highlighted: bool) -> None:
+        """Show bullhorn_hover.png while read-aloud is playing."""
+        swap = self._icon_hovers.get("speak")
+        if swap is not None:
+            swap.set_active(highlighted)
+
+    def refresh_theme_styles(self) -> None:
+        th = get_active_theme()
+        self.setStyleSheet(th.file_tree_nav_container_stylesheet())
+        for action_id, btn in self._buttons.items():
+            if action_id in _IMAGE_ACTION_IDS:
+                normal_name, hover_name = _IMAGE_ICON_PATHS[action_id]
+                normal, hover = icon_pair_from_assets(normal_name, hover_name)
+                swap = self._icon_hovers.get(action_id)
+                if swap is None:
+                    self._icon_hovers[action_id] = attach_icon_hover_swap(
+                        btn, normal, hover
+                    )
+                else:
+                    swap.set_icons(normal, hover)
+            btn.setStyleSheet(info_action_button_stylesheet())

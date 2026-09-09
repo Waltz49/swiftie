@@ -1,0 +1,1375 @@
+#!/usr/bin/env python3
+"""Image-gen settings in ~/.prowser/data/settings.json (per dialog/function).
+
+LoRA catalog user state is stored separately in ~/.prowser/data/lora_catalog.json.
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from config import get_config
+
+# Serialize imagegen settings writes (model params, LoRA catalog, active plugin, …).
+_imagegen_settings_lock = threading.Lock()
+_UNSET = object()
+
+
+def _ensure_imagegen_dict(settings: dict) -> dict:
+    """Ensure settings['imagegen'] is a dict without dropping existing keys (e.g. lora_catalog)."""
+    imagegen = settings.get("imagegen")
+    if not isinstance(imagegen, dict):
+        imagegen = {}
+        settings["imagegen"] = imagegen
+    return imagegen
+
+
+def _imagegen_lora_catalog(imagegen: dict) -> dict:
+    from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings
+
+    return lora_catalog_from_settings({"imagegen": imagegen})
+
+
+def _mutate_imagegen_settings(mutator: Callable[[dict], None]) -> None:
+    """Load settings, mutate imagegen under lock, save (LoRA catalog → separate file)."""
+    import copy
+    import shutil
+
+    config = get_config()
+    with _imagegen_settings_lock:
+        settings = config.load_settings()
+        imagegen = _ensure_imagegen_dict(settings)
+        mutator(imagegen)
+        lc = imagegen.pop("lora_catalog", None)
+        if isinstance(lc, dict):
+            from imagegen_plugins.lora_catalog_store import save_lora_catalog_file
+
+            save_lora_catalog_file(lc)
+        settings_path = config.settings_file
+        if settings_path.exists():
+            try:
+                backup = settings_path.with_suffix(".json.pre_imagegen_write")
+                shutil.copy2(settings_path, backup)
+            except OSError:
+                pass
+        config.save_settings(copy.deepcopy(settings))
+
+
+_DIALOGS_KEY = "dialogs"
+_PLUGIN_SETTINGS_KEY = "plugin_settings"
+_LORA_STACKS_KEY = "lora_stacks"
+_STRUCTURAL_DIALOG_KEYS = frozenset({_PLUGIN_SETTINGS_KEY, _LORA_STACKS_KEY})
+
+# Not shared across models in a function dialog (come from plugin model_defaults).
+_PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
+    {
+        "hf_model_id",
+        "source_image_path",
+        "source_image_paths",
+    }
+)
+
+# Shared across all models in a function dialog (e.g. create).
+_SHARED_FUNCTION_KEYS = frozenset({"prompt"})
+
+# Keys that were removed from unified dialogs but may linger in saved settings.
+_DIALOG_DEPRECATED_FIELD_KEYS = frozenset({"low_ram"})
+
+# Global image-gen prefs (not per function, model, or dialog field values).
+_GLOBAL_DIALOG_PREF_KEYS = frozenset(
+    {
+        "pass_image_to_ai_with_prompt",
+        "flux_prompt_job_with_generate",
+        "flux_prompt_ai_job",
+        "show_progressive_images",
+    }
+)
+
+# Owned by the job-queue toolbar (T>), not generate-dialog field values.
+_JOB_QUEUE_ONLY_DIALOG_KEYS = frozenset({"series_prompt_refinement"})
+_PASS_IMAGE_TO_AI_KEY = "pass_image_to_ai_with_prompt"
+_SHOW_PROGRESSIVE_IMAGES_KEY = "show_progressive_images"
+_FLUX_PROMPT_JOB_WITH_GENERATE_KEY = "flux_prompt_job_with_generate"
+_FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY = "flux_prompt_system_prompt_text"
+_FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY = "flux_prompt_system_prompt_visible"
+_FLUX_PROMPT_SYSTEM_PROMPT_SPLITTER_SIZES_KEY = (
+    "flux_prompt_system_prompt_splitter_sizes"
+)
+_FLUX_PROMPT_SYSTEM_PROMPT_EDITOR_EXPANDED_KEY = (
+    "flux_prompt_system_prompt_editor_expanded"
+)
+
+
+def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        k: v
+        for k, v in dict(values).items()
+        if k not in _PLUGIN_SPECIFIC_DIALOG_KEYS
+        and k not in _GLOBAL_DIALOG_PREF_KEYS
+        and k not in _JOB_QUEUE_ONLY_DIALOG_KEYS
+        and k not in _DIALOG_DEPRECATED_FIELD_KEYS
+    }
+
+
+def _shared_dialog_values(fn_entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Function-level dialog fields only (exclude plugin_settings / lora_stacks)."""
+    return _sanitize_dialog_values(
+        {k: v for k, v in dict(fn_entry).items() if k not in _STRUCTURAL_DIALOG_KEYS}
+    )
+
+
+def _shared_function_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: values[k] for k in _SHARED_FUNCTION_KEYS if k in values}
+
+
+def _dialog_entry_parts(
+    dialogs: dict, function: str
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Shared dialog fields, lora_stacks, and plugin_settings for a function entry."""
+    existing = dialogs.get(function)
+    existing = dict(existing) if isinstance(existing, dict) else {}
+    shared = _shared_dialog_values(existing)
+    stacks = existing.get(_LORA_STACKS_KEY)
+    stacks = dict(stacks) if isinstance(stacks, dict) else {}
+    plugin_settings = existing.get(_PLUGIN_SETTINGS_KEY)
+    plugin_settings = (
+        dict(plugin_settings) if isinstance(plugin_settings, dict) else {}
+    )
+    return shared, stacks, plugin_settings
+
+
+def _per_plugin_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in values.items() if k not in _SHARED_FUNCTION_KEYS}
+
+
+def _split_lora_stack_from_values(
+    values: Dict[str, Any],
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Pop ``mflux_lora_stack`` before sanitize; it is stored under ``lora_stacks``."""
+    raw = dict(values)
+    stack = _coerce_lora_stack_list(raw.pop("mflux_lora_stack", None))
+    return _sanitize_dialog_values(raw), stack
+
+
+def _coerce_lora_stack_list(raw: Any) -> List[str]:
+    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw:
+        pid = coerce_lora_preset_id(item)
+        if pid != "none" and pid not in out:
+            out.append(pid)
+    return out
+
+
+def _plugin_uses_lora_stack(plugin_id: str) -> bool:
+    """FLUX/mflux/Klein/SDXL use multi-LoRA stacks; SD15 keeps single ``mflux_lora``."""
+    from imagegen_plugins.lora_host_registry import HOST_SD15
+
+    plugin_id = str(plugin_id)
+    try:
+        from imagegen_plugins import discover_plugins
+
+        for plugin in discover_plugins():
+            if plugin.plugin_id == plugin_id:
+                host = getattr(plugin, "lora_host_id", None)
+                return host is not None and host not in (HOST_SD15,)
+    except Exception:
+        pass
+    return True
+
+
+def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
+    """Per-function, per-plugin LoRA stack (preset ids). Migrates legacy ``mflux_lora``."""
+    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+    plugin_id = str(plugin_id)
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    fn_entry = dialogs.get(function) or {}
+    stacks = fn_entry.get(_LORA_STACKS_KEY) or {}
+    if isinstance(stacks, dict):
+        raw = stacks.get(plugin_id)
+        stack = _coerce_lora_stack_list(raw)
+        if stack:
+            return stack
+
+    return []
+
+
+def _load_per_plugin_settings(function: str, plugin_id: str) -> Dict[str, Any]:
+    plugin_id = str(plugin_id)
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    fn_entry = dialogs.get(function) or {}
+    plugin_settings = fn_entry.get(_PLUGIN_SETTINGS_KEY) or {}
+    if not isinstance(plugin_settings, dict):
+        return {}
+    saved = plugin_settings.get(plugin_id) or {}
+    return dict(saved) if isinstance(saved, dict) else {}
+
+
+def _merge_prompt_from_shared(
+    shared: Dict[str, Any], per_plugin: Dict[str, Any]
+) -> Optional[str]:
+    shared_p = (shared.get("prompt") or "").strip()
+    if shared_p:
+        return shared["prompt"]
+    per = (per_plugin.get("prompt") or "").strip()
+    if per:
+        return per_plugin["prompt"]
+    return None
+
+
+def load_dialog_settings(
+    function: str,
+    *,
+    fallback_plugin_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Saved field values for a function dialog (create, edit, expand, …)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    saved = dict(dialogs.get(function) or {})
+    return _shared_dialog_values(saved)
+
+
+def load_plugin_dialog_settings(function: str, plugin_id: str) -> Dict[str, Any]:
+    """Per-plugin field values merged with function-level shared keys (prompt)."""
+    plugin_id = str(plugin_id)
+    shared = load_dialog_settings(function, fallback_plugin_id=plugin_id)
+    per_plugin = _sanitize_dialog_values(_load_per_plugin_settings(function, plugin_id))
+
+    if per_plugin:
+        out = dict(per_plugin)
+    elif shared:
+        out = dict(shared)
+    else:
+        out = {}
+
+    prompt = _merge_prompt_from_shared(shared, per_plugin)
+    if prompt is not None:
+        out["prompt"] = prompt
+
+    stack = load_lora_stack_for_plugin(function, plugin_id)
+    if _plugin_uses_lora_stack(plugin_id):
+        out["mflux_lora_stack"] = stack
+        out.pop("mflux_lora", None)
+    else:
+        from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+        pid = coerce_lora_preset_id(out.get("mflux_lora", "none"))
+        if pid == "none" and stack:
+            out["mflux_lora"] = stack[0]
+        out.pop("mflux_lora_stack", None)
+    return _sanitize_dialog_values(out)
+
+
+def save_plugin_dialog_settings(
+    function: str,
+    plugin_id: str,
+    values: Dict[str, Any],
+    *,
+    active_plugin_id: Optional[str] = None,
+) -> None:
+    """Persist model-specific settings per plugin; prompt stays function-level."""
+    plugin_id = str(plugin_id)
+    sanitized, stack = _split_lora_stack_from_values(dict(values))
+    persist_stack = _plugin_uses_lora_stack(plugin_id)
+    if not persist_stack:
+        from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+        sanitized.pop("mflux_lora_stack", None)
+        pid = coerce_lora_preset_id(sanitized.get("mflux_lora", "none"))
+        if pid == "none" and stack:
+            sanitized["mflux_lora"] = stack[0]
+
+    def mutate(imagegen: dict) -> None:
+        from imagegen_plugins.image_gen_active_model import (
+            apply_active_plugin_to_imagegen,
+        )
+
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        fn_entry, stacks, plugin_settings = _dialog_entry_parts(dialogs, function)
+        fn_entry.update(_shared_function_values(sanitized))
+        if persist_stack:
+            stacks[plugin_id] = stack
+        else:
+            stacks.pop(plugin_id, None)
+        fn_entry[_LORA_STACKS_KEY] = stacks
+        per_plugin = _per_plugin_dialog_values(sanitized)
+        if persist_stack:
+            per_plugin.pop("mflux_lora", None)
+        plugin_settings[plugin_id] = per_plugin
+        fn_entry[_PLUGIN_SETTINGS_KEY] = plugin_settings
+        dialogs[function] = fn_entry
+
+        aid = active_plugin_id or plugin_id
+        apply_active_plugin_to_imagegen(imagegen, function, aid)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def switch_plugin_persisted_settings(
+    function: str,
+    outgoing_plugin_id: str,
+    outgoing_values: Dict[str, Any],
+    incoming_plugin_id: str,
+    *,
+    active_plugin_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Save outgoing plugin state; return persisted settings for the incoming plugin."""
+    save_plugin_dialog_settings(
+        function,
+        outgoing_plugin_id,
+        outgoing_values,
+        active_plugin_id=active_plugin_id or incoming_plugin_id,
+    )
+    return load_plugin_dialog_settings(function, incoming_plugin_id)
+
+
+
+def save_dialog_sessions_batch(
+    sessions: Dict[str, Tuple[Dict[str, Any], Optional[str]]],
+) -> None:
+    """Persist multiple function dialog values (+ optional plugin ids) in one write."""
+    if not sessions:
+        return
+
+    prepared: Dict[str, Tuple[Dict[str, Any], Optional[str], List[str]]] = {}
+    for function, (values, plugin_id) in sessions.items():
+        sanitized, stack = _split_lora_stack_from_values(dict(values))
+        if plugin_id is not None and not _plugin_uses_lora_stack(str(plugin_id)):
+            from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+            sanitized.pop("mflux_lora_stack", None)
+            pid = coerce_lora_preset_id(sanitized.get("mflux_lora", "none"))
+            if pid == "none" and stack:
+                sanitized["mflux_lora"] = stack[0]
+        prepared[function] = (sanitized, plugin_id, stack)
+
+    def mutate(imagegen: dict) -> None:
+        from imagegen_plugins.image_gen_active_model import (
+            apply_active_plugin_to_imagegen,
+        )
+
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        for function, (vals, plugin_id, stack) in prepared.items():
+            persist_stack = (
+                _plugin_uses_lora_stack(str(plugin_id))
+                if plugin_id is not None
+                else False
+            )
+            fn_entry, stacks, plugin_settings = _dialog_entry_parts(
+                dialogs, function
+            )
+            fn_entry.update(_shared_function_values(vals))
+            if plugin_id is not None:
+                pid = str(plugin_id)
+                if persist_stack:
+                    stacks[pid] = stack
+                else:
+                    stacks.pop(pid, None)
+                fn_entry[_LORA_STACKS_KEY] = stacks
+                per_plugin = _per_plugin_dialog_values(vals)
+                if persist_stack:
+                    per_plugin.pop("mflux_lora", None)
+                plugin_settings[pid] = per_plugin
+                fn_entry[_PLUGIN_SETTINGS_KEY] = plugin_settings
+            dialogs[function] = fn_entry
+            if plugin_id is not None:
+                apply_active_plugin_to_imagegen(imagegen, function, plugin_id)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_imagegen_dialog_geometry_hex() -> Optional[str]:
+    """Saved image-generation dialog geometry (hex QByteArray), shared by all types."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    geom = imagegen.get("dialog_geometry")
+    if isinstance(geom, str) and geom:
+        return geom
+    geoms = imagegen.get("dialog_geometries")
+    if isinstance(geoms, dict):
+        for value in geoms.values():
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def save_imagegen_dialog_geometry_hex(geom_hex: str) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["dialog_geometry"] = geom_hex
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_close_dialog_on_generate() -> bool:
+    """Whether the unified image-gen dialog closes after a successful generate."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get("close_dialog_on_generate"))
+
+
+def save_close_dialog_on_generate(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["close_dialog_on_generate"] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_pass_image_to_ai_with_prompt() -> bool:
+    """Whether AI prompt refinement should include the source image (all gen dialogs)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get(_PASS_IMAGE_TO_AI_KEY, False))
+
+
+def save_pass_image_to_ai_with_prompt(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_PASS_IMAGE_TO_AI_KEY] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_show_progressive_images() -> bool:
+    """Whether intermediate previews are shown during supported image generation."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get(_SHOW_PROGRESSIVE_IMAGES_KEY, False))
+
+
+def save_show_progressive_images(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_SHOW_PROGRESSIVE_IMAGES_KEY] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_flux_prompt_job_with_generate() -> bool:
+    """Whether Generate should queue an AI prompt-refinement stage with the job."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get(_FLUX_PROMPT_JOB_WITH_GENERATE_KEY, False))
+
+
+def save_flux_prompt_job_with_generate(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_FLUX_PROMPT_JOB_WITH_GENERATE_KEY] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_flux_prompt_system_prompt_settings() -> tuple[str, bool, list[int], bool]:
+    """Global flux Prompt AI system prompt pane state."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    text = imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY, "")
+    visible = bool(imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY, False))
+    sizes = imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_SPLITTER_SIZES_KEY, [])
+    expanded = bool(imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_EDITOR_EXPANDED_KEY, True))
+    if not isinstance(text, str):
+        text = ""
+    if not isinstance(sizes, list):
+        sizes = []
+    return text, visible, sizes, expanded
+
+
+def save_flux_prompt_system_prompt_settings(
+    text: str,
+    visible: bool,
+    splitter_sizes: list[int],
+    *,
+    editor_expanded: bool = True,
+) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY] = text
+        imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY] = bool(visible)
+        imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_EDITOR_EXPANDED_KEY] = bool(
+            editor_expanded
+        )
+        if (
+            isinstance(splitter_sizes, list)
+            and len(splitter_sizes) == 2
+            and sum(splitter_sizes) > 0
+        ):
+            imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_SPLITTER_SIZES_KEY] = list(
+                splitter_sizes
+            )
+
+    _mutate_imagegen_settings(mutate)
+
+
+def reset_all_gen_dialog_settings() -> None:
+    """Clear persisted field values for all image-gen function dialogs (create, edit, …).
+
+    Active model choices, dialog geometry, LoRA catalog, and other non-field prefs are kept.
+    """
+    from imagegen_plugins.image_gen_active_model import (
+        FUNCTION_INFILL,
+        FUNCTION_INFILL_PAINT,
+        IMAGEGEN_FUNCTIONS,
+    )
+
+    persist_functions = set()
+    for function in IMAGEGEN_FUNCTIONS:
+        if function == FUNCTION_INFILL_PAINT:
+            persist_functions.add(FUNCTION_INFILL)
+        else:
+            persist_functions.add(function)
+
+    def mutate(imagegen: dict) -> None:
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if isinstance(dialogs, dict):
+            for function in persist_functions:
+                dialogs.pop(function, None)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_job_queue_geometry_hex() -> Optional[str]:
+    """Saved job queue dialog geometry (hex QByteArray), if any."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    geom = imagegen.get("job_queue_geometry")
+    return geom if isinstance(geom, str) and geom else None
+
+
+def save_job_queue_geometry_hex(geom_hex: str) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue_geometry"] = geom_hex
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_job_queue_always_on_top() -> bool:
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get("job_queue_always_on_top", False))
+
+
+def save_job_queue_always_on_top(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue_always_on_top"] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+_JOB_QUEUE_SIZE_MODES = frozenset({"all", "one", "strip"})
+
+
+def load_job_queue_size_mode() -> str:
+    """Saved floating job control dialog size mode (all / one / strip)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    mode = imagegen.get("job_queue_size_mode", "all")
+    return mode if mode in _JOB_QUEUE_SIZE_MODES else "all"
+
+
+def save_job_queue_size_mode(mode: str) -> None:
+    mode = mode if mode in _JOB_QUEUE_SIZE_MODES else "all"
+
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue_size_mode"] = mode
+
+    _mutate_imagegen_settings(mutate)
+
+
+def effective_restored_job_queue_size_mode(
+    saved: str,
+    *,
+    has_jobs: bool,
+    has_active: bool,
+) -> str:
+    """Pick a queue size mode valid for the current queue/active state."""
+    if saved not in _JOB_QUEUE_SIZE_MODES:
+        saved = "all"
+    if not has_jobs and not has_active:
+        return "all"
+    if saved == "strip" and not has_active and not has_jobs:
+        return "all"
+    if saved == "one" and not has_jobs:
+        return "strip" if has_active else "all"
+    return saved
+
+
+def load_hold_job_queue() -> bool:
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get("hold_job_queue", False))
+
+
+def save_hold_job_queue(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["hold_job_queue"] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def remove_legacy_settings_job_queue() -> bool:
+    """Drop legacy settings.imagegen.job_queue from disk (pre-step-queue storage)."""
+    removed = False
+
+    def mutate(imagegen: dict) -> None:
+        nonlocal removed
+        if "job_queue" in imagegen:
+            imagegen.pop("job_queue", None)
+            removed = True
+
+    _mutate_imagegen_settings(mutate)
+    return removed
+
+
+def _json_safe_value(value: Any) -> Any:
+    import json
+
+    json.dumps(value)
+    return value
+
+
+def _json_safe_dict(values: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in dict(values).items():
+        try:
+            out[key] = _json_safe_value(value)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def save_lora_catalog_state(
+    *,
+    host_id: Optional[str] = None,
+    model_id: Optional[str] = None,
+    enabled_ids: Optional[list] = None,
+    hidden_ids: Optional[list] = None,
+    deleted_ids: Optional[list] = None,
+    by_host: Optional[Dict[str, Dict[str, list]]] = None,
+    by_model: Optional[Dict[str, Dict[str, list]]] = None,
+    model_support: Optional[dict] = None,
+    cross_family_models: Optional[dict] = None,
+    probe_history: Optional[dict] = None,
+) -> None:
+    from imagegen_plugins.lora_catalog import merged_lora_catalog
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        PROBE_HISTORY_KEY,
+        normalize_probe_history,
+        migrate_lora_catalog,
+    )
+    from imagegen_plugins.hf_model_ids import LORA_PROBE_MODEL_ORDER
+    from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+
+    removed = deleted_ids if deleted_ids is not None else hidden_ids
+    _empty = {"enabled_ids": [], DELETED_IDS_KEY: []}
+
+    def mutate(imagegen: dict) -> None:
+        lc = dict(_imagegen_lora_catalog(imagegen))
+        catalog = merged_lora_catalog({"imagegen": {"lora_catalog": lc}})
+
+        # Apply model_support before by_model so enable filters see new probe results.
+        if model_support is not None:
+            prev_ms = lc.get("model_support")
+            cleaned: dict = {}
+            if isinstance(prev_ms, dict):
+                cleaned = {
+                    str(k): list(v)
+                    for k, v in prev_ms.items()
+                    if str(k) in catalog and isinstance(v, (list, tuple))
+                }
+            allowed = set(LORA_PROBE_MODEL_ORDER)
+            for lid, models in model_support.items():
+                lid_s = str(lid)
+                if lid_s not in catalog:
+                    continue
+                if not isinstance(models, (list, tuple)):
+                    continue
+                cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
+            lc["model_support"] = cleaned
+
+        if cross_family_models is not None:
+            prev_cf = lc.get(CROSS_FAMILY_MODELS_KEY)
+            cleaned_cf: dict = {}
+            if isinstance(prev_cf, dict):
+                cleaned_cf = {
+                    str(k): list(v)
+                    for k, v in prev_cf.items()
+                    if str(k) in catalog and isinstance(v, (list, tuple))
+                }
+            allowed = set(LORA_PROBE_MODEL_ORDER)
+            for lid, models in cross_family_models.items():
+                lid_s = str(lid)
+                if lid_s not in catalog:
+                    continue
+                if not isinstance(models, (list, tuple)):
+                    continue
+                cleaned_cf[lid_s] = [str(m) for m in models if str(m) in allowed]
+            lc[CROSS_FAMILY_MODELS_KEY] = cleaned_cf
+
+        ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
+
+        if by_host is not None:
+            bh = dict(lc.get("by_host") or {})
+            for hid, slice_ in by_host.items():
+                if not isinstance(slice_, dict):
+                    continue
+                prev = dict(bh.get(hid) or _empty)
+                if "enabled_ids" in slice_:
+                    prev["enabled_ids"] = [
+                        str(x)
+                        for x in slice_["enabled_ids"]
+                        if str(x) in catalog and catalog[str(x)].host_id == hid
+                    ]
+                if DELETED_IDS_KEY in slice_ or "hidden_ids" in slice_:
+                    raw_deleted = slice_.get(DELETED_IDS_KEY, slice_.get("hidden_ids"))
+                    prev[DELETED_IDS_KEY] = [
+                        str(x)
+                        for x in (raw_deleted or [])
+                        if str(x) in catalog and catalog[str(x)].host_id == hid
+                    ]
+                bh[hid] = prev
+            lc["by_host"] = bh
+
+        if host_id and (enabled_ids is not None or removed is not None):
+            bh = dict(lc.get("by_host") or {})
+            prev = dict(bh.get(host_id) or _empty)
+            if enabled_ids is not None:
+                prev["enabled_ids"] = [
+                    str(x)
+                    for x in enabled_ids
+                    if str(x) in catalog and catalog[str(x)].host_id == host_id
+                ]
+            if removed is not None:
+                prev[DELETED_IDS_KEY] = [
+                    str(x)
+                    for x in removed
+                    if str(x) in catalog and catalog[str(x)].host_id == host_id
+                ]
+            bh[host_id] = prev
+            lc["by_host"] = bh
+
+        if by_model is not None:
+            bm = dict(lc.get("by_model") or {})
+            for mid, slice_ in by_model.items():
+                if not isinstance(slice_, dict):
+                    continue
+                prev = dict(bm.get(mid) or _empty)
+                if "enabled_ids" in slice_:
+                    prev["enabled_ids"] = [
+                        str(x)
+                        for x in slice_["enabled_ids"]
+                    if str(x) in catalog
+                    and entry_matches_lora_model(
+                        catalog[str(x)], mid, model_support=ms
+                    )
+                    ]
+                if DELETED_IDS_KEY in slice_ or "hidden_ids" in slice_:
+                    raw_deleted = slice_.get(DELETED_IDS_KEY, slice_.get("hidden_ids"))
+                    prev[DELETED_IDS_KEY] = [
+                        str(x)
+                        for x in (raw_deleted or [])
+                    if str(x) in catalog
+                    and entry_matches_lora_model(
+                        catalog[str(x)], mid, model_support=ms
+                    )
+                    ]
+                bm[mid] = prev
+            lc["by_model"] = bm
+
+        if model_id and (enabled_ids is not None or removed is not None):
+            bm = dict(lc.get("by_model") or {})
+            prev = dict(bm.get(model_id) or _empty)
+            if enabled_ids is not None:
+                prev["enabled_ids"] = [
+                    str(x)
+                    for x in enabled_ids
+                    if str(x) in catalog
+                    and entry_matches_lora_model(
+                        catalog[str(x)], model_id, model_support=ms
+                    )
+                ]
+            if removed is not None:
+                prev[DELETED_IDS_KEY] = [
+                    str(x)
+                    for x in removed
+                    if str(x) in catalog
+                    and entry_matches_lora_model(
+                        catalog[str(x)], model_id, model_support=ms
+                    )
+                ]
+            bm[model_id] = prev
+            lc["by_model"] = bm
+
+        if probe_history is not None:
+            prev_ph = normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
+            merged_ph = dict(prev_ph)
+            for key, slice_ in probe_history.items():
+                key_s = str(key).strip()
+                if not key_s or not isinstance(slice_, dict):
+                    continue
+                normalized = normalize_probe_history({key_s: slice_})
+                if key_s in normalized:
+                    merged_ph[key_s] = normalized[key_s]
+            lc[PROBE_HISTORY_KEY] = merged_ph
+
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def clear_lora_probe_history() -> int:
+    """Clear Check LoRAs probe history (skip-unchanged fingerprint cache)."""
+    from imagegen_plugins.lora_catalog_settings import (
+        PROBE_HISTORY_KEY,
+        lora_catalog_from_settings,
+        probe_history_from_lc,
+    )
+
+    settings = get_config().load_settings()
+    count = len(probe_history_from_lc(lora_catalog_from_settings(settings)))
+
+    def mutate(imagegen: dict) -> None:
+        lc = dict(_imagegen_lora_catalog(imagegen))
+        lc[PROBE_HISTORY_KEY] = {}
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+    return count
+
+
+def register_user_lora(
+    entry,
+    *,
+    model_key: str,
+    supported_models: list,
+) -> None:
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        migrate_lora_catalog,
+    )
+    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, _entry_to_dict
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+        raw[entry.lora_id] = _entry_to_dict(entry)
+        lc[USER_ENTRIES_KEY] = raw
+        ms = dict(lc.get("model_support") or {})
+        prev = ms.get(entry.lora_id) or []
+        merged = list(dict.fromkeys([*(prev if isinstance(prev, list) else []), *supported_models]))
+        ms[entry.lora_id] = merged
+        lc["model_support"] = ms
+        from imagegen_plugins.lora_model_registry import cross_family_models_for_entry
+
+        cf = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
+        cf[entry.lora_id] = list(cross_family_models_for_entry(entry, merged))
+        lc[CROSS_FAMILY_MODELS_KEY] = cf
+        bm = dict(lc.get("by_model") or {})
+        slice_ = dict(bm.get(model_key) or {"enabled_ids": [], DELETED_IDS_KEY: []})
+        enabled = list(slice_.get("enabled_ids") or [])
+        if entry.lora_id not in enabled:
+            enabled.append(entry.lora_id)
+        deleted = [d for d in (slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or []) if d != entry.lora_id]
+        bm[model_key] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+        lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def update_lora_entry_metadata(
+    lora_id: str,
+    *,
+    display_name: str,
+    trigger_word: Optional[str] = None,
+    scale: Optional[float] = None,
+    best_guess: Optional[float] = None,
+    comment: Optional[str] = None,
+    reference_prompt: Any = _UNSET,
+    repo_id: Optional[str] = None,
+    filename: Optional[str] = None,
+    source_path: Optional[str] = None,
+) -> None:
+    """Persist user-editable LoRA metadata (name, trigger, scale, best guess, comment, reference prompt).
+
+    ``scale`` / ``best_guess`` are left unchanged when omitted (None).
+    ``reference_prompt`` is left unchanged when omitted (``_UNSET``); pass ``""`` to clear.
+    """
+    from imagegen_plugins.lora_catalog import LORA_CATALOG
+    from imagegen_plugins.lora_catalog_settings import (
+        DELETED_IDS_KEY,
+        ENTRY_OVERRIDES_KEY,
+        migrate_lora_catalog,
+    )
+    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, is_user_lora_id
+
+    lid = str(lora_id or "").strip()
+    if not lid:
+        return
+    name = (display_name or "").strip()
+    if not name:
+        raise ValueError("Display name is required.")
+    trigger = (trigger_word or "").strip() or None
+    note = (comment or "").strip() or None
+    ref_prompt: Optional[str] = None
+    update_reference_prompt = reference_prompt is not _UNSET
+    if update_reference_prompt:
+        ref_prompt = (reference_prompt or "").strip() or None
+    repo = (repo_id or "").strip() if repo_id is not None else None
+    fname = (filename or "").strip() if filename is not None else None
+    src = (source_path or "").strip() if source_path is not None else None
+    if src == "":
+        src = None
+    scale_val: Optional[float] = None
+    if scale is not None:
+        try:
+            scale_val = float(scale)
+        except (TypeError, ValueError):
+            scale_val = 1.0
+    best_guess_val: Optional[float] = None
+    if best_guess is not None:
+        try:
+            best_guess_val = float(best_guess)
+        except (TypeError, ValueError):
+            best_guess_val = 1.0
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        if is_user_lora_id(lid):
+            raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+            entry_dict = raw.get(lid)
+            if not isinstance(entry_dict, dict):
+                raise ValueError(f"User LoRA {lid!r} was not found.")
+            entry_dict = dict(entry_dict)
+            entry_dict["display_name"] = name
+            entry_dict["trigger_word"] = trigger
+            if scale_val is not None:
+                entry_dict["scale"] = scale_val
+            if best_guess_val is not None:
+                entry_dict["best_guess"] = best_guess_val
+            entry_dict["comment"] = note
+            if update_reference_prompt:
+                entry_dict["reference_prompt"] = ref_prompt
+            if repo is not None:
+                entry_dict["repo_id"] = repo
+            if fname is not None:
+                entry_dict["filename"] = fname
+            if source_path is not None:
+                entry_dict["source_path"] = src or ""
+            raw[lid] = entry_dict
+            lc[USER_ENTRIES_KEY] = raw
+        else:
+            if lid not in LORA_CATALOG:
+                raise ValueError(f"LoRA {lid!r} was not found.")
+            overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
+            prev = dict(overrides.get(lid) or {})
+            prev["display_name"] = name
+            prev["trigger_word"] = trigger
+            if scale_val is not None:
+                prev["scale"] = scale_val
+            if best_guess_val is not None:
+                prev["best_guess"] = best_guess_val
+            prev["comment"] = note
+            if update_reference_prompt:
+                prev["reference_prompt"] = ref_prompt
+            overrides[lid] = prev
+            lc[ENTRY_OVERRIDES_KEY] = overrides
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+
+def remove_user_lora(lora_id: str) -> None:
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_catalog_settings import DELETED_IDS_KEY, migrate_lora_catalog
+    from imagegen_plugins.lora_user_entries import (
+        USER_ENTRIES_KEY,
+        is_user_lora_id,
+        remove_user_lora_files,
+    )
+
+    if not is_user_lora_id(lora_id):
+        return
+    entry = get_lora_entry(lora_id)
+    if entry is not None:
+        remove_user_lora_files(entry)
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+        raw.pop(lora_id, None)
+        lc[USER_ENTRIES_KEY] = raw
+        ms = dict(lc.get("model_support") or {})
+        ms.pop(lora_id, None)
+        lc["model_support"] = ms
+        bm = dict(lc.get("by_model") or {})
+        for mk, slice_ in list(bm.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lora_id]
+            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+            bm[mk] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+        lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def remove_lora_enabled_everywhere(lora_id: str) -> None:
+    """Remove a LoRA id from enabled lists for every base model and host in settings."""
+    from imagegen_plugins.lora_catalog_settings import DELETED_IDS_KEY, migrate_lora_catalog
+
+    lid = str(lora_id or "").strip()
+    if not lid:
+        return
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        bm = dict(lc.get("by_model") or {})
+        for mk, slice_ in list(bm.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
+            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+            bm[mk] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+        lc["by_model"] = bm
+        bh = dict(lc.get("by_host") or {})
+        for hid, slice_ in list(bh.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
+            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+            bh[hid] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+        lc["by_host"] = bh
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def update_user_lora_local_path(lora_id: str, local_path: str) -> None:
+    from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
+    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, is_user_lora_id
+
+    lid = str(lora_id or "").strip()
+    path = str(local_path or "").strip()
+    if not lid or not path or not is_user_lora_id(lid):
+        return
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+        entry_dict = raw.get(lid)
+        if not isinstance(entry_dict, dict):
+            return
+        entry_dict = dict(entry_dict)
+        entry_dict["local_path"] = path
+        raw[lid] = entry_dict
+        lc[USER_ENTRIES_KEY] = raw
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def install_lora_entry(lora_id: str) -> str:
+    """Download or re-copy LoRA weights; return absolute path."""
+    from imagegen_plugins.lora_catalog import get_lora_entry, has_recovery_source
+    from imagegen_plugins.lora_user_entries import is_user_lora_id, reinstall_user_lora
+    from imagegen_plugins.mflux_lora_presets import resolve_lora_path
+
+    entry = get_lora_entry(lora_id)
+    if entry is None:
+        raise ValueError(f"LoRA {lora_id!r} was not found.")
+    if is_user_lora_id(lora_id):
+        if not has_recovery_source(entry):
+            raise ValueError("No recovery source is configured for this LoRA.")
+        path = reinstall_user_lora(entry)
+        update_user_lora_local_path(lora_id, str(path))
+        return str(path)
+    return resolve_lora_path(lora_id)
+
+
+def uninstall_lora_weights(lora_id: str) -> None:
+    """Remove weights from disk and disable everywhere (Uninstalled state)."""
+    from imagegen_plugins.lora_catalog import delete_installed_lora_files, get_lora_entry
+
+    entry = get_lora_entry(lora_id)
+    if entry is None:
+        return
+    delete_installed_lora_files(entry)
+    remove_lora_enabled_everywhere(lora_id)
+
+
+def delete_lora_from_library(lora_id: str, *, model_key: str = "") -> None:
+    """Permanently remove a LoRA from the user's library (Deleted state)."""
+    from imagegen_plugins.lora_catalog import (
+        LORA_CATALOG,
+        get_lora_entry,
+        is_lora_installed,
+        model_keys_for_lora_entry,
+        remove_lora_weights_from_disk,
+    )
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        ENTRY_OVERRIDES_KEY,
+        PROBE_HISTORY_KEY,
+        migrate_lora_catalog,
+        normalize_probe_history,
+    )
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    lid = str(lora_id or "").strip()
+    if not lid:
+        return
+    if is_user_lora_id(lid):
+        remove_user_lora(lid)
+        return
+
+    entry = get_lora_entry(lid)
+    if entry is None or lid not in LORA_CATALOG:
+        return
+    if is_lora_installed(lid):
+        remove_lora_weights_from_disk(entry)
+    remove_lora_enabled_everywhere(lid)
+
+    host_models = list(model_keys_for_lora_entry(entry)) if entry is not None else []
+    mk = (model_key or "").strip()
+    targets = [mk] if mk else host_models
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        bm = dict(lc.get("by_model") or {})
+        mark_models = list(targets) if targets else list(bm.keys())
+        for model in mark_models:
+            if not model:
+                continue
+            slice_ = dict(bm.get(model) or {"enabled_ids": [], DELETED_IDS_KEY: []})
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
+            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+            if lid not in deleted:
+                deleted.append(lid)
+            bm[model] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+        lc["by_model"] = bm
+        ms = dict(lc.get("model_support") or {})
+        ms.pop(lid, None)
+        lc["model_support"] = ms
+        cf = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
+        cf.pop(lid, None)
+        lc[CROSS_FAMILY_MODELS_KEY] = cf
+        overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
+        overrides.pop(lid, None)
+        lc[ENTRY_OVERRIDES_KEY] = overrides
+        prev_ph = normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
+        lc[PROBE_HISTORY_KEY] = {
+            key: slice_
+            for key, slice_ in prev_ph.items()
+            if key != lid and not str(key).startswith(f"{lid}:")
+        }
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def save_lora_user_preset() -> None:
+    """Snapshot enabled LoRAs and user-imported ids per base model."""
+    from imagegen_plugins.lora_catalog_settings import (
+        LORA_SETTINGS_MODEL_ORDER,
+        USER_PRESET_KEY,
+        lora_catalog_from_settings,
+        migrate_lora_catalog,
+        model_state,
+    )
+    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, is_user_lora_id
+
+    lc = lora_catalog_from_settings()
+    user_ids = [
+        str(lid)
+        for lid in (lc.get(USER_ENTRIES_KEY) or {})
+        if is_user_lora_id(str(lid))
+    ]
+    by_model: Dict[str, Dict[str, list]] = {}
+    for model in LORA_SETTINGS_MODEL_ORDER:
+        st = model_state(None, model)
+        by_model[model] = {
+            "enabled_ids": list(st.get("enabled_ids") or []),
+            "user_lora_ids": list(user_ids),
+        }
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        lc[USER_PRESET_KEY] = {"by_model": by_model}
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def apply_lora_user_preset(*, install_missing: bool = False) -> Tuple[int, int]:
+    """Restore enabled ids from lora_user_preset. Returns (enabled_count, install_count)."""
+    from imagegen_plugins.lora_catalog import is_lora_installed, merged_lora_catalog
+    from imagegen_plugins.lora_catalog_settings import (
+        DELETED_IDS_KEY,
+        LORA_SETTINGS_MODEL_ORDER,
+        USER_PRESET_KEY,
+        lora_catalog_from_settings,
+        migrate_lora_catalog,
+    )
+    from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+    from imagegen_plugins.mflux_lora_presets import resolve_lora_path
+
+    lc = lora_catalog_from_settings()
+    preset = lc.get(USER_PRESET_KEY)
+    if not isinstance(preset, dict):
+        raise ValueError("No saved LoRA setup found. Use Save my setup first.")
+    by_model = preset.get("by_model")
+    if not isinstance(by_model, dict):
+        raise ValueError("Saved LoRA setup is invalid.")
+
+    enabled_total = 0
+    install_total = 0
+    catalog = merged_lora_catalog()
+
+    def mutate(imagegen: dict) -> None:
+        nonlocal enabled_total, install_total
+        lc = _imagegen_lora_catalog(imagegen)
+        bm = dict(lc.get("by_model") or {})
+        for mk in LORA_SETTINGS_MODEL_ORDER:
+            slice_ = by_model.get(mk)
+            if not isinstance(slice_, dict):
+                continue
+            want = [str(x) for x in (slice_.get("enabled_ids") or []) if str(x) in catalog]
+            prev = dict(bm.get(mk) or {"enabled_ids": [], DELETED_IDS_KEY: []})
+            prev["enabled_ids"] = [
+                x for x in want if entry_matches_lora_model(catalog[x], mk)
+            ]
+            deleted = list(prev.get(DELETED_IDS_KEY) or prev.get("hidden_ids") or [])
+            prev[DELETED_IDS_KEY] = [d for d in deleted if d not in want]
+            bm[mk] = prev
+            enabled_total += len(prev["enabled_ids"])
+            if install_missing:
+                for lid in prev["enabled_ids"]:
+                    if not is_lora_installed(lid):
+                        try:
+                            resolve_lora_path(lid)
+                            install_total += 1
+                        except Exception:
+                            pass
+        lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+    return enabled_total, install_total
+
+
+def restore_app_lora_recommendations(
+    *,
+    install_missing: bool = False,
+    overwrite_enabled: bool = False,
+) -> Tuple[int, int]:
+    """Restore shipped default LoRAs: clear deleted, optionally enable and install."""
+    from imagegen_plugins.lora_catalog import is_lora_installed, merged_lora_catalog
+    from imagegen_plugins.lora_catalog_settings import (
+        DEFAULT_ENABLED_LORA_IDS_BY_MODEL,
+        DELETED_IDS_KEY,
+        LORA_SETTINGS_MODEL_ORDER,
+        migrate_lora_catalog,
+    )
+    from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+    from imagegen_plugins.mflux_lora_presets import resolve_lora_path
+
+    enabled_total = 0
+    install_total = 0
+    catalog = merged_lora_catalog()
+
+    def mutate(imagegen: dict) -> None:
+        nonlocal enabled_total, install_total
+        lc = _imagegen_lora_catalog(imagegen)
+        bm = dict(lc.get("by_model") or {})
+        for mk in LORA_SETTINGS_MODEL_ORDER:
+            defaults = list(DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(mk, ()))
+            prev = dict(bm.get(mk) or {"enabled_ids": [], DELETED_IDS_KEY: []})
+            deleted = list(prev.get(DELETED_IDS_KEY) or prev.get("hidden_ids") or [])
+            deleted = [d for d in deleted if d not in defaults]
+            prev[DELETED_IDS_KEY] = deleted
+            if overwrite_enabled:
+                prev["enabled_ids"] = [
+                    x
+                    for x in defaults
+                    if x in catalog and entry_matches_lora_model(catalog[x], mk)
+                ]
+            else:
+                enabled = list(prev.get("enabled_ids") or [])
+                for lid in defaults:
+                    if (
+                        lid in catalog
+                        and entry_matches_lora_model(catalog[lid], mk)
+                        and lid not in enabled
+                    ):
+                        enabled.append(lid)
+                prev["enabled_ids"] = enabled
+            bm[mk] = prev
+            enabled_total += len(prev["enabled_ids"])
+            if install_missing:
+                for lid in defaults:
+                    if lid not in catalog:
+                        continue
+                    if not is_lora_installed(lid):
+                        try:
+                            resolve_lora_path(lid)
+                            install_total += 1
+                        except Exception:
+                            pass
+        lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+    return enabled_total, install_total
+
+
+def enrich_lora_origin_metadata(lora_id: str):
+    """Best-effort online lookup; updates user LoRA metadata when a match is found."""
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_origin_lookup import (
+        entry_needs_origin_lookup,
+        lookup_lora_origin,
+        origin_match_to_metadata,
+    )
+
+    entry = get_lora_entry(lora_id)
+    if entry is None or not entry_needs_origin_lookup(entry):
+        return None
+    match = lookup_lora_origin(entry)
+    if match is None:
+        return None
+    meta = origin_match_to_metadata(match)
+    comment = (entry.comment or "").strip()
+    link = (match.page_url or match.download_url or "").strip()
+    if link and link not in comment:
+        line = f"Source: {link}"
+        comment = f"{comment}\n{line}".strip() if comment else line
+    update_lora_entry_metadata(
+        lora_id,
+        display_name=entry.display_name,
+        trigger_word=match.trigger_word or entry.trigger_word,
+        scale=float(entry.scale),
+        comment=comment or None,
+        reference_prompt=entry.reference_prompt,
+        repo_id=meta.get("repo_id", entry.repo_id or ""),
+        filename=meta.get("filename", entry.filename or ""),
+        source_path=meta.get("source_path", entry.source_path or ""),
+    )
+    return match

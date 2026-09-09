@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""First model plugin: FLUX.1 Schnell MFLUX (default quant 3)."""
+
+from __future__ import annotations
+
+from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
+from imagegen_plugins.image_gen_field_blocks import flux1_t2i_field_layout
+from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
+
+FLUX_SCHNELL_MFLUX_PLUGIN = ImageGenModelPlugin(
+    plugin_id="flux_schnell_mflux",
+    pipeline_id="flux_schnell_mflux_play",
+    display_name="FLUX.1 Schnell MFLUX",
+    hf_model_id=FLUX1_SCHNELL,
+    lora_host_id=HOST_FLUX1_T2I,
+    model_comment="High Quality, Low RAM Mode suggested",
+    max_generation_dimension=1440,
+    field_layout_builder=flux1_t2i_field_layout,
+    model_defaults={
+        "mflux_quantize": 4,
+        "guidance_scale": 3.5,
+        "steps": 4,
+        "width": 1024,
+        "height": 1024,
+        "seed": 0,
+        "random_seed": True,
+        "prompt": "",
+    },
+)
