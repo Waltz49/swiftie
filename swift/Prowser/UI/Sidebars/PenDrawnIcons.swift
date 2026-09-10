@@ -68,6 +68,45 @@ enum PenDrawnIcons {
         return AppAssets.nsImage(name: name, fileExtension: "svg")
     }
 
+    /// Rename-status toggle — port of `FileTreeHandler._create_checkmark_icon`.
+    static func renameStatusCheckmarkIcon(active: Bool, hover: Bool, size: CGFloat = 20) -> NSImage {
+        drawImage(size: size) { _ in
+            let x1: CGFloat = 4, y1: CGFloat = 12
+            let x2: CGFloat = 8, y2: CGFloat = 15
+            let x3: CGFloat = 15, y3: CGFloat = 5
+
+            let border = NSBezierPath()
+            border.lineWidth = 3
+            border.lineCapStyle = .round
+            border.lineJoinStyle = .round
+            NSColor.white.setStroke()
+            border.move(to: NSPoint(x: x1, y: y1))
+            border.line(to: NSPoint(x: x2, y: y2))
+            border.line(to: NSPoint(x: x3, y: y3))
+            border.stroke()
+
+            let check = NSBezierPath()
+            check.lineWidth = 2
+            check.lineCapStyle = .round
+            check.lineJoinStyle = .round
+            let color: NSColor
+            if active {
+                color = hover
+                    ? NSColor(calibratedRed: 0.4, green: 1, blue: 0.4, alpha: 1)
+                    : NSColor(calibratedRed: 0, green: 1, blue: 0, alpha: 1)
+            } else {
+                color = hover
+                    ? NSColor(calibratedWhite: 0.47, alpha: 1)
+                    : .black
+            }
+            color.setStroke()
+            check.move(to: NSPoint(x: x1, y: y1))
+            check.line(to: NSPoint(x: x2, y: y2))
+            check.line(to: NSPoint(x: x3, y: y3))
+            check.stroke()
+        }
+    }
+
     static func dateSourceIcon(exif: Bool, color: NSColor, size: CGFloat = 12) -> NSImage {
         drawImage(size: size) { rect in
             if exif {

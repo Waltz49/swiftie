@@ -8,6 +8,7 @@ struct ImageGenIntSliderRow: View {
     let maxValue: Int
     let step: Int
     let presetValues: [Int]
+    var resetDefault: Any? = nil
     @Binding var values: [String: Any]
 
     @State private var textValue = ""
@@ -48,6 +49,17 @@ struct ImageGenIntSliderRow: View {
                     .menuStyle(.borderlessButton)
                     .help("Preset values")
                 }
+                if resetDefault != nil {
+                    ImageGenFieldResetButton(
+                        isActive: !ImageGenFieldResetLogic.matchesDefault(
+                            current: values[key],
+                            resetDefault: resetDefault,
+                            kind: "int_slider"
+                        ),
+                        tooltip: "Reset to default",
+                        action: resetToDefault
+                    )
+                }
             }
         }
         .onAppear { syncTextFromValue() }
@@ -60,6 +72,11 @@ struct ImageGenIntSliderRow: View {
 
     private var currentValue: Int {
         values[key] as? Int ?? minValue
+    }
+
+    private func resetToDefault() {
+        guard let resetDefault else { return }
+        setValue(ImageGenFieldResetLogic.intValue(resetDefault))
     }
 
     private var sliderBinding: Binding<Double> {
@@ -104,6 +121,7 @@ struct ImageGenFloatSliderRow: View {
     let maxValue: Double
     let step: Double
     let presetValues: [Double]
+    var resetDefault: Any? = nil
     @Binding var values: [String: Any]
 
     @State private var textValue = ""
@@ -148,6 +166,18 @@ struct ImageGenFloatSliderRow: View {
                     .menuStyle(.borderlessButton)
                     .help("Preset values")
                 }
+                if resetDefault != nil {
+                    ImageGenFieldResetButton(
+                        isActive: !ImageGenFieldResetLogic.matchesDefault(
+                            current: values[key],
+                            resetDefault: resetDefault,
+                            kind: "float_slider",
+                            step: step
+                        ),
+                        tooltip: "Reset to default",
+                        action: resetToDefault
+                    )
+                }
             }
         }
         .onAppear { syncTextFromValue() }
@@ -156,6 +186,11 @@ struct ImageGenFloatSliderRow: View {
                 syncTextFromValue()
             }
         }
+    }
+
+    private func resetToDefault() {
+        guard let resetDefault else { return }
+        setValue(ImageGenFieldResetLogic.doubleValue(resetDefault))
     }
 
     private var currentValue: Double {

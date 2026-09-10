@@ -19,53 +19,64 @@ struct ImageGenCustomSizeSection: View {
             isExpanded: $isExpanded,
             tooltip: "Override output dimensions when enabled."
         ) {
-            VStack(alignment: .leading, spacing: 8) {
-                if values["use_custom_size"] as? Bool ?? false {
-                    Toggle("Lock aspect ratio", isOn: $aspectLock)
-                        .onChange(of: aspectLock) { _, locked in
-                            values["aspect_lock"] = locked
-                            if locked {
-                                captureAspectRatio()
-                            }
+            if values["use_custom_size"] as? Bool ?? false {
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        controlsRow
+                        ImageGenIntSliderRow(
+                            label: widthSpec["label"] as? String ?? "Width",
+                            key: "width",
+                            minValue: widthSpec["min_value"] as? Int ?? 256,
+                            maxValue: widthSpec["max_value"] as? Int ?? 2048,
+                            step: widthSpec["step"] as? Int ?? 8,
+                            presetValues: ImageGenSliderPresets.intPresets(
+                                key: "width",
+                                min: widthSpec["min_value"] as? Int ?? 256,
+                                max: widthSpec["max_value"] as? Int ?? 2048,
+                                step: widthSpec["step"] as? Int ?? 8,
+                                choices: widthSpec["choices"] as? [Any]
+                            ),
+                            resetDefault: widthSpec["reset_default"],
+                            values: $values
+                        )
+                        .onChange(of: values["width"] as? Int) { _, _ in
+                            applyAspectLock(changed: "width")
                             onValuesChanged?()
                         }
-                    ImageGenIntSliderRow(
-                        label: widthSpec["label"] as? String ?? "Width",
-                        key: "width",
-                        minValue: widthSpec["min_value"] as? Int ?? 256,
-                        maxValue: widthSpec["max_value"] as? Int ?? 2048,
-                        step: widthSpec["step"] as? Int ?? 8,
-                        presetValues: ImageGenSliderPresets.intPresets(
-                            key: "width",
-                            min: widthSpec["min_value"] as? Int ?? 256,
-                            max: widthSpec["max_value"] as? Int ?? 2048,
-                            step: widthSpec["step"] as? Int ?? 8,
-                            choices: widthSpec["choices"] as? [Any]
-                        ),
-                        values: $values
-                    )
-                    .onChange(of: values["width"] as? Int) { _, _ in
-                        applyAspectLock(changed: "width")
-                        onValuesChanged?()
-                    }
-                    ImageGenIntSliderRow(
-                        label: heightSpec["label"] as? String ?? "Height",
-                        key: "height",
-                        minValue: heightSpec["min_value"] as? Int ?? 256,
-                        maxValue: heightSpec["max_value"] as? Int ?? 2048,
-                        step: heightSpec["step"] as? Int ?? 8,
-                        presetValues: ImageGenSliderPresets.intPresets(
+                        ImageGenIntSliderRow(
+                            label: heightSpec["label"] as? String ?? "Height",
                             key: "height",
-                            min: heightSpec["min_value"] as? Int ?? 256,
-                            max: heightSpec["max_value"] as? Int ?? 2048,
+                            minValue: heightSpec["min_value"] as? Int ?? 256,
+                            maxValue: heightSpec["max_value"] as? Int ?? 2048,
                             step: heightSpec["step"] as? Int ?? 8,
-                            choices: heightSpec["choices"] as? [Any]
-                        ),
-                        values: $values
-                    )
-                    .onChange(of: values["height"] as? Int) { _, _ in
-                        applyAspectLock(changed: "height")
-                        onValuesChanged?()
+                            presetValues: ImageGenSliderPresets.intPresets(
+                                key: "height",
+                                min: heightSpec["min_value"] as? Int ?? 256,
+                                max: heightSpec["max_value"] as? Int ?? 2048,
+                                step: heightSpec["step"] as? Int ?? 8,
+                                choices: heightSpec["choices"] as? [Any]
+                            ),
+                            resetDefault: heightSpec["reset_default"],
+                            values: $values
+                        )
+                        .onChange(of: values["height"] as? Int) { _, _ in
+                            applyAspectLock(changed: "height")
+                            onValuesChanged?()
+                        }
+                    }
+                    VStack(spacing: 4) {
+                        ImageGenDimHelperIconButton(
+                            normalName: "sizeX2",
+                            hoverName: "sizeX2_hover",
+                            tooltip: ImageGenDimHelperTooltips.doubleArea,
+                            action: { applyAreaScale(multiplier: 2.0) }
+                        )
+                        ImageGenDimHelperIconButton(
+                            normalName: "sizeD2",
+                            hoverName: "sizeD2_hover",
+                            tooltip: ImageGenDimHelperTooltips.halfArea,
+                            action: { applyAreaScale(multiplier: 0.5) }
+                        )
                     }
                 }
             }
@@ -78,6 +89,47 @@ struct ImageGenCustomSizeSection: View {
         .onChange(of: isExpanded) { _, expanded in
             values["use_custom_size"] = expanded
             onValuesChanged?()
+        }
+    }
+
+    private var controlsRow: some View {
+        HStack(spacing: 8) {
+            Toggle("Lock aspect ratio", isOn: $aspectLock)
+                .help(ImageGenDimHelperTooltips.aspect)
+                .onChange(of: aspectLock) { _, locked in
+                    values["aspect_lock"] = locked
+                    if locked {
+                        captureAspectRatio()
+                    }
+                    onValuesChanged?()
+                }
+            Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                ImageGenDimHelperIconButton(
+                    normalName: "dim_square_icon",
+                    hoverName: "dim_square_icon_hover",
+                    tooltip: ImageGenDimHelperTooltips.square,
+                    action: applySquareDims
+                )
+                ImageGenDimHelperIconButton(
+                    normalName: "dim_reverse_icon",
+                    hoverName: "dim_reverse_icon_hover",
+                    tooltip: ImageGenDimHelperTooltips.reverse,
+                    action: applyReverseDims
+                )
+                ImageGenDimHelperIconButton(
+                    normalName: "dim_screen_icon",
+                    hoverName: "dim_screen_icon_hover",
+                    tooltip: ImageGenDimHelperTooltips.screenSize,
+                    action: applyScreenDims
+                )
+                ImageGenDimHelperIconButton(
+                    normalName: "import_icon",
+                    hoverName: "import_icon_hover",
+                    tooltip: ImageGenDimHelperTooltips.importSize,
+                    action: applyImportDims
+                )
+            }
         }
     }
 
@@ -114,6 +166,133 @@ struct ImageGenCustomSizeSection: View {
             values["width"] = width
         }
     }
+
+    private func widthBounds() -> (min: Int, max: Int, step: Int) {
+        (
+            widthSpec["min_value"] as? Int ?? 256,
+            widthSpec["max_value"] as? Int ?? 2048,
+            widthSpec["step"] as? Int ?? 8
+        )
+    }
+
+    private func heightBounds() -> (min: Int, max: Int, step: Int) {
+        (
+            heightSpec["min_value"] as? Int ?? 256,
+            heightSpec["max_value"] as? Int ?? 2048,
+            heightSpec["step"] as? Int ?? 8
+        )
+    }
+
+    private func setDims(width: Int, height: Int) {
+        let wb = widthBounds()
+        let hb = heightBounds()
+        let w = ImageGenDimScaleLogic.snap(width, step: wb.step, min: wb.min, max: wb.max)
+        let h = ImageGenDimScaleLogic.snap(height, step: hb.step, min: hb.min, max: hb.max)
+        values["width"] = w
+        values["height"] = h
+        if aspectLock {
+            captureAspectRatio()
+        }
+        onValuesChanged?()
+    }
+
+    private func applyScreenDims() {
+        let screen = NSScreen.main?.frame.size ?? NSSize(width: 1024, height: 1024)
+        setDims(width: Int(screen.width.rounded()), height: Int(screen.height.rounded()))
+    }
+
+    private func applySquareDims() {
+        let wb = widthBounds()
+        let hb = heightBounds()
+        let lo = max(wb.min, hb.min)
+        let hi = min(wb.max, hb.max)
+        let width = values["width"] as? Int ?? 1024
+        var side = ImageGenDimScaleLogic.snap(width, step: wb.step, min: lo, max: hi)
+        side = max(lo, min(hi, side))
+        if aspectLock {
+            aspectRatio = 1.0
+        }
+        setDims(width: side, height: side)
+    }
+
+    private func applyReverseDims() {
+        let width = values["width"] as? Int ?? 1024
+        let height = values["height"] as? Int ?? 1024
+        if aspectLock, width > 0 {
+            aspectRatio = Double(height) / Double(width)
+        }
+        setDims(width: height, height: width)
+    }
+
+    private func applyImportDims() {
+        guard let size = sourcePixelSize() else { return }
+        setDims(width: size.width, height: size.height)
+    }
+
+    private func applyAreaScale(multiplier: Double) {
+        let width = values["width"] as? Int ?? 1024
+        let height = values["height"] as? Int ?? 1024
+        let ratio = aspectLock ? aspectRatio : (height > 0 ? Double(width) / Double(height) : 1.0)
+        let scaled = ImageGenDimScaleLogic.scaleForAreaMultiplier(
+            width: width,
+            height: height,
+            multiplier: multiplier,
+            ratio: ratio,
+            widthBounds: widthBounds(),
+            heightBounds: heightBounds()
+        )
+        if scaled.width == width, scaled.height == height { return }
+        setDims(width: scaled.width, height: scaled.height)
+    }
+}
+
+enum ImageGenDimHelperTooltips {
+    static let importSize =
+        "Import size from the\n"
+        + "dimensions of the selected image."
+    static let screenSize =
+        "Set size to fit your screen.\n"
+        + "Limited by aspect ratio lock and\n"
+        + "max size from Settings Dialog."
+    static let square = "Square:\nMake width and height equal."
+    static let reverse = "Reverse:\nSwap width and height."
+    static let aspect =
+        "Keep width and height proportional\nwhen either dimension is changed."
+    static let doubleArea =
+        "Double the pixel area (width × height),\n"
+        + "keeping aspect ratio.\n"
+        + "Limited by min/max size and Settings."
+    static let halfArea =
+        "Halve the pixel area (width × height),\n"
+        + "keeping aspect ratio.\n"
+        + "Limited by min/max size and Settings."
+}
+
+enum ImageGenDimScaleLogic {
+    static func snap(_ value: Int, step: Int, min minValue: Int, max maxValue: Int) -> Int {
+        let stepValue = max(1, step)
+        let snapped = ((value + stepValue / 2) / stepValue) * stepValue
+        return max(minValue, min(maxValue, snapped))
+    }
+
+    static func scaleForAreaMultiplier(
+        width: Int,
+        height: Int,
+        multiplier: Double,
+        ratio: Double,
+        widthBounds: (min: Int, max: Int, step: Int),
+        heightBounds: (min: Int, max: Int, step: Int)
+    ) -> (width: Int, height: Int) {
+        guard width > 0, height > 0, ratio > 0, multiplier > 0 else {
+            return (width, height)
+        }
+        let area = Double(width * height) * multiplier
+        var newWidth = Int(sqrt(area * ratio).rounded())
+        var newHeight = Int(sqrt(area / ratio).rounded())
+        newWidth = snap(newWidth, step: widthBounds.step, min: widthBounds.min, max: widthBounds.max)
+        newHeight = snap(newHeight, step: heightBounds.step, min: heightBounds.min, max: heightBounds.max)
+        return (newWidth, newHeight)
+    }
 }
 
 enum ImageGenFieldLayoutFilter {
@@ -148,6 +327,9 @@ enum ImageGenFieldLayoutFilter {
         if let spec = node["spec"] as? [String: Any] {
             let key = spec["key"] as? String ?? ""
             if key == "width" || key == "height" || key == "prompt" || key == "negative_prompt" {
+                return nil
+            }
+            if key == "mflux_lora" || key == "mflux_lora_stack" {
                 return nil
             }
         }

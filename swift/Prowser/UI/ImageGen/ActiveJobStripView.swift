@@ -8,7 +8,7 @@ struct ActiveJobStripView: View {
     var includeQueueJobsRow: Bool = false
 
     var body: some View {
-        let _ = appState.imageGen.queueRevision
+        let _ = appState.imageGen.activeStripView.fingerprint()
         ActiveJobStripNSViewRepresentable(includeQueueJobsRow: includeQueueJobsRow)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -32,6 +32,9 @@ final class ActiveJobStripNSView: NSView {
     private var lastStructureKey = ""
     private var lastColorsID = ""
     private var barHandles: [BarHandle] = []
+    private(set) var cachedContentHeight: CGFloat = 0
+    private var contentHeightReportScheduled = false
+    var onContentHeightChanged: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -65,11 +68,41 @@ final class ActiveJobStripNSView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: max(cachedContentHeight, 28))
+    }
+
+    func refreshCachedContentHeight(forWidth width: CGFloat) {
+        guard width > 0 else { return }
+        if abs(bounds.width - width) > 0.5 {
+            frame.size.width = width
+        }
         layoutSubtreeIfNeeded()
+        let measured = max(measuredContentHeight(), 28)
+        guard abs(measured - cachedContentHeight) > 1 else { return }
+        cachedContentHeight = measured
+        invalidateIntrinsicContentSize()
+        scheduleContentHeightReport()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshCachedContentHeight(forWidth: bounds.width)
+    }
+
+    private func measuredContentHeight() -> CGFloat {
         let rowsHeight = rowsStack.fittingSize.height
         let cooldownHeight = cooldownRow.arrangedSubviews.isEmpty ? 0 : cooldownRow.fittingSize.height + 2
-        let height = 8 + rowsHeight + cooldownHeight
-        return NSSize(width: NSView.noIntrinsicMetric, height: max(height, 28))
+        return 8 + rowsHeight + cooldownHeight
+    }
+
+    private func scheduleContentHeightReport() {
+        guard !contentHeightReportScheduled else { return }
+        contentHeightReportScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            contentHeightReportScheduled = false
+            onContentHeightChanged?()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -96,6 +129,17 @@ final class ActiveJobStripNSView: NSView {
     }
 
     private func updateLiveFields(_ stripView: ActiveJobStripStatusView) {
+        if !stripView.cooldownText.isEmpty {
+            let labels = cooldownRow.arrangedSubviews.compactMap { $0 as? NSTextField }
+            if labels.count >= 2 {
+                labels[0].stringValue = stripView.cooldownText
+                labels[1].stringValue = stripView.cooldownCountText
+            } else {
+                rebuild(stripView: stripView, colors: colors)
+                return
+            }
+        }
+
         let barRows = stripView.rows.compactMap { row -> ActiveJobStripRowKind? in
             if case .bar = row { return row }
             return nil
@@ -116,7 +160,6 @@ final class ActiveJobStripNSView: NSView {
                 showPendingStart: showPendingStart
             )
         }
-        invalidateIntrinsicContentSize()
     }
 
     private func rebuild(stripView: ActiveJobStripStatusView, colors: ThemeColors) {
@@ -154,17 +197,19 @@ final class ActiveJobStripNSView: NSView {
             cooldownRow.addArrangedSubview(makeLabel(stripView.cooldownText, muted: true))
             cooldownRow.addArrangedSubview(makeLabel(stripView.cooldownCountText, muted: false))
             if stripView.showSkipIcon {
-                cooldownRow.addArrangedSubview(makeIconButton(symbol: "forward.end", action: #selector(skipAction)))
+                cooldownRow.addArrangedSubview(makeSkipIconButton())
             }
             if stripView.showCancelIcon {
-                cooldownRow.addArrangedSubview(makeIconButton(symbol: "trash", action: #selector(cancelAction)))
+                cooldownRow.addArrangedSubview(makeCancelIconButton())
             }
         }
         cooldownRow.isHidden = cooldownRow.arrangedSubviews.isEmpty
         for case let row as NSStackView in rowsStack.arrangedSubviews {
             row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
         }
+        cachedContentHeight = 0
         invalidateIntrinsicContentSize()
+        scheduleContentHeightReport()
     }
 
     private func makeLabel(_ text: String, muted: Bool) -> NSTextField {
@@ -213,18 +258,33 @@ final class ActiveJobStripNSView: NSView {
         row.addArrangedSubview(post)
 
         if showCancel {
-            row.addArrangedSubview(makeIconButton(symbol: "trash", action: #selector(cancelAction)))
+            row.addArrangedSubview(makeCancelIconButton())
         }
         barHandles.append(BarHandle(prefix: pre, postfix: post, bar: bar))
         return row
     }
 
-    private func makeIconButton(symbol: String, action: Selector) -> NSButton {
-        let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage(), target: self, action: action)
-        button.bezelStyle = .shadowlessSquare
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 16).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 16).isActive = true
+    private func makeCancelIconButton() -> NSButton {
+        let button = NSAssetIconButton(
+            normalName: "trash_icon",
+            hoverName: "trash_icon_hover",
+            size: 16,
+            tooltip: "Cancel generation"
+        )
+        button.target = self
+        button.action = #selector(cancelAction)
+        return button
+    }
+
+    private func makeSkipIconButton() -> NSButton {
+        let button = NSAssetIconButton(
+            normalName: "jobs_skip_copy",
+            hoverName: "jobs_skip_copy_hover",
+            size: 16,
+            tooltip: "Skip copy cooldown"
+        )
+        button.target = self
+        button.action = #selector(skipAction)
         return button
     }
 
@@ -238,9 +298,8 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ActiveJobStripNSView, context: Context) -> CGSize? {
         let width = proposal.width ?? max(nsView.bounds.width, 200)
-        nsView.frame.size.width = width
-        nsView.layoutSubtreeIfNeeded()
-        let height = nsView.intrinsicContentSize.height
+        nsView.refreshCachedContentHeight(forWidth: width)
+        let height = max(nsView.cachedContentHeight, 28)
         return CGSize(width: width, height: height)
     }
 
@@ -248,16 +307,29 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         let view = ActiveJobStripNSView()
         view.onCancel = { appState.imageGen.cancelActiveJob() }
         view.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
+        view.onContentHeightChanged = { [weak view] in
+            guard let view else { return }
+            reportMeasuredHeight(nsView: view, appState: appState)
+        }
         return view
     }
 
     func updateNSView(_ nsView: ActiveJobStripNSView, context: Context) {
         let controller = appState.imageGen
         let colors = appState.theme.colors
-        nsView.update(stripView: controller.activeStripView, colors: colors)
-        Task {
-            await controller.refreshActiveStripView(includeQueueJobsRow: includeQueueJobsRow)
-            nsView.update(stripView: controller.activeStripView, colors: colors)
+        nsView.onContentHeightChanged = { [weak nsView] in
+            guard let nsView else { return }
+            reportMeasuredHeight(nsView: nsView, appState: appState)
         }
+        nsView.update(stripView: controller.activeStripView, colors: colors)
+        let width = max(nsView.bounds.width, 200)
+        nsView.refreshCachedContentHeight(forWidth: width)
+    }
+
+    @MainActor
+    private func reportMeasuredHeight(nsView: ActiveJobStripNSView, appState: AppState) {
+        let width = max(nsView.bounds.width, 200)
+        nsView.refreshCachedContentHeight(forWidth: width)
+        appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, 28))
     }
 }

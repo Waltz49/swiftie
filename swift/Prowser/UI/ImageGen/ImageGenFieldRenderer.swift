@@ -75,6 +75,7 @@ private struct ImageGenFieldSpecView: View {
                     step: spec["step"] as? Int ?? 1,
                     choices: spec["choices"] as? [Any]
                 ),
+                resetDefault: spec["reset_default"],
                 values: $values
             )
         case "float_slider":
@@ -90,6 +91,7 @@ private struct ImageGenFieldSpecView: View {
                     step: doubleValue(spec["step"], default: 0.1),
                     key: key
                 ),
+                resetDefault: spec["reset_default"],
                 values: $values
             )
         case "choice":
@@ -165,6 +167,17 @@ private struct ImageGenChoiceRow: View {
                     .onChange(of: isEditing) { _, editing in
                         if !editing { commitTextValue() }
                     }
+                if spec["reset_default"] != nil {
+                    ImageGenFieldResetButton(
+                        isActive: !ImageGenFieldResetLogic.matchesDefault(
+                            current: values[key],
+                            resetDefault: spec["reset_default"],
+                            kind: "choice"
+                        ),
+                        tooltip: "Reset to default",
+                        action: resetToDefault
+                    )
+                }
             }
         }
         .onAppear { syncTextFromSelection() }
@@ -176,7 +189,6 @@ private struct ImageGenChoiceRow: View {
     }
 
     private var selectionBinding: Binding<String> {
-        let defaultValue = stringifyChoiceValue(spec["default"])
         return Binding(
             get: {
                 if let string = values[key] as? String { return string }
@@ -217,6 +229,18 @@ private struct ImageGenChoiceRow: View {
         if let number = value as? Int { return String(number) }
         if let number = value as? Double { return String(number) }
         return ""
+    }
+
+    private func resetToDefault() {
+        guard let resetDefault = spec["reset_default"] else { return }
+        if let intValue = resetDefault as? Int {
+            values[key] = intValue
+        } else if let doubleValue = resetDefault as? Double {
+            values[key] = doubleValue
+        } else {
+            values[key] = ImageGenFieldResetLogic.stringify(resetDefault)
+        }
+        syncTextFromSelection()
     }
 }
 

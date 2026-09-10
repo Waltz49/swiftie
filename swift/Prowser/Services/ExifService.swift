@@ -116,7 +116,7 @@ enum ExifService {
             )
         }
 
-        record.extraFields = extraExifFields(exif: exif, tiff: tiff)
+        record.extraFields = extraExifFields(exif: exif)
 
         return record
     }
@@ -503,16 +503,12 @@ enum ExifService {
         return (latitude, longitude)
     }
 
-    private static func extraExifFields(exif: [CFString: Any], tiff: [CFString: Any]) -> [(String, String)] {
+    private static func extraExifFields(exif: [CFString: Any]) -> [(String, String)] {
         let skipNames: Set<String> = [
             "Camera", "Orientation", "Lens", "Location", "Description",
             "EXIF Date", "Exposure", "Aperture", "ISO", "Focal Length", "Software", "Artist",
         ]
         var fields: [String: String] = [:]
-
-        if let copyright = tiff[kCGImagePropertyTIFFCopyright] as? String, !copyright.isEmpty {
-            fields["Copyright"] = copyright
-        }
 
         if let flash = exif[kCGImagePropertyExifFlash] as? Int {
             fields["Flash"] = flashLabel(flash)

@@ -138,6 +138,9 @@ final class AppState {
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
     private(set) var sidebarLayoutRevision = 0
+    private(set) var measuredActiveJobStripHeight: CGFloat = 0
+    private(set) var measuredJobsCardStackHeight: CGFloat = 0
+    private var isAdjustingJobsPaneGeometry = false
     private var chromeSavedLayout: ChromeSavedLayout?
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
@@ -1035,8 +1038,45 @@ final class AppState {
     }
 
     func syncJobsPaneGeometry() {
-        guard jobsDisplayMode == .pane else { return }
+        guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
         rightSidebarSplit.resizeJobsPaneToMode(appState: self)
+    }
+
+    func jobsQueuePaneContentHeight(for mode: JobsQueueSizeMode? = nil) -> CGFloat {
+        let mode = mode ?? jobsQueueSizeMode
+        let jobCount = imageGen.queue.jobs.count
+        let showsActiveStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
+        return JobQueuePaneMetrics.contentHeight(
+            mode: mode,
+            cardStackHeight: measuredJobsCardStackHeight,
+            activeStripHeight: measuredActiveJobStripHeight,
+            jobCount: jobCount,
+            isProcessing: imageGen.isProcessing,
+            showsActiveStrip: showsActiveStrip,
+            hasMeasuredCards: measuredJobsCardStackHeight > 0
+        )
+    }
+
+    func updateMeasuredActiveJobStripHeight(_ height: CGFloat) {
+        let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: height)
+        guard abs(measuredActiveJobStripHeight - height) > tolerance else { return }
+        measuredActiveJobStripHeight = height
+        syncJobsPaneGeometry()
+    }
+
+    func updateMeasuredJobsQueueGeometry(cardStackHeight: CGFloat) {
+        let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: cardStackHeight)
+        guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
+        measuredJobsCardStackHeight = cardStackHeight
+        syncJobsPaneGeometry()
+    }
+
+    func beginJobsPaneGeometryAdjustment() {
+        isAdjustingJobsPaneGeometry = true
+    }
+
+    func endJobsPaneGeometryAdjustment() {
+        isAdjustingJobsPaneGeometry = false
     }
 
     func requestFileTreeFocus() {

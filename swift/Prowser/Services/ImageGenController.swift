@@ -457,6 +457,105 @@ final class ImageGenController {
         bumpQueueRevision()
     }
 
+    func setSeriesRefinement(for jobID: String, image: Bool? = nil, text: Bool? = nil) {
+        if jobID == activeJobID {
+            let img = image ?? (pendingValues["series_refinement"] as? Bool ?? false)
+            let txt = text ?? (pendingValues["series_prompt_refinement"] as? Bool ?? false)
+            setActiveSeriesRefinement(image: img, text: txt)
+            return
+        }
+        guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        if let image {
+            queue.jobs[index].values["series_refinement"] = image
+        }
+        if let text {
+            queue.jobs[index].values["series_prompt_refinement"] = text
+        }
+        persistQueue()
+        bumpQueueRevision()
+    }
+
+    func actionBarState(for jobID: String) -> JobQueueActionBarState {
+        guard let row = queueSnapshot().first(where: { $0.jobID == jobID }) else {
+            return .empty
+        }
+        let remaining = seriesRemainingAfter(for: jobID)
+        var state = JobQueueActionBarState()
+        state.hasRow = true
+        state.canAddSeries = canAddSeriesCycle(for: jobID)
+        state.canSubtractSeries = canSubtractSeriesCycle(for: jobID)
+        state.imageRefinementVisible = remaining > 0 && row.copiesTotal > 1 && jobSupportsImageSeriesRefinement(jobID: jobID)
+        state.textRefinementVisible = remaining > 0 && row.copiesTotal > 1 && jobSupportsTextSeriesRefinement(jobID: jobID)
+        state.imageRefinementChecked = seriesRefinementEnabled(for: jobID)
+        state.textRefinementChecked = seriesPromptRefinementEnabled(for: jobID)
+        return state
+    }
+
+    private func seriesRemainingAfter(for jobID: String) -> Int {
+        if jobID == activeJobID {
+            let inProgress = isProcessing ? 1 : 0
+            return max(0, copiesTotal - copiesDone - inProgress)
+        }
+        guard let job = queue.jobs.first(where: { $0.jobID == jobID }) else { return 0 }
+        return max(1, job.copiesTotal)
+    }
+
+    private func canAddSeriesCycle(for jobID: String) -> Bool {
+        guard jobID == activeJobID else { return false }
+        guard !JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return false }
+        return copiesTotal < 50
+    }
+
+    private func canSubtractSeriesCycle(for jobID: String) -> Bool {
+        guard jobID == activeJobID else { return false }
+        return seriesRemainingAfter(for: jobID) > 0
+    }
+
+    private func seriesRefinementEnabled(for jobID: String) -> Bool {
+        if jobID == activeJobID {
+            return pendingValues["series_refinement"] as? Bool ?? false
+        }
+        return queue.jobs.first(where: { $0.jobID == jobID })?.values["series_refinement"] as? Bool ?? false
+    }
+
+    private func seriesPromptRefinementEnabled(for jobID: String) -> Bool {
+        if jobID == activeJobID {
+            return pendingValues["series_prompt_refinement"] as? Bool ?? false
+        }
+        return queue.jobs.first(where: { $0.jobID == jobID })?.values["series_prompt_refinement"] as? Bool ?? false
+    }
+
+    private func jobSupportsImageSeriesRefinement(jobID: String) -> Bool {
+        let function: String
+        if jobID == activeJobID {
+            function = activeFunction
+        } else if let job = queue.jobs.first(where: { $0.jobID == jobID }) {
+            function = job.function
+        } else {
+            return false
+        }
+        switch function {
+        case "create", "edit":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func jobSupportsTextSeriesRefinement(jobID: String) -> Bool {
+        guard jobSupportsImageSeriesRefinement(jobID: jobID) else { return false }
+        let function: String
+        if jobID == activeJobID {
+            function = activeFunction
+        } else if let job = queue.jobs.first(where: { $0.jobID == jobID }) {
+            function = job.function
+        } else {
+            return false
+        }
+        guard function == "create" || function == "edit" || function == "expand" else { return false }
+        return foregroundTasks.isAvailable
+    }
+
     func jobsHeaderStatusText() -> String {
         let rows = queueSnapshot()
         if holdJobQueue {

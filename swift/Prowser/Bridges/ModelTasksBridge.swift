@@ -44,13 +44,22 @@ final class ModelTasksBridge {
         return jobID
     }
 
-    func startFluxPrompt(prompt: String, imagePaths: [String] = []) throws -> String {
+    func startFluxPrompt(
+        prompt: String,
+        systemPrompt: String? = nil,
+        imagePaths: [String] = []
+    ) throws -> String {
         let jobID = UUID().uuidString
         var cmd: [String: Any] = [
             "command": "flux_prompt",
             "job_id": jobID,
-            "prompt": prompt,
+            "user_prompt": prompt,
         ]
+        if let systemPrompt, !systemPrompt.isEmpty {
+            cmd["system_prompt"] = systemPrompt
+        } else {
+            cmd["prompt"] = prompt
+        }
         if !imagePaths.isEmpty {
             cmd["image_paths"] = imagePaths
         }

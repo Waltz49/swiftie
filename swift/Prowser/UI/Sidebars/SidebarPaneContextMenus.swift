@@ -401,6 +401,7 @@ struct SidebarPaneToolsMenuButton: NSViewRepresentable {
     func updateNSView(_ nsView: PaneToolsButtonView, context: Context) {
         nsView.kind = kind
         nsView.appState = appState
+        nsView.refreshAppearance()
     }
 }
 
@@ -410,32 +411,87 @@ final class PaneToolsButtonView: NSView {
     weak var appState: AppState?
 
     private let button = NSButton()
+    private let backgroundView = NSView()
+    private var isHovered = false
+    private var trackingArea: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        button.bezelStyle = .inline
+        backgroundView.wantsLayer = true
+        backgroundView.layer?.cornerRadius = 3
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .shadowlessSquare
         button.isBordered = false
-        button.image = PenDrawnIcons.gearIcon(hover: false)
-            ?? NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Pane tools")
         button.imagePosition = .imageOnly
         button.target = self
         button.action = #selector(showToolsMenu)
-        button.toolTip = "Pane tools"
+        button.toolTip = toolsTooltip(for: .fileTree)
         button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(backgroundView)
         addSubview(button)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 20),
-            heightAnchor.constraint(equalToConstant: 20),
+            widthAnchor.constraint(equalToConstant: TitlebarIcons.buttonSize),
+            heightAnchor.constraint(equalToConstant: TitlebarIcons.buttonSize),
+            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backgroundView.topAnchor.constraint(equalTo: topAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
             button.centerXAnchor.constraint(equalTo: centerXAnchor),
             button.centerYAnchor.constraint(equalTo: centerYAnchor),
-            button.widthAnchor.constraint(equalToConstant: 20),
-            button.heightAnchor.constraint(equalToConstant: 20),
+            button.widthAnchor.constraint(equalToConstant: TitlebarIcons.buttonSize),
+            button.heightAnchor.constraint(equalToConstant: TitlebarIcons.buttonSize),
         ])
+        refreshAppearance()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        refreshAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        guard let appState else { return }
+        let colors = appState.theme.colors
+        let chip = TitlebarIcons.chipColors(for: colors)
+        backgroundView.layer?.backgroundColor = NSColor(isHovered ? chip.hoverBackground : chip.background).cgColor
+        backgroundView.layer?.borderWidth = 1
+        backgroundView.layer?.borderColor = NSColor(isHovered ? chip.hoverBorder : chip.border).cgColor
+        button.image = TitlebarIcons.toolsIcon(colors: colors, hover: isHovered)
+        button.toolTip = toolsTooltip(for: kind)
+    }
+
+    private func toolsTooltip(for kind: SidebarPaneContextMenuKind) -> String {
+        switch kind {
+        case .fileTree: return "File tree tools"
+        case .information: return "File information tools"
+        case .jobs: return "Job control tools"
+        case .chat: return "Chat tools"
+        }
     }
 
     @objc private func showToolsMenu() {

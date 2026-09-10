@@ -47,26 +47,22 @@ struct SidebarPaneTitlebar: View {
             }
 
             if showsFlyoutButton, let onFlyout {
-                Button(action: onFlyout) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(colors.sidebarHeaderText)
-                .help("Open floating job control panel")
+                SidebarTitlebarChipButton(
+                    tooltip: "Open floating job control panel",
+                    image: { colors, hover in
+                        TitlebarIcons.flyoutIcon(paneMode: true, colors: colors, hover: hover)
+                    },
+                    action: onFlyout
+                )
             }
 
-            Button(action: onToggle) {
-                Image(systemName: isExpanded ? "minus" : "plus")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(colors.sidebarHeaderText)
-            .help(isExpanded ? "Hide pane" : "Show pane")
+            SidebarTitlebarChipButton(
+                tooltip: isExpanded ? "Hide pane" : "Show pane",
+                image: { colors, hover in
+                    TitlebarIcons.hideIcon(mode: isExpanded ? "minus" : "plus", colors: colors, hover: hover)
+                },
+                action: onToggle
+            )
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

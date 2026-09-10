@@ -17,28 +17,32 @@ enum FileTreeContextMenu {
 
         addAction(
             menu,
-            title: menuTitle("Rename...", shortcut: "F2"),
+            title: "Rename...",
+            shortcut: "F2",
             enabled: canRename,
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.renameDirectory(_:))
         )
         addAction(
             menu,
-            title: menuTitle("Search by Description...", shortcut: "⌘F"),
+            title: "Search by Description...",
+            shortcut: "⌘F",
             enabled: !restricted,
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.searchByDescription(_:))
         )
         addAction(
             menu,
-            title: menuTitle("Search by Person...", shortcut: "⌘P"),
+            title: "Search by Person...",
+            shortcut: "⌘P",
             enabled: !restricted,
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.searchByPerson(_:))
         )
         addAction(
             menu,
-            title: menuTitle("Copy Directory Path", shortcut: "⌘C"),
+            title: "Copy Directory Path",
+            shortcut: "⌘C",
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.copyDirectoryPath(_:))
         )
@@ -50,14 +54,16 @@ enum FileTreeContextMenu {
         )
         addAction(
             menu,
-            title: menuTitle("Show All Images inc. Subdirs", shortcut: "⇧A"),
+            title: "Show All Images inc. Subdirs",
+            shortcut: "⇧A",
             enabled: !restricted,
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.showAllImages(_:))
         )
         addAction(
             menu,
-            title: menuTitle("Find Duplicate Image Files", shortcut: "⇧F"),
+            title: "Find Duplicate Image Files",
+            shortcut: "⇧F",
             enabled: !restricted,
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.findDuplicates(_:))
@@ -80,18 +86,18 @@ enum FileTreeContextMenu {
         return menu
     }
 
-    private static func menuTitle(_ title: String, shortcut: String) -> String {
-        "\(title)\t\(shortcut)"
-    }
-
     private static func addAction(
         _ menu: NSMenu,
         title: String,
+        shortcut: String? = nil,
         enabled: Bool = true,
         representedObject: Any?,
         action: Selector
     ) {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+        if let shortcut {
+            NSMenuShortcutSupport.apply(display: shortcut, to: item)
+        }
         item.target = FileTreeMenuActions.shared
         item.isEnabled = enabled
         item.representedObject = representedObject

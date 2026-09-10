@@ -9,6 +9,7 @@ struct ImageGenFluxPromptSection: View {
     var onValuesChanged: (() -> Void)?
 
     @State private var isExpanded = false
+    @State private var systemPromptExpanded = true
     @State private var systemPrompt = ""
     @State private var passImage = false
     @State private var jobWithGenerate = false
@@ -24,20 +25,14 @@ struct ImageGenFluxPromptSection: View {
                 tooltip: "Refine prompts with a local LM Studio model."
             ) {
                 VStack(alignment: .leading, spacing: 8) {
-                    TextEditor(text: $systemPrompt)
-                        .font(.body.monospaced())
-                        .frame(minHeight: 72, maxHeight: 120)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                        .onChange(of: systemPrompt) { _, text in
-                            ImageGenPersistence.saveFluxSystemPrompt(
-                                text: text,
-                                expanded: isExpanded,
-                                config: appState.config
-                            )
-                            onValuesChanged?()
+                    Toggle("Pass image to Prompt Generator", isOn: $passImage)
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                        .onChange(of: passImage) { _, enabled in
+                            ImageGenPersistence.setPassImageToAI(enabled, config: appState.config)
                         }
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 16) {
                         Button(isRefining ? "Cancel" : "Gen Prompt") {
                             if isRefining {
                                 appState.workers.foregroundModelTasks.cancel()
@@ -54,22 +49,20 @@ struct ImageGenFluxPromptSection: View {
                         .keyboardShortcut(.return, modifiers: [.option, .shift])
                         .disabled(undoPrompt == nil)
 
-                        Toggle("Pass image", isOn: $passImage)
-                            .toggleStyle(.checkbox)
-                            .font(.caption)
-                            .onChange(of: passImage) { _, enabled in
-                                ImageGenPersistence.setPassImageToAI(enabled, config: appState.config)
-                            }
-
-                        Toggle("Job AI", isOn: $jobWithGenerate)
-                            .toggleStyle(.checkbox)
-                            .font(.caption)
-                            .onChange(of: jobWithGenerate) { _, enabled in
-                                ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
-                                values["flux_prompt_job_with_generate"] = enabled
-                                onValuesChanged?()
-                            }
+                        Spacer(minLength: 0)
                     }
+
+                    systemPromptBlock
+
+                    Toggle("Job: Include AI Prompt Refinement in jobs", isOn: $jobWithGenerate)
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                        .padding(.leading, 18)
+                        .onChange(of: jobWithGenerate) { _, enabled in
+                            ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
+                            values["flux_prompt_job_with_generate"] = enabled
+                            onValuesChanged?()
+                        }
 
                     if !refineError.isEmpty {
                         Text(refineError)
@@ -90,6 +83,59 @@ struct ImageGenFluxPromptSection: View {
                 appState.workers.foregroundModelTasks.onFluxPromptChunk = nil
                 appState.workers.foregroundModelTasks.onFluxPromptReady = nil
                 appState.workers.foregroundModelTasks.onJobFinished = nil
+            }
+        }
+    }
+
+    private var systemPromptBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Button {
+                    systemPromptExpanded.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(systemPromptExpanded ? "▼" : "▶")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                        Text("System Prompt")
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Click to expand or collapse system prompt")
+
+                Spacer(minLength: 0)
+
+                ImageGenPromptActionButtons(
+                    text: systemPrompt,
+                    defaultText: ImageGenPromptDefaults.systemPromptResetText,
+                    includeFavorite: false,
+                    onTextChanged: { newText in
+                        systemPrompt = newText
+                        ImageGenPersistence.saveFluxSystemPrompt(
+                            text: newText,
+                            expanded: isExpanded,
+                            config: appState.config
+                        )
+                        onValuesChanged?()
+                    }
+                )
+            }
+
+            if systemPromptExpanded {
+                TextEditor(text: $systemPrompt)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 72, maxHeight: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    .onChange(of: systemPrompt) { _, text in
+                        ImageGenPersistence.saveFluxSystemPrompt(
+                            text: text,
+                            expanded: isExpanded,
+                            config: appState.config
+                        )
+                        onValuesChanged?()
+                    }
             }
         }
     }

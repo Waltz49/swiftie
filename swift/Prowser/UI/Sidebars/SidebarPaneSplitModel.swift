@@ -237,18 +237,29 @@ final class SidebarPaneSplitModel {
 
     func resizeJobsPaneToMode(appState: AppState) {
         guard side == .right else { return }
-        let needed = jobsPaneHeight(appState: appState, headerOnly: false)
-        resizePaneToHeight(paneIndex: 2, targetHeight: needed, appState: appState)
+        appState.beginJobsPaneGeometryAdjustment()
+        defer { appState.endJobsPaneGeometryAdjustment() }
+
+        var previousNeeded: CGFloat = -1
+        var previousCurrent: CGFloat = -1
+        for _ in 0..<3 {
+            let needed = jobsPaneHeight(appState: appState, headerOnly: false)
+            let current = sizes[2]
+            if previousNeeded >= 0,
+               abs(needed - previousNeeded) <= 1,
+               abs(current - previousCurrent) <= 1 {
+                break
+            }
+            resizePaneToHeight(paneIndex: 2, targetHeight: needed, appState: appState)
+            previousNeeded = needed
+            previousCurrent = sizes[2]
+        }
     }
 
     private func jobsPaneHeight(appState: AppState, headerOnly: Bool) -> CGFloat {
         let header = headerHeight(for: 2)
         if headerOnly { return header }
-        let mode = appState.jobsQueueSizeMode
-        let content = mode.estimatedContentHeight(
-            jobCount: appState.imageGen.queue.jobs.count,
-            isProcessing: appState.imageGen.isProcessing
-        )
+        let content = appState.jobsQueuePaneContentHeight()
         return header + max(content, SidebarPaneLayout.minJobsQueueContentHeight)
     }
 

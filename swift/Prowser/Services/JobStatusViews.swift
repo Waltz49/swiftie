@@ -159,16 +159,23 @@ struct ActiveJobStripStatusView: Equatable {
 
     var isEmpty: Bool { rows.isEmpty && cooldownText.isEmpty }
 
-    /// Row layout identity only (live prefix/fill values update in place).
+    /// Row layout identity only (live prefix/fill/slot values update in place).
     func structureKey() -> String {
-        rows.map { row -> String in
+        let rowKeys = rows.map { row -> String in
             switch row {
-            case .bar(let label, _, _, _, let slot, _):
-                return "bar:\(label):\(slot)"
+            case .bar(let label, _, _, _, _, _):
+                return "bar:\(label)"
             case .count(let label, _):
                 return "count:\(label)"
             }
-        }.joined(separator: ";")
+        }
+        return ([
+            rowKeys.joined(separator: ";"),
+            "mode:\(mode)",
+            "skip:\(showSkipIcon)",
+            "cancel:\(showCancelIcon)",
+            "cooldown:\(!cooldownText.isEmpty)",
+        ] as [String]).joined(separator: "|")
     }
 
     func fingerprint() -> String {
@@ -241,4 +248,5 @@ enum JobQueueLayout {
     static let stripBarHeight: CGFloat = 10
     static let stripBarMinWidth: CGFloat = 48
     static let progressBarFillHex = "#3478F6"
+    static let paneFitBottomSlack: CGFloat = 5
 }

@@ -34,13 +34,16 @@ struct JobQueuePanelView: View {
         }
         .padding(compactForFloating ? 10 : 8)
         .frame(
-            minHeight: mode.estimatedContentHeight(
-                jobCount: controller.queueSnapshot().count,
-                isProcessing: controller.isProcessing
-            ),
+            minHeight: appState.jobsQueuePaneContentHeight(),
             alignment: .top
         )
-        .onChange(of: controller.queueRevision) { _, _ in }
+        .onChange(of: controller.queueRevision) { _, _ in
+            guard mode != .strip else { return }
+            appState.syncJobsPaneGeometry()
+        }
+        .onChange(of: mode) { _, _ in
+            appState.syncJobsPaneGeometry()
+        }
     }
 
     @ViewBuilder

@@ -120,13 +120,20 @@ struct EditExifUserCommentSheet: View {
 
     private var actionBarRow: some View {
         HStack(spacing: 4) {
-            actionButton("copy", systemName: "doc.on.doc", tooltip: copyTooltip, enabled: hasComment) {
+            assetActionButton(
+                "copy",
+                normal: "copy",
+                hover: "copy_hover",
+                tooltip: copyTooltip,
+                enabled: hasComment
+            ) {
                 copyComment(full: NSEvent.modifierFlags.contains(.option))
             }
             if !BundleCapabilities.isMinBundle {
-                actionButton(
+                assetActionButton(
                     "speak",
-                    systemName: speechController.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2",
+                    normal: "bullhorn",
+                    hover: "bullhorn_hover",
                     tooltip: "Read aloud (click again to stop)",
                     enabled: hasComment,
                     highlighted: speechController.isSpeaking
@@ -136,9 +143,10 @@ struct EditExifUserCommentSheet: View {
                 }
             }
             if createAvailable {
-                actionButton(
+                assetActionButton(
                     "create",
-                    systemName: "photo",
+                    normal: "fromText",
+                    hover: "fromText_hover",
                     tooltip: "Create image from this prompt",
                     enabled: hasCaptionForGenerate && !captionInProgress
                 ) {
@@ -146,30 +154,53 @@ struct EditExifUserCommentSheet: View {
                 }
             }
             if editAIAvailable {
-                actionButton("editai", systemName: "wand.and.stars", tooltip: "Edit this image with AI") {
+                assetActionButton(
+                    "editai",
+                    normal: "editAI",
+                    hover: "editAI_hover",
+                    tooltip: "Edit this image with AI"
+                ) {
                     editWithAI()
                 }
             }
             Spacer(minLength: 0)
             if lmStudioUIEnabled {
                 if lmStudioCaptionAvailable {
-                    actionButton(
+                    assetActionButton(
                         "instructions",
-                        systemName: "text.alignleft",
+                        normal: aiInfoIconName,
+                        hover: aiInfoIconName,
                         tooltip: "Show/hide Instructions field (override AI user prompt)",
                         highlighted: instructionsVisible
                     ) {
                         instructionsVisible.toggle()
                     }
                 }
-                actionButton("settings", systemName: "gearshape", tooltip: "Open Captioning settings") {
-                    appState.openSettingsWindow(tab: .captioning)
-                }
+                AppAssetIconButton(
+                    normalName: "gear",
+                    hoverName: "gear_hover",
+                    fileExtension: "svg",
+                    size: 26,
+                    iconSize: 16,
+                    tooltip: "Open Captioning settings",
+                    action: { appState.openSettingsWindow(tab: .captioning) }
+                )
+                .accessibilityIdentifier("settings")
             }
-            actionButton("delete", systemName: "trash", tooltip: "Clear comment text", enabled: hasComment) {
+            assetActionButton(
+                "delete",
+                normal: "trash_icon",
+                hover: "trash_icon_hover",
+                tooltip: "Clear comment text",
+                enabled: hasComment
+            ) {
                 clearCommentText()
             }
         }
+    }
+
+    private var aiInfoIconName: String {
+        appState.theme.themeID == "light" ? "ai_icon_info_light" : "ai_icon_info_dark"
     }
 
     private var copyTooltip: String {
@@ -454,34 +485,23 @@ struct EditExifUserCommentSheet: View {
 
     // MARK: - UI helpers
 
-    private func actionButton(
+    private func assetActionButton(
         _ id: String,
-        systemName: String,
+        normal: String,
+        hover: String,
         tooltip: String,
         enabled: Bool = true,
         highlighted: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .frame(width: 26, height: 26)
-                .foregroundStyle(
-                    highlighted || enabled
-                        ? colors.dialogText
-                        : colors.dialogMutedText.opacity(0.45)
-                )
-                .background(
-                    highlighted
-                        ? colors.defaultBorder.opacity(0.35)
-                        : colors.dialogInputBackground.opacity(0.6)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
-        .help(tooltip)
+        SidebarAssetIconButton(
+            normalName: normal,
+            hoverName: hover,
+            tooltip: tooltip,
+            selected: highlighted,
+            enabled: enabled,
+            action: action
+        )
         .accessibilityIdentifier(id)
     }
 }

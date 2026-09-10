@@ -194,6 +194,7 @@ final class JobCardStatusNSView: NSView {
         let val = makeLabel(value, muted: false, wrapping: wrapping)
         if wrapping {
             val.preferredMaxLayoutWidth = valueWidth
+            val.widthAnchor.constraint(equalToConstant: valueWidth).isActive = true
         }
         row.addArrangedSubview(val)
         row.widthAnchor.constraint(equalToConstant: width).isActive = true
@@ -229,6 +230,6 @@ final class JobCardStatusNSView: NSView {
 
     override var intrinsicContentSize: NSSize {
         let height = max(rowsStack.fittingSize.height, 1)
-        return NSSize(width: NSView.noIntrinsicMetric, height: height)
+        return NSSize(width: contentWidth > 0 ? contentWidth : NSView.noIntrinsicMetric, height: height)
     }
 }

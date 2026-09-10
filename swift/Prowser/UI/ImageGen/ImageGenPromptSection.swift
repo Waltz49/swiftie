@@ -18,30 +18,17 @@ struct ImageGenPromptSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
+                Text("Prompt")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                AppAssetIconButton(
-                    normalName: "copy",
-                    hoverName: "copy_hover",
-                    tooltip: "Copy to clipboard",
-                    action: copyPrompt
-                )
-                AppAssetIconButton(
-                    normalName: "bullhorn",
-                    hoverName: "bullhorn_hover",
-                    tooltip: "Read prompt aloud",
-                    action: speakPrompt
-                )
-                AppAssetIconButton(
-                    normalName: "chatfav",
-                    hoverName: "chatfav_hover",
-                    tooltip: "Append from favorite prompts",
-                    action: appendFavoritePrompt
-                )
-                AppAssetIconButton(
-                    normalName: "trash_icon",
-                    hoverName: "trash_icon_hover",
-                    tooltip: "Clear prompt",
-                    action: clearPrompt
+                ImageGenPromptActionButtons(
+                    text: promptText,
+                    defaultText: ImageGenPromptDefaults.promptResetText,
+                    onTextChanged: { newText in
+                        values["prompt"] = newText
+                        onValuesChanged?()
+                    }
                 )
             }
 
@@ -57,12 +44,20 @@ struct ImageGenPromptSection: View {
                 HStack(spacing: 6) {
                     importSideButton(title: "Import Prompt", action: importPrompt)
                     importSideButton(title: "Import Rest", action: importRest)
+                    ImageGenGrammarButton(
+                        text: promptBinding,
+                        onTextChanged: onValuesChanged
+                    )
                 }
             }
         }
         .onAppear {
             showImportButtons = shouldShowImportButtons
         }
+    }
+
+    private var promptText: String {
+        values["prompt"] as? String ?? ""
     }
 
     private var shouldShowImportButtons: Bool {
@@ -98,30 +93,6 @@ struct ImageGenPromptSection: View {
             get: { values["negative_prompt"] as? String ?? "" },
             set: { values["negative_prompt"] = $0 }
         )
-    }
-
-    private func copyPrompt() {
-        let text = values["prompt"] as? String ?? ""
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        appState.status.show("Copied to clipboard.")
-    }
-
-    private func speakPrompt() {
-        let text = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        let synthesizer = NSSpeechSynthesizer()
-        synthesizer.startSpeaking(text)
-    }
-
-    private func appendFavoritePrompt() {
-        // Favorite prompt picker is chat-specific; stub shows status until ported.
-        appState.status.show("Favorite prompts: use chat prompt library (not yet ported).")
-    }
-
-    private func clearPrompt() {
-        values["prompt"] = ""
-        onValuesChanged?()
     }
 
     private func importPrompt() {

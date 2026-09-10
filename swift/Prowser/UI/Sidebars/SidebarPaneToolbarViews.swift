@@ -18,6 +18,17 @@ struct FileTreeToolbarView: View {
                 appState.collapseFileTreeToHome()
             }
             SidebarToolbarIconButton(
+                tooltip: (
+                    "Toggle Rename Status Check\n"
+                    + "Check if files matching filter pattern also match rename pattern "
+                    + "and are sequentially numbered"
+                ),
+                enabled: false,
+                imageProvider: { hover in
+                    PenDrawnIcons.renameStatusCheckmarkIcon(active: false, hover: hover)
+                }
+            ) { }
+            SidebarToolbarIconButton(
                 tooltip: "Open Settings\nConfigure application preferences",
                 imageProvider: { hover in
                     PenDrawnIcons.gearIcon(hover: hover)
@@ -95,23 +106,46 @@ struct InformationActionBarView: View {
     var body: some View {
         let hasComment = appState.informationHasUserComment
         HStack(spacing: 4) {
-            actionButton("edit", systemName: "text.bubble", tooltip: "Edit user comment")
-            actionButton("copy", systemName: "doc.on.doc", tooltip: "Copy prompt to clipboard", enabled: hasComment)
+            assetActionButton("edit", normal: "comment_icon", hover: "comment_icon_hover", tooltip: "Edit user comment")
+            assetActionButton(
+                "copy",
+                normal: "copy",
+                hover: "copy_hover",
+                tooltip: "Copy prompt to clipboard.\n⌥+click to copy full user comment.",
+                enabled: hasComment
+            )
             if BundleCapabilities.voiceInputUIEnabled {
-                actionButton(
+                assetActionButton(
                     "speak",
-                    systemName: appState.commentSpeaker.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2",
-                    tooltip: "Read user comment aloud",
+                    normal: "bullhorn",
+                    hover: "bullhorn_hover",
+                    tooltip: "Read aloud (click again to stop)",
                     enabled: hasComment,
                     highlighted: appState.commentSpeaker.isSpeaking
                 )
             }
             if BundleCapabilities.imageGenUIEnabled {
-                actionButton("create", systemName: "photo", tooltip: "Create image from this prompt")
-                actionButton("editai", systemName: "wand.and.stars", tooltip: "Edit this image with AI")
+                assetActionButton(
+                    "create",
+                    normal: "fromText",
+                    hover: "fromText_hover",
+                    tooltip: "Create image from this prompt"
+                )
+                assetActionButton(
+                    "editai",
+                    normal: "editAI",
+                    hover: "editAI_hover",
+                    tooltip: "Edit this image with AI"
+                )
             }
             Spacer(minLength: 0)
-            actionButton("delete", systemName: "trash", tooltip: "Delete user comment", enabled: hasComment)
+            assetActionButton(
+                "delete",
+                normal: "trash_icon",
+                hover: "trash_icon_hover",
+                tooltip: "Delete user comment",
+                enabled: hasComment
+            )
         }
         .padding(.horizontal, 8)
         .padding(.top, 0)
@@ -119,14 +153,21 @@ struct InformationActionBarView: View {
         .background(appState.theme.colors.sidebarHeaderBackground.opacity(0.35))
     }
 
-    private func actionButton(
+    private func assetActionButton(
         _ action: String,
-        systemName: String,
+        normal: String,
+        hover: String,
         tooltip: String,
         enabled: Bool = true,
         highlighted: Bool = false
     ) -> some View {
-        SidebarToolbarIconButton(systemName: systemName, tooltip: tooltip, selected: highlighted, enabled: enabled) {
+        SidebarAssetIconButton(
+            normalName: normal,
+            hoverName: hover,
+            tooltip: tooltip,
+            selected: highlighted,
+            enabled: enabled
+        ) {
             NotificationCenter.default.post(
                 name: .prowserInformationAction,
                 object: nil,
@@ -144,24 +185,27 @@ struct JobsToolbarView: View {
         let controller = appState.imageGen
         ZStack {
             HStack(spacing: 4) {
-                SidebarToolbarIconButton(
-                    systemName: "photo.on.rectangle.angled",
+                SidebarAssetIconButton(
+                    normalName: "jobs_intermediate",
+                    hoverName: "jobs_intermediate_hover",
                     tooltip: "Intermediate Images\nShow progressive images during generation",
                     selected: controller.showProgressiveImages,
                     enabled: controller.isEnabled
                 ) {
                     controller.setShowProgressiveImages(!controller.showProgressiveImages)
                 }
-                SidebarToolbarIconButton(
-                    systemName: "pause.circle",
+                SidebarAssetIconButton(
+                    normalName: "jobs_hold",
+                    hoverName: "jobs_hold_hover",
                     tooltip: "Hold Job Queue\nPause starting new jobs until released",
                     selected: controller.holdJobQueue,
                     enabled: controller.isEnabled
                 ) {
                     controller.setHoldJobQueue(!controller.holdJobQueue)
                 }
-                SidebarToolbarIconButton(
-                    systemName: "forward.end",
+                SidebarAssetIconButton(
+                    normalName: "jobs_skip_copy",
+                    hoverName: "jobs_skip_copy_hover",
                     tooltip: "Skip This Copy\nEnd the current copy and start the next one in this series",
                     enabled: controller.canSkipActiveSeriesCopy
                 ) {
@@ -191,15 +235,17 @@ struct ChatToolbarView: View {
     var body: some View {
         let chat = appState.chat
         HStack(spacing: 4) {
-            SidebarToolbarIconButton(
-                systemName: "text.quote",
+            SidebarAssetIconButton(
+                normalName: "prompt",
+                hoverName: "prompt_hover",
                 tooltip: "System prompt for chat\nOpen the system prompt library",
                 enabled: chat.isEnabled
             ) {
                 chat.requestSystemPromptEdit()
             }
-            SidebarToolbarIconButton(
-                systemName: "photo.on.rectangle",
+            SidebarAssetIconButton(
+                normalName: "copy_asst",
+                hoverName: "copy_asst_hover",
                 tooltip: "Copy images to Assistant's reply\nWhen enabled, assistant replies show the preceding user message images",
                 selected: chat.copyImagesToAssistant,
                 enabled: chat.isEnabled
@@ -207,8 +253,9 @@ struct ChatToolbarView: View {
                 chat.setCopyImagesToAssistant(!chat.copyImagesToAssistant)
             }
             Spacer(minLength: 0)
-            SidebarToolbarIconButton(
-                systemName: "trash",
+            SidebarAssetIconButton(
+                normalName: "trash_icon",
+                hoverName: "trash_icon_hover",
                 tooltip: "Clear Chat\nRemove all messages and attachments"
             ) {
                 chat.clear()
@@ -283,7 +330,7 @@ private struct SidebarToolbarIconButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
+        .opacity(enabled ? 1 : 0.35)
         .help(tooltip)
         .onHover { hovering = $0 }
     }

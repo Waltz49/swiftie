@@ -32,10 +32,11 @@ enum ThumbnailContextMenu {
         menu.autoenablesItems = false
 
         let rename = menu.addItem(
-            withTitle: menuTitle("Rename", shortcut: "F2"),
+            withTitle: "Rename",
             action: #selector(MenuActions.rename(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "F2", to: rename)
         rename.target = MenuActions.shared
         rename.representedObject = paths
         rename.isEnabled = inThumbnail && singleOnly
@@ -50,18 +51,20 @@ enum ThumbnailContextMenu {
         delete.representedObject = paths
 
         let copyPath = menu.addItem(
-            withTitle: menuTitle("Copy Pathname", shortcut: "⌘C"),
+            withTitle: "Copy Pathname",
             action: #selector(MenuActions.copyPath(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌘C", to: copyPath)
         copyPath.target = MenuActions.shared
         copyPath.representedObject = paths
 
         let copyImage = menu.addItem(
-            withTitle: menuTitle("Copy image", shortcut: "⌃C"),
+            withTitle: "Copy image",
             action: #selector(MenuActions.copyImage(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌃C", to: copyImage)
         copyImage.target = MenuActions.shared
         copyImage.representedObject = paths
         copyImage.isEnabled = singleOnly
@@ -75,35 +78,39 @@ enum ThumbnailContextMenu {
         duplicate.representedObject = paths
 
         let findSimilar = menu.addItem(
-            withTitle: menuTitle("Find Similar Images…", shortcut: "⌘K"),
+            withTitle: "Find Similar Images…",
             action: #selector(MenuActions.findSimilar(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌘K", to: findSimilar)
         findSimilar.target = MenuActions.shared
         findSimilar.representedObject = paths
 
         let showInDirectory = menu.addItem(
-            withTitle: menuTitle("Show in Directory", shortcut: "⇧⌘H"),
+            withTitle: "Show in Directory",
             action: #selector(MenuActions.showInDirectory(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⇧⌘H", to: showInDirectory)
         showInDirectory.target = MenuActions.shared
         showInDirectory.representedObject = paths
         showInDirectory.isEnabled = singleOnly && appState.specificFilesActive
 
         let convertFormat = menu.addItem(
-            withTitle: menuTitle("Convert Format…", shortcut: "⌘M"),
+            withTitle: "Convert Format…",
             action: #selector(MenuActions.convertFormat(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌘M", to: convertFormat)
         convertFormat.target = MenuActions.shared
         convertFormat.representedObject = paths
 
         let resizeImages = menu.addItem(
-            withTitle: menuTitle("Resize…", shortcut: "⌘⇧Z"),
+            withTitle: "Resize…",
             action: #selector(MenuActions.resizeImages(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌘⇧Z", to: resizeImages)
         resizeImages.target = MenuActions.shared
         resizeImages.representedObject = paths
 
@@ -111,19 +118,21 @@ enum ThumbnailContextMenu {
 
         let editorName = appState.config.string(forKey: "image_editor_app", default: "Preview")
         let edit = menu.addItem(
-            withTitle: menuTitle("Edit in \(editorName)", shortcut: "⌘E"),
+            withTitle: "Edit in \(editorName)",
             action: #selector(MenuActions.editExternal(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌘E", to: edit)
         edit.target = MenuActions.shared
         edit.representedObject = paths
         edit.isEnabled = singleOnly || paths.count > 1
 
         let exif = menu.addItem(
-            withTitle: menuTitle("Edit EXIF User Comment…", shortcut: "⇧⌘E"),
+            withTitle: "Edit EXIF User Comment…",
             action: #selector(MenuActions.editExifComment(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⇧⌘E", to: exif)
         exif.target = MenuActions.shared
         exif.representedObject = paths
 
@@ -148,20 +157,22 @@ enum ThumbnailContextMenu {
 
         if BundleCapabilities.facesUIEnabled, singleOnly {
             let faces = menu.addItem(
-                withTitle: menuTitle("Extract Faces", shortcut: "⇧⌘P"),
+                withTitle: "Extract Faces",
                 action: #selector(MenuActions.extractFaces(_:)),
                 keyEquivalent: ""
             )
+            NSMenuShortcutSupport.apply(display: "⇧⌘P", to: faces)
             faces.target = MenuActions.shared
             faces.representedObject = paths
         }
 
         let anyHasGPS = paths.contains { ExifService.gpsCoordinates(for: $0) != nil }
         let mapLocation = menu.addItem(
-            withTitle: menuTitle("Show Location on Map", shortcut: "⌘G"),
+            withTitle: "Show Location on Map",
             action: #selector(MenuActions.showLocationOnMap(_:)),
             keyEquivalent: ""
         )
+        NSMenuShortcutSupport.apply(display: "⌘G", to: mapLocation)
         mapLocation.target = MenuActions.shared
         mapLocation.representedObject = paths
         mapLocation.isEnabled = anyHasGPS
@@ -236,10 +247,6 @@ enum ThumbnailContextMenu {
 
         MenuActions.shared.appState = appState
         NSMenu.popUpContextMenu(menu, with: event, for: view)
-    }
-
-    private static func menuTitle(_ title: String, shortcut: String) -> String {
-        "\(title)\t\(shortcut)"
     }
 
     private static func stripMenuIcons(_ menu: NSMenu) {

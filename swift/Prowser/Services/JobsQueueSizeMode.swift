@@ -18,18 +18,85 @@ enum JobsQueueSizeMode: String, CaseIterable {
         return modes[(index + 1) % modes.count]
     }
 
-    /// Estimated content height below the pane titlebar.
+    /// Fallback content height below the pane titlebar when live measurement is unavailable.
     func estimatedContentHeight(jobCount: Int, isProcessing: Bool) -> CGFloat {
-        switch self {
+        JobQueuePaneMetrics.contentHeight(
+            mode: self,
+            cardStackHeight: 0,
+            activeStripHeight: 0,
+            jobCount: jobCount,
+            isProcessing: isProcessing,
+            showsActiveStrip: isProcessing || jobCount > 0,
+            hasMeasuredCards: false
+        )
+    }
+}
+
+/// Port of `job_queue_panel.py` pane content height helpers.
+enum JobQueuePaneMetrics {
+    static let panelPadding: CGFloat = 8
+    static let vstackSpacing: CGFloat = 4
+    static let bottomSlack: CGFloat = 5
+    static let emptyStateHeight: CGFloat = 18
+    static let fallbackStripHeight: CGFloat = 36
+    static let fallbackSingleCardHeight: CGFloat = 96
+
+    static func contentHeight(
+        mode: JobsQueueSizeMode,
+        cardStackHeight: CGFloat,
+        activeStripHeight: CGFloat,
+        jobCount: Int,
+        isProcessing: Bool,
+        showsActiveStrip: Bool,
+        hasMeasuredCards: Bool
+    ) -> CGFloat {
+        let padding = panelPadding * 2
+        let stripBlock = stripBlockHeight(
+            showsActiveStrip: showsActiveStrip,
+            activeStripHeight: activeStripHeight
+        )
+
+        switch mode {
         case .strip:
-            return isProcessing || jobCount > 0 ? 36 : 22
+            if showsActiveStrip {
+                return padding + stripBlock
+            }
+            if jobCount > 0 {
+                return padding + max(stripBlock, 22)
+            }
+            return padding + emptyStateHeight
+
         case .one:
-            if jobCount == 0 { return isProcessing ? 56 : 22 }
-            return 88
+            var total = padding + stripBlock
+            if jobCount == 0 {
+                return max(total + (isProcessing ? 22 : emptyStateHeight), padding + emptyStateHeight)
+            }
+            let cardH = hasMeasuredCards ? cardStackHeight : fallbackSingleCardHeight
+            return total + cardH + bottomSlack
+
         case .all:
-            if jobCount == 0 { return isProcessing ? 72 : 22 }
-            return min(320, 56 + CGFloat(jobCount) * 72)
+            var total = padding + stripBlock
+            if jobCount == 0 {
+                return max(total + (isProcessing ? 56 : emptyStateHeight), padding + emptyStateHeight)
+            }
+            if jobCount <= 1 {
+                let cardH = hasMeasuredCards ? cardStackHeight : fallbackSingleCardHeight
+                return total + cardH + bottomSlack
+            }
+            let stackH = hasMeasuredCards
+                ? cardStackHeight
+                : min(320, 56 + CGFloat(jobCount) * fallbackSingleCardHeight * 0.75)
+            return total + stackH + bottomSlack
         }
+    }
+
+    private static func stripBlockHeight(
+        showsActiveStrip: Bool,
+        activeStripHeight: CGFloat
+    ) -> CGFloat {
+        guard showsActiveStrip else { return 0 }
+        let strip = activeStripHeight > 0 ? activeStripHeight : fallbackStripHeight
+        return strip + vstackSpacing
     }
 }
 

@@ -37,10 +37,7 @@ struct RightSidebarView: View {
                 isJobsPane: true,
                 showsFlyoutButton: true,
                 contextMenuKind: .jobs(floating: false),
-                preferredFitContentHeight: appState.jobsQueueSizeMode.estimatedContentHeight(
-                    jobCount: imageGen.queue.jobs.count,
-                    isProcessing: imageGen.isProcessing
-                )
+                preferredFitContentHeight: appState.jobsQueuePaneContentHeight()
             ),
         ]
 

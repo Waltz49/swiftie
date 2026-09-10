@@ -52,6 +52,14 @@ struct ImageGenPanelShell: View {
             ImageGenModelSelector(plugins: plugins, selectedPluginID: $selectedPluginID)
                 .onChange(of: selectedPluginID) { _, _ in onValuesChanged?() }
 
+            if let plugin = selectedPlugin {
+                ImageGenLoraSection(
+                    values: $values,
+                    plugin: plugin,
+                    onValuesChanged: onValuesChanged
+                )
+            }
+
             if let comment = selectedPlugin?["model_comment"] as? String, !comment.isEmpty {
                 Text(comment).font(.caption).foregroundStyle(.secondary)
             }
