@@ -181,12 +181,11 @@ final class ExifOperationsController {
         let paths = selectedPaths(appState: appState).filter { ExifService.canWriteExif(path: $0) }
         guard !paths.isEmpty else { return }
 
-        let alert = NSAlert()
-        alert.messageText = "Delete User Comment?"
-        alert.informativeText = "Remove EXIF User Comment from \(paths.count) file(s)?"
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard StyledMessageDialog.showConfirm(
+            title: "Delete User Comment?",
+            message: "Remove EXIF User Comment from \(paths.count) file(s)?",
+            confirmTitle: "Delete"
+        ) else { return }
 
         Task {
             for path in paths {
@@ -211,9 +210,7 @@ final class ExifOperationsController {
     }
 
     private func showAlert(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.runModal()
+        StyledMessageDialog.showInformation(title: message, message: "")
     }
 
     private func truncatePath(_ path: String) -> String {

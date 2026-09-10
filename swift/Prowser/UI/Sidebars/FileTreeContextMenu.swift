@@ -180,9 +180,9 @@ final class FileTreeMenuActions: NSObject {
     }
 
     private func showRestrictedAlert(path: String) {
-        let alert = NSAlert()
-        alert.messageText = "Action Not Available"
-        alert.informativeText = FileTreePathRestrictions.restrictedActionMessage(for: path)
-        alert.runModal()
+        StyledMessageDialog.showWarning(
+            title: "Action Not Available",
+            message: FileTreePathRestrictions.restrictedActionMessage(for: path)
+        )
     }
 }

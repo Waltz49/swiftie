@@ -12,8 +12,10 @@ final class ChatBridge {
     private(set) var lastError = ""
 
     var onChunk: ((String) -> Void)?
+    var onRestarted: (() -> Void)?
     var onFinished: ((String, Bool) -> Void)?
     var onError: ((String) -> Void)?
+    var onCancelled: (() -> Void)?
 
     private var activeJobID = ""
     private var pendingCommand: [String: Any]?
@@ -48,8 +50,6 @@ final class ChatBridge {
 
     func cancel() {
         try? bridge?.send(["command": "cancel", "job_id": activeJobID])
-        isBusy = false
-        activeJobID = ""
     }
 
     func shutdown() {
@@ -84,6 +84,8 @@ final class ChatBridge {
             }
         case "chunk":
             if let text = message["text"] as? String { onChunk?(text) }
+        case "restarted":
+            onRestarted?()
         case "result":
             let text = message["text"] as? String ?? ""
             let suppress = message["suppress_auto_image_gen"] as? Bool ?? false
@@ -93,7 +95,11 @@ final class ChatBridge {
         case "error":
             let error = message["message"] as? String ?? "Chat failed."
             lastError = error
-            onError?(error)
+            if error == "Cancelled" {
+                onCancelled?()
+            } else {
+                onError?(error)
+            }
             isBusy = false
             activeJobID = ""
         default:

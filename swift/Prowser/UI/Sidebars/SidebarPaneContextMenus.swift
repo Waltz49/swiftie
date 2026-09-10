@@ -159,6 +159,13 @@ enum SidebarPaneContextMenus {
             enabled: chat.isEnabled,
             action: #selector(PaneMenuActions.chatCopyImages(_:))
         )
+        addCheckable(
+            menu,
+            title: "Submit Job Automatically",
+            checked: chat.automaticCreate,
+            enabled: chat.isEnabled,
+            action: #selector(PaneMenuActions.chatAutomaticCreate(_:))
+        )
         addAction(menu, title: "Clear Chat", action: #selector(PaneMenuActions.chatClear(_:)))
         menu.addItem(.separator())
         addCheckable(
@@ -251,7 +258,7 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func infoCopy(_ sender: NSMenuItem) {
-        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "copy"])
+        appState?.copyInformationComment(full: NSEvent.modifierFlags.contains(.option))
     }
 
     @objc func infoSpeak(_ sender: NSMenuItem) {
@@ -305,6 +312,11 @@ final class PaneMenuActions: NSObject {
         appState.chat.setCopyImagesToAssistant(sender.state == .on)
     }
 
+    @objc func chatAutomaticCreate(_ sender: NSMenuItem) {
+        guard let appState else { return }
+        appState.chat.setAutomaticCreate(sender.state == .on)
+    }
+
     @objc func chatClear(_ sender: NSMenuItem) {
         appState?.chat.clear()
     }
@@ -353,6 +365,7 @@ final class PaneContextMenuView: NSView {
     weak var appState: AppState?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        if Self.isResolvingUnderlyingView { return nil }
         guard bounds.contains(point) else { return nil }
         guard let event = NSApp.currentEvent else { return nil }
         switch event.type {
@@ -369,11 +382,13 @@ final class PaneContextMenuView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        if forwardToUnderlyingTextInput(event) { return }
         presentMenu(for: event)
     }
 
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) {
+            if forwardToUnderlyingTextInput(event) { return }
             presentMenu(for: event)
             return
         }
@@ -383,6 +398,45 @@ final class PaneContextMenuView: NSView {
     private func presentMenu(for event: NSEvent) {
         guard let appState else { return }
         SidebarPaneContextMenus.show(kind: kind, for: event, in: self, appState: appState)
+    }
+
+    /// Re-dispatch the click with this overlay hidden so text views receive the standard edit menu.
+    private func forwardToUnderlyingTextInput(_ event: NSEvent) -> Bool {
+        let point = convert(event.locationInWindow, from: nil)
+        guard underlyingTextInput(at: point) != nil else { return false }
+        isHidden = true
+        NSApp.sendEvent(event)
+        isHidden = false
+        return true
+    }
+
+    private static var isResolvingUnderlyingView = false
+
+    /// When a text field sits under this overlay, pass the click through for the standard edit menu.
+    private func underlyingTextInput(at point: NSPoint) -> NSView? {
+        guard let window, !Self.isResolvingUnderlyingView else { return nil }
+        let windowPoint = convert(point, to: nil)
+        Self.isResolvingUnderlyingView = true
+        isHidden = true
+        let hit = window.contentView?.hitTest(windowPoint)
+        isHidden = false
+        Self.isResolvingUnderlyingView = false
+        guard let hit, Self.containsTextInput(hit) else { return nil }
+        return hit
+    }
+
+    private static func containsTextInput(_ view: NSView) -> Bool {
+        if view is NSTextView || view is NSTextField || view is NSSecureTextField {
+            return true
+        }
+        var current: NSView? = view
+        while let candidate = current {
+            if candidate is NSTextView || candidate is NSTextField || candidate is NSSecureTextField {
+                return true
+            }
+            current = candidate.superview
+        }
+        return false
     }
 }
 

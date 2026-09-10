@@ -187,4 +187,67 @@ enum JobStepQueue {
         doc["steps_done"] = done + 1
         return step
     }
+
+    static func prependPendingStep(doc: [String: Any], step: [String: Any]) -> [String: Any] {
+        let steps = doc["steps"] as? [[String: Any]] ?? []
+        var out = doc
+        out["steps"] = [step] + steps
+        return out
+    }
+
+    static func syncChainStateToPendingDoc(
+        _ doc: [String: Any]?,
+        outputPath: String = "",
+        prompt: String = "",
+        priorValues: [String: Any]? = nil
+    ) -> [String: Any]? {
+        guard let doc else { return nil }
+        var out = doc
+        var chain: [String: Any] = [:]
+        if !outputPath.isEmpty {
+            chain["last_output_path"] = outputPath
+        }
+        if !prompt.isEmpty {
+            chain["last_prompt"] = prompt
+        }
+        if let priorValues, !priorValues.isEmpty {
+            chain["last_values"] = priorValues
+        }
+        if chain.isEmpty {
+            out.removeValue(forKey: chainStateKey)
+        } else {
+            out[chainStateKey] = chain
+        }
+        return out
+    }
+
+    static func restoreChainStateFromPendingDoc(_ doc: [String: Any]?) -> (outputPath: String, prompt: String, values: [String: Any]) {
+        guard let doc, let chain = doc[chainStateKey] as? [String: Any] else {
+            return ("", "", [:])
+        }
+        let outputPath = chain["last_output_path"] as? String ?? ""
+        let prompt = chain["last_prompt"] as? String ?? ""
+        let values = chain["last_values"] as? [String: Any] ?? [:]
+        return (outputPath, prompt, values)
+    }
+
+    static func pendingDocIsContinuous(_ doc: [String: Any]?, runningStep: [String: Any]? = nil) -> Bool {
+        if let doc, doc[continuousModeKey] as? Bool == true {
+            return true
+        }
+        if let doc, doc[continuousTemplateKey] as? [String: Any] != nil {
+            return true
+        }
+        if let runningStep {
+            let copies = stepValues(runningStep)["copies"] as? Int ?? Int("\(stepValues(runningStep)["copies"] ?? "")") ?? 0
+            if isSeriesContinuousCopies(copies) { return true }
+        }
+        if let steps = doc?["steps"] as? [[String: Any]] {
+            for step in steps {
+                let copies = stepValues(step)["copies"] as? Int ?? Int("\(stepValues(step)["copies"] ?? "")") ?? 0
+                if isSeriesContinuousCopies(copies) { return true }
+            }
+        }
+        return false
+    }
 }

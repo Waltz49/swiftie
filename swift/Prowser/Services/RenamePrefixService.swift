@@ -30,19 +30,13 @@ final class RenamePrefixService {
         let incrementLength = appState.config.int(forKey: "rename_increment_length", default: 5)
         let startingNumber = appState.config.int(forKey: "rename_starting_number", default: 1)
 
-        let alert = NSAlert()
-        alert.messageText = "Rename with Custom Prefix"
-        alert.informativeText = "Rename \(targetPaths.count) image(s) in \((directory as NSString).lastPathComponent). Use %d for directory name."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        guard let prefixTemplate = StyledMessageDialog.presentTextInput(
+            title: "Rename with Custom Prefix",
+            message: "Rename \(targetPaths.count) image(s) in \((directory as NSString).lastPathComponent). Use %d for directory name.",
+            initialText: savedPrefix.isEmpty ? "image-%d" : savedPrefix,
+            confirmTitle: "Rename"
+        ) else { return }
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        field.stringValue = savedPrefix.isEmpty ? "image-%d" : savedPrefix
-        alert.accessoryView = field
-
-        guard alert.runModal() == .OK else { return }
-
-        let prefixTemplate = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prefixTemplate.isEmpty else {
             appState.status.show("Prefix cannot be empty")
             return
@@ -135,10 +129,7 @@ final class RenamePrefixService {
     }
 
     private func showAlert(_ title: String, informative: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = informative
-        alert.runModal()
+        StyledMessageDialog.showWarning(title: title, message: informative)
     }
 }
 

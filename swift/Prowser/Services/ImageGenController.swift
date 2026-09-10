@@ -47,6 +47,18 @@ final class ImageGenController {
     private var cooldownDisplayTask: Task<Void, Never>?
     private var liveStatusTask: Task<Void, Never>?
     private var activeStatusView: QueueJobStatusView?
+    private var quitAfterCurrentWorker = false
+    private var deferredQuitWaitAllJobs = false
+    private var queueAdvanceSuppressed = false
+    private var exitQueuePersisted = false
+    private var queuePersistSuppressed = false
+    private var startupQueueHold = false
+    private var startupQueueReleaseTask: Task<Void, Never>?
+    private var copyBatchCancelled = false
+    private var suppressTaskFailureUI = false
+    private let deferredQuitDialog = DeferredQuitDialog()
+
+    var onDeferredQuitComplete: (() -> Void)?
 
     var isEnabled: Bool { BundleCapabilities.imageGenUIEnabled && modelTasks.isAvailable && registry.isAvailable }
 
@@ -92,7 +104,9 @@ final class ImageGenController {
         self.modelTasks = modelTasks
         self.foregroundTasks = foregroundTasks
         self.registry = registry
-        reloadQueue()
+        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
+        reloadToolbarSettings(from: imagegen)
+        restorePersistedJobQueue()
         wireBridgeCallbacks()
     }
 
@@ -108,9 +122,20 @@ final class ImageGenController {
     }
 
     func reloadQueue() {
-        queue = JobStepPersistence.loadQueue(config: config)
-        activeDisplayIndex = queue.activeDisplayIndex
-        Task { await refreshAllQueuedJobStatusViews() }
+        restorePersistedJobQueue()
+    }
+
+    func scheduleStartupQueueRelease(delayMs: Int = 6_000) {
+        guard startupQueueHold, !holdJobQueue else { return }
+        startupQueueReleaseTask?.cancel()
+        startupQueueReleaseTask = Task {
+            let delay = max(0, delayMs)
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            releaseStartupQueueHold()
+        }
     }
 
     func selectJob(id: String?) {
@@ -128,7 +153,12 @@ final class ImageGenController {
 
     func reloadToolbarSettings(from imagegen: [String: Any]) {
         showProgressiveImages = imagegen["show_progressive_images"] as? Bool ?? false
-        holdJobQueue = imagegen["hold_job_queue"] as? Bool ?? false
+        let newHold = imagegen["hold_job_queue"] as? Bool ?? false
+        if newHold {
+            startupQueueReleaseTask?.cancel()
+            startupQueueHold = false
+        }
+        holdJobQueue = newHold
     }
 
     func setShowProgressiveImages(_ enabled: Bool) {
@@ -142,7 +172,8 @@ final class ImageGenController {
         holdJobQueue = enabled
         mutateImagegen { $0["hold_job_queue"] = enabled }
         if !enabled {
-            processNextIfIdle()
+            startupQueueHold = false
+            resumeAfterHoldReleased()
         }
         bumpQueueRevision()
     }
@@ -571,7 +602,7 @@ final class ImageGenController {
     // MARK: - Internal processing
 
     private func startNextQueuedJobIfIdle() async {
-        guard isEnabled, !modelTasks.isBusy, activeJobID == nil, !holdJobQueue else { return }
+        guard isEnabled, !modelTasks.isBusy, activeJobID == nil, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed else { return }
         guard let index = queue.jobs.firstIndex(where: { $0.statusHTML == "Queued" || $0.statusLabel == "Queued" }) else {
             return
         }
@@ -801,12 +832,18 @@ final class ImageGenController {
         } else {
             lastError = error
             if error == "Cancelled" {
+                if suppressTaskFailureUI || queuePersistSuppressed {
+                    return
+                }
                 finishActiveJob(cancelled: true)
                 return
             }
         }
 
         stepRunning = nil
+        if finishCurrentUnitAndMaybeQuit() {
+            return
+        }
         if seriesContinues() {
             scheduleCooldownThen { await self.promoteAndRunNextStep() }
         } else {
@@ -842,16 +879,20 @@ final class ImageGenController {
         copiesTotal = 0
         copiesDone = 0
         jobAIStageActive = false
-        JobStepPersistence.saveActiveRunning(nil, config: config)
-        JobStepPersistence.saveActivePending(nil, config: config)
-        persistQueue()
+        if !queuePersistSuppressed {
+            JobStepPersistence.saveActiveRunning(nil, config: config)
+            JobStepPersistence.saveActivePending(nil, config: config)
+            persistQueue()
+        }
         bumpQueueRevision()
-        if !holdJobQueue {
+        if !holdJobQueue, !queueAdvanceSuppressed, !startupQueueHold {
             Task { await startNextQueuedJobIfIdle() }
         }
+        maybeQuitAfterCurrentWorker()
     }
 
     private func handleStepFailure(_ message: String) {
+        if suppressTaskFailureUI || queuePersistSuppressed { return }
         lastError = message
         progressMessage = "Failed"
         taskStatusHTML = progressMessage
@@ -884,6 +925,11 @@ final class ImageGenController {
             }
             guard !Task.isCancelled else { return }
             cooldownSecondsRemaining = 0
+            if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
+                finishCopyBatchForDeferredQuit()
+                maybeQuitAfterCurrentWorker()
+                return
+            }
             await action()
         }
     }
@@ -942,15 +988,32 @@ final class ImageGenController {
     }
 
     private func persistQueue() {
+        if queuePersistSuppressed { return }
         queue.activeDisplayIndex = activeDisplayIndex
         JobStepPersistence.saveQueue(queue, config: config)
     }
 
     private func persistStepState() {
+        if queuePersistSuppressed { return }
+        let runningDoc: [String: Any]?
+        if let stepRunning {
+            runningDoc = JobStepPersistence.loadActiveRunning(config: config)
+                ?? JobStepQueue.buildRunningJobDoc(
+                    jobID: activeJobID ?? "",
+                    pluginID: activePluginID,
+                    function: activeFunction,
+                    step: stepRunning,
+                    outputPath: activeOutputPath ?? "",
+                    fullPrompt: pendingValues["prompt"] as? String ?? "",
+                    thumbnailPaths: activeThumbnailPaths
+                )
+        } else {
+            runningDoc = nil
+        }
         JobStepPersistence.persistStepJobFiles(
-            running: stepRunning != nil ? JobStepPersistence.loadActiveRunning(config: config) : nil,
+            running: runningDoc,
             pending: stepPendingDoc,
-            queue: queue,
+            queue: queueWithActiveDisplayIndex(),
             config: config
         )
     }
@@ -1203,6 +1266,484 @@ final class ImageGenController {
     private func stopLiveStatusTimer() {
         liveStatusTask?.cancel()
         liveStatusTask = nil
+    }
+
+    // MARK: - Quit / shutdown
+
+    func isRunning() -> Bool {
+        if modelTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
+            return true
+        }
+        if copyBatchActive, !copyBatchCancelled {
+            return true
+        }
+        return isProcessing
+    }
+
+    func quitInterruptsActiveWorker() -> Bool {
+        modelTasks.isBusy || foregroundTasks.isBusy
+    }
+
+    func hasPendingWork() -> Bool {
+        !queue.jobs.isEmpty || isRunning() || activeJobID != nil
+    }
+
+    /// Return true when terminate may proceed without showing a dialog.
+    func quitGateAllowsImmediateTerminate() -> Bool {
+        if quitAfterCurrentWorker {
+            if quitInterruptsActiveWorker() {
+                return false
+            }
+            if deferredQuitWaitAllJobs, !deferredQuitPipelineIdle() {
+                return false
+            }
+            return true
+        }
+        return !quitInterruptsActiveWorker()
+    }
+
+    func prepareForShutdown() {
+        quitAfterCurrentWorker = false
+        deferredQuitWaitAllJobs = false
+        dismissDeferredQuitDialog()
+        suppressTaskFailureUI = true
+        queueAdvanceSuppressed = true
+        persistJobQueueForExit()
+        abortActiveGenerationForShutdown()
+        if foregroundTasks.isBusy {
+            foregroundTasks.cancel()
+        }
+    }
+
+    func cleanup() {
+        dismissDeferredQuitDialog()
+        quitAfterCurrentWorker = false
+        deferredQuitWaitAllJobs = false
+        startupQueueHold = false
+        startupQueueReleaseTask?.cancel()
+        queueAdvanceSuppressed = true
+        suppressTaskFailureUI = true
+        persistJobQueueForExit()
+        copyBatchCancelled = true
+        cooldownTask?.cancel()
+        cooldownDisplayTask?.cancel()
+        cooldownSecondsRemaining = 0
+        queue.jobs.removeAll()
+        activeJobID = nil
+        clearActiveGenerationState()
+        bumpQueueRevision()
+    }
+
+    func deferredQuitStatusMessage() -> String {
+        if deferredQuitWaitAllJobs {
+            return "Prowser will shut down after all queued jobs finish."
+        }
+        if copyBatchActive {
+            return "Prowser will shut down after the current copy completes.\nExisting jobs will be requeued on the next startup."
+        }
+        return "Prowser will shut down after the current task completes."
+    }
+
+    func deferredQuitToggleButtonLabel() -> String {
+        deferredQuitWaitAllJobs ? "Quit after current copy" : "Wait for all"
+    }
+
+    func deferredQuitShowWaitForAllOption() -> Bool {
+        deferredQuitHasMoreWorkAfterCurrent() && !deferredQuitWorkIncludesContinuous()
+    }
+
+    func toggleDeferredQuitMode() {
+        if deferredQuitWaitAllJobs {
+            setDeferredQuitAfterCurrentCopy()
+        } else {
+            setDeferredQuitWaitAllJobs()
+        }
+        if windowForDeferredQuit {
+            deferredQuitDialog.refresh(imageGen: self)
+        }
+    }
+
+    func cancelDeferredQuit() {
+        quitAfterCurrentWorker = false
+        deferredQuitWaitAllJobs = false
+        queueAdvanceSuppressed = false
+        dismissDeferredQuitDialog()
+    }
+
+    func beginQuitAfterCurrentWorker() {
+        quitAfterCurrentWorker = true
+        deferredQuitWaitAllJobs = false
+        queueAdvanceSuppressed = true
+        persistJobQueueForExit()
+        Task { @MainActor in
+            tryCompleteDeferredQuitAfterCurrentCopy()
+        }
+    }
+
+    private func setDeferredQuitWaitAllJobs() {
+        deferredQuitWaitAllJobs = true
+        queueAdvanceSuppressed = false
+        exitQueuePersisted = false
+        queuePersistSuppressed = false
+        resumeDeferredQuitQueueAdvance()
+    }
+
+    private func setDeferredQuitAfterCurrentCopy() {
+        deferredQuitWaitAllJobs = false
+        queueAdvanceSuppressed = true
+        persistJobQueueForExit()
+        tryCompleteDeferredQuitAfterCurrentCopy()
+    }
+
+    private weak var deferredQuitAppState: AppState?
+
+    func setDeferredQuitAppState(_ appState: AppState) {
+        deferredQuitAppState = appState
+    }
+
+    private func tryCompleteDeferredQuitAfterCurrentCopy() {
+        guard quitAfterCurrentWorker else { return }
+        if deferredQuitWaitAllJobs { return }
+        if jobAIStageActive || modelTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
+            if let appState = deferredQuitAppState {
+                if !windowForDeferredQuit {
+                    deferredQuitDialog.show(imageGen: self, appState: appState)
+                    windowForDeferredQuit = true
+                } else {
+                    deferredQuitDialog.refresh(imageGen: self)
+                }
+            }
+            return
+        }
+        if copyBatchActive {
+            finishCopyBatchForDeferredQuit()
+        }
+        maybeQuitAfterCurrentWorker()
+    }
+
+    private var windowForDeferredQuit = false
+
+    private func maybeQuitAfterCurrentWorker() {
+        guard quitAfterCurrentWorker else { return }
+        if jobAIStageActive { return }
+        if modelTasks.isBusy || foregroundTasks.isBusy {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                maybeQuitAfterCurrentWorker()
+            }
+            return
+        }
+        if deferredQuitWaitAllJobs, !deferredQuitPipelineIdle() {
+            return
+        }
+        quitAfterCurrentWorker = false
+        deferredQuitWaitAllJobs = false
+        dismissDeferredQuitDialog()
+        onDeferredQuitComplete?()
+    }
+
+    private func deferredQuitPipelineIdle() -> Bool {
+        if jobAIStageActive { return false }
+        if modelTasks.isBusy || foregroundTasks.isBusy { return false }
+        return !hasPendingWork()
+    }
+
+    private func deferredQuitHasMoreWorkAfterCurrent() -> Bool {
+        if !queue.jobs.isEmpty { return true }
+        return pendingBatchCopies() > 1
+    }
+
+    private func deferredQuitWorkIncludesContinuous() -> Bool {
+        if JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning) {
+            return true
+        }
+        if copyBatchActive, JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+            return true
+        }
+        return queue.jobs.contains { JobStepQueue.isSeriesContinuousCopies($0.copiesTotal) }
+    }
+
+    private func pendingBatchCopies() -> Int {
+        JobStepQueue.pendingStepCount(stepPendingDoc) + (stepRunning != nil ? 1 : 0)
+    }
+
+    @discardableResult
+    private func finishCurrentUnitAndMaybeQuit() -> Bool {
+        guard quitAfterCurrentWorker, !deferredQuitWaitAllJobs else { return false }
+        syncChainStateToPendingDoc()
+        let remaining = JobStepQueue.pendingStepCount(stepPendingDoc)
+        if remaining > 0 {
+            JobStepPersistence.saveActivePending(stepPendingDoc, config: config)
+            JobStepPersistence.saveActiveRunning(nil, config: config)
+        } else {
+            JobStepPersistence.saveActivePending(nil, config: config)
+            JobStepPersistence.saveActiveRunning(nil, config: config)
+        }
+        finishCopyBatchForDeferredQuit()
+        maybeQuitAfterCurrentWorker()
+        return true
+    }
+
+    private func finishCopyBatchForDeferredQuit() {
+        copyBatchActive = false
+        copyBatchCancelled = true
+    }
+
+    private func dismissDeferredQuitDialog() {
+        windowForDeferredQuit = false
+        deferredQuitDialog.dismiss()
+        deferredQuitAppState = nil
+    }
+
+    private func prependRunningStepToPending() {
+        guard let running = stepRunning else { return }
+        var doc = stepPendingDoc
+        if doc == nil, let activeJobID {
+            doc = JobStepQueue.buildPendingJobDoc(
+                jobID: activeJobID,
+                pluginID: activePluginID,
+                function: activeFunction,
+                steps: [],
+                fullPrompt: pendingValues["prompt"] as? String ?? "",
+                thumbnailPaths: activeThumbnailPaths,
+                stepsDone: copiesDone
+            )
+        }
+        guard var doc else { return }
+        syncChainStateToPendingDoc()
+        doc = stepPendingDoc ?? doc
+        stepPendingDoc = JobStepQueue.prependPendingStep(doc: doc, step: running)
+        stepRunning = nil
+        JobStepPersistence.saveActiveRunning(nil, config: config)
+    }
+
+    private func persistJobQueueForExit() {
+        if exitQueuePersisted { return }
+        if stepRunning != nil, !quitAfterCurrentWorker {
+            prependRunningStepToPending()
+        }
+        syncChainStateToPendingDoc()
+        let runningDoc: [String: Any]?
+        if let stepRunning {
+            runningDoc = JobStepQueue.buildRunningJobDoc(
+                jobID: activeJobID ?? "",
+                pluginID: activePluginID,
+                function: activeFunction,
+                step: stepRunning,
+                outputPath: activeOutputPath ?? "",
+                fullPrompt: pendingValues["prompt"] as? String ?? "",
+                thumbnailPaths: activeThumbnailPaths
+            )
+        } else {
+            runningDoc = nil
+        }
+        JobStepPersistence.persistStepJobFiles(
+            running: runningDoc,
+            pending: stepPendingDoc,
+            queue: queueWithActiveDisplayIndex(),
+            config: config
+        )
+        exitQueuePersisted = true
+        queuePersistSuppressed = true
+    }
+
+    private func queueWithActiveDisplayIndex() -> ImageGenQueueFile {
+        var file = queue
+        file.activeDisplayIndex = activeDisplayIndex
+        return file
+    }
+
+    private func syncChainStateToPendingDoc() {
+        guard stepPendingDoc != nil else { return }
+        stepPendingDoc = JobStepQueue.syncChainStateToPendingDoc(
+            stepPendingDoc,
+            outputPath: activeOutputPath ?? "",
+            prompt: pendingValues["prompt"] as? String ?? "",
+            priorValues: pendingValues
+        )
+    }
+
+    private func abortActiveGenerationForShutdown() {
+        if !isRunning(), !isProcessing {
+            clearActiveGenerationState()
+            return
+        }
+        copyBatchCancelled = true
+        if stepRunning != nil {
+            prependRunningStepToPending()
+        }
+        cooldownTask?.cancel()
+        cooldownDisplayTask?.cancel()
+        cooldownSecondsRemaining = 0
+        modelTasks.cancel()
+        clearActiveGenerationState()
+    }
+
+    private func clearActiveGenerationState() {
+        activeJobID = nil
+        isProcessing = false
+        progressMessage = ""
+        taskStatusHTML = ""
+        stopLiveStatusTimer()
+        activeStatusView = nil
+        activeStripView = ActiveJobStripStatusView()
+        generationStartTime = nil
+        liveStep = 0
+        liveStepTotal = 0
+        liveEstimateSeconds = nil
+        skipSeriesCopyInFlight = false
+        progressivePreviewPath = nil
+        activeOutputPath = nil
+        activeThumbnailPaths = []
+        stepRunning = nil
+        stepPendingDoc = nil
+        jobAIStageActive = false
+        copyBatchActive = false
+        copiesTotal = 0
+        copiesDone = 0
+        if !queuePersistSuppressed {
+            JobStepPersistence.saveActiveRunning(nil, config: config)
+            JobStepPersistence.saveActivePending(nil, config: config)
+        }
+    }
+
+    private func restorePersistedJobQueue() {
+        queue = JobStepPersistence.loadQueue(config: config)
+        activeDisplayIndex = queue.activeDisplayIndex
+        let hasActive = restoreActiveJobFromStepFiles()
+        Task { await refreshAllQueuedJobStatusViews() }
+        if (!queue.jobs.isEmpty || hasActive), !holdJobQueue {
+            startupQueueHold = true
+        }
+        bumpQueueRevision()
+    }
+
+    @discardableResult
+    private func restoreActiveJobFromStepFiles() -> Bool {
+        let runningDoc = JobStepPersistence.loadActiveRunning(config: config)
+        let pendingDoc = JobStepPersistence.loadActivePending(config: config)
+        guard runningDoc != nil || pendingDoc != nil else { return false }
+        let source = runningDoc ?? pendingDoc
+        guard let source else { return false }
+        let pluginID = source["plugin_id"] as? String ?? ""
+        let function = source["function"] as? String ?? ""
+        let jobID = source["job_id"] as? String ?? ""
+        guard !pluginID.isEmpty, !function.isEmpty, !jobID.isEmpty else { return false }
+
+        activeJobID = jobID
+        activeDisplayIndex = max(0, min(activeDisplayIndex, queue.jobs.count))
+        activePluginID = pluginID
+        activeFunction = function
+        stepPendingDoc = pendingDoc
+        copiesDone = 0
+        if let pendingDoc {
+            copiesDone = max(0, pendingDoc["steps_done"] as? Int ?? 0)
+            if let display = pendingDoc["display"] as? [String: Any],
+               let thumbs = display["thumbnail_paths"] as? [String] {
+                activeThumbnailPaths = thumbs.filter { FileManager.default.fileExists(atPath: $0) }
+            }
+        }
+        if activeThumbnailPaths.isEmpty,
+           let steps = pendingDoc?["steps"] as? [[String: Any]],
+           let first = steps.first {
+            pendingValues = JobStepQueue.mergeStepIntoValues(first)
+        }
+        if let runningDoc, let step = runningDoc["step"] as? [String: Any] {
+            stepRunning = step
+            pendingValues = JobStepQueue.mergeStepIntoValues(step)
+        } else if let pendingDoc,
+                  let steps = pendingDoc["steps"] as? [[String: Any]],
+                  let first = steps.first {
+            var values = JobStepQueue.mergeStepIntoValues(first)
+            let pendingCount = steps.count
+            values["copies"] = max(1, copiesDone + pendingCount)
+            pendingValues = values
+        }
+        let pendingCount = JobStepQueue.pendingStepCount(stepPendingDoc)
+        let runningCount = stepRunning != nil ? 1 : 0
+        if JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning) {
+            copiesTotal = JobStepQueue.seriesContinuousCopies
+            pendingValues["copies"] = JobStepQueue.seriesContinuousCopies
+            copyBatchActive = true
+        } else {
+            let copies = pendingValues["copies"] as? Int ?? Int("\(pendingValues["copies"] ?? "")") ?? 0
+            if JobStepQueue.isSeriesContinuousCopies(copies) {
+                copiesTotal = JobStepQueue.seriesContinuousCopies
+                pendingValues["copies"] = JobStepQueue.seriesContinuousCopies
+            } else {
+                copiesTotal = max(1, copiesDone + pendingCount + runningCount)
+            }
+            copyBatchActive = copiesTotal > 1 || copiesDone > 0
+        }
+        copyBatchCancelled = false
+        return true
+    }
+
+    private func releaseStartupQueueHold() {
+        guard startupQueueHold else { return }
+        startupQueueHold = false
+        guard !holdJobQueue else { return }
+        if activeJobID != nil, !modelTasks.isBusy {
+            resumeRestoredActiveJobIfIdle()
+            return
+        }
+        processNextIfIdle()
+    }
+
+    private func resumeRestoredActiveJobIfIdle() {
+        guard !holdJobQueue, !startupQueueHold else { return }
+        guard activeJobID != nil, !modelTasks.isBusy else {
+            processNextIfIdle()
+            return
+        }
+        if let step = stepRunning {
+            let displayPrompt = (stepPendingDoc?["display"] as? [String: Any])?["full_prompt"] as? String ?? ""
+            let statusViewPrompt = JobStepQueue.promptFromStatusView(activeStatusView)
+            let values = JobStepQueue.generationValues(
+                from: step,
+                jobValues: pendingValues,
+                displayFullPrompt: displayPrompt,
+                statusViewPrompt: statusViewPrompt
+            )
+            pendingValues = values
+            isProcessing = true
+            generationStartTime = Date()
+            startLiveStatusTimer()
+            if JobStepQueue.stepNeedsAI(step) {
+                Task { await runJobAIStage(values: values) }
+            } else {
+                Task { await launchGeneration(values: values) }
+            }
+            return
+        }
+        Task { await promoteAndRunNextStep() }
+    }
+
+    private func resumeAfterHoldReleased() {
+        if queueAdvanceSuppressed { return }
+        if copyBatchActive, !copyBatchCancelled, pendingBatchCopies() > 0, !modelTasks.isBusy, cooldownSecondsRemaining == 0 {
+            Task { await promoteAndRunNextStep() }
+            return
+        }
+        if activeJobID != nil, !modelTasks.isBusy {
+            resumeRestoredActiveJobIfIdle()
+            return
+        }
+        if !modelTasks.isBusy {
+            processNextIfIdle()
+        }
+    }
+
+    private func resumeDeferredQuitQueueAdvance() {
+        guard quitAfterCurrentWorker, deferredQuitWaitAllJobs else { return }
+        if holdJobQueue { return }
+        if copyBatchActive, !copyBatchCancelled, pendingBatchCopies() > 0, !modelTasks.isBusy, cooldownSecondsRemaining == 0 {
+            Task { await promoteAndRunNextStep() }
+            return
+        }
+        if !isRunning() {
+            processNextIfIdle()
+        }
     }
 
     func refreshActiveStripView(includeQueueJobsRow: Bool = false) async {

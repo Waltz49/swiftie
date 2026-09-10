@@ -168,6 +168,10 @@ struct InformationActionBarView: View {
             selected: highlighted,
             enabled: enabled
         ) {
+            if action == "copy" {
+                appState.copyInformationComment(full: NSEvent.modifierFlags.contains(.option))
+                return
+            }
             NotificationCenter.default.post(
                 name: .prowserInformationAction,
                 object: nil,

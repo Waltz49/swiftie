@@ -6,39 +6,15 @@ struct ProwserCommands: Commands {
     @Bindable var appState: AppState
 
     var body: some Commands {
-        CommandGroup(replacing: .newItem) {
-            Button("Open File…") {
-                Task { @MainActor in appState.openFileDialog() }
-            }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
+        CommandMenu(MenuBarTitles.edit) {
+            ExternalEditorButton(appState: appState)
 
-            Button("Open Directory…") {
-                Task { @MainActor in openDirectory() }
-            }
-            .keyboardShortcut("o", modifiers: .command)
-        }
+            Divider()
 
-        CommandGroup(after: .newItem) {
-            Button("Back") {
-                Task { @MainActor in appState.goBack() }
-            }
-            .keyboardShortcut("[", modifiers: .command)
-
-            Button("Forward") {
-                Task { @MainActor in appState.goForward() }
-            }
-            .keyboardShortcut("]", modifiers: .command)
-        }
-
-        CommandGroup(replacing: .undoRedo) {
             Button("Undo Delete") {
                 Task { @MainActor in appState.fileOperations.undoLastFileOperation() }
             }
             .keyboardShortcut("z", modifiers: .command)
-        }
-
-        CommandMenu("Edit") {
-            ExternalEditorButton(appState: appState)
 
             Divider()
 
@@ -91,7 +67,31 @@ struct ProwserCommands: Commands {
             }
         }
 
-        CommandMenu("File") {
+        CommandMenu(MenuBarTitles.file) {
+            Button("Open File…") {
+                Task { @MainActor in appState.openFileDialog() }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+
+            Button("Open Directory…") {
+                Task { @MainActor in openDirectory() }
+            }
+            .keyboardShortcut("o", modifiers: .command)
+
+            Divider()
+
+            Button("Back") {
+                Task { @MainActor in appState.goBack() }
+            }
+            .keyboardShortcut("[", modifiers: .command)
+
+            Button("Forward") {
+                Task { @MainActor in appState.goForward() }
+            }
+            .keyboardShortcut("]", modifiers: .command)
+
+            Divider()
+
             Menu("Recent…") {
                 RecentDirectoriesMenuContent(appState: appState)
             }
@@ -234,7 +234,7 @@ struct ProwserCommands: Commands {
             .disabled(!BundleCapabilities.facesUIEnabled)
         }
 
-        CommandMenu("View") {
+        CommandMenu(MenuBarTitles.view) {
             Button("Enter Image Viewer") {
                 Task { @MainActor in
                     guard appState.fileData.currentImagePath != nil else { return }
@@ -594,9 +594,7 @@ struct ProwserCommands: Commands {
 
     @MainActor
     private func deleteSelection() {
-        let paths = selectedPaths()
-        guard !paths.isEmpty else { return }
-        _ = appState.fileOperations.confirmAndMoveToTrash(paths)
+        appState.fileOperations.deleteSelectedFiles()
     }
 
     @MainActor
@@ -608,10 +606,10 @@ struct ProwserCommands: Commands {
     private func extractFaces() {
         guard let directory = appState.fileData.currentDirectory else { return }
         guard appState.workers.face.isAvailable else {
-            let alert = NSAlert()
-            alert.messageText = "Face extraction unavailable"
-            alert.informativeText = "Python face worker is not available."
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Face extraction unavailable",
+                message: "Python face worker is not available."
+            )
             return
         }
         appState.workers.face.onFinished = { count in
@@ -624,10 +622,10 @@ struct ProwserCommands: Commands {
             appState.status.show("Extracting faces…")
             try appState.workers.face.scanDirectory(directory, maxDepth: 99)
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Face scan failed"
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Face scan failed",
+                message: error.localizedDescription
+            )
         }
     }
 
@@ -706,10 +704,10 @@ struct ProwserCommands: Commands {
             }
             appState.status.show("Desktop wallpaper updated")
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Cannot Set Wallpaper"
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Cannot Set Wallpaper",
+                message: error.localizedDescription
+            )
         }
     }
 

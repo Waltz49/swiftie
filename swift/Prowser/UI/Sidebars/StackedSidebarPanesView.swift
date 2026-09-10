@@ -171,7 +171,11 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             default: descriptor.defaultExpanded
         )
         model.setPaneExpanded(!expanded, configKey: descriptor.expandedConfigKey)
-        appState.onSidebarPaneToggled(side: model.side, nowVisible: !expanded)
+        appState.onSidebarPaneToggled(
+            side: model.side,
+            paneIndex: descriptor.index,
+            nowVisible: !expanded
+        )
         appState.config.applySettingsChange(emit: appState.eventBus)
     }
 

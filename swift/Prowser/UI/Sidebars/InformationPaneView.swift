@@ -70,7 +70,8 @@ struct InformationPaneView: View {
             case "edit":
                 appState.beginEditUserComment()
             case "copy":
-                copyComment(full: false)
+                let full = notification.userInfo?["full"] as? Bool ?? false
+                appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
             case "speak":
                 speakComment()
             case "delete":
@@ -154,7 +155,7 @@ struct InformationPaneView: View {
         case .speak:
             speakComment()
         case .copy(let full):
-            copyComment(full: full)
+            appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
         case .edit:
             appState.beginEditUserComment()
         case .create:
@@ -176,15 +177,6 @@ struct InformationPaneView: View {
         let text = overlayData.speakablePlainText ?? ""
         let spoken = ExifService.truncateUserCommentBeforePrompt(text)
         appState.commentSpeaker.speakOrStop(spoken)
-    }
-
-    @MainActor
-    private func copyComment(full: Bool) {
-        guard let text = overlayData.speakablePlainText else { return }
-        let clipboard = ExifService.userCommentTextForClipboard(text, copyFull: full)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(clipboard, forType: .string)
-        appState.status.show(full ? "Copied full user comment" : "Copied prompt to clipboard")
     }
 
     @MainActor

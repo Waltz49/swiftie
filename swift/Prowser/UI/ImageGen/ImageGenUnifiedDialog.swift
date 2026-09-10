@@ -239,6 +239,9 @@ struct ImageGenUnifiedDialog: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        if request.autoGenerate, errorMessage.isEmpty, replaceJobID == nil {
+            await submit(replace: false)
+        }
     }
 
     private func switchFunction(from oldFunction: String, to newFunction: String) async {

@@ -35,6 +35,16 @@ final class SelectionModel {
         resetCmdMulti()
         emitSelectionChanged()
     }
+
+    /// Clear multi-select after delete without changing the active image (Python `clear_selection(preserve_current_image=True)`).
+    func clearPreservingCurrentImage() {
+        selectedFiles.removeAll()
+        rangeAnchorIndex = nil
+        lastClickedIndex = nil
+        mostRecentSelectedPath = nil
+        resetCmdMulti()
+        emitSelectionChanged(highlightIndex: nil)
+    }
 }
 
 struct SelectionChange: Sendable {

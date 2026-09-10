@@ -18,7 +18,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             instanceLock = lock
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
+            scheduleMenuBarDeduplication()
             applyLaunchOptions(appState)
+            appState.imageGen.setDeferredQuitAppState(appState)
+            appState.imageGen.onDeferredQuitComplete = {
+                NSApp.terminate(nil)
+            }
         } else {
             let message = LaunchMessage.from(launchOptions: appState.launchOptions)
             if InstanceLock.forwardToRunningInstance(
@@ -28,10 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
                 return
             }
-            let alert = NSAlert()
-            alert.messageText = "Prowser is already running"
-            alert.informativeText = "Could not forward the open request to the running instance."
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Prowser is already running",
+                message: "Could not forward the open request to the running instance."
+            )
             NSApp.terminate(nil)
         }
     }
@@ -58,6 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let appState else { return .terminateNow }
+        if appState.confirmQuitIfRunning() {
+            return .terminateNow
+        }
+        return .terminateCancel
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let appState {
             let path = appState.fileData.currentImagePath
@@ -71,9 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+        appState?.prepareForApplicationExit()
         appState?.theme.commitPreview()
         appState?.config.saveSettings()
         appState?.persistAllSidebarLayout()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        scheduleMenuBarDeduplication()
+    }
+
+    private func scheduleMenuBarDeduplication() {
+        DispatchQueue.main.async {
+            MenuBarTitles.removeDuplicateStandardMenus()
+        }
     }
 
     private func applyLaunchOptions(_ appState: AppState) {

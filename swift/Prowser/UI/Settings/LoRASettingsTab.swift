@@ -382,14 +382,8 @@ struct LoRASettingsTab: View {
     }
 
     private func confirmAlert(title: String, message: String) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let alert = NSAlert()
-            alert.messageText = title
-            alert.informativeText = message
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Cancel")
-            continuation.resume(returning: alert.runModal() == .alertFirstButtonReturn)
+        await MainActor.run {
+            StyledMessageDialog.showOkCancel(title: title, message: message, defaultCancel: false)
         }
     }
 }

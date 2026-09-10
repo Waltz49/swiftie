@@ -47,6 +47,7 @@ struct ImageGenDialogRequest {
     var replaceJobID: String?
     var initialPrompt: String?
     var autoImportEXIF: Bool
+    var autoGenerate: Bool
     var editSourcePaths: [String]
 
     static let empty = ImageGenDialogRequest(
@@ -54,6 +55,7 @@ struct ImageGenDialogRequest {
         replaceJobID: nil,
         initialPrompt: nil,
         autoImportEXIF: false,
+        autoGenerate: false,
         editSourcePaths: []
     )
 }

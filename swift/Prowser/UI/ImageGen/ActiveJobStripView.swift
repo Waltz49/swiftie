@@ -305,7 +305,7 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ActiveJobStripNSView {
         let view = ActiveJobStripNSView()
-        view.onCancel = { appState.imageGen.cancelActiveJob() }
+        view.onCancel = { appState.confirmCancelGeneration() }
         view.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
         view.onContentHeightChanged = { [weak view] in
             guard let view else { return }

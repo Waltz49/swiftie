@@ -47,6 +47,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var displayedImagesObserver: NSObjectProtocol?
         private var settingsObserver: UUID?
         private var thumbnailsInvalidatedObserver: UUID?
+        private var fileOperationObserver: UUID?
         private var lastSyncedIndex = -1
 
         init(appState: AppState) {
@@ -112,6 +113,17 @@ struct ThumbnailGridView: NSViewRepresentable {
                     Task { @MainActor in self?.syncFromAppState() }
                 }
             }
+            if fileOperationObserver == nil {
+                fileOperationObserver = appState.eventBus.subscribe(.fileOperationComplete) { [weak self] _ in
+                    Task { @MainActor in self?.restoreKeyboardFocusAfterFileOperation() }
+                }
+            }
+        }
+
+        private func restoreKeyboardFocusAfterFileOperation() {
+            guard appState.fileData.currentViewMode == .thumbnail else { return }
+            syncFromAppState()
+            claimKeyboardFocus()
         }
 
         func claimKeyboardFocus() {

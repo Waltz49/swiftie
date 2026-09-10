@@ -192,6 +192,7 @@ final class AppState {
         )
         informationSectionState = InformationSectionState(config: config)
         loadSidebarToolbarSettings()
+        imageGen.scheduleStartupQueueRelease()
         observeViewModeChanges()
         imageGen.onImageGenerated = { [weak self] path in
             guard let self else { return }
@@ -205,6 +206,7 @@ final class AppState {
         }
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
+        chat.bind(self)
         exifOperations.bind(self)
         searchOperations.bind(self)
         fileTreeOperations.bind(self)
@@ -332,6 +334,29 @@ final class AppState {
         }
     }
 
+    /// File Information pane copy button / `copy://` link (Python `usercomment_text_for_clipboard`).
+    func copyInformationComment(full: Bool, preferredText: String? = nil) {
+        Task { @MainActor in
+            var text = preferredText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if text.isEmpty, let path = fileData.currentImagePath {
+                text = await ExifService.userDescription(path: path)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
+            guard !text.isEmpty else {
+                status.show("No user comment to copy")
+                return
+            }
+            let clipboard = ExifService.userCommentTextForClipboard(text, copyFull: full)
+            guard !clipboard.isEmpty else {
+                status.show("No prompt text to copy")
+                return
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(clipboard, forType: .string)
+            status.show(full ? "Copied full user comment" : "Copied prompt to clipboard")
+        }
+    }
+
     func reverseSortOrder() {
         let mode = SortMode(rawValue: config.string(forKey: "sort_mode", default: "date")) ?? .date
         if fileData.currentViewMode == .list {
@@ -433,10 +458,10 @@ final class AppState {
 
         let directories = Set(paths.map { ($0 as NSString).deletingLastPathComponent })
         if directories.count > 1 {
-            let alert = NSAlert()
-            alert.messageText = "Multiple Directories"
-            alert.informativeText = "Selected files belong to different directories. Choose files from one folder."
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Multiple Directories",
+                message: "Selected files belong to different directories. Choose files from one folder."
+            )
             return
         }
         guard let directory = directories.first else { return }
@@ -649,10 +674,10 @@ final class AppState {
         if FileManager.default.fileExists(atPath: logPath.path) {
             NSWorkspace.shared.open(logPath)
         } else {
-            let alert = NSAlert()
-            alert.messageText = "Log file not found"
-            alert.informativeText = logPath.path
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Log file not found",
+                message: logPath.path
+            )
         }
     }
 
@@ -1236,6 +1261,7 @@ final class AppState {
         replaceJobID: String? = nil,
         initialPrompt: String? = nil,
         autoImportEXIF: Bool = false,
+        autoGenerate: Bool = false,
         editSourcePaths: [String] = []
     ) {
         guard imageGen.isEnabled else { return }
@@ -1250,6 +1276,7 @@ final class AppState {
                     replaceJobID: replaceJobID,
                     initialPrompt: imported,
                     autoImportEXIF: true,
+                    autoGenerate: autoGenerate,
                     editSourcePaths: editSourcePaths
                 )
             }
@@ -1260,6 +1287,7 @@ final class AppState {
             replaceJobID: replaceJobID,
             initialPrompt: prompt,
             autoImportEXIF: autoImportEXIF,
+            autoGenerate: autoGenerate,
             editSourcePaths: editSourcePaths
         )
         if showImageGenUnifiedDialog {
@@ -1345,9 +1373,10 @@ final class AppState {
             return
         }
         guard ExifService.canWriteExif(path: path) else {
-            let alert = NSAlert()
-            alert.messageText = "This file format does not support EXIF User Comment editing."
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "This file format does not support EXIF User Comment editing.",
+                message: ""
+            )
             return
         }
         editUserCommentPath = path
@@ -1412,14 +1441,77 @@ final class AppState {
 
     func confirmCancelGeneration() {
         guard imageGen.isProcessing else { return }
-        let alert = NSAlert()
-        alert.messageText = "Cancel job?"
-        alert.informativeText = "Cancel the running job?"
-        alert.addButton(withTitle: "Cancel Job")
-        alert.addButton(withTitle: "Keep Running")
-        if alert.runModal() == .alertFirstButtonReturn {
+        if StyledMessageDialog.showConfirm(
+            title: "Cancel job?",
+            message: "Cancel the running job?",
+            confirmTitle: "Cancel Job",
+            cancelTitle: "Keep Running",
+            defaultCancel: true
+        ) {
             imageGen.cancelActiveJob()
         }
+    }
+
+    func confirmCancelJob(id: String, cascade: Bool) {
+        if cascade {
+            imageGen.cancelJob(id: id, cascade: true)
+            return
+        }
+        let rows = imageGen.queueSnapshot()
+        guard let row = rows.first(where: { $0.jobID == id }) else { return }
+        let prompt = row.isActive ? "Cancel the running job?" : "Remove this job from the queue?"
+        let confirmTitle = row.isActive ? "Cancel Job" : "Remove"
+        let keepTitle = row.isActive ? "Keep Running" : "Keep"
+        if StyledMessageDialog.showConfirm(
+            title: "Cancel job?",
+            message: prompt,
+            confirmTitle: confirmTitle,
+            cancelTitle: keepTitle,
+            defaultCancel: true
+        ) {
+            imageGen.cancelJob(id: id)
+        }
+    }
+
+    func confirmQuitIfRunning() -> Bool {
+        if imageGen.quitGateAllowsImmediateTerminate() {
+            return true
+        }
+        let stripHost = NSHostingController(
+            rootView: ActiveJobStripView().environment(self)
+        )
+        stripHost.view.frame = NSRect(x: 0, y: 0, width: 360, height: 80)
+        Task { await imageGen.refreshActiveStripView() }
+
+        let choice = StyledMessageDialog.present(
+            title: "AI task running",
+            message: "Image generation or an AI caption is in progress.\nQuit anyway?",
+            style: .warning,
+            buttons: [
+                StyledMessageDialog.Button("No", role: .dismissive),
+                StyledMessageDialog.Button("Quit anyway"),
+                StyledMessageDialog.Button("Wait and quit"),
+            ],
+            defaultButtonIndex: 0,
+            escapeButtonIndex: 0,
+            accessoryView: stripHost.view
+        )
+        switch choice {
+        case 1:
+            imageGen.prepareForShutdown()
+            return true
+        case 2:
+            imageGen.setDeferredQuitAppState(self)
+            imageGen.beginQuitAfterCurrentWorker()
+            return false
+        default:
+            return false
+        }
+    }
+
+    func prepareForApplicationExit() {
+        imageGen.cleanup()
+        workers.shutdown()
     }
 
     func setFileTreeToolbarVisible(_ visible: Bool) {
@@ -1640,10 +1732,7 @@ final class AppState {
     }
 
     private func showMapAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.runModal()
+        StyledMessageDialog.showWarning(title: title, message: message)
     }
 
     /// True when at least one left sidebar pane is open (browse: chat only).
@@ -1848,7 +1937,11 @@ final class AppState {
         chromeSuppressed = false
     }
 
-    func onSidebarPaneToggled(side: SidebarSplitSide, nowVisible: Bool) {
+    func onSidebarPaneToggled(side: SidebarSplitSide, paneIndex: Int, nowVisible: Bool) {
+        if side == .left, nowVisible, paneIndex != 2,
+           config.bool(forKey: "chat_visible", default: false) {
+            config.updateSetting("chat_visible", value: false)
+        }
         if nowVisible {
             revealSidebarColumn(side)
         }
@@ -1871,6 +1964,10 @@ final class AppState {
 
     private func setLeftSidebarPaneVisible(configKey: String, visible: Bool) {
         clearChromeSuppression()
+        if visible, configKey != "chat_visible",
+           config.bool(forKey: "chat_visible", default: false) {
+            config.updateSetting("chat_visible", value: false)
+        }
         config.updateSetting(configKey, value: visible)
         if visible { revealSidebarColumn(.left) }
         noteSidebarLayoutChanged()
@@ -1998,12 +2095,11 @@ final class AppState {
         config.updateSetting("last_used_screen_copy_fit_method", value: method.rawValue)
 
         if paths.count > 1 {
-            let alert = NSAlert()
-            alert.messageText = "Create screen size copy?"
-            alert.informativeText = "Create screen-sized copies for \(paths.count) files?"
-            alert.addButton(withTitle: "Create")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard StyledMessageDialog.showConfirm(
+                title: "Create screen size copy?",
+                message: "Create screen-sized copies for \(paths.count) files?",
+                confirmTitle: "Create"
+            ) else { return }
         }
 
         var created = 0
@@ -2030,10 +2126,10 @@ final class AppState {
             )
             refreshDirectory()
         } else {
-            let alert = NSAlert()
-            alert.messageText = "Screen size copy failed"
-            alert.informativeText = lastError ?? "No files were processed."
-            alert.runModal()
+            StyledMessageDialog.showWarning(
+                title: "Screen size copy failed",
+                message: lastError ?? "No files were processed."
+            )
         }
     }
 

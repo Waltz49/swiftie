@@ -5,14 +5,14 @@ struct LeftSidebarView: View {
 
     var body: some View {
         let chat = appState.chat
-        let inBrowse = appState.fileData.currentViewMode == .browse
+        let displayVis = SidebarPaneSplitModel.leftDisplayPaneVisibility(appState: appState)
         let descriptors = [
             SidebarPaneDescriptor(
                 index: 0,
                 title: "File Tree",
                 expandedConfigKey: "file_tree_visible",
                 defaultExpanded: true,
-                isDisplayed: !inBrowse,
+                isDisplayed: displayVis[0],
                 omitLeftBorder: true,
                 contextMenuKind: .fileTree,
                 preferredFitContentHeight: 180
@@ -22,7 +22,7 @@ struct LeftSidebarView: View {
                 title: "Preview",
                 expandedConfigKey: "preview_visible",
                 defaultExpanded: true,
-                isDisplayed: !inBrowse,
+                isDisplayed: displayVis[1],
                 omitLeftBorder: true,
                 allowsTitlebarDrag: true,
                 preferredFitContentHeight: 120
@@ -32,7 +32,7 @@ struct LeftSidebarView: View {
                 title: "Chat",
                 expandedConfigKey: "chat_visible",
                 defaultExpanded: false,
-                isDisplayed: BundleCapabilities.chatUIEnabled,
+                isDisplayed: displayVis[2],
                 status: chat.isStreaming ? "…" : nil,
                 omitLeftBorder: true,
                 allowsTitlebarDrag: true,

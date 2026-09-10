@@ -199,6 +199,12 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘Delete / ⌘Backspace — move to trash (handle here so menu focus is not stolen).
+        if hasCommand, !hasOption, !hasControl, isDeleteKey(event) {
+            appState.fileOperations.deleteSelectedFiles()
+            return true
+        }
+
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
@@ -304,11 +310,25 @@ final class KeyboardHandlerController {
 
     private func isTextInputFocused() -> Bool {
         guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        return Self.isTextEditingResponder(responder)
+    }
+
+    private static func isTextEditingResponder(_ responder: NSResponder) -> Bool {
         if responder is NSTextView || responder is NSTextField || responder is NSSecureTextField {
             return true
         }
-        if String(describing: type(of: responder)).contains("TextField") {
+        let typeName = String(describing: type(of: responder))
+        if typeName.contains("TextField") || typeName.contains("TextEditor") || typeName.contains("TextView") {
             return true
+        }
+        if let view = responder as? NSView {
+            var current: NSView? = view
+            while let candidate = current {
+                if candidate is NSTextView || candidate is NSTextField || candidate is NSSecureTextField {
+                    return true
+                }
+                current = candidate.superview
+            }
         }
         return false
     }
@@ -1289,6 +1309,11 @@ final class KeyboardHandlerController {
         case 25: return 8
         default: return nil
         }
+    }
+
+    /// Forward delete (117) and backspace/delete (51) both map to trash shortcuts on macOS.
+    private func isDeleteKey(_ event: NSEvent) -> Bool {
+        event.keyCode == 51 || event.keyCode == 117
     }
 
     /// US keyboard `/` is keyCode 44; Shift+/ yields `?` in charactersIgnoringModifiers.

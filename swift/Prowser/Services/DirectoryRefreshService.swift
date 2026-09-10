@@ -99,27 +99,46 @@ enum DirectoryRefreshService {
         appState.loadDirectory(directory, saveHistory: false)
     }
 
+    /// Remove deleted paths from the displayed list and advance the active image (Python `remove_thumbnails_for_files`).
+    static func applyRemovedFiles(
+        appState: AppState,
+        removed: Set<String>,
+        displayed: [String],
+        activePath: String?
+    ) {
+        guard !removed.isEmpty else { return }
+        removeDisplayedFiles(
+            appState: appState,
+            removed: removed,
+            displayed: displayed,
+            activePath: activePath
+        )
+    }
+
     private static func removeDisplayedFiles(
         appState: AppState,
         removed: Set<String>,
-        displayed: [String]
+        displayed: [String],
+        activePath: String? = nil
     ) {
-        let activePath = appState.fileData.currentImagePath
+        let priorActivePath = activePath ?? appState.fileData.currentImagePath
         let newList = displayed.filter { !removed.contains($0) }
         appState.fileData.setDisplayedImages(newList)
 
-        if let activePath, newList.contains(activePath) {
-            appState.fileData.setCurrentImagePath(activePath)
+        if let priorActivePath, newList.contains(priorActivePath), !removed.contains(priorActivePath) {
+            appState.fileData.setCurrentImagePath(priorActivePath)
         } else {
             let next = nextImageAfterDeletion(
                 original: displayed,
                 removed: removed,
-                activePath: activePath
+                activePath: priorActivePath
             )
             if let next {
                 appState.fileData.setCurrentImagePath(next)
             } else if let first = newList.first {
                 appState.fileData.setCurrentImagePath(first)
+            } else {
+                appState.fileData.setCurrentImagePath(nil)
             }
         }
 

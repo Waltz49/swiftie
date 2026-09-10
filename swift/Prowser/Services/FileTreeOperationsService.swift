@@ -169,16 +169,13 @@ final class FileTreeOperationsService {
     }
 
     private func showRestrictedAlert(directory: String) {
-        let alert = NSAlert()
-        alert.messageText = "Action Not Available"
-        alert.informativeText = FileTreePathRestrictions.restrictedActionMessage(for: directory)
-        alert.runModal()
+        StyledMessageDialog.showWarning(
+            title: "Action Not Available",
+            message: FileTreePathRestrictions.restrictedActionMessage(for: directory)
+        )
     }
 
     private func showAlert(_ title: String, informative: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = informative
-        alert.runModal()
+        StyledMessageDialog.showWarning(title: title, message: informative)
     }
 }

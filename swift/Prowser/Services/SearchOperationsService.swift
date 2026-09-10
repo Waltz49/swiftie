@@ -491,10 +491,7 @@ final class SearchOperationsService {
     }
 
     private func showAlert(_ title: String, informative: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = informative
-        alert.runModal()
+        StyledMessageDialog.showWarning(title: title, message: informative)
     }
 }
 

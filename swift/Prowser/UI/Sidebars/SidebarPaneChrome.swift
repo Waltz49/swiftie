@@ -229,8 +229,12 @@ struct SidebarPaneBody<Content: View>: View {
     }
 
     private func usesInternalContextMenu(_ kind: SidebarPaneContextMenuKind) -> Bool {
-        if case .fileTree = kind { return true }
-        return false
+        switch kind {
+        case .fileTree, .chat:
+            return true
+        default:
+            return false
+        }
     }
 
     private func toolbarVisible(for kind: SidebarPaneContextMenuKind) -> Bool {

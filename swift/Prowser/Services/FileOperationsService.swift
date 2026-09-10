@@ -28,9 +28,25 @@ final class FileOperationsService {
         return moveToTrash(paths)
     }
 
+    /// Delete current/selected files (⌘Delete). Port of `file_operations_manager.delete_selected_files`.
+    func deleteSelectedFiles(forceConfirmation: Bool = false) {
+        guard let appState else { return }
+        var paths = selectedPaths(appState: appState)
+        guard !paths.isEmpty else { return }
+
+        let activePath = appState.fileData.currentImagePath
+        if appState.fileData.currentViewMode == .browse, let activePath, !paths.contains(activePath) {
+            paths = [activePath]
+        }
+
+        appState.selection.mostRecentSelectedPath = nil
+        _ = confirmAndMoveToTrash(paths, forceConfirmation: forceConfirmation)
+    }
+
     func moveToTrash(_ paths: [String]) -> [String] {
         guard let appState else { return [] }
-        let displayed = appState.fileData.displayedImages
+        let originalDisplayed = appState.fileData.displayedImages
+        let activePath = appState.fileData.currentImagePath
         var entries: [DeletedFileUndoEntry] = []
         var trashed: [String] = []
         var lockedNames: [String] = []
@@ -45,7 +61,7 @@ final class FileOperationsService {
             let size = attrs?[.size] as? Int64
             let mtime = attrs?[.modificationDate] as? Date
             let inode = fileInode(at: path)
-            let index = displayed.firstIndex(of: path)
+            let index = originalDisplayed.firstIndex(of: path)
 
             do {
                 var trashURL: NSURL?
@@ -80,7 +96,14 @@ final class FileOperationsService {
         }
         if !trashed.isEmpty {
             appState.status.showFileOperation("Moved \(trashed.count) file(s) to Trash")
-            refreshAfterChange()
+            DirectoryRefreshService.applyRemovedFiles(
+                appState: appState,
+                removed: Set(trashed),
+                displayed: originalDisplayed,
+                activePath: activePath
+            )
+            appState.selection.clearPreservingCurrentImage()
+            appState.eventBus.emit(.fileOperationComplete)
         }
         return trashed
     }
@@ -323,20 +346,12 @@ final class FileOperationsService {
 
     func beginRename(path: String) {
         guard let appState else { return }
-        let alert = NSAlert()
-        alert.messageText = "Rename"
-        alert.informativeText = (path as NSString).lastPathComponent
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        field.stringValue = (path as NSString).lastPathComponent
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !newName.isEmpty, newName != (path as NSString).lastPathComponent else { return }
+        guard let newName = StyledMessageDialog.presentTextInput(
+            title: "Rename",
+            message: (path as NSString).lastPathComponent,
+            initialText: (path as NSString).lastPathComponent,
+            confirmTitle: "Rename"
+        ), newName != (path as NSString).lastPathComponent else { return }
 
         do {
             let newPath = try rename(path: path, to: newName)
@@ -479,18 +494,18 @@ final class FileOperationsService {
     }
 
     private func confirmDelete(paths: [String]) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "Delete Files"
+        let message: String
         if paths.count == 1 {
             let name = (paths[0] as NSString).lastPathComponent
-            alert.informativeText = "Are you sure you want to delete this file?\n\n\(name)"
+            message = "Are you sure you want to delete this file?\n\n\(name)"
         } else {
-            alert.informativeText = "Are you sure you want to delete these \(paths.count) files?"
+            message = "Are you sure you want to delete these \(paths.count) files?"
         }
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons[1].keyEquivalent = "\r"
-        return alert.runModal() == .alertFirstButtonReturn
+        return StyledMessageDialog.showConfirm(
+            title: "Delete Files",
+            message: message,
+            confirmTitle: "Delete"
+        )
     }
 
     private func fileInode(at path: String) -> UInt64? {
@@ -565,10 +580,7 @@ final class FileOperationsService {
     }
 
     private func showAlert(_ title: String, _ message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.runModal()
+        StyledMessageDialog.showWarning(title: title, message: message)
     }
 
     private func refreshAfterChange() {

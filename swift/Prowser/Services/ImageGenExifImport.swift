@@ -121,11 +121,7 @@ enum ImageGenExifImport {
     }
 
     static func showWarning(title: String, message: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = title
-        alert.informativeText = message
-        alert.runModal()
+        StyledMessageDialog.showWarning(title: title, message: message)
     }
 
     // MARK: - Private
