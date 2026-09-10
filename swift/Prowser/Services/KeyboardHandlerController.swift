@@ -109,6 +109,22 @@ final class KeyboardHandlerController {
             }
         }
 
+        // ⌘; — swap browse image history first two (Last Image).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers == ";" {
+            if appState.fileData.currentViewMode == .browse {
+                appState.swapBrowseImageHistoryFirstTwoAndShow()
+                return true
+            }
+        }
+
+        // ⌘F — CLIP text search sheet.
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "f" {
+            appState.presentClipSearchSheet()
+            return true
+        }
+
         // ⌘K — find similar images (Python menu shortcut).
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "k" {
@@ -633,7 +649,7 @@ final class KeyboardHandlerController {
     ) -> Bool {
         if hasControl, !hasShift,
            event.charactersIgnoringModifiers?.lowercased() == "w" {
-            // Slideshow2 fit-to-width not yet ported; consume key to match browse binding.
+            appState.fitSlideshow2ToCanvasWidth()
             return true
         }
 

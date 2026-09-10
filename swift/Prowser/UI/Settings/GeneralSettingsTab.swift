@@ -15,6 +15,10 @@ struct GeneralSettingsTab: View {
                     Toggle("Wrap around when navigating", isOn: boolBinding("wrap_around", default: true))
                     Toggle("Restore state on launch", isOn: restoreStateBinding)
                     Toggle("Debug mode", isOn: boolBinding("debug_mode"))
+                    Toggle(
+                        "Peek status bar when cursor nears bottom",
+                        isOn: boolBinding("raise_status_bar_on_cursor_near_bottom", default: true)
+                    )
                 }
 
                 SettingsSection(title: "Images") {

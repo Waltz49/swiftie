@@ -3,88 +3,66 @@ import SwiftUI
 struct InformationPaneView: View {
     @Environment(AppState.self) private var appState
     @State private var record: ExifRecord = .empty
+    @State private var overlayData = InformationOverlayData(filename: "", fieldValuePairs: [])
+    @State private var html = ""
     @State private var errorMessage: String?
+    @State private var metadataRefreshTask: Task<Void, Never>?
+    @State private var fileMetadataToken: UUID?
+    @State private var themeRevision = 0
+
+    private var sectionState: InformationSectionState {
+        appState.informationSectionState
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        Group {
             if appState.fileData.currentImagePath == nil {
                 Text("No image selected")
-                    .foregroundStyle(.secondary)
-                    .padding()
+                    .foregroundStyle(appState.theme.colors.sidebarMutedText)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 15)
+                Spacer()
+            } else if html.isEmpty {
                 Spacer()
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        section("File") {
-                            infoRow("Name", record.fileName)
-                            infoRow("Directory", (record.directory as NSString).abbreviatingWithTildeInPath)
-                            infoRow("Size", record.fileSize)
-                            infoRow("File Date", record.fileDate)
-                            infoRow("Image Size", record.imageSize)
-                        }
-
-                        if hasExifSection {
-                            section("EXIF") {
-                                if let exifDate = record.exifDate { infoRow("EXIF Date", exifDate) }
-                                if let camera = record.camera { infoRow("Camera", camera) }
-                                if let lens = record.lens { infoRow("Lens", lens) }
-                                if let orientation = record.orientation { infoRow("Orientation", orientation) }
-                                if let location = record.location { infoRow("Location", location) }
-                                if let exposure = record.exposure { infoRow("Exposure", exposure) }
-                                if let aperture = record.aperture { infoRow("Aperture", aperture) }
-                                if let iso = record.iso { infoRow("ISO", iso) }
-                                if let focal = record.focalLength { infoRow("Focal Length", focal) }
-                                if let software = record.software { infoRow("Software", software) }
-                                if let artist = record.artist { infoRow("Artist", artist) }
-                            }
-                        }
-
-                        if let description = record.description, !description.isEmpty {
-                            section("Description") {
-                                Text(description)
-                                    .font(.body)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-
-                        if appState.imageGen.isProcessing {
-                            HStack {
-                                Text(appState.imageGen.progressMessage.isEmpty ? "Generation in progress…" : appState.imageGen.progressMessage)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Button("Cancel generation") {
-                                    appState.confirmCancelGeneration()
-                                }
-                                .font(.caption)
-                            }
-                        }
-
-                        if !appState.informationMenuBarVisible {
-                            HStack {
-                                Button("Edit Comment") { appState.beginEditUserComment() }
-                                Button("Copy Comment") { copyComment() }
-                                Button("Delete Comment") { deleteComment() }
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                        }
-                    }
-                    .padding(12)
+                InformationPaneWebView(html: html) { action, _ in
+                    handleLink(action)
                 }
             }
         }
         .onChange(of: appState.fileData.currentImagePath) { _, newPath in
-            Task { await reload(path: newPath) }
+            scheduleReload(path: newPath)
         }
         .onAppear {
-            Task { await reload(path: appState.fileData.currentImagePath) }
+            fileMetadataToken = appState.eventBus.subscribe(.fileMetadataChanged) { event in
+                guard case .string(let path) = event.payload else { return }
+                guard let current = appState.fileData.currentImagePath else { return }
+                if URL(fileURLWithPath: path).standardizedFileURL.path
+                    == URL(fileURLWithPath: current).standardizedFileURL.path {
+                    scheduleReload(path: current)
+                }
+            }
+            scheduleReload(path: appState.fileData.currentImagePath)
+        }
+        .onDisappear {
+            if let fileMetadataToken {
+                appState.eventBus.unsubscribe(.fileMetadataChanged, token: fileMetadataToken)
+            }
         }
         .onChange(of: appState.showEditUserCommentSheet) { _, showing in
             if !showing {
-                Task { await reload(path: appState.fileData.currentImagePath) }
+                scheduleReload(path: appState.fileData.currentImagePath)
             }
+        }
+        .onChange(of: appState.theme.colors) { _, _ in
+            themeRevision += 1
+            rebuildHTML()
+        }
+        .onChange(of: appState.imageGen.isProcessing) { _, _ in
+            rebuildHTML()
+        }
+        .onChange(of: appState.imageGen.cooldownSecondsRemaining) { _, _ in
+            rebuildHTML()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
@@ -92,7 +70,9 @@ struct InformationPaneView: View {
             case "edit":
                 appState.beginEditUserComment()
             case "copy":
-                copyComment()
+                copyComment(full: false)
+            case "speak":
+                speakComment()
             case "delete":
                 deleteComment()
             case "create":
@@ -100,6 +80,8 @@ struct InformationPaneView: View {
                     let prompt = await appState.importPromptForActiveImageAsync()
                     appState.openImageGenDialog(initialPrompt: prompt, autoImportEXIF: true)
                 }
+            case "editai":
+                appState.openImageGenDialog(function: "edit", autoImportEXIF: true)
             default:
                 break
             }
@@ -114,31 +96,12 @@ struct InformationPaneView: View {
         }
     }
 
-    private var hasExifSection: Bool {
-        record.exifDate != nil || record.camera != nil || record.lens != nil
-            || record.orientation != nil || record.location != nil || record.exposure != nil
-            || record.aperture != nil || record.iso != nil || record.focalLength != nil
-            || record.software != nil || record.artist != nil
-    }
-
-    @ViewBuilder
-    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            content()
-        }
-    }
-
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.body)
-                .textSelection(.enabled)
+    private func scheduleReload(path: String?) {
+        metadataRefreshTask?.cancel()
+        metadataRefreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled else { return }
+            await reload(path: path)
         }
     }
 
@@ -146,16 +109,82 @@ struct InformationPaneView: View {
     private func reload(path: String?) async {
         guard let path else {
             record = .empty
+            overlayData = InformationOverlayData(filename: "", fieldValuePairs: [])
+            html = ""
             return
         }
         record = await ExifService.loadRecord(for: path, preferPythonDescription: true)
+        overlayData = InformationPaneHTMLBuilder.buildOverlayData(
+            from: record,
+            imageDirectory: (path as NSString).deletingLastPathComponent,
+            imagePath: path
+        )
+        rebuildHTML()
     }
 
-    private func copyComment() {
-        guard let text = record.description else { return }
-        let clipboard = ExifService.userCommentTextForClipboard(text)
+    @MainActor
+    private func rebuildHTML() {
+        guard appState.fileData.currentImagePath != nil else {
+            html = ""
+            return
+        }
+        html = InformationPaneHTMLBuilder.buildHTML(
+            data: overlayData,
+            colors: appState.theme.colors,
+            sectionState: sectionState,
+            activeJobHeading: appState.fileData.currentImagePath.map {
+                appState.imageGen.activeJobRelationHeading(for: $0)
+            } ?? nil,
+            contentWidth: max(160, Int(appState.rightSidebarWidth) - 36)
+        )
+    }
+
+    @MainActor
+    private func handleLink(_ action: InformationPaneLinkAction) {
+        switch action {
+        case .copySeed(let seed):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(seed, forType: .string)
+            appState.status.show("Copied seed to clipboard")
+        case .toggleSection(let key, let expandAll):
+            sectionState.toggleSection(key, expandAll: expandAll)
+            rebuildHTML()
+        case .refLevel:
+            appState.showReferenceGraph()
+        case .speak:
+            speakComment()
+        case .copy(let full):
+            copyComment(full: full)
+        case .edit:
+            appState.beginEditUserComment()
+        case .create:
+            Task {
+                let prompt = await appState.importPromptForActiveImageAsync()
+                appState.openImageGenDialog(initialPrompt: prompt, autoImportEXIF: true)
+            }
+        case .editAI:
+            appState.openImageGenDialog(function: "edit", autoImportEXIF: true)
+        case .delete:
+            deleteComment()
+        case .cancelGeneration:
+            appState.confirmCancelGeneration()
+        }
+    }
+
+    @MainActor
+    private func speakComment() {
+        let text = overlayData.speakablePlainText ?? ""
+        let spoken = ExifService.truncateUserCommentBeforePrompt(text)
+        appState.commentSpeaker.speakOrStop(spoken)
+    }
+
+    @MainActor
+    private func copyComment(full: Bool) {
+        guard let text = overlayData.speakablePlainText else { return }
+        let clipboard = ExifService.userCommentTextForClipboard(text, copyFull: full)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(clipboard, forType: .string)
+        appState.status.show(full ? "Copied full user comment" : "Copied prompt to clipboard")
     }
 
     @MainActor

@@ -17,6 +17,8 @@ final class MetadataCacheService {
     private var dirty = false
     private let maxEntries = 12_000
 
+    var entryCount: Int { cache.count }
+
     init(paths: ProfilePaths) {
         cacheFile = paths.metadataCacheDirectory.appendingPathComponent("metadata_cache.json")
         load()

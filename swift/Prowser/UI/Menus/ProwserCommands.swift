@@ -42,6 +42,23 @@ struct ProwserCommands: Commands {
 
             Divider()
 
+            Button("Rename with Custom Prefix…") {
+                Task { @MainActor in appState.renameWithCustomPrefix() }
+            }
+            .keyboardShortcut("n", modifiers: .command)
+
+            Button("Convert Image Format…") {
+                Task { @MainActor in appState.presentConvertFormatSheet() }
+            }
+            .keyboardShortcut("m", modifiers: .command)
+
+            Button("Resize…") {
+                Task { @MainActor in appState.presentResizeSheet() }
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+
+            Divider()
+
             Button("Lock Files") {
                 Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
             }
@@ -81,26 +98,28 @@ struct ProwserCommands: Commands {
 
             Menu("Favorites") {
                 ForEach(1...9, id: \.self) { slot in
-                    Button("Favorite \(slot)") {
-                        Task { @MainActor in appState.fileOperations.openFavoriteDirectory(slot: slot) }
-                    }
+                    FavoriteMenuButton(appState: appState, slot: slot)
                 }
             }
 
-            Menu("Move to") {
-                Button("Destination 1") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 1) } }
-                Button("Destination 2") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 2) } }
-                Button("Destination 3") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 3) } }
-                Button("Destination 4") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 4) } }
-                Button("Destination 5") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 5) } }
-                Button("Destination 6") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 6) } }
-                Button("Destination 7") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 7) } }
-                Button("Destination 8") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 8) } }
-                Button("Destination 9") { Task { @MainActor in appState.fileOperations.moveToDestination(slot: 9) } }
-                Divider()
-                Button("Last Drop Location") {
-                    Task { @MainActor in appState.fileOperations.moveToLastDropLocation(copyOnly: false) }
-                }
+            MoveDestinationsMenu(appState: appState)
+
+            Divider()
+
+            Button("Settings…") {
+                Task { @MainActor in appState.openSettingsWindow() }
+            }
+            .keyboardShortcut(",", modifiers: .command)
+
+            LastImageMenuButton(appState: appState)
+
+            Button("Delete File") {
+                Task { @MainActor in deleteSelection() }
+            }
+            .keyboardShortcut(.delete, modifiers: [.command, .shift])
+
+            Button("Copy User Comment") {
+                Task { @MainActor in appState.copyUserCommentToClipboard() }
             }
 
             Divider()
@@ -176,6 +195,11 @@ struct ProwserCommands: Commands {
         }
 
         CommandMenu("Search") {
+            Button("Search by Text…") {
+                Task { @MainActor in appState.presentClipSearchSheet() }
+            }
+            .keyboardShortcut("f", modifiers: .command)
+
             Button("Find Similar Image Files…") {
                 Task { @MainActor in appState.searchOperations.findSimilarImages() }
             }
@@ -226,51 +250,47 @@ struct ProwserCommands: Commands {
 
             Divider()
 
-            Button("Toggle File Tree") {
-                Task { @MainActor in appState.toggleFileTree() }
-            }
-            .keyboardShortcut("t", modifiers: [])
+            PaneToggleButton(appState: appState, pane: .fileTree)
+                .keyboardShortcut("t", modifiers: [])
 
-            Button("Toggle Preview") {
-                Task { @MainActor in appState.togglePreviewPane() }
-            }
-            .keyboardShortcut("p", modifiers: [])
+            PaneToggleButton(appState: appState, pane: .preview)
+                .keyboardShortcut("p", modifiers: [])
 
-            Button("Toggle Organize Sidebar") {
-                Task { @MainActor in appState.toggleShortcutsSidebar() }
-            }
-            .keyboardShortcut("o", modifiers: [])
+            PaneToggleButton(appState: appState, pane: .organizeSidebar)
+                .keyboardShortcut("o", modifiers: [])
 
-            Button("Toggle Information Sidebar") {
-                Task { @MainActor in appState.toggleInformationSidebar() }
-            }
-            .keyboardShortcut("i", modifiers: [])
+            PaneToggleButton(appState: appState, pane: .informationSidebar)
+                .keyboardShortcut("i", modifiers: [])
 
-            Button("Toggle Jobs Pane") {
-                Task { @MainActor in appState.toggleJobsPane() }
-            }
-            .keyboardShortcut("j", modifiers: [])
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
+            JobsPaneToggleButton(appState: appState)
+                .keyboardShortcut("j", modifiers: [])
 
-            Button("Toggle Status Bar") {
-                Task { @MainActor in appState.toggleStatusBar() }
-            }
-            .keyboardShortcut("b", modifiers: [])
+            PaneToggleButton(appState: appState, pane: .statusBar)
+                .keyboardShortcut("b", modifiers: [])
 
-            Button("Show Chat") {
-                Task { @MainActor in appState.toggleChatPane() }
-            }
-            .keyboardShortcut(",", modifiers: [])
-            .disabled(!BundleCapabilities.chatUIEnabled)
+            ChatPaneToggleButton(appState: appState)
+                .keyboardShortcut(",", modifiers: [])
 
             Divider()
 
             Menu("Sort By") {
-                ForEach(SortMode.allCases, id: \.self) { mode in
-                    Button(mode.displayName) {
-                        Task { @MainActor in applySortMode(mode) }
-                    }
+                SortMenuButton(appState: appState, title: "Date (Newest First)", mode: .date, reversed: false, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "Date (Oldest First)", mode: .date, reversed: true, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "EXIF Date (Newest First)", mode: .exifDate, reversed: false, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "EXIF Date (Oldest First)", mode: .exifDate, reversed: true, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "EXIF Year (Newest First)", mode: .exifYear, reversed: false, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "EXIF Year (Oldest First)", mode: .exifYear, reversed: true, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "Name (A-Z)", mode: .name, reversed: false, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "Name (Z-A)", mode: .name, reversed: true, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "Size (Largest First)", mode: .size, reversed: false, apply: applySortMode)
+                SortMenuButton(appState: appState, title: "Size (Smallest First)", mode: .size, reversed: true, apply: applySortMode)
+                Divider()
+                Button("Reverse Sort Order") {
+                    Task { @MainActor in appState.reverseSortOrder() }
                 }
+                .keyboardShortcut("t", modifiers: .command)
+                RandomSortMenuButton(appState: appState)
+                SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode)
             }
 
             Button("Cycle Thumbnail Overlay") {
@@ -303,7 +323,55 @@ struct ProwserCommands: Commands {
         }
 
         CommandMenu("Tools") {
+            Button("Quick Mass Rename…") {
+                Task { @MainActor in appState.quickMassRename() }
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+
+            Button("Backup Custom Sort") {
+                Task { @MainActor in appState.backupCustomSort() }
+            }
+
+            Button("Restore Custom Sort") {
+                Task { @MainActor in appState.restoreCustomSort() }
+            }
+
+            Button("Lock Selected File") {
+                Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
+            }
+            .keyboardShortcut("l", modifiers: .command)
+
+            Button("Unlock Selected File") {
+                Task { @MainActor in appState.fileOperations.unlockSelectedFiles() }
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
+
+            Divider()
+
             MapLocationButton(appState: appState)
+
+            Divider()
+
+            Button("Open Home Directory") {
+                Task { @MainActor in
+                    let home = FileManager.default.homeDirectoryForCurrentUser.path
+                    appState.loadDirectory(home, saveHistory: true)
+                }
+            }
+            .keyboardShortcut("h", modifiers: .control)
+
+            Button("Cache Subdirectories' Thumbnails") {
+                Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
+            }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+
+            Button("Delete EXIF Date from File…") {
+                Task { @MainActor in appState.deleteExifDateFromSelection() }
+            }
+
+            Button("Speak Comment") {
+                Task { @MainActor in appState.speakUserComment() }
+            }
 
             Divider()
 
@@ -370,15 +438,26 @@ struct ProwserCommands: Commands {
             }
 
             Menu("Debug") {
+                Button("Print Cache Status") {
+                    Task { @MainActor in appState.printCacheStatus() }
+                }
+                .keyboardShortcut("d", modifiers: .command)
+
+                Button("Random Images") {
+                    Task { @MainActor in appState.loadRandomImagesFromRecents() }
+                }
+
+                Button("View Live Log") {
+                    Task { @MainActor in appState.openLiveLog() }
+                }
+                .keyboardShortcut("l", modifiers: .control)
+
+                Divider()
+
                 Button("Toggle Debug Mode") {
                     Task { @MainActor in toggleDebugMode() }
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-
-                Button("View Log") {
-                    Task { @MainActor in openViewLog() }
-                }
-                .keyboardShortcut("d", modifiers: .control)
 
                 Button("Toggle Number Overlay") {
                     Task { @MainActor in appState.toggleNumberOverlay() }
@@ -424,6 +503,14 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.showKeyboardHelp = true }
             }
             .keyboardShortcut("/", modifiers: [])
+
+            Button("PF Keys…") {
+                Task { @MainActor in appState.showPFKeysHelp() }
+            }
+
+            Button("Hidden Gems…") {
+                Task { @MainActor in appState.showHiddenGemsHelp() }
+            }
 
             Button("About Prowser") {
                 Task { @MainActor in appState.showAbout = true }
@@ -513,9 +600,8 @@ struct ProwserCommands: Commands {
     }
 
     @MainActor
-    private func applySortMode(_ mode: SortMode) {
-        appState.config.updateSetting("sort_mode", value: mode.rawValue)
-        appState.refreshDirectory()
+    private func applySortMode(_ mode: SortMode, reversed: Bool = false) {
+        appState.applySortMode(mode, reversed: reversed)
     }
 
     @MainActor
@@ -634,19 +720,6 @@ struct ProwserCommands: Commands {
         appState.status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
     }
 
-    @MainActor
-    private func openViewLog() {
-        let logPath = appState.config.logsDirectory
-            .appendingPathComponent("image_browser_print_\(getuid()).log")
-        if FileManager.default.fileExists(atPath: logPath.path) {
-            NSWorkspace.shared.open(logPath)
-        } else {
-            let alert = NSAlert()
-            alert.messageText = "Log file not found"
-            alert.informativeText = logPath.path
-            alert.runModal()
-        }
-    }
 }
 
 private struct MapLocationButton: View {
@@ -710,11 +783,169 @@ private struct ChromeToggleMenuButton: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        Button(appState.chromeToggleMenuTitle) {
+        Button(MenuStateHelpers.chromeToggleTitle(appState: appState)) {
             appState.toggleChrome()
         }
         .keyboardShortcut(".", modifiers: [])
         .keyboardShortcut(".", modifiers: .control)
+    }
+}
+
+private struct MoveDestinationsMenu: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        let action = appState.config.string(forKey: "destination_menu_action", default: "move")
+        let title = action == "copy" ? "Copy to" : "Move to"
+        Menu(title) {
+            ForEach(1...9, id: \.self) { slot in
+                DestinationMenuButton(appState: appState, slot: slot)
+            }
+            Divider()
+            Button("Last Drop Location") {
+                Task { @MainActor in appState.fileOperations.moveToLastDropLocation(copyOnly: false) }
+            }
+        }
+    }
+}
+
+private struct LastImageMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Last Image") {
+            Task { @MainActor in appState.swapBrowseImageHistoryFirstTwoAndShow() }
+        }
+        .keyboardShortcut(";", modifiers: .command)
+        .disabled(appState.fileData.currentViewMode != .browse)
+    }
+}
+
+private struct FavoriteMenuButton: View {
+    @Bindable var appState: AppState
+    let slot: Int
+
+    var body: some View {
+        Button(MenuStateHelpers.favoriteMenuLabel(slot: slot, config: appState.config)) {
+            Task { @MainActor in appState.fileOperations.openFavoriteDirectory(slot: slot) }
+        }
+        .disabled(!MenuStateHelpers.favoriteIsEnabled(slot: slot, config: appState.config))
+    }
+}
+
+private struct DestinationMenuButton: View {
+    @Bindable var appState: AppState
+    let slot: Int
+
+    var body: some View {
+        if MenuStateHelpers.destinationIsVisible(slot: slot, config: appState.config) {
+            Button(MenuStateHelpers.destinationMenuLabel(slot: slot, config: appState.config)) {
+                Task { @MainActor in
+                    let copyOnly = appState.config.string(forKey: "destination_menu_action", default: "move") == "copy"
+                    appState.fileOperations.moveToDestination(slot: slot, copyOnly: copyOnly)
+                }
+            }
+        }
+    }
+}
+
+private struct SortMenuButton: View {
+    @Bindable var appState: AppState
+    let title: String
+    let mode: SortMode
+    let reversed: Bool
+    let apply: (SortMode, Bool) -> Void
+
+    var body: some View {
+        let checked = MenuStateHelpers.sortMenuItemChecked(mode: mode, reversed: reversed, config: appState.config)
+        Button(checked ? "✓ \(title)" : title) {
+            Task { @MainActor in apply(mode, reversed) }
+        }
+    }
+}
+
+private struct RandomSortMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        let checked = MenuStateHelpers.sortMenuItemChecked(mode: .random, reversed: false, config: appState.config)
+        Button(checked ? "✓ Random Sort" : "Random Sort") {
+            Task { @MainActor in appState.applyRandomSort() }
+        }
+        .keyboardShortcut("r", modifiers: [])
+    }
+}
+
+private enum PaneToggleKind {
+    case fileTree
+    case preview
+    case organizeSidebar
+    case informationSidebar
+    case statusBar
+}
+
+@MainActor
+private struct PaneToggleButton: View {
+    @Bindable var appState: AppState
+    let pane: PaneToggleKind
+
+    var body: some View {
+        let (name, visible) = paneLabelState
+        Button(MenuStateHelpers.paneToggleLabel(name, visible: visible)) {
+            Task { @MainActor in toggle() }
+        }
+    }
+
+    @MainActor
+    private var paneLabelState: (String, Bool) {
+        switch pane {
+        case .fileTree:
+            return ("File Tree", appState.config.bool(forKey: "file_tree_visible", default: true))
+        case .preview:
+            return ("Preview", appState.config.bool(forKey: "preview_visible", default: true))
+        case .organizeSidebar:
+            return ("Organize Sidebar", appState.config.bool(forKey: "shortcuts_sidebar_visible", default: true))
+        case .informationSidebar:
+            return ("Information Sidebar", appState.config.bool(forKey: "information_sidebar_visible", default: true))
+        case .statusBar:
+            return ("Status Bar", appState.config.bool(forKey: "status_bar_visible", default: true))
+        }
+    }
+
+    @MainActor
+    private func toggle() {
+        switch pane {
+        case .fileTree: appState.toggleFileTree()
+        case .preview: appState.togglePreviewPane()
+        case .organizeSidebar: appState.toggleShortcutsSidebar()
+        case .informationSidebar: appState.toggleInformationSidebar()
+        case .statusBar: appState.toggleStatusBar()
+        }
+    }
+}
+
+private struct JobsPaneToggleButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        let visible = appState.jobsDisplayMode == .pane
+            && appState.config.bool(forKey: "jobs_visible", default: true)
+        Button(MenuStateHelpers.paneToggleLabel("Jobs Pane", visible: visible)) {
+            Task { @MainActor in appState.toggleJobsPane() }
+        }
+        .disabled(!BundleCapabilities.imageGenUIEnabled)
+    }
+}
+
+private struct ChatPaneToggleButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        let visible = appState.config.bool(forKey: "chat_visible", default: false)
+        Button(MenuStateHelpers.paneToggleLabel("Chat", visible: visible)) {
+            Task { @MainActor in appState.toggleChatPane() }
+        }
+        .disabled(!BundleCapabilities.chatUIEnabled)
     }
 }
 

@@ -150,6 +150,120 @@ final class SearchOperationsService {
         }
     }
 
+    func presentClipSearch() {
+        guard let appState else { return }
+        appState.showClipSearchSheet = true
+    }
+
+    func runClipSearch(
+        text: String,
+        threshold: Double,
+        recursive: Bool,
+        directory: String?,
+        onProgress: ((Int, Int, String) -> Void)? = nil
+    ) async throws -> [String] {
+        guard let appState else { return [] }
+        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else {
+            throw SearchError.workerFailed("Empty text prompt.")
+        }
+
+        let candidates = collectClipCandidatePaths(
+            appState: appState,
+            recursive: recursive,
+            directory: directory
+        )
+        guard !candidates.isEmpty else {
+            throw SearchError.noCandidates
+        }
+
+        if recursive, let searchDir = resolvedClipSearchDirectory(directory, appState: appState) {
+            if FileTreePathRestrictions.isRootOrSystemVolume(searchDir) {
+                throw SearchError.workerFailed(
+                    FileTreePathRestrictions.restrictedActionMessage(for: searchDir)
+                )
+            }
+        }
+
+        exitSlideshowIfNeeded(appState: appState)
+        if appState.fileData.currentViewMode == .browse || appState.fileData.currentViewMode == .list {
+            appState.fileData.setViewMode(.thumbnail)
+        }
+
+        let bridge = appState.workers.clipSearch
+        guard bridge.isAvailable else {
+            appState.status.show("CLIP text search requires Python and clip_search_worker.")
+            throw SearchError.pythonUnavailable
+        }
+
+        let filterBelow = threshold > 0
+        return try await withCheckedThrowingContinuation { continuation in
+            bridge.onFinished = { paths in
+                continuation.resume(returning: paths)
+            }
+            bridge.onError = { error in
+                if error == "Cancelled" {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    continuation.resume(throwing: SearchError.workerFailed(error))
+                }
+            }
+            bridge.onProgress = onProgress
+            do {
+                try bridge.search(
+                    textPrompt: prompt,
+                    candidatePaths: candidates,
+                    threshold: threshold,
+                    filterBelowThreshold: filterBelow
+                )
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
+    func applyClipSearchResults(_ paths: [String], prompt: String) {
+        guard let appState else { return }
+        guard !paths.isEmpty else {
+            showAlert("No Matches Found", informative: "No images matched \"\(prompt)\".")
+            return
+        }
+
+        let savedPath = appState.fileData.currentImagePath
+        appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+        appState.setSpecificFilesActive(true)
+        appState.fileData.setDisplayedImages(paths)
+        if let savedPath, paths.contains(savedPath) {
+            appState.fileData.setCurrentImagePath(savedPath)
+        } else {
+            appState.fileData.setCurrentIndex(0)
+            appState.fileData.setCurrentImagePath(paths[0])
+        }
+        appState.fileData.setViewMode(.thumbnail)
+        appState.status.show("CLIP search (\(prompt)): \(paths.count) images")
+    }
+
+    func findSimilarInFolder(directory: String, recursive: Bool = true) async throws -> [String] {
+        guard let appState else { return [] }
+        if FileTreePathRestrictions.isRootOrSystemVolume(directory) {
+            throw SearchError.workerFailed(
+                FileTreePathRestrictions.restrictedActionMessage(for: directory)
+            )
+        }
+
+        let references = referencePaths(appState: appState)
+        guard !references.isEmpty else {
+            throw SearchError.noReferenceImage
+        }
+
+        let options = SimilaritySearchOptions(
+            useCustomDirectory: true,
+            directoryPath: directory,
+            recursive: recursive
+        )
+        return try await runSimilaritySearch(options: options)
+    }
+
     func applySimilarityResults(_ paths: [String]) {
         guard let appState else { return }
         guard !paths.isEmpty else {
@@ -264,6 +378,67 @@ final class SearchOperationsService {
         } else if options.useCustomDirectory,
                   !options.directoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let searchDir = (options.directoryPath as NSString).expandingTildeInPath
+            let scanned = DirectoryScanner.scanDirectory(
+                at: searchDir,
+                extensions: extensions,
+                filterPattern: filterPattern
+            )
+            for path in scanned { add(path) }
+        } else {
+            for path in appState.fileData.displayedImages { add(path) }
+        }
+
+        return paths
+    }
+
+    private func resolvedClipSearchDirectory(_ directory: String?, appState: AppState) -> String? {
+        if let directory, !directory.isEmpty {
+            return (directory as NSString).expandingTildeInPath
+        }
+        return appState.fileData.currentDirectory
+    }
+
+    private func collectClipCandidatePaths(
+        appState: AppState,
+        recursive: Bool,
+        directory: String?
+    ) -> [String] {
+        let extensions = appState.config.imageExtensions
+        let filterPattern = appState.filterSettings.filterPattern
+        let excluded = PathExclusions.excludedPaths(config: appState.config)
+        let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
+        let maxDepth = appState.config.int(forKey: "search_depth", default: 4)
+
+        var paths: [String] = []
+        var seen = Set<String>()
+
+        func add(_ path: String) {
+            let resolved = URL(fileURLWithPath: path).standardizedFileURL.path
+            guard seen.insert(resolved).inserted else { return }
+            guard FileManager.default.fileExists(atPath: resolved) else { return }
+            if filterPattern != "*" && !filterPattern.isEmpty {
+                let name = (resolved as NSString).lastPathComponent
+                guard DirectoryScanner.matchesGlob(name, pattern: filterPattern) else { return }
+            }
+            paths.append(resolved)
+        }
+
+        if recursive {
+            let searchDir = resolvedClipSearchDirectory(directory, appState: appState) ?? ""
+            guard !searchDir.isEmpty, FileManager.default.fileExists(atPath: searchDir) else { return [] }
+            if searchDir == "/" { return [] }
+            let scanned = DirectoryScanner.scanDirectoryRecursive(
+                at: searchDir,
+                extensions: extensions,
+                filterPattern: filterPattern,
+                maxDepth: maxDepth,
+                excludedPaths: excluded,
+                includeHidden: showHidden
+            )
+            for path in scanned { add(path) }
+        } else if let searchDir = resolvedClipSearchDirectory(directory, appState: appState),
+                  !searchDir.isEmpty,
+                  FileManager.default.fileExists(atPath: searchDir) {
             let scanned = DirectoryScanner.scanDirectory(
                 at: searchDir,
                 extensions: extensions,

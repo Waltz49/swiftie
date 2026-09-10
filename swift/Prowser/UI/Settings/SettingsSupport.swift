@@ -126,6 +126,21 @@ enum SettingsSupport {
     }
 }
 
+struct SettingsPathRow: View {
+    let title: String
+    let path: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.subheadline)
+            Text(path)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+    }
+}
+
 struct SettingsSection<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content

@@ -88,7 +88,7 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 
 ## Context menus
 
-**None ported to Swift yet** (no `NSMenu` / SwiftUI `contextMenu` wiring in `swift/Prowser`).
+Swift uses AppKit `NSMenu` builders (`ThumbnailContextMenu`, `FileTreeContextMenu`, `SidebarPaneContextMenus`, `StatusBarMenus`).
 
 ### Thumbnail grid & list view
 
@@ -102,40 +102,40 @@ Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). L
 - [~] Copy image (⌃C, single selection)
 - [~] Duplicate file(s) (`FileOperationsService.duplicateFiles`)
 - [~] Find Similar Images… (⌘K)
-- [ ] Show in Directory (⇧⌘H, specific-files mode only)
+- [~] Show in Directory (⇧⌘H — `showImageInDirectory()`)
 - [~] Edit in \<external editor\> (⌘E; Pixelmator Pro multi-select exception deferred)
 - [~] Edit EXIF User Comment… (⇧⌘E)
-- [ ] Convert Format… (⌘M)
+- [~] Convert Format… (⌘M — `ConvertFormatSheet`)
 - [~] Extract Faces (single file via `FaceBridge.scanDirectory` imagePaths)
 - [~] Show Location on Map (⌘G, when GPS in EXIF)
-- [ ] Show Reference Graph (when resolvable EXIF refs)
+- [~] Show Reference Graph (`ReferenceGraphView` sheet)
 - [~] Find References to This Image…
 - [~] Open in Finder (single)
 - [~] Set as Wallpaper submenu (fit/fill/width/height)
 - [~] Multiselect disabled-items note at bottom
-- [ ] List view row context menu (reuse `ThumbnailContextMenu`)
+- [~] List view row context menu (`ImageListNSView` → `ThumbnailContextMenu`)
 
 ### File tree — directory entries
 
-Source: `files/file_tree_handler.py` `contextMenuEvent`.
+Source: `files/file_tree_handler.py` `contextMenuEvent`. Menu in `FileTreeContextMenu.swift`.
 
-- [ ] Rename… (F2, permission-checked)
-- [ ] Search by Description… (⌘F)
-- [ ] Search by Person… (⌘P)
-- [ ] Copy Directory Path (⌘C)
-- [ ] Open in Finder
-- [ ] Show All Images inc. Subdirs (⇧A)
-- [ ] Find Duplicate Image Files (⇧F)
-- [ ] Find Visually Similar Image Files (recursive, folder-scoped)
-- [ ] Clear Cache (folder subtree)
+- [~] Rename… (F2, permission-checked)
+- [~] Search by Description… (⌘F) — `ClipSearchSheet` + `CLIPSearchBridge`
+- [~] Search by Person… (⌘P)
+- [~] Copy Directory Path (⌘C)
+- [~] Open in Finder
+- [~] Show All Images inc. Subdirs (⇧A)
+- [~] Find Duplicate Image Files (⇧F)
+- [~] Find Visually Similar Image Files — `findSimilarInFolder` via `SimilaritySearchBridge`
+- [~] Clear Cache (folder subtree)
 
 ### Status bar
 
-Source: `status_bar_config.py` (click/right-click sections).
+Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`.
 
-- [ ] Filter section menu: Edit…, No Filter (\*), saved filter presets with checkmarks
-- [ ] Sort section menu: all sort modes + reverse + random + custom (mirrors keyboard sort keys)
-- [ ] Image count / selection section menus (properties, date tools, etc. — see Python status bar widgets)
+- [~] Filter section menu: Edit…, No Filter (\*), saved filter presets with checkmarks
+- [~] Sort section menu: all sort modes + random + custom (mirrors keyboard sort keys)
+- [ ] Image count / selection section menus (properties, date tools, etc.)
 - [ ] Status bar peek-on-hover chrome behavior
 
 ## Settings tabs (⌘,)
@@ -147,12 +147,12 @@ Source: `status_bar_config.py` (click/right-click sections).
 - [~] Destinations (`DestinationsSettingsTab`)
 - [~] Excludes (`ExcludesSettingsTab`)
 - [x] Theme (`ThemeSettingsTab` + `ThemeService` — full color editor, custom themes, browse transparency)
-- [ ] Maps and Editor (deferred)
+- [ ] Maps and Editor — `MapsEditorSettingsTab` (map app, external editor)
 - [~] Slideshow (`SlideshowSettingsTab` — core timing fields)
-- [ ] Models for Search (deferred — Python bridge)
-- [ ] Face Recognition (`--min` hidden; deferred)
-- [ ] Captioning (`--min` hidden; deferred)
-- [ ] LoRA (`--min` hidden; deferred)
+- [ ] Models for Search — `ModelsSearchSettingsTab` (CLIP/similarity keys)
+- [ ] Face Recognition — `FaceRecognitionSettingsTab` (`--min` hidden)
+- [ ] Captioning — `CaptioningSettingsTab` (`--min` hidden)
+- [ ] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
 - [~] Caches (`CacheSettingsTab` — clear thumbnails)
 
 ## Menus — File
@@ -320,9 +320,9 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | Pane visibility (`file_tree_visible`, `preview_visible`, `chat_visible`, `jobs_visible`, `shortcuts_sidebar_visible`, `information_sidebar_visible`, `status_bar_visible`, `left_sidebar_visible`, `right_sidebar_visible`) | done | done |
 | Pane toolbar visibility (`file_tree_show_toolbar`, etc.) | done | done |
 | `shortcuts_sidebar_scroll_position` | done | done (`PersistedScrollOffsetReader`) |
-| `information_section_expanded` | done | missing (info pane sections not collapsible yet) |
+| `information_section_expanded` | done | done (`InformationSectionState`) |
 | Main window geometry / position | not persisted (Qt fullscreen) | not persisted |
-| `window_size` (browse thumb size memory) | done | missing |
+| `window_size` (browse thumb size memory) | done | done (browse return state) |
 
 ### Session restore
 
@@ -360,7 +360,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `space_key_mode`, `browse_image_history_save_after_ms` | done | done |
 | Slideshow presets / rates / slideshow2/3 tuning | done | done |
 | `wrap_around`, `confirm_delete`, `debug_mode` | done | done |
-| `raise_status_bar_on_cursor_near_bottom` | done | missing |
+| `raise_status_bar_on_cursor_near_bottom` | done | done (status bar peek) |
 
 ### Settings UI state
 
@@ -437,10 +437,10 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] F2 rename, F12 list toggle, ⌘Return tree collapse/expand
 - [~] F3 browse image history; ⇧Space browse space mode toggle
 - [~] ⌘⇧H show image in directory
-- [ ] ⌘; last image swap
-- [ ] ⌘F CLIP search
+- [~] ⌘; last image swap (`BrowseImageHistoryController.swapFirstTwoAndShow`)
+- [~] ⌘F CLIP search (`ClipSearchSheet`)
 - [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
-- [ ] ⌘N rename prefix, ⌘M convert, ⌘⇧Z resize
+- [~] ⌘N rename prefix, ⌘M convert, ⌘⇧Z resize
 
 ## Suggested implementation order (M9+)
 
@@ -455,5 +455,46 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 
 ## Build variants
 
-- [ ] Full build (all AI features)
-- [ ] `--min` build (browser + search only, no imagegen/LM Studio/voice UI)
+- [~] Full build (all AI features)
+- [~] `--min` build (browser + search only, no imagegen/LM Studio/voice UI)
+
+## Information pane (exact Python layout)
+
+Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
+
+- [~] Collapsible sections with `information_section_expanded` persistence (9 keys)
+- [~] Monospace two-column table layout (Courier 12pt, 18×15px margins)
+- [~] Bordered EXIF grid vs borderless basic fields
+- [~] Seed `copyseed://` links (copy to clipboard, hover styling)
+- [~] Reference `reflevel://` links → reference graph sheet
+- [~] Image Model param table (Seed, Steps, LoRA, Elapsed, etc.)
+- [~] User comment h4 sections (Prompt, Title, References, Negative prompt)
+- [~] "Add user comment" empty placeholder
+- [~] Active job Input/Output headings with accent border
+- [~] Action bar: edit → copy → speak → create → editai → delete
+- [~] Option+click copy full comment; speak highlight while TTS active
+- [~] Live refresh on `fileMetadataChanged` and theme change
+- [~] Python-format field strings (dates, GPS 3dp, file size, MP line)
+
+## Menu parity matrix (Python `menu_manager.py` ↔ Swift `ProwserCommands.swift`)
+
+| Python menu | Swift status | Notes |
+|---|---|---|
+| File: Open, Recent, Favorites, Back/Forward | done | Dynamic favorite/destination labels via `MenuStateHelpers` |
+| File: Settings, Last Image, Delete, Trash view | partial | Settings via scene; Last Image ⌘; done; Trash view deferred (bundled app limit) |
+| Edit: copy path/image, lock, rename prefix, convert, resize | done | |
+| View: pane toggles, sort (checkmarks), theme, chrome | done | Hide/Show dynamic labels |
+| Search: similar, CLIP, person, duplicates, show in dir | done | Quick person search partial |
+| Move/Copy top-level menu | partial | Folded into File → Move to |
+| Image: create/edit/expand/infill, job queue | partial | Fast-create presets, model download deferred (Python backend) |
+| Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting |
+| Tools: Debug | partial | Browser debug done; imagegen debug stays Python |
+| Help: shortcuts, about, docs | partial | PF Keys / Hidden Gems placeholders |
+
+## Remaining gate items (manual sign-off)
+
+- Side-by-side screenshot compare: information pane collapsed/expanded, seed link, Image Model table
+- Profile round-trip: open settings.json in Python after Swift session
+- `--min` build hides imagegen/chat/faces UI end-to-end
+- Remove PySide6 `ImageBrowserWindow` launch (keep `prowser.py` workers only)
+- Chat named system prompt library; tree rename status checker; imagegen favorite prompts (acceptable Python-bridge deferrals)

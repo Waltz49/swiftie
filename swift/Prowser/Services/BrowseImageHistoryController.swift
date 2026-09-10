@@ -118,4 +118,18 @@ final class BrowseImageHistoryController {
         appState.fileData.setViewMode(.thumbnail)
         appState.status.show("Image history (\(paths.count) images)")
     }
+
+    /// ⌘; — swap F3 browse history [0]↔[1], then show the new first image in browse mode.
+    func swapFirstTwoAndShow() {
+        guard let appState else { return }
+        guard appState.fileData.currentViewMode == .browse else { return }
+
+        prune()
+        guard history.count >= 2 else { return }
+        history.swapAt(0, 1)
+
+        let newFirst = history[0]
+        guard FileManager.default.fileExists(atPath: newFirst) else { return }
+        appState.openImageInBrowse(path: newFirst)
+    }
 }

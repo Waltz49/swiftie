@@ -255,15 +255,15 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func infoSpeak(_ sender: NSMenuItem) {
-        appState?.status.show("Read aloud is not available in the Swift build yet.")
+        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "speak"])
     }
 
     @objc func infoCreate(_ sender: NSMenuItem) {
-        appState?.openImageGenDialog()
+        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "create"])
     }
 
     @objc func infoEditAI(_ sender: NSMenuItem) {
-        appState?.status.show("Edit with AI is not available in the Swift build yet.")
+        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "editai"])
     }
 
     @objc func infoDelete(_ sender: NSMenuItem) {

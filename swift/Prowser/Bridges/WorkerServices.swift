@@ -8,6 +8,7 @@ final class WorkerServices {
     let foregroundModelTasks: ModelTasksBridge
     let imageGenRegistry: ImageGenRegistryBridge
     let clip: CLIPBridge
+    let clipSearch: CLIPSearchBridge
     let chat: ChatBridge
     let face: FaceBridge
     let similaritySearch: SimilaritySearchBridge
@@ -21,6 +22,7 @@ final class WorkerServices {
         foregroundModelTasks = ModelTasksBridge(profilePath: profilePath)
         imageGenRegistry = ImageGenRegistryBridge(profilePath: profilePath)
         clip = CLIPBridge(profilePath: profilePath)
+        clipSearch = CLIPSearchBridge(profilePath: profilePath)
         chat = ChatBridge(profilePath: profilePath)
         face = FaceBridge(profilePath: profilePath)
         similaritySearch = SimilaritySearchBridge(profilePath: profilePath)
@@ -43,6 +45,7 @@ final class WorkerServices {
         foregroundModelTasks.shutdown()
         imageGenRegistry.shutdown()
         clip.shutdown()
+        clipSearch.shutdown()
         chat.shutdown()
         face.shutdown()
         similaritySearch.shutdown()

@@ -45,11 +45,15 @@ struct Slideshow2View: View {
                     .background(.black.opacity(0.35))
                 }
             }
-        }
-        .onAppear {
-            slideIndex = appState.fileData.currentIndex
-            loadSlide(images: images, viewport: nil)
-            startPanTimer(images: images)
+            .onAppear {
+                slideIndex = appState.fileData.currentIndex
+                appState.slideshow2ViewportSize = geometry.size
+                loadSlide(images: images, viewport: geometry.size)
+                startPanTimer(images: images)
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                appState.slideshow2ViewportSize = newSize
+            }
         }
         .onChange(of: appState.fileData.currentIndex) { _, newIndex in
             slideIndex = newIndex

@@ -125,7 +125,11 @@ final class FileTreeMenuActions: NSObject {
             showRestrictedAlert(path: path)
             return
         }
-        appState.status.show("Search by Description is not available in the Swift build yet.")
+        if appState.fileData.currentViewMode == .browse {
+            appState.fileData.setViewMode(.thumbnail)
+        }
+        appState.clipSearchPrefillDirectory = path
+        appState.showClipSearchSheet = true
     }
 
     @objc func searchByPerson(_ sender: NSMenuItem) {

@@ -48,77 +48,7 @@ struct MainWindowView: View {
         .environment(\.themeColors, appState.theme.colors)
         .background(appState.theme.colors.background)
         .toolbar(.hidden, for: .windowToolbar)
-        .sheet(isPresented: Binding(
-            get: { appState.showKeyboardHelp },
-            set: { appState.showKeyboardHelp = $0 }
-        )) {
-            KeyboardShortcutsHelpView()
-                .environment(\.themeColors, appState.theme.colors)
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.showAbout },
-            set: { appState.showAbout = $0 }
-        )) {
-            AboutView()
-                .environment(\.themeColors, appState.theme.colors)
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.showSimilaritySearchSheet },
-            set: { appState.showSimilaritySearchSheet = $0 }
-        )) {
-            SimilaritySearchSheet()
-                .environment(appState)
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.showPersonSearchSheet },
-            set: { appState.showPersonSearchSheet = $0 }
-        )) {
-            PersonSearchSheet()
-                .environment(appState)
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.showFindReferencesSheet },
-            set: { appState.showFindReferencesSheet = $0 }
-        )) {
-            FindReferencesSheet()
-                .environment(appState)
-        }
-        .sheet(item: Binding(
-            get: { appState.exifBatchConfirmation },
-            set: { appState.exifBatchConfirmation = $0 }
-        )) { state in
-            ExifBatchConfirmationSheet(state: state) {
-                appState.exifBatchConfirmation = nil
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.showFilterDialog },
-            set: { appState.showFilterDialog = $0 }
-        )) {
-            FilterDialogSheet()
-                .environment(appState)
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.showEditUserCommentSheet },
-            set: { presented in
-                if !presented {
-                    appState.cancelEditUserComment()
-                } else {
-                    appState.showEditUserCommentSheet = true
-                }
-            }
-        )) {
-            EditExifUserCommentSheet()
-                .environment(appState)
-        }
-        .alert("EXIF Error", isPresented: Binding(
-            get: { appState.editUserCommentError != nil },
-            set: { if !$0 { appState.editUserCommentError = nil } }
-        )) {
-            Button("OK", role: .cancel) { appState.editUserCommentError = nil }
-        } message: {
-            Text(appState.editUserCommentError ?? "")
-        }
+        .modifier(MainWindowSheetsModifier(appState: appState))
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
             appState.refreshSidebarLayout()
@@ -149,6 +79,133 @@ struct MainWindowView: View {
                 openWindow(id: "imagegen-unified")
             }
         }
+        .overlay(alignment: .bottom) {
+            StatusBarPeekMouseTracker(appState: appState)
+                .frame(maxWidth: .infinity)
+                .frame(height: 35)
+        }
+    }
+}
+
+/// Shows the status bar when the cursor nears the bottom edge (Python peek zone).
+private struct StatusBarPeekMouseTracker: NSViewRepresentable {
+    let appState: AppState
+
+    func makeNSView(context: Context) -> StatusBarPeekTrackingView {
+        let view = StatusBarPeekTrackingView()
+        view.appState = appState
+        return view
+    }
+
+    func updateNSView(_ nsView: StatusBarPeekTrackingView, context: Context) {
+        nsView.appState = appState
+    }
+}
+
+@MainActor
+private final class StatusBarPeekTrackingView: NSView {
+    weak var appState: AppState?
+    private let peekZoneHeight: CGFloat = 35
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard let appState else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        let nearBottom = location.y <= peekZoneHeight
+        appState.updateStatusBarPeek(nearBottom: nearBottom)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseMoved, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+    }
+}
+
+private struct MainWindowSheetsModifier: ViewModifier {
+    @Bindable var appState: AppState
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $appState.showKeyboardHelp) {
+                KeyboardShortcutsHelpView()
+                    .environment(\.themeColors, appState.theme.colors)
+            }
+            .sheet(isPresented: $appState.showAbout) {
+                AboutView()
+                    .environment(\.themeColors, appState.theme.colors)
+            }
+            .sheet(isPresented: $appState.showSimilaritySearchSheet) {
+                SimilaritySearchSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showPersonSearchSheet) {
+                PersonSearchSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showClipSearchSheet) {
+                ClipSearchSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showConvertFormatSheet) {
+                ConvertFormatSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showResizeSheet) {
+                ResizeImagesSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showFindReferencesSheet) {
+                FindReferencesSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showReferenceGraphSheet) {
+                if let graph = appState.referenceGraphData {
+                    ReferenceGraphView(graph: graph)
+                        .environment(appState)
+                }
+            }
+            .sheet(item: $appState.exifBatchConfirmation) { state in
+                ExifBatchConfirmationSheet(state: state) {
+                    appState.exifBatchConfirmation = nil
+                }
+            }
+            .sheet(isPresented: $appState.showFilterDialog) {
+                FilterDialogSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: Binding(
+                get: { appState.showEditUserCommentSheet },
+                set: { presented in
+                    if !presented {
+                        appState.cancelEditUserComment()
+                    } else {
+                        appState.showEditUserCommentSheet = true
+                    }
+                }
+            )) {
+                EditExifUserCommentSheet()
+                    .environment(appState)
+            }
+            .alert("EXIF Error", isPresented: Binding(
+                get: { appState.editUserCommentError != nil },
+                set: { if !$0 { appState.editUserCommentError = nil } }
+            )) {
+                Button("OK", role: .cancel) { appState.editUserCommentError = nil }
+            } message: {
+                Text(appState.editUserCommentError ?? "")
+            }
     }
 }
 

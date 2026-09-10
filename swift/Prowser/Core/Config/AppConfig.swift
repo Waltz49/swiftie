@@ -264,6 +264,38 @@ final class AppConfig {
         saveSettings()
     }
 
+    func sectionExpanded(_ key: String) -> Bool {
+        let defaults = Self.defaultInformationSectionExpanded
+        guard let saved = settings["information_section_expanded"] as? [String: Bool] else {
+            return defaults[key] ?? true
+        }
+        return saved[key] ?? defaults[key] ?? true
+    }
+
+    func setSectionExpanded(_ key: String, expanded: Bool) {
+        guard Self.defaultInformationSectionExpanded.keys.contains(key) else { return }
+        var state = (settings["information_section_expanded"] as? [String: Bool]) ?? Self.defaultInformationSectionExpanded
+        guard state[key] != expanded else { return }
+        state[key] = expanded
+        updateSetting("information_section_expanded", value: state)
+    }
+
+    func allSectionKeys() -> [String] {
+        Array(Self.defaultInformationSectionExpanded.keys).sorted()
+    }
+
+    static let defaultInformationSectionExpanded: [String: Bool] = [
+        "filename": true,
+        "references": true,
+        "image_model": true,
+        "prompt": true,
+        "title": true,
+        "description": true,
+        "negative_prompt": true,
+        "input_to_active_job": true,
+        "output_of_active_job": true,
+    ]
+
     func applySettingsChange(emit: AppEventBus) {
         emit.emit(.settingsChanged)
     }
@@ -359,6 +391,7 @@ final class AppConfig {
             "jobs_pane_compact": false,
             "file_tree_show_toolbar": true,
             "information_show_menu_bar": true,
+            "information_section_expanded": defaultInformationSectionExpanded,
             "chat_show_toolbar": true,
             "jobs_show_toolbar": true,
             "imagegen": [
@@ -407,6 +440,17 @@ final class AppConfig {
             "browse_image_history_save_after_ms": 3000,
             "space_key_mode": "exit",
             "map_application": "apple_maps",
+            "image_editor_app": "Preview",
+            "raise_status_bar_on_cursor_near_bottom": true,
+            "similarity_metric": "cosine",
+            "resnet_model": "resnet18",
+            "clip_model_name": "openai/clip-vit-base-patch32",
+            "caption_lms_host": "localhost:1234",
+            "caption_system_prompt": "Analyze the provided image thoroughly and write a highly detailed, visually rich, {CAPTION_WORD_COUNT}-word caption.",
+            "caption_user_prompt": "Carefully study the attached image and provide a comprehensive, vivid, and nuanced {CAPTION_WORD_COUNT}-word caption.",
+            "caption_max_words": 200,
+            "caption_temperature": 0.7,
+            "imagegen_lora_model_key": "",
             "slideshow2_enlargement": 1.2,
             "slideshow2_speed": 8,
             "slideshow2_high_quality_scaling": false,

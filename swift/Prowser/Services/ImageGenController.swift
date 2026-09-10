@@ -54,6 +54,27 @@ final class ImageGenController {
         isProcessing && !skipSeriesCopyRequested && copyBatchActive
     }
 
+    func activeJobRelationHeading(for path: String) -> String? {
+        guard isEnabled, viewingPathMatchesActiveGeneration(path) else { return nil }
+        if viewingPathIsActiveGenerationOutput(path) {
+            return "Output of Active Job"
+        }
+        return "Input to Active Job"
+    }
+
+    func viewingPathMatchesActiveGeneration(_ path: String) -> Bool {
+        guard isEnabled, !path.isEmpty else { return false }
+        guard isProcessing || cooldownSecondsRemaining > 0 else { return false }
+        let norm = normalizedImagePath(path)
+        return pathsAssociatedWithActiveGeneration().contains(norm)
+    }
+
+    func viewingPathIsActiveGenerationOutput(_ path: String) -> Bool {
+        guard let activeOutputPath, !activeOutputPath.isEmpty else { return false }
+        guard isProcessing || cooldownSecondsRemaining > 0 else { return false }
+        return normalizedImagePath(path) == normalizedImagePath(activeOutputPath)
+    }
+
     var isDialogBuildPaused: Bool { dialogBuildPauseCount > 0 }
 
     var onImageGenerated: ((String) -> Void)?
@@ -934,6 +955,25 @@ final class ImageGenController {
 
     private func normalizedImagePath(_ path: String) -> String {
         (path as NSString).standardizingPath
+    }
+
+    private func pathsAssociatedWithActiveGeneration() -> Set<String> {
+        var paths = Set<String>()
+        if let activeOutputPath, !activeOutputPath.isEmpty {
+            paths.insert(normalizedImagePath(activeOutputPath))
+        }
+        if let progressivePreviewPath, !progressivePreviewPath.isEmpty {
+            paths.insert(normalizedImagePath(progressivePreviewPath))
+        }
+        for path in activeThumbnailPaths where !path.isEmpty {
+            paths.insert(normalizedImagePath(path))
+        }
+        if let sourcePaths = pendingValues["source_image_paths"] as? [String] {
+            for path in sourcePaths where !path.isEmpty {
+                paths.insert(normalizedImagePath(path))
+            }
+        }
+        return paths
     }
 
     private func refreshAllQueuedJobStatusViews() async {

@@ -95,6 +95,11 @@ actor ThumbnailCache {
         return cgImage
     }
 
+    func statistics() -> (memoryCount: Int, diskCount: Int) {
+        let diskCount = (try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path).count) ?? 0
+        return (memoryCache.count, diskCount)
+    }
+
     private func storeInMemory(key: String, image: NSImage, imagePath: String) {
         if memoryCache.count >= memoryLimit {
             memoryCache.removeValue(forKey: memoryCache.keys.first!)

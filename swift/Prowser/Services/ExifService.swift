@@ -9,12 +9,6 @@ enum ExifService {
         return f
     }()
 
-    private static let displayDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .medium
-        return f
-    }()
 
     static let supportedWriteExtensions: Set<String> = [
         "jpg", "jpeg", "png", "tiff", "tif", "webp",
@@ -39,10 +33,10 @@ enum ExifService {
 
         if let attrs = try? FileManager.default.attributesOfItem(atPath: path) {
             if let size = attrs[.size] as? NSNumber {
-                record.fileSize = ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)
+                record.fileSize = InformationFormatting.formatFileSize(size.intValue)
             }
             if let mtime = attrs[.modificationDate] as? Date {
-                record.fileDate = displayDateFormatter.string(from: mtime)
+                record.fileDate = InformationFormatting.formatFileDate(mtime)
             }
         }
 
@@ -53,18 +47,23 @@ enum ExifService {
 
         if let width = props[kCGImagePropertyPixelWidth] as? Int,
            let height = props[kCGImagePropertyPixelHeight] as? Int {
-            record.imageSize = "\(width) × \(height)"
+            record.imageSize = InformationFormatting.formatImageSize(width: width, height: height)
         }
 
         let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
 
-        if let dateString = (exif[kCGImagePropertyExifDateTimeOriginal] as? String)
-            ?? (exif[kCGImagePropertyExifDateTimeDigitized] as? String)
-            ?? (exif[exifDateTimeKey] as? String)
-            ?? (tiff[kCGImagePropertyTIFFDateTime] as? String),
-           let date = exifDateFormatter.date(from: dateString) {
-            record.exifDate = displayDateFormatter.string(from: date)
+        let dateCandidates = [
+            exif[kCGImagePropertyExifDateTimeOriginal] as? String,
+            exif[kCGImagePropertyExifDateTimeDigitized] as? String,
+            exif[exifDateTimeKey] as? String,
+            tiff[kCGImagePropertyTIFFDateTime] as? String,
+        ]
+        for candidate in dateCandidates {
+            if let candidate, let formatted = InformationFormatting.formatExifDateString(candidate) {
+                record.exifDate = formatted
+                break
+            }
         }
 
         let make = (tiff[kCGImagePropertyTIFFMake] as? String)?.trimmingCharacters(in: .whitespaces)
@@ -89,9 +88,9 @@ enum ExifService {
         }
 
         if let fNumber = exif[kCGImagePropertyExifFNumber] as? Double {
-            record.aperture = "f/\(String(format: "%.1f", fNumber))"
+            record.aperture = InformationFormatting.formatAperture(fNumber)
         } else if let fNumber = exif[kCGImagePropertyExifFNumber] as? NSNumber {
-            record.aperture = "f/\(String(format: "%.1f", fNumber.doubleValue))"
+            record.aperture = InformationFormatting.formatAperture(fNumber.doubleValue)
         }
 
         if let iso = exif[kCGImagePropertyExifISOSpeedRatings] as? Int {
@@ -101,17 +100,23 @@ enum ExifService {
         }
 
         if let focal = exif[kCGImagePropertyExifFocalLength] as? Double {
-            record.focalLength = "\(String(format: "%.1f", focal)) mm"
+            record.focalLength = InformationFormatting.formatFocalLength(focal)
         } else if let focal = exif[kCGImagePropertyExifFocalLength] as? NSNumber {
-            record.focalLength = "\(String(format: "%.1f", focal.doubleValue)) mm"
+            record.focalLength = InformationFormatting.formatFocalLength(focal.doubleValue)
         }
 
         record.software = tiff[kCGImagePropertyTIFFSoftware] as? String
         record.artist = tiff[kCGImagePropertyTIFFArtist] as? String
 
-        if let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] {
-            record.location = formatGPS(gps)
+        if let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+           let coords = parseGPS(gps) {
+            record.location = InformationFormatting.formatGPS(
+                latitude: coords.latitude,
+                longitude: coords.longitude
+            )
         }
+
+        record.extraFields = extraExifFields(exif: exif, tiff: tiff)
 
         return record
     }
@@ -498,9 +503,82 @@ enum ExifService {
         return (latitude, longitude)
     }
 
-    private static func formatGPS(_ gps: [CFString: Any]) -> String? {
-        guard let coords = parseGPS(gps) else { return nil }
-        return String(format: "%.5f, %.5f", coords.latitude, coords.longitude)
+    private static func extraExifFields(exif: [CFString: Any], tiff: [CFString: Any]) -> [(String, String)] {
+        let skipNames: Set<String> = [
+            "Camera", "Orientation", "Lens", "Location", "Description",
+            "EXIF Date", "Exposure", "Aperture", "ISO", "Focal Length", "Software", "Artist",
+        ]
+        var fields: [String: String] = [:]
+
+        if let copyright = tiff[kCGImagePropertyTIFFCopyright] as? String, !copyright.isEmpty {
+            fields["Copyright"] = copyright
+        }
+
+        if let flash = exif[kCGImagePropertyExifFlash] as? Int {
+            fields["Flash"] = flashLabel(flash)
+        } else if let flash = exif[kCGImagePropertyExifFlash] as? NSNumber {
+            fields["Flash"] = flashLabel(flash.intValue)
+        }
+
+        if let whiteBalance = exif[kCGImagePropertyExifWhiteBalance] as? Int {
+            fields["White Balance"] = whiteBalance == 0 ? "Auto" : "Manual"
+        }
+
+        if let metering = exif[kCGImagePropertyExifMeteringMode] as? Int {
+            fields["Metering Mode"] = "\(metering)"
+        }
+
+        if let exposureMode = exif[kCGImagePropertyExifExposureMode] as? Int {
+            fields["Exposure Mode"] = "\(exposureMode)"
+        }
+
+        if let exposureProgram = exif[kCGImagePropertyExifExposureProgram] as? Int {
+            fields["Exposure Program"] = "\(exposureProgram)"
+        }
+
+        if let shutter = exif[kCGImagePropertyExifShutterSpeedValue] as? Double {
+            fields["Shutter Speed"] = InformationFormatting.formatFloat(shutter)
+        }
+
+        if let apertureValue = exif[kCGImagePropertyExifApertureValue] as? Double {
+            fields["Aperture Value"] = InformationFormatting.formatFloat(apertureValue)
+        }
+
+        if let brightness = exif[kCGImagePropertyExifBrightnessValue] as? Double {
+            fields["Brightness"] = InformationFormatting.formatFloat(brightness)
+        }
+
+        if let subjectDistance = exif[kCGImagePropertyExifSubjectDistance] as? Double {
+            fields["Subject Distance"] = InformationFormatting.formatFloat(subjectDistance)
+        }
+
+        if let focal35 = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Int {
+            fields["Focal Len (35mm)"] = "\(focal35)mm"
+        } else if let focal35 = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? NSNumber {
+            fields["Focal Len (35mm)"] = "\(focal35.intValue)mm"
+        }
+
+        if let colorSpace = exif[kCGImagePropertyExifColorSpace] as? Int {
+            fields["Color Space"] = "\(colorSpace)"
+        }
+
+        return fields
+            .filter { !skipNames.contains($0.key) }
+            .sorted { $0.key < $1.key }
+            .map { ($0.key, $0.value) }
+    }
+
+    private static func flashLabel(_ value: Int) -> String {
+        switch value {
+        case 0: return "No Flash"
+        case 1: return "Fired"
+        case 5: return "Fired, Return not detected"
+        case 7: return "Fired, Return detected"
+        case 9: return "Fired, Compulsory"
+        case 13: return "Fired, Compulsory, Return not detected"
+        case 15: return "Fired, Compulsory, Return detected"
+        default: return "\(value)"
+        }
     }
 
     enum ExifError: LocalizedError {

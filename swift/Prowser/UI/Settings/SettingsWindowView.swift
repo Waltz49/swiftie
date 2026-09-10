@@ -61,32 +61,17 @@ struct SettingsWindowView: View {
         case .theme:
             ThemeSettingsTab()
         case .maps:
-            DeferredSettingsTabView(
-                title: "Maps and Editor",
-                detail: "Map application preference and external image editor settings."
-            )
+            MapsEditorSettingsTab()
         case .slideshow:
             SlideshowSettingsTab()
         case .similarity:
-            DeferredSettingsTabView(
-                title: "Models for Search",
-                detail: "CLIP and similarity search model configuration."
-            )
+            ModelsSearchSettingsTab()
         case .faces:
-            DeferredSettingsTabView(
-                title: "Face Recognition",
-                detail: "Face detection model paths and recognition settings."
-            )
+            FaceRecognitionSettingsTab()
         case .captioning:
-            DeferredSettingsTabView(
-                title: "Captioning",
-                detail: "Automatic image captioning model settings."
-            )
+            CaptioningSettingsTab()
         case .lora:
-            DeferredSettingsTabView(
-                title: "LoRA",
-                detail: "LoRA model catalogs and download settings."
-            )
+            LoRASettingsTab()
         case .caches:
             CacheSettingsTab()
         }

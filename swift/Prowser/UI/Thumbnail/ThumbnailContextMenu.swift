@@ -82,6 +82,31 @@ enum ThumbnailContextMenu {
         findSimilar.target = MenuActions.shared
         findSimilar.representedObject = paths
 
+        let showInDirectory = menu.addItem(
+            withTitle: menuTitle("Show in Directory", shortcut: "⇧⌘H"),
+            action: #selector(MenuActions.showInDirectory(_:)),
+            keyEquivalent: ""
+        )
+        showInDirectory.target = MenuActions.shared
+        showInDirectory.representedObject = paths
+        showInDirectory.isEnabled = singleOnly && appState.specificFilesActive
+
+        let convertFormat = menu.addItem(
+            withTitle: menuTitle("Convert Format…", shortcut: "⌘M"),
+            action: #selector(MenuActions.convertFormat(_:)),
+            keyEquivalent: ""
+        )
+        convertFormat.target = MenuActions.shared
+        convertFormat.representedObject = paths
+
+        let resizeImages = menu.addItem(
+            withTitle: menuTitle("Resize…", shortcut: "⌘⇧Z"),
+            action: #selector(MenuActions.resizeImages(_:)),
+            keyEquivalent: ""
+        )
+        resizeImages.target = MenuActions.shared
+        resizeImages.representedObject = paths
+
         menu.addItem(.separator())
 
         let editorName = appState.config.string(forKey: "image_editor_app", default: "Preview")
@@ -111,6 +136,16 @@ enum ThumbnailContextMenu {
         findRefs.representedObject = paths
         findRefs.isEnabled = singleOnly
 
+        if singleOnly {
+            let refGraph = menu.addItem(
+                withTitle: "Show Reference Graph",
+                action: #selector(MenuActions.showReferenceGraph(_:)),
+                keyEquivalent: ""
+            )
+            refGraph.target = MenuActions.shared
+            refGraph.representedObject = paths
+        }
+
         if BundleCapabilities.facesUIEnabled, singleOnly {
             let faces = menu.addItem(
                 withTitle: menuTitle("Extract Faces", shortcut: "⇧⌘P"),
@@ -120,6 +155,16 @@ enum ThumbnailContextMenu {
             faces.target = MenuActions.shared
             faces.representedObject = paths
         }
+
+        let anyHasGPS = paths.contains { ExifService.gpsCoordinates(for: $0) != nil }
+        let mapLocation = menu.addItem(
+            withTitle: menuTitle("Show Location on Map", shortcut: "⌘G"),
+            action: #selector(MenuActions.showLocationOnMap(_:)),
+            keyEquivalent: ""
+        )
+        mapLocation.target = MenuActions.shared
+        mapLocation.representedObject = paths
+        mapLocation.isEnabled = anyHasGPS
 
         menu.addItem(.separator())
 
@@ -247,6 +292,26 @@ private final class MenuActions: NSObject {
         appState.searchOperations.findSimilarImages()
     }
 
+    @objc func convertFormat(_ sender: NSMenuItem) {
+        guard let appState, let paths = sender.representedObject as? [String] else { return }
+        appState.presentConvertFormatSheet(paths: paths)
+    }
+
+    @objc func resizeImages(_ sender: NSMenuItem) {
+        guard let appState, let paths = sender.representedObject as? [String] else { return }
+        appState.presentResizeSheet(paths: paths)
+    }
+
+    @objc func showInDirectory(_ sender: NSMenuItem) {
+        guard let appState else { return }
+        appState.showImageInDirectory()
+    }
+
+    @objc func showLocationOnMap(_ sender: NSMenuItem) {
+        guard let appState else { return }
+        appState.openMapForCurrentImage()
+    }
+
     @objc func editExternal(_ sender: NSMenuItem) {
         guard let appState else { return }
         appState.fileOperations.openWithExternalEditor()
@@ -261,6 +326,11 @@ private final class MenuActions: NSObject {
     @objc func findReferences(_ sender: NSMenuItem) {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
         appState.findReferences(to: path)
+    }
+
+    @objc func showReferenceGraph(_ sender: NSMenuItem) {
+        guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
+        appState.showReferenceGraph(for: path)
     }
 
     @objc func extractFaces(_ sender: NSMenuItem) {

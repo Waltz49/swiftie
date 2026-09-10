@@ -97,8 +97,18 @@ struct InformationActionBarView: View {
         HStack(spacing: 4) {
             actionButton("edit", systemName: "text.bubble", tooltip: "Edit user comment")
             actionButton("copy", systemName: "doc.on.doc", tooltip: "Copy prompt to clipboard", enabled: hasComment)
+            if BundleCapabilities.voiceInputUIEnabled {
+                actionButton(
+                    "speak",
+                    systemName: appState.commentSpeaker.isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2",
+                    tooltip: "Read user comment aloud",
+                    enabled: hasComment,
+                    highlighted: appState.commentSpeaker.isSpeaking
+                )
+            }
             if BundleCapabilities.imageGenUIEnabled {
                 actionButton("create", systemName: "photo", tooltip: "Create image from this prompt")
+                actionButton("editai", systemName: "wand.and.stars", tooltip: "Edit this image with AI")
             }
             Spacer(minLength: 0)
             actionButton("delete", systemName: "trash", tooltip: "Delete user comment", enabled: hasComment)
@@ -113,9 +123,10 @@ struct InformationActionBarView: View {
         _ action: String,
         systemName: String,
         tooltip: String,
-        enabled: Bool = true
+        enabled: Bool = true,
+        highlighted: Bool = false
     ) -> some View {
-        SidebarToolbarIconButton(systemName: systemName, tooltip: tooltip, enabled: enabled) {
+        SidebarToolbarIconButton(systemName: systemName, tooltip: tooltip, selected: highlighted, enabled: enabled) {
             NotificationCenter.default.post(
                 name: .prowserInformationAction,
                 object: nil,
