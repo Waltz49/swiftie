@@ -21,6 +21,7 @@ struct ProwserMainSplitView<Left: View, Center: View, Right: View>: NSViewRepres
     var rightVisible: Bool
     var preferredLeftWidth: CGFloat
     var preferredRightWidth: CGFloat
+    var allowAnimatedWidths: Bool
     var layoutRevision: Int
     var onLeftWidthChange: (CGFloat) -> Void
     var onRightWidthChange: (CGFloat) -> Void
@@ -142,12 +143,19 @@ struct ProwserMainSplitView<Left: View, Center: View, Right: View>: NSViewRepres
         }
 
         private func sidebarWidths(forTotal total: CGFloat) -> (left: CGFloat, right: CGFloat) {
-            var leftW = parent.leftVisible
-                ? SidebarWidthLimits.clampLeft(parent.preferredLeftWidth)
-                : 0
-            var rightW = parent.rightVisible
-                ? SidebarWidthLimits.clampRight(parent.preferredRightWidth)
-                : 0
+            var leftW: CGFloat
+            var rightW: CGFloat
+            if parent.allowAnimatedWidths {
+                leftW = parent.leftVisible ? max(0, parent.preferredLeftWidth) : 0
+                rightW = parent.rightVisible ? max(0, parent.preferredRightWidth) : 0
+            } else {
+                leftW = parent.leftVisible
+                    ? SidebarWidthLimits.clampLeft(parent.preferredLeftWidth)
+                    : 0
+                rightW = parent.rightVisible
+                    ? SidebarWidthLimits.clampRight(parent.preferredRightWidth)
+                    : 0
+            }
 
             if leftW + rightW + SidebarWidthLimits.centerMin > total {
                 if parent.leftVisible, parent.rightVisible {
@@ -237,6 +245,7 @@ struct ProwserMainSplitView<Left: View, Center: View, Right: View>: NSViewRepres
         ) -> CGFloat {
             let total = max(splitView.bounds.width, 0)
             if dividerIndex == 0 {
+                if parent.allowAnimatedWidths { return 0 }
                 return parent.leftVisible ? SidebarWidthLimits.leftMin : 0
             }
             if dividerIndex == 1 {
@@ -255,6 +264,9 @@ struct ProwserMainSplitView<Left: View, Center: View, Right: View>: NSViewRepres
             let total = max(splitView.bounds.width, 0)
             if dividerIndex == 0 {
                 guard parent.leftVisible else { return 0 }
+                if parent.allowAnimatedWidths {
+                    return min(total, parent.preferredLeftWidth)
+                }
                 let rightReserved = parent.rightVisible ? SidebarWidthLimits.rightMin : 0
                 let maxLeft = min(
                     SidebarWidthLimits.leftMax,

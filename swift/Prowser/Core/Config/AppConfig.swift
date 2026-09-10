@@ -44,6 +44,7 @@ final class AppConfig {
     var useExifDate: Bool { boolValue("use_exif_date", default: true) }
     var filteredTree: String { stringValue("filtered_tree") ?? "images" }
     var filterPattern: String? { stringValue("filter_pattern") }
+    var savedFilters: [String] { getSavedFilters() }
     var sidebarWidth: CGFloat { CGFloat(numberValue("sidebar_width", default: 300)) }
     var rightSidebarWidth: CGFloat { CGFloat(numberValue("right_sidebar_width", default: 300)) }
 
@@ -81,6 +82,36 @@ final class AppConfig {
     }
 
     func rawSettings() -> [String: Any] { settings }
+
+    func getSavedFilters() -> [String] {
+        let filters = settings["saved_filters"] as? [String] ?? []
+        return filters.filter { filter in
+            let trimmed = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty && trimmed != "*"
+        }
+    }
+
+    func saveFilters(_ filters: [String]) {
+        var normalized: [String] = []
+        var seen = Set<String>()
+        for pattern in filters {
+            let trimmed = FilterPatternFormatting.forStorage(pattern)
+            guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            normalized.append(trimmed)
+        }
+        updateSetting("saved_filters", value: normalized)
+    }
+
+    /// Mirrors Python `ImageBrowserConfig.normalize_filter_pattern`.
+    static func normalizeFilterPattern(_ pattern: String?) -> String {
+        guard let pattern, !pattern.isEmpty else { return "*" }
+        var trimmed = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("*") {
+            trimmed = String(trimmed.dropLast())
+        }
+        return trimmed + "*"
+    }
 
     func bool(forKey key: String, default defaultValue: Bool = false) -> Bool {
         boolValue(key, default: defaultValue)
@@ -205,6 +236,7 @@ final class AppConfig {
             "ignore_exif_rotation": false,
             "filtered_tree": "images",
             "filter_pattern": "*",
+            "saved_filters": [] as [String],
             "ui_theme": "dark",
             "file_tree_visible": true,
             "left_sidebar_visible": true,

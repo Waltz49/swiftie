@@ -85,9 +85,11 @@ final class AppState {
     var showSimilaritySearchSheet = false
     var showPersonSearchSheet = false
     var showFindReferencesSheet = false
+    var showFilterDialog = false
     var findReferencesTargetPath: String?
     var findReferencesMatches: [String] = []
     var exifBatchConfirmation: ExifBatchConfirmationState?
+    var chromeLayoutOverride: ChromeLayoutSnapshot?
     var numberOverlayVisible = false
     var chromeSuppressed = false
     var fileTreeToolbarVisible = true
@@ -426,6 +428,7 @@ final class AppState {
     func applyFilenameFilterPattern(_ pattern: String) {
         filterSettings.setFilterPattern(pattern, persist: true)
         refreshFileTreeFilter()
+        refreshDirectory()
         config.applySettingsChange(emit: eventBus)
         eventBus.emit(.filterPatternChanged)
     }
@@ -614,6 +617,41 @@ final class AppState {
         !chromeSuppressed && config.bool(forKey: "status_bar_visible", default: true)
     }
 
+    var effectiveStatusBarHeight: CGFloat {
+        if let override = chromeLayoutOverride {
+            return override.statusBarHeight
+        }
+        return statusBarColumnVisible ? ChromeLayoutAnimator.statusBarHeight : 0
+    }
+
+    var effectiveLeftSidebarWidth: CGFloat {
+        if let override = chromeLayoutOverride {
+            return override.leftWidth
+        }
+        return leftSidebarColumnVisible ? leftSidebarWidth : 0
+    }
+
+    var effectiveRightSidebarWidth: CGFloat {
+        if let override = chromeLayoutOverride {
+            return override.rightWidth
+        }
+        return rightSidebarColumnVisible ? rightSidebarWidth : 0
+    }
+
+    var effectiveLeftSidebarVisible: Bool {
+        if chromeLayoutOverride != nil {
+            return (chromeLayoutOverride?.leftWidth ?? 0) > 0.5
+        }
+        return leftSidebarColumnVisible
+    }
+
+    var effectiveRightSidebarVisible: Bool {
+        if chromeLayoutOverride != nil {
+            return (chromeLayoutOverride?.rightWidth ?? 0) > 0.5
+        }
+        return rightSidebarColumnVisible
+    }
+
     var leftSidebarColumnVisible: Bool {
         !chromeSuppressed
             && config.bool(forKey: "left_sidebar_visible", default: true)
@@ -638,17 +676,31 @@ final class AppState {
         if isAnyChromeVisible {
             persistSplitterSizes()
             chromeSavedLayout = captureChromeLayout()
-            chromeSuppressed = true
-            persistChromeVisibilityToConfig()
-        } else if let saved = chromeSavedLayout {
-            chromeSuppressed = false
-            restoreChromeLayout(saved)
+            let from = currentChromeLayoutSnapshot()
+            let to = ChromeLayoutSnapshot(leftWidth: 0, rightWidth: 0, statusBarHeight: 0)
+            animateChromeLayout(from: from, to: to) {
+                self.chromeSuppressed = true
+                self.chromeLayoutOverride = nil
+                self.persistChromeVisibilityToConfig()
+                self.noteSidebarLayoutChanged()
+                self.config.applySettingsChange(emit: self.eventBus)
+            }
         } else {
-            chromeSuppressed = false
-            showDefaultChrome()
+            if let saved = chromeSavedLayout {
+                chromeSuppressed = false
+                restoreChromeLayout(saved)
+            } else {
+                chromeSuppressed = false
+                showDefaultChrome()
+            }
+            let from = ChromeLayoutSnapshot(leftWidth: 0, rightWidth: 0, statusBarHeight: 0)
+            let to = targetChromeLayoutSnapshot()
+            animateChromeLayout(from: from, to: to) {
+                self.chromeLayoutOverride = nil
+                self.noteSidebarLayoutChanged()
+                self.config.applySettingsChange(emit: self.eventBus)
+            }
         }
-        noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
     }
 
     private func captureChromeLayout() -> ChromeSavedLayout {
@@ -763,9 +815,83 @@ final class AppState {
 
     func toggleStatusBar() {
         clearChromeSuppression()
-        let visible = !config.bool(forKey: "status_bar_visible", default: true)
-        config.updateSetting("status_bar_visible", value: visible)
+        let currentlyVisible = config.bool(forKey: "status_bar_visible", default: true)
+        let from = currentChromeLayoutSnapshot()
+        if currentlyVisible {
+            let to = ChromeLayoutSnapshot(
+                leftWidth: from.leftWidth,
+                rightWidth: from.rightWidth,
+                statusBarHeight: 0
+            )
+            animateChromeLayout(from: from, to: to) {
+                self.config.updateSetting("status_bar_visible", value: false)
+                self.chromeLayoutOverride = nil
+                self.notifyMainContentLayoutChanged()
+                self.config.applySettingsChange(emit: self.eventBus)
+            }
+        } else {
+            config.updateSetting("status_bar_visible", value: true)
+            let to = ChromeLayoutSnapshot(
+                leftWidth: from.leftWidth,
+                rightWidth: from.rightWidth,
+                statusBarHeight: ChromeLayoutAnimator.statusBarHeight
+            )
+            animateChromeLayout(from: from, to: to) {
+                self.chromeLayoutOverride = nil
+                self.notifyMainContentLayoutChanged()
+                self.config.applySettingsChange(emit: self.eventBus)
+            }
+        }
+    }
+
+    func applySortMode(_ mode: SortMode, reversed: Bool) {
+        config.updateSetting("sort_mode", value: mode.rawValue)
+        config.updateSetting("sort_reversed", value: reversed)
+        refreshDirectory()
+    }
+
+    func setUseExifDate(_ enabled: Bool) {
+        config.updateSetting("use_exif_date", value: enabled)
         config.applySettingsChange(emit: eventBus)
+    }
+
+    func presentFilterEditSheet() {
+        showFilterDialog = true
+    }
+
+    func saveFilterPresets(_ filters: [String]) {
+        config.saveFilters(filters)
+    }
+
+    private func currentChromeLayoutSnapshot() -> ChromeLayoutSnapshot {
+        if let override = chromeLayoutOverride {
+            return override
+        }
+        return targetChromeLayoutSnapshot()
+    }
+
+    private func targetChromeLayoutSnapshot() -> ChromeLayoutSnapshot {
+        ChromeLayoutSnapshot(
+            leftWidth: leftSidebarColumnVisible ? leftSidebarWidth : 0,
+            rightWidth: rightSidebarColumnVisible ? rightSidebarWidth : 0,
+            statusBarHeight: statusBarColumnVisible ? ChromeLayoutAnimator.statusBarHeight : 0
+        )
+    }
+
+    private func animateChromeLayout(
+        from: ChromeLayoutSnapshot,
+        to: ChromeLayoutSnapshot,
+        onComplete: @escaping () -> Void
+    ) {
+        chromeLayoutOverride = from
+        sidebarLayoutRevision += 1
+        ChromeLayoutAnimator.animate(from: from, to: to) { snapshot in
+            self.chromeLayoutOverride = snapshot
+            self.sidebarLayoutRevision += 1
+            self.notifyMainContentLayoutChanged()
+        } onComplete: {
+            onComplete()
+        }
     }
 
     func toggleNumberOverlay() {

@@ -46,8 +46,7 @@ final class FilterSettingsModel {
     static let validTreeModes: Set<String> = ["all", "images", "use_filter"]
 
     static func normalizeFilterPattern(_ pattern: String?) -> String {
-        guard let pattern, !pattern.isEmpty else { return "*" }
-        return pattern
+        FilterPatternFormatting.normalizeForMatching(pattern)
     }
 }
 

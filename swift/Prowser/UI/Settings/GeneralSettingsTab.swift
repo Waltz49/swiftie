@@ -56,7 +56,7 @@ struct GeneralSettingsTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
-            filterDraft = appState.config.string(forKey: "filter_pattern", default: "*")
+            filterDraft = FilterPatternFormatting.forEditing(appState.filterSettings.filterPattern)
         }
     }
 

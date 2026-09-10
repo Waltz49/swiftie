@@ -6,8 +6,7 @@ struct NotificationBubbleOverlay: View {
 
     var body: some View {
         let bubbles = appState.status.bubbles
-        let statusBarVisible = appState.config.bool(forKey: "status_bar_visible", default: true)
-        let bottomPadding: CGFloat = statusBarVisible ? 30 : 12
+        let bottomPadding: CGFloat = appState.effectiveStatusBarHeight > 0 ? 30 : 12
         VStack(alignment: .leading, spacing: 6) {
             ForEach(bubbles) { bubble in
                 Text(bubble.message)

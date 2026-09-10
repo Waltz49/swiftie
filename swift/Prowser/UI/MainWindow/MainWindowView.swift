@@ -6,40 +6,43 @@ struct MainWindowView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        ProwserMainSplitView(
-            leftVisible: appState.leftSidebarColumnVisible,
-            rightVisible: appState.rightSidebarColumnVisible,
-            preferredLeftWidth: appState.leftSidebarWidth,
-            preferredRightWidth: appState.rightSidebarWidth,
-            layoutRevision: appState.sidebarLayoutRevision,
-            onLeftWidthChange: { width in
-                appState.updateLeftSidebarWidth(width)
-            },
-            onRightWidthChange: { width in
-                appState.updateRightSidebarWidth(width)
-            },
-            onLayoutApplied: {
-                appState.notifyMainContentLayoutChanged()
-            },
-            left: {
-                LeftSidebarView()
-            },
-            center: {
-                ZStack(alignment: .bottomLeading) {
-                    VStack(spacing: 0) {
+        VStack(spacing: 0) {
+            ProwserMainSplitView(
+                leftVisible: appState.effectiveLeftSidebarVisible,
+                rightVisible: appState.effectiveRightSidebarVisible,
+                preferredLeftWidth: appState.effectiveLeftSidebarWidth,
+                preferredRightWidth: appState.effectiveRightSidebarWidth,
+                allowAnimatedWidths: appState.chromeLayoutOverride != nil,
+                layoutRevision: appState.sidebarLayoutRevision,
+                onLeftWidthChange: { width in
+                    appState.updateLeftSidebarWidth(width)
+                },
+                onRightWidthChange: { width in
+                    appState.updateRightSidebarWidth(width)
+                },
+                onLayoutApplied: {
+                    appState.notifyMainContentLayoutChanged()
+                },
+                left: {
+                    LeftSidebarView()
+                },
+                center: {
+                    ZStack(alignment: .bottomLeading) {
                         ContentStackView()
                             .frame(minWidth: 400, maxHeight: .infinity)
-                        if appState.statusBarColumnVisible {
-                            StatusBarView()
-                        }
+                        NotificationBubbleOverlay()
                     }
-                    NotificationBubbleOverlay()
+                },
+                right: {
+                    RightSidebarView()
                 }
-            },
-            right: {
-                RightSidebarView()
+            )
+            .frame(maxHeight: .infinity)
+
+            if appState.effectiveStatusBarHeight > 0 || appState.chromeLayoutOverride != nil {
+                StatusBarView()
             }
-        )
+        }
         .navigationTitle(appState.fileData.currentDirectory.map { ($0 as NSString).lastPathComponent } ?? "Prowser")
         .preferredColorScheme(appState.theme.preferredColorScheme)
         .background(appState.theme.colors.background)
@@ -91,6 +94,13 @@ struct MainWindowView: View {
             ExifBatchConfirmationSheet(state: state) {
                 appState.exifBatchConfirmation = nil
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { appState.showFilterDialog },
+            set: { appState.showFilterDialog = $0 }
+        )) {
+            FilterDialogSheet()
+                .environment(appState)
         }
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)

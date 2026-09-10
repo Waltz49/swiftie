@@ -20,6 +20,11 @@ enum ThemeDefaults {
             "current_image_background_color_hex": "#2895cb",
             "multiselect_border_color_hex": "#d0ae22",
             "multiselect_background_color_hex": "#9d8419",
+            "thumbnail_empty_filter_btn_bg_hex": "#161618",
+            "thumbnail_empty_filter_btn_bg_hover_hex": "#263447",
+            "thumbnail_empty_filter_btn_border_hex": "#38506b",
+            "thumbnail_empty_filter_btn_border_hover_hex": "#41a6c6",
+            "thumbnail_empty_filter_btn_text_hover_hex": "#bbecff",
         ]
     }
 
@@ -42,6 +47,11 @@ enum ThemeDefaults {
             "multiselect_border_color_hex": "#705d1f",
             "multiselect_background_color_hex": "#ffd700",
             "thumbnail_filename_overlay_rgba": "0, 0, 0, 240",
+            "thumbnail_empty_filter_btn_bg_hex": "#161618",
+            "thumbnail_empty_filter_btn_bg_hover_hex": "#263447",
+            "thumbnail_empty_filter_btn_border_hex": "#38506b",
+            "thumbnail_empty_filter_btn_border_hover_hex": "#41a6c6",
+            "thumbnail_empty_filter_btn_text_hover_hex": "#bbecff",
         ]
     }
 
@@ -64,6 +74,11 @@ enum ThemeDefaults {
             "multiselect_border_color_hex": "#e65100",
             "multiselect_background_color_hex": "gold",
             "thumbnail_filename_overlay_rgba": "248, 250, 252, 252",
+            "thumbnail_empty_filter_btn_bg_hex": "#f0f2f5",
+            "thumbnail_empty_filter_btn_bg_hover_hex": "#e3f2fd",
+            "thumbnail_empty_filter_btn_border_hex": "#b0bec5",
+            "thumbnail_empty_filter_btn_border_hover_hex": "#2196f3",
+            "thumbnail_empty_filter_btn_text_hover_hex": "#0d47a1",
         ]
     }
 

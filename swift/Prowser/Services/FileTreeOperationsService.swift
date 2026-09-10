@@ -20,17 +20,21 @@ final class FileTreeOperationsService {
         let excluded = PathExclusions.excludedPaths(config: appState.config)
         let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
         let maxDepth = appState.config.int(forKey: "search_depth", default: 4)
+        let filterPattern = appState.filterSettings.filterPattern
         let images = DirectoryScanner.scanDirectoryRecursive(
             at: directory,
             extensions: appState.config.imageExtensions,
-            filterPattern: "*",
+            filterPattern: filterPattern,
             maxDepth: maxDepth,
             excludedPaths: excluded,
             includeHidden: showHidden
         )
 
         guard !images.isEmpty else {
-            showAlert("No Images Found", informative: "No images found in \(directory) and its subdirectories.")
+            let message = filterPattern == "*"
+                ? "No images found in \(directory) and its subdirectories."
+                : "No images matching filter \"\(filterPattern)\" found in \(directory) and its subdirectories."
+            showAlert("No Images Found", informative: message)
             return
         }
 
@@ -40,7 +44,10 @@ final class FileTreeOperationsService {
         appState.fileData.setDisplayedImages(images)
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(images[0])
-        appState.status.show("Showing \(images.count) images from \(directory)")
+        let status = filterPattern == "*"
+            ? "Showing \(images.count) images from \(directory)"
+            : "Showing \(images.count) images matching \"\(filterPattern)\" from \(directory)"
+        appState.status.show(status)
     }
 
     func findDuplicateImages(in directory: String) {
@@ -60,7 +67,7 @@ final class FileTreeOperationsService {
         let paths = DirectoryScanner.scanDirectoryRecursive(
             at: directory,
             extensions: appState.config.imageExtensions,
-            filterPattern: appState.filterSettings.filterPattern ?? "*",
+            filterPattern: appState.filterSettings.filterPattern,
             maxDepth: maxDepth,
             excludedPaths: excluded,
             includeHidden: showHidden

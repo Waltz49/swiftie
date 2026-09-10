@@ -42,6 +42,8 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var layoutObserver: UUID?
         private var navigateObserver: UUID?
         private var viewModeObserver: NSObjectProtocol?
+        private var filterPatternObserver: NSObjectProtocol?
+        private var directoryObserver: NSObjectProtocol?
         private var lastSyncedIndex = -1
 
         init(appState: AppState) {
@@ -64,6 +66,26 @@ struct ThumbnailGridView: NSViewRepresentable {
                           mode == ViewMode.thumbnail.rawValue else { return }
                     let coordinator = self
                     Task { @MainActor in coordinator?.ensureHighlightedVisible() }
+                }
+            }
+            if filterPatternObserver == nil {
+                filterPatternObserver = NotificationCenter.default.addObserver(
+                    forName: .prowserFilterPatternChanged,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    let coordinator = self
+                    Task { @MainActor in coordinator?.syncFromAppState() }
+                }
+            }
+            if directoryObserver == nil {
+                directoryObserver = NotificationCenter.default.addObserver(
+                    forName: .prowserDirectoryChanged,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    let coordinator = self
+                    Task { @MainActor in coordinator?.syncFromAppState() }
                 }
             }
         }
@@ -125,16 +147,27 @@ struct ThumbnailGridView: NSViewRepresentable {
             if let viewModeObserver {
                 NotificationCenter.default.removeObserver(viewModeObserver)
             }
+            if let filterPatternObserver {
+                NotificationCenter.default.removeObserver(filterPatternObserver)
+            }
+            if let directoryObserver {
+                NotificationCenter.default.removeObserver(directoryObserver)
+            }
         }
 
         func syncFromAppState() {
             guard let gridView else { return }
             let paths = appState.fileData.displayedImages
+            gridView.emptyStateStyle = ThumbnailEmptyStateStyle.from(theme: appState.theme.colors)
+            gridView.currentDirectory = appState.fileData.currentDirectory
+            gridView.filterPattern = appState.filterSettings.filterPattern
+            gridView.imageExtensions = appState.config.imageExtensions
             if gridView.imagePaths != paths {
                 gridView.imagePaths = paths
                 gridView.clearThumbnails()
                 lastSyncedIndex = -1
             }
+            gridView.updateEmptyStateContext()
             let index = resolvedHighlightIndex(in: paths)
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
             gridView.wrapAround = appState.config.bool(forKey: "wrap_around", default: true)
@@ -217,6 +250,16 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView) {
             ThumbnailContextMenu.show(for: event, clickedIndex: clickedIndex, in: view, appState: appState)
+        }
+
+        func thumbnailGridDidApplyFilter(label: String) {
+            let pattern: String
+            if label == "All files(*)" {
+                pattern = "*"
+            } else {
+                pattern = FilterPatternFormatting.normalizeForMatching(label)
+            }
+            appState.applyFilenameFilterPattern(pattern)
         }
     }
 }

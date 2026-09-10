@@ -9,6 +9,7 @@ protocol ThumbnailGridDelegate: AnyObject {
     func thumbnailGridDidReorder(path: String, insertionIndex: Int)
     func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void)
     func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
+    func thumbnailGridDidApplyFilter(label: String)
 }
 
 /// Custom-painted thumbnail grid. Port of `thumbnails/thumbnail_canvas.py` (phase 1).
@@ -37,6 +38,17 @@ final class ThumbnailGridNSView: NSView {
     }
 
     var overlayBoxColor: NSColor = NSColor.black.withAlphaComponent(0.94)
+    var emptyStateStyle = ThumbnailEmptyStateStyle.from(theme: ThemeColors.dark)
+    var currentDirectory: String?
+    var filterPattern: String = "*"
+    var imageExtensions: [String] = []
+    var directoryListingDenied = false
+
+    private var suggestedFilters: [String] = []
+    private var hasImagesInFolder = false
+    private var filterButtons: [ThumbnailEmptyFilterButton] = []
+    private var hoveredFilterButtonIndex = -1
+    private var trackingArea: NSTrackingArea?
 
     private var metrics = ThumbnailLayout.metrics(for: 800, itemCount: 0, showFilename: false, showImageSize: false)
     private var imageDimensionCache: [String: String] = [:]
@@ -69,6 +81,17 @@ final class ThumbnailGridNSView: NSView {
         let viewportWidth = viewportWidthForLayout()
         let width = max(viewportWidth, 200)
         lastLayoutViewportWidth = width
+        if imagePaths.isEmpty {
+            let viewport = emptyStateViewportSize()
+            applyDocumentSize(
+                NSSize(
+                    width: max(width, viewport.width),
+                    height: max(viewport.height, 300)
+                )
+            )
+            needsDisplay = true
+            return
+        }
         let cellSize = CGFloat(
             configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
                 ?? ThumbnailLayout.defaultCellSize
@@ -110,9 +133,56 @@ final class ThumbnailGridNSView: NSView {
         needsDisplay = true
     }
 
+    func updateEmptyStateContext() {
+        guard imagePaths.isEmpty else {
+            suggestedFilters = []
+            hasImagesInFolder = false
+            filterButtons = []
+            hoveredFilterButtonIndex = -1
+            return
+        }
+        guard let directory = currentDirectory else {
+            suggestedFilters = []
+            hasImagesInFolder = false
+            return
+        }
+
+        let supportedFiles = Self.supportedImageFilenames(in: directory, extensions: imageExtensions)
+        hasImagesInFolder = !supportedFiles.isEmpty
+        if hasImagesInFolder, filterPattern != "*" {
+            let basenames = supportedFiles.map { ($0 as NSString).deletingPathExtension }
+            suggestedFilters = SuggestedFiltersService.determineSuggestedFilters(filenames: basenames)
+        } else {
+            suggestedFilters = []
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        if imagePaths.isEmpty {
+            emptyStateStyle.background.setFill()
+            bounds.fill()
+            let area = NSRect(origin: .zero, size: emptyStateViewportSize())
+            if let message = ThumbnailEmptyStateRenderer.message(
+                directory: currentDirectory,
+                filterPattern: filterPattern,
+                directoryListingDenied: directoryListingDenied
+            ) {
+                filterButtons = ThumbnailEmptyStateRenderer.draw(
+                    in: area,
+                    message: message,
+                    style: emptyStateStyle,
+                    suggestedFilters: suggestedFilters,
+                    hasImagesInFolder: hasImagesInFolder,
+                    hoveredButtonIndex: hoveredFilterButtonIndex
+                )
+            } else {
+                filterButtons = []
+            }
+            return
+        }
+
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        NSColor.windowBackgroundColor.setFill()
+        emptyStateStyle.background.setFill()
         bounds.fill()
 
         for index in 0..<imagePaths.count {
@@ -195,6 +265,45 @@ final class ThumbnailGridNSView: NSView {
         showContextMenu(for: event)
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard imagePaths.isEmpty, !filterButtons.isEmpty else {
+            if hoveredFilterButtonIndex != -1 {
+                hoveredFilterButtonIndex = -1
+                needsDisplay = true
+            }
+            NSCursor.arrow.set()
+            super.mouseMoved(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        let hovered = filterButtons.firstIndex { $0.rect.contains(point) } ?? -1
+        if hovered != hoveredFilterButtonIndex {
+            hoveredFilterButtonIndex = hovered
+            needsDisplay = true
+        }
+        if hovered >= 0 {
+            NSCursor.pointingHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+        super.mouseMoved(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if flags.contains(.control), !flags.contains(.command) {
@@ -202,6 +311,9 @@ final class ThumbnailGridNSView: NSView {
             return
         }
 
+        if imagePaths.isEmpty {
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         guard let index = indexAt(point: point) else { return }
         dragSourceIndex = index
@@ -213,23 +325,12 @@ final class ThumbnailGridNSView: NSView {
         gridDelegate?.thumbnailGridDidSelect(index: index, path: path)
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard let start = dragStartPoint, dragSourceIndex != nil else { return }
-        let distance = hypot(point.x - start.x, point.y - start.y)
-        guard distance >= dragThreshold else { return }
-
-        let insertion = ThumbnailReorderService.insertionIndex(
-            at: CGPoint(x: point.x, y: point.y),
-            metrics: metrics,
-            itemCount: imagePaths.count
-        )
-        dropInsertionIndex = insertion
-        dropIndicatorRect = dropIndicatorRect(for: insertion)
-        needsDisplay = true
-    }
-
     override func mouseUp(with event: NSEvent) {
+        if imagePaths.isEmpty {
+            let point = convert(event.locationInWindow, from: nil)
+            handleEmptyStateClick(at: point)
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         if let start = dragStartPoint,
            hypot(point.x - start.x, point.y - start.y) >= dragThreshold,
@@ -246,6 +347,30 @@ final class ThumbnailGridNSView: NSView {
         dragStartPoint = nil
         dropInsertionIndex = nil
         dropIndicatorRect = nil
+        needsDisplay = true
+    }
+
+    private func handleEmptyStateClick(at point: NSPoint) {
+        guard let button = filterButtons.first(where: { $0.rect.contains(point) }) else { return }
+        gridDelegate?.thumbnailGridDidApplyFilter(label: button.label)
+        suggestedFilters = []
+        filterButtons = []
+        hoveredFilterButtonIndex = -1
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let start = dragStartPoint, dragSourceIndex != nil else { return }
+        let distance = hypot(point.x - start.x, point.y - start.y)
+        guard distance >= dragThreshold else { return }
+
+        let insertion = ThumbnailReorderService.insertionIndex(
+            at: CGPoint(x: point.x, y: point.y),
+            metrics: metrics,
+            itemCount: imagePaths.count
+        )
+        dropInsertionIndex = insertion
+        dropIndicatorRect = dropIndicatorRect(for: insertion)
         needsDisplay = true
     }
 
@@ -380,6 +505,32 @@ final class ThumbnailGridNSView: NSView {
             return scrollView.contentSize.width
         }
         return bounds.width
+    }
+
+    private func emptyStateViewportSize() -> NSSize {
+        if let scrollView = enclosingScrollView {
+            return scrollView.contentSize
+        }
+        return bounds.size
+    }
+
+    private static func supportedImageFilenames(in directory: String, extensions: [String]) -> [String] {
+        let normalized = Set(extensions.map { $0.lowercased() })
+        let url = URL(fileURLWithPath: directory)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        return entries.compactMap { entry in
+            guard (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                return nil
+            }
+            guard normalized.contains(entry.pathExtension.lowercased()) else { return nil }
+            return entry.lastPathComponent
+        }
     }
 
     private func applyDocumentSize(_ newSize: NSSize) {

@@ -16,6 +16,11 @@ struct ThemeColors: Equatable {
     var multiselectBackground: Color
     var statusBarBackground: Color
     var statusBarText: Color
+    var thumbnailEmptyFilterButtonBackground: Color
+    var thumbnailEmptyFilterButtonBackgroundHover: Color
+    var thumbnailEmptyFilterButtonBorder: Color
+    var thumbnailEmptyFilterButtonBorderHover: Color
+    var thumbnailEmptyFilterButtonTextHover: Color
     var thumbnailFilenameOverlay: Color
 
     static let dark = ThemeColors(
@@ -33,6 +38,11 @@ struct ThemeColors: Equatable {
         multiselectBackground: Color(hex: "#ffd700") ?? .yellow,
         statusBarBackground: Color(hex: "#000000") ?? .black,
         statusBarText: Color(hex: "#b6b6b6") ?? .gray,
+        thumbnailEmptyFilterButtonBackground: Color(hex: "#161618") ?? Color(white: 0.09),
+        thumbnailEmptyFilterButtonBackgroundHover: Color(hex: "#263447") ?? Color(white: 0.15),
+        thumbnailEmptyFilterButtonBorder: Color(hex: "#38506b") ?? .gray,
+        thumbnailEmptyFilterButtonBorderHover: Color(hex: "#41a6c6") ?? .cyan,
+        thumbnailEmptyFilterButtonTextHover: Color(hex: "#bbecff") ?? .cyan,
         thumbnailFilenameOverlay: Color(white: 0, opacity: 240.0 / 255.0)
     )
 
@@ -51,6 +61,11 @@ struct ThemeColors: Equatable {
         multiselectBackground: Color(hex: "gold") ?? .yellow,
         statusBarBackground: Color(hex: "#c0c0c0") ?? Color(white: 0.75),
         statusBarText: .black,
+        thumbnailEmptyFilterButtonBackground: Color(hex: "#f0f2f5") ?? Color(white: 0.94),
+        thumbnailEmptyFilterButtonBackgroundHover: Color(hex: "#e3f2fd") ?? Color(white: 0.9),
+        thumbnailEmptyFilterButtonBorder: Color(hex: "#b0bec5") ?? .gray,
+        thumbnailEmptyFilterButtonBorderHover: Color(hex: "#2196f3") ?? .blue,
+        thumbnailEmptyFilterButtonTextHover: Color(hex: "#0d47a1") ?? .blue,
         thumbnailFilenameOverlay: Color(white: 0.98, opacity: 252.0 / 255.0)
     )
 
@@ -78,6 +93,11 @@ struct ThemeColors: Equatable {
             multiselectBackground: color("multiselect_background_color_hex", fallback.multiselectBackground),
             statusBarBackground: color("status_bar_background_color_hex", fallback.statusBarBackground),
             statusBarText: color("status_bar_text_color_hex", fallback.statusBarText),
+            thumbnailEmptyFilterButtonBackground: color("thumbnail_empty_filter_btn_bg_hex", fallback.thumbnailEmptyFilterButtonBackground),
+            thumbnailEmptyFilterButtonBackgroundHover: color("thumbnail_empty_filter_btn_bg_hover_hex", fallback.thumbnailEmptyFilterButtonBackgroundHover),
+            thumbnailEmptyFilterButtonBorder: color("thumbnail_empty_filter_btn_border_hex", fallback.thumbnailEmptyFilterButtonBorder),
+            thumbnailEmptyFilterButtonBorderHover: color("thumbnail_empty_filter_btn_border_hover_hex", fallback.thumbnailEmptyFilterButtonBorderHover),
+            thumbnailEmptyFilterButtonTextHover: color("thumbnail_empty_filter_btn_text_hover_hex", fallback.thumbnailEmptyFilterButtonTextHover),
             thumbnailFilenameOverlay: rgbaColor("thumbnail_filename_overlay_rgba", fallback.thumbnailFilenameOverlay)
         )
     }

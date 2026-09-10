@@ -28,31 +28,83 @@ enum SortingService {
             return paths.shuffled()
         case .duplicates:
             let dupes = DuplicateHashService.duplicateSortedPaths(paths)
-            return options.reversed ? dupes.reversed() : dupes
+            return sortDescending(mode: .duplicates, reversed: options.reversed)
+                ? dupes.reversed() : dupes
         case .custom:
-            guard let directory = commonDirectory(for: paths) else {
-                return options.reversed ? paths.reversed() : paths
-            }
-            let ordered = PrsortIO.applyCustomOrder(paths: paths, directory: directory)
-            return options.reversed ? ordered.reversed() : ordered
+            guard let directory = commonDirectory(for: paths) else { return paths }
+            // `.prsort` stores reversal; do not apply `sort_reversed` again.
+            return PrsortIO.applyCustomOrder(paths: paths, directory: directory)
+        case .size:
+            return sortBySize(paths, reversed: options.reversed, metadataCache: metadataCache)
         default:
+            let descending = sortDescending(mode: options.mode, reversed: options.reversed)
             let keyed = paths.map {
                 ( $0, sortKey(for: $0, mode: options.mode, useExifDate: options.useExifDate, metadataCache: metadataCache) )
             }
             let sortedKeys = keyed.sorted { lhs, rhs in
                 switch (lhs.1, rhs.1) {
                 case let (.string(a), .string(b)):
-                    return options.reversed ? a > b : a < b
+                    return descending ? a > b : a < b
                 case let (.number(a), .number(b)):
-                    return options.reversed ? a > b : a < b
+                    return descending ? a > b : a < b
                 case let (.size(a), .size(b)):
-                    return options.reversed ? a > b : a < b
+                    return descending ? a > b : a < b
                 default:
-                    return options.reversed ? lhs.0 > rhs.0 : lhs.0 < rhs.0
+                    return descending ? lhs.0 > rhs.0 : lhs.0 < rhs.0
                 }
             }
             return sortedKeys.map(\.0)
         }
+    }
+
+    /// Python `sorting_manager.py` uses `reverse=not is_reversed` for date/size/filesize/exif,
+    /// but `reverse=is_reversed` for name/dimensions/permissions.
+    private static func sortDescending(mode: SortMode, reversed: Bool) -> Bool {
+        switch mode {
+        case .name, .dimensions, .permissions, .duplicates:
+            return reversed
+        case .date, .size, .filesize, .exifDate, .exifYear:
+            return !reversed
+        default:
+            return reversed
+        }
+    }
+
+    private static func sortBySize(
+        _ paths: [String],
+        reversed: Bool,
+        metadataCache: MetadataCacheService?
+    ) -> [String] {
+        let descending = sortDescending(mode: .size, reversed: reversed)
+        return paths.sorted { lhs, rhs in
+            let left = sizeSortTuple(for: lhs, reversed: reversed, metadataCache: metadataCache)
+            let right = sizeSortTuple(for: rhs, reversed: reversed, metadataCache: metadataCache)
+            if left.area != right.area {
+                return descending ? left.area > right.area : left.area < right.area
+            }
+            if left.widthKey != right.widthKey {
+                return descending ? left.widthKey > right.widthKey : left.widthKey < right.widthKey
+            }
+            return descending ? left.path > right.path : left.path < right.path
+        }
+    }
+
+    private struct SizeSortTuple {
+        var area: Int64
+        var widthKey: Int
+        var path: String
+    }
+
+    private static func sizeSortTuple(
+        for path: String,
+        reversed: Bool,
+        metadataCache: MetadataCacheService?
+    ) -> SizeSortTuple {
+        let dims = metadataCache?.pixelSize(path: path) ?? imagePixelSize(path: path)
+        let area = dims.map { Int64($0.width * $0.height) } ?? 0
+        let width = dims?.width ?? 0
+        let widthKey = reversed ? -width : width
+        return SizeSortTuple(area: area, widthKey: widthKey, path: path.lowercased())
     }
 
     private enum SortKey {
