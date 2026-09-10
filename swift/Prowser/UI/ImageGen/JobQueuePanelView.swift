@@ -13,24 +13,17 @@ struct JobQueuePanelView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             if !compactForFloating, controller.isProcessing {
-                HStack {
-                    Spacer()
-                    Button("Cancel") {
-                        controller.cancelActiveJob()
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
+                ActiveJobStripView()
             }
 
             if !controller.isEnabled {
                 Text("Image generation requires Python workers and a full build.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if controller.queue.jobs.isEmpty {
-                emptyQueueView(isProcessing: controller.isProcessing)
+            } else if controller.queueSnapshot().isEmpty, !controller.isProcessing {
+                emptyQueueView
             } else {
-                queueContent(mode: mode, controller: controller)
+                queueContent(mode: mode)
             }
 
             if !controller.progressMessage.isEmpty, mode != .strip {
@@ -50,23 +43,18 @@ struct JobQueuePanelView: View {
         .padding(compactForFloating ? 10 : 8)
         .frame(
             minHeight: mode.estimatedContentHeight(
-                jobCount: controller.queue.jobs.count,
+                jobCount: controller.queueSnapshot().count,
                 isProcessing: controller.isProcessing
             ),
             alignment: .top
         )
+        .onChange(of: controller.queueRevision) { _, _ in }
     }
 
     @ViewBuilder
-    private func emptyQueueView(isProcessing: Bool) -> some View {
-        if isProcessing, appState.jobsQueueSizeMode == .strip {
-            HStack {
-                ProgressView()
-                    .controlSize(.small)
-                Text(appState.imageGen.progressMessage.isEmpty ? "Generating…" : appState.imageGen.progressMessage)
-                    .font(.caption)
-                    .lineLimit(1)
-            }
+    private var emptyQueueView: some View {
+        if appState.imageGen.isProcessing, appState.jobsQueueSizeMode == .strip {
+            ActiveJobStripView()
         } else {
             Text("No jobs in the queue.")
                 .font(.caption)
@@ -75,74 +63,13 @@ struct JobQueuePanelView: View {
     }
 
     @ViewBuilder
-    private func queueContent(mode: JobsQueueSizeMode, controller: ImageGenController) -> some View {
+    private func queueContent(mode: JobsQueueSizeMode) -> some View {
         switch mode {
         case .strip:
-            stripView(controller: controller)
-        case .one:
-            if let job = activeJob(from: controller) {
-                jobRow(job)
-            } else {
-                emptyQueueView(isProcessing: controller.isProcessing)
-            }
-        case .all:
-            List {
-                ForEach(controller.queue.jobs) { job in
-                    jobRow(job)
-                        .swipeActions {
-                            Button("Remove", role: .destructive) {
-                                controller.removeJob(id: job.jobID)
-                            }
-                        }
-                }
-            }
-            .listStyle(.plain)
-        }
-    }
-
-    private func stripView(controller: ImageGenController) -> some View {
-        HStack(spacing: 8) {
-            if controller.isProcessing {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Text(stripSummary(controller: controller))
-                .font(.caption)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            if controller.isProcessing {
-                Button("Cancel") {
-                    controller.cancelActiveJob()
-                }
-                .font(.caption)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-
-    private func stripSummary(controller: ImageGenController) -> String {
-        if controller.isProcessing {
-            return controller.progressMessage.isEmpty ? "Generating…" : controller.progressMessage
-        }
-        let count = controller.queue.jobs.count
-        return count == 1 ? "1 job queued" : "\(count) jobs queued"
-    }
-
-    private func activeJob(from controller: ImageGenController) -> ImageGenQueuedJob? {
-        if let activeJobID = controller.activeJobID,
-           let job = controller.queue.jobs.first(where: { $0.jobID == activeJobID }) {
-            return job
-        }
-        return controller.queue.jobs.first
-    }
-
-    private func jobRow(_ job: ImageGenQueuedJob) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(job.fullPrompt)
-                .lineLimit(appState.jobsQueueSizeMode == .one ? 3 : 2)
-            Text(job.statusLabel)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            ActiveJobStripView()
+        case .one, .all:
+            JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
+                .frame(minHeight: 80)
         }
     }
 
@@ -159,6 +86,9 @@ struct JobQueuePanelView: View {
                     .scaledToFit()
                     .frame(maxHeight: 160)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .onTapGesture {
+                        appState.openGeneratedImageInBrowse(path: path)
+                    }
             }
         }
     }

@@ -27,6 +27,12 @@ struct ProwserApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 320, height: 420)
 
+        Window("Image Generation", id: "imagegen-unified") {
+            ImageGenUnifiedDialog()
+                .environment(appState)
+        }
+        .defaultSize(width: 720, height: 560)
+
         Settings {
             SettingsWindowView()
                 .environment(appState)
@@ -80,6 +86,9 @@ final class AppState {
     var showFloatingJobsPanel = false
     var fileTreeFocusToken = 0
     var showImageGenCreateSheet = false
+    var showImageGenUnifiedDialog = false
+    var imageGenDialogReloadToken = 0
+    var imageGenDialogRequest = ImageGenDialogRequest.empty
     var showKeyboardHelp = false
     var showAbout = false
     var showSimilaritySearchSheet = false
@@ -141,7 +150,12 @@ final class AppState {
         workers = WorkerServices(profilePath: launchOptions.profilePath)
         workers.reloadSettings(config: config)
         chat = ChatController(chatBridge: workers.chat, dataDirectory: config.dataDirectory)
-        imageGen = ImageGenController(config: config, modelTasks: workers.modelTasks)
+        imageGen = ImageGenController(
+            config: config,
+            modelTasks: workers.modelTasks,
+            foregroundTasks: workers.foregroundModelTasks,
+            registry: workers.imageGenRegistry
+        )
         loadSidebarToolbarSettings()
         imageGen.onImageGenerated = { [weak self] path in
             guard let self else { return }
@@ -451,6 +465,85 @@ final class AppState {
             userInfo: ["tab": tab.rawValue]
         )
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
+    func openImageGenDialog(
+        function: String? = nil,
+        replaceJobID: String? = nil,
+        initialPrompt: String? = nil,
+        autoImportEXIF: Bool = false,
+        editSourcePaths: [String] = []
+    ) {
+        guard imageGen.isEnabled else { return }
+        let session = ImageGenSessionState()
+        let resolvedFunction = function ?? session.lastFunction(config: config)
+        var prompt = initialPrompt
+        if autoImportEXIF, prompt == nil {
+            prompt = userCommentForActiveImage()
+        }
+        imageGenDialogRequest = ImageGenDialogRequest(
+            function: resolvedFunction,
+            replaceJobID: replaceJobID,
+            initialPrompt: prompt,
+            autoImportEXIF: autoImportEXIF,
+            editSourcePaths: editSourcePaths
+        )
+        if showImageGenUnifiedDialog {
+            imageGenDialogReloadToken += 1
+            NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
+        } else {
+            showImageGenUnifiedDialog = true
+        }
+    }
+
+    func closeImageGenUnifiedDialog() {
+        showImageGenUnifiedDialog = false
+    }
+
+    func openFastImageGenDialog() {
+        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
+        let action = imagegen["fast_open_action"] as? String ?? "from_text"
+        let comment = userCommentForActiveImage()
+        if action == "edit_image" {
+            openImageGenDialog(function: "edit", initialPrompt: comment, autoImportEXIF: true)
+        } else {
+            openImageGenDialog(function: "create", initialPrompt: comment, autoImportEXIF: true)
+        }
+    }
+
+    func editActiveQueueJob() {
+        let rows = imageGen.queueSnapshot()
+        guard let active = rows.first(where: { $0.isActive }) ?? rows.first else { return }
+        openImageGenDialog(function: nil, replaceJobID: active.jobID)
+    }
+
+    func openGeneratedImageInBrowse(path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        if directory != fileData.currentDirectory {
+            loadDirectory(directory, saveHistory: true)
+        }
+        fileData.setCurrentImagePath(path)
+        fileData.setViewMode(.browse)
+    }
+
+    func userCommentForActiveImage() -> String? {
+        guard let path = fileData.currentImagePath else { return nil }
+        let comment = ExifService.userComment(path: path) ?? ""
+        let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func confirmCancelGeneration() {
+        guard imageGen.isProcessing else { return }
+        let alert = NSAlert()
+        alert.messageText = "Cancel job?"
+        alert.informativeText = "Cancel the running job?"
+        alert.addButton(withTitle: "Cancel Job")
+        alert.addButton(withTitle: "Keep Running")
+        if alert.runModal() == .alertFirstButtonReturn {
+            imageGen.cancelActiveJob()
+        }
     }
 
     func setFileTreeToolbarVisible(_ visible: Bool) {

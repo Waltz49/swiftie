@@ -12,6 +12,9 @@ let package = Package(
             name: "Prowser",
             path: "Prowser",
             exclude: ["Resources/Info.plist"],
+            resources: [
+                .process("Resources/Assets"),
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",

@@ -40,11 +40,13 @@ struct ImageGenCreateSheet: View {
 
     @MainActor
     private func submit() {
-        do {
-            try appState.imageGen.enqueueCreate(prompt: prompt, width: width, height: height)
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await appState.imageGen.enqueueCreate(prompt: prompt, width: width, height: height)
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }

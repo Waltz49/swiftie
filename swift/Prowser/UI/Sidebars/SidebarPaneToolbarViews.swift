@@ -7,14 +7,22 @@ struct FileTreeToolbarView: View {
     var body: some View {
         HStack(spacing: 4) {
             SidebarToolbarIconButton(
-                systemName: "house",
-                tooltip: "Collapse to home directory\nCollapse all and expand to home directory"
+                tooltip: "Collapse to home directory\nCollapse all and expand to home directory",
+                imageProvider: { hover in
+                    PenDrawnIcons.squeezeIcon(
+                        color: navIconColor(hover: hover),
+                        size: 20
+                    )
+                }
             ) {
                 appState.collapseFileTreeToHome()
             }
             SidebarToolbarIconButton(
-                systemName: "gearshape",
-                tooltip: "Open Settings\nConfigure application preferences"
+                tooltip: "Open Settings\nConfigure application preferences",
+                imageProvider: { hover in
+                    PenDrawnIcons.gearIcon(hover: hover)
+                        ?? PenDrawnIcons.squeezeIcon(color: navIconColor(hover: hover), size: 20)
+                }
             ) {
                 appState.openSettingsWindow(tab: .general)
             }
@@ -29,21 +37,43 @@ struct FileTreeToolbarView: View {
 
     private var filterButtons: some View {
         HStack(spacing: 4) {
-            filterButton(mode: "all", systemName: "xmark")
-            filterButton(mode: "images", systemName: "square")
-            filterButton(mode: "use_filter", systemName: "line.3.horizontal.decrease")
+            filterButton(mode: "all")
+            filterButton(mode: "images")
+            filterButton(mode: "use_filter")
         }
     }
 
-    private func filterButton(mode: String, systemName: String) -> some View {
+    private func filterButton(mode: String) -> some View {
         let selected = appState.filterSettings.filteredTree == mode
         return SidebarToolbarIconButton(
-            systemName: systemName,
             tooltip: filterTooltip(mode),
-            selected: selected
+            selected: selected,
+            imageProvider: { hover in
+                PenDrawnIcons.treeFilterIcon(
+                    mode: mode,
+                    selected: selected,
+                    hover: hover,
+                    selectedColor: filterIconSelectedColor,
+                    unselectedColor: filterIconUnselectedColor
+                )
+            }
         ) {
             appState.setFileTreeFilterMode(mode)
         }
+    }
+
+    private var filterIconSelectedColor: NSColor {
+        NSColor(appState.theme.colors.sidebarHeaderText)
+    }
+
+    private var filterIconUnselectedColor: NSColor {
+        NSColor(appState.theme.colors.sidebarHeaderText.opacity(0.55))
+    }
+
+    private func navIconColor(hover: Bool) -> NSColor {
+        hover
+            ? NSColor(appState.theme.colors.sidebarHeaderText)
+            : NSColor(appState.theme.colors.sidebarHeaderText.opacity(0.72))
     }
 
     private func filterTooltip(_ mode: String) -> String {
@@ -176,20 +206,60 @@ private struct SidebarToolbarIconButton: View {
     @Environment(AppState.self) private var appState
     @State private var hovering = false
 
-    let systemName: String
+    var systemName: String?
+    var imageProvider: ((Bool) -> NSImage)?
     let tooltip: String
     var selected = false
     var enabled = true
     let action: () -> Void
 
+    init(
+        systemName: String,
+        tooltip: String,
+        selected: Bool = false,
+        enabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
+        self.systemName = systemName
+        self.imageProvider = nil
+        self.tooltip = tooltip
+        self.selected = selected
+        self.enabled = enabled
+        self.action = action
+    }
+
+    init(
+        tooltip: String,
+        selected: Bool = false,
+        enabled: Bool = true,
+        imageProvider: @escaping (Bool) -> NSImage,
+        action: @escaping () -> Void
+    ) {
+        self.systemName = nil
+        self.imageProvider = imageProvider
+        self.tooltip = tooltip
+        self.selected = selected
+        self.enabled = enabled
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .frame(width: 26, height: 26)
-                .foregroundStyle(foregroundColor)
-                .background(backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Group {
+                if let imageProvider {
+                    Image(nsImage: imageProvider(hovering || selected))
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                } else if let systemName {
+                    Image(systemName: systemName)
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+            .frame(width: 26, height: 26)
+            .foregroundStyle(foregroundColor)
+            .background(backgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

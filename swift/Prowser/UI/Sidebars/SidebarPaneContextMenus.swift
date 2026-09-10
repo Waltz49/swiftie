@@ -259,7 +259,7 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func infoCreate(_ sender: NSMenuItem) {
-        appState?.showImageGenCreateSheet = true
+        appState?.openImageGenDialog()
     }
 
     @objc func infoEditAI(_ sender: NSMenuItem) {
@@ -415,7 +415,8 @@ final class PaneToolsButtonView: NSView {
         super.init(frame: frameRect)
         button.bezelStyle = .inline
         button.isBordered = false
-        button.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Pane tools")
+        button.image = PenDrawnIcons.gearIcon(hover: false)
+            ?? NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Pane tools")
         button.imagePosition = .imageOnly
         button.target = self
         button.action = #selector(showToolsMenu)

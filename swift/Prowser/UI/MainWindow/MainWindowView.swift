@@ -48,13 +48,6 @@ struct MainWindowView: View {
         .background(appState.theme.colors.background)
         .toolbar(.hidden, for: .windowToolbar)
         .sheet(isPresented: Binding(
-            get: { appState.showImageGenCreateSheet },
-            set: { appState.showImageGenCreateSheet = $0 }
-        )) {
-            ImageGenCreateSheet()
-                .environment(appState)
-        }
-        .sheet(isPresented: Binding(
             get: { appState.showKeyboardHelp },
             set: { appState.showKeyboardHelp = $0 }
         )) {
@@ -108,6 +101,9 @@ struct MainWindowView: View {
             if appState.jobsDisplayMode == .panel {
                 appState.showFloatingJobsPanel = true
             }
+            if appState.showImageGenUnifiedDialog {
+                openWindow(id: "imagegen-unified")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -122,6 +118,11 @@ struct MainWindowView: View {
         .onChange(of: appState.showFloatingJobsPanel) { _, show in
             if show {
                 openWindow(id: "jobs-panel")
+            }
+        }
+        .onChange(of: appState.showImageGenUnifiedDialog) { _, show in
+            if show {
+                openWindow(id: "imagegen-unified")
             }
         }
     }

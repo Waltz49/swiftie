@@ -96,6 +96,16 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘⌥/ — edit active queue job.
+        if hasCommand, hasOption, !hasShift, !hasControl {
+            if event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
+                if BundleCapabilities.imageGenUIEnabled {
+                    appState.editActiveQueueJob()
+                    return true
+                }
+            }
+        }
+
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
@@ -135,8 +145,23 @@ final class KeyboardHandlerController {
             case "\\":
                 appState.setJobsQueueSizeMode(.all, requireActive: true)
                 return true
+            case "/", "÷":
+                if BundleCapabilities.imageGenUIEnabled {
+                    appState.openImageGenDialog()
+                    return true
+                }
             default:
                 break
+            }
+        }
+
+        // ⇧⌥/ — fast open image generation from active image EXIF.
+        if hasOption, hasShift, !hasCommand, !hasControl {
+            if event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
+                if BundleCapabilities.imageGenUIEnabled {
+                    appState.openFastImageGenDialog()
+                    return true
+                }
             }
         }
 
@@ -165,12 +190,16 @@ final class KeyboardHandlerController {
 
     private func shouldHandle(_ event: NSEvent) -> Bool {
         guard let appState else { return false }
-        if appState.showImageGenCreateSheet || appState.showKeyboardHelp || appState.showAbout {
+        if isImageGenUnifiedDialogKeyWindow() || appState.showKeyboardHelp || appState.showAbout {
             return false
         }
         if isTextInputFocused() { return false }
         if NSApp.keyWindow == nil { return false }
         return true
+    }
+
+    private func isImageGenUnifiedDialogKeyWindow() -> Bool {
+        NSApp.keyWindow?.identifier?.rawValue == "imagegen-unified"
     }
 
     private func isTextInputFocused() -> Bool {

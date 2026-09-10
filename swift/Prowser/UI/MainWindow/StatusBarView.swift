@@ -14,38 +14,23 @@ struct StatusBarView: View {
         let filterPattern = appState.filterSettings.filterPattern
         let viewMode = appState.fileData.currentViewMode
 
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            HStack(spacing: 0) {
-                ForEach(StatusBarLayout.SectionID.displayOrder, id: \.self) { sectionID in
-                    sectionView(
-                        sectionID,
-                        totalWidth: width,
-                        sortMode: sortMode,
-                        sortReversed: sortReversed,
-                        displayed: displayed,
-                        currentPath: currentPath,
-                        filterPattern: filterPattern,
-                        viewMode: viewMode
-                    )
-                    if sectionID.showsSeparatorAfter {
-                        StatusBarSeparator()
-                    }
-                }
-            }
-            .overlay(alignment: .trailing) {
-                if let message = appState.status.bubbles.last?.message {
-                    section(
-                        text: message,
-                        sectionID: nil,
-                        totalWidth: width,
-                        enabled: false,
-                        action: nil
-                    )
-                    .italic()
+        HStack(spacing: 0) {
+            ForEach(StatusBarLayout.SectionID.displayOrder, id: \.self) { sectionID in
+                sectionView(
+                    sectionID,
+                    sortMode: sortMode,
+                    sortReversed: sortReversed,
+                    displayed: displayed,
+                    currentPath: currentPath,
+                    filterPattern: filterPattern,
+                    viewMode: viewMode
+                )
+                if sectionID.showsSeparatorAfter {
+                    StatusBarSeparator()
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .frame(height: appState.effectiveStatusBarHeight)
         .clipped()
         .background(appState.theme.colors.statusBarBackground)
@@ -69,7 +54,6 @@ struct StatusBarView: View {
     @MainActor @ViewBuilder
     private func sectionView(
         _ sectionID: StatusBarLayout.SectionID,
-        totalWidth: CGFloat,
         sortMode: SortMode,
         sortReversed: Bool,
         displayed: [String],
@@ -82,7 +66,6 @@ struct StatusBarView: View {
             section(
                 text: StatusBarFormatter.sortLabel(mode: sortMode, reversed: sortReversed),
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: true,
                 action: { StatusBarMenus.showSortMenu(appState: appState, relativeTo: $0) }
             )
@@ -90,7 +73,6 @@ struct StatusBarView: View {
             section(
                 text: StatusBarFormatter.filterLabel(pattern: filterPattern),
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: viewMode == .thumbnail || viewMode == .list,
                 action: (viewMode == .thumbnail || viewMode == .list)
                     ? { StatusBarMenus.showFilterMenu(appState: appState, relativeTo: $0) }
@@ -100,7 +82,6 @@ struct StatusBarView: View {
             section(
                 text: filenameText(displayed: displayed, currentPath: currentPath, filterPattern: filterPattern),
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: true,
                 action: nil
             )
@@ -110,27 +91,26 @@ struct StatusBarView: View {
                     ? "0 x 0"
                     : StatusBarFormatter.dimensionsLabel(path: currentPath, metadataCache: appState.metadataCache),
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: true,
                 action: nil
             )
         case .date:
+            let dateLabel = StatusBarFormatter.dateLabel(
+                path: currentPath,
+                useExifDate: appState.config.useExifDate,
+                metadataCache: appState.metadataCache
+            )
             section(
-                text: StatusBarFormatter.dateLabel(
-                    path: currentPath,
-                    useExifDate: appState.config.useExifDate,
-                    metadataCache: appState.metadataCache
-                ),
+                text: dateLabel.text,
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: true,
+                trailingIcon: dateTrailingIcon(for: dateLabel),
                 action: { StatusBarMenus.showDateMenu(appState: appState, relativeTo: $0) }
             )
         case .fitMode:
             section(
                 text: StatusBarFormatter.fitModeLabel(actualSize: appState.browseActualSizeEnabled),
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: viewMode == .browse,
                 action: viewMode == .browse ? { _ in appState.toggleBrowseActualSize() } : nil
             )
@@ -143,7 +123,6 @@ struct StatusBarView: View {
                     extensions: appState.config.imageExtensions
                 ),
                 sectionID: sectionID,
-                totalWidth: totalWidth,
                 enabled: true,
                 action: nil
             )
@@ -151,22 +130,31 @@ struct StatusBarView: View {
     }
 
     @MainActor
+    private func dateTrailingIcon(for label: StatusBarFormatter.DateLabel) -> NSImage? {
+        guard let usesExif = label.usesExifDate else { return nil }
+        return PenDrawnIcons.dateSourceIcon(
+            exif: usesExif,
+            color: NSColor(appState.theme.colors.statusBarText)
+        )
+    }
+
+    @MainActor
     private func filenameText(displayed: [String], currentPath: String?, filterPattern: String) -> String {
+        if let path = currentPath ?? displayed.first {
+            return StatusBarFormatter.displayPath(path)
+        }
         if displayed.isEmpty {
             return "No files match the filter: \(filterPattern)"
         }
-        if let path = currentPath {
-            return StatusBarFormatter.displayPath(path)
-        }
-        return "No files match the filter: \(filterPattern)"
+        return ""
     }
 
     @MainActor @ViewBuilder
     private func section(
         text: String,
-        sectionID: StatusBarLayout.SectionID?,
-        totalWidth: CGFloat,
+        sectionID: StatusBarLayout.SectionID,
         enabled: Bool,
+        trailingIcon: NSImage? = nil,
         action: ((NSView) -> Void)?
     ) -> some View {
         let color = enabled
@@ -176,31 +164,20 @@ struct StatusBarView: View {
             text: text,
             textColor: NSColor(color),
             enabled: enabled,
-            isBold: sectionID?.isBold ?? false,
-            alignment: nsTextAlignment(for: sectionID?.alignment ?? .leading),
+            isBold: sectionID.isBold,
+            alignment: nsTextAlignment(for: sectionID.alignment),
+            trailingIcon: trailingIcon,
             onClick: action
         )
 
-        if let sectionID, sectionID.expands {
+        if sectionID.expands {
             host
-                .frame(
-                    minWidth: StatusBarLayout.minWidth(for: sectionID, totalWidth: totalWidth),
-                    maxWidth: .infinity,
-                    alignment: sectionID.alignment
-                )
+                .frame(maxWidth: .infinity, alignment: sectionID.alignment)
                 .layoutPriority(0)
-        } else if let sectionID {
-            host
-                .frame(
-                    minWidth: StatusBarLayout.minWidth(for: sectionID, totalWidth: totalWidth),
-                    alignment: sectionID.alignment
-                )
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(1)
         } else {
             host
-                .frame(minWidth: max(80, totalWidth * 0.10), alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
         }
     }
 

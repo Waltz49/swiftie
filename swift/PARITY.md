@@ -75,9 +75,10 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 
 ### Job Control pane
 
-- [ ] Toolbar actions: intermediate images, hold queue, skip copy (`jobs_tools_menu.py`)
-- [ ] Floating panel: “Always on Top” (when opened as panel)
-- [ ] “Show Toolbar” toggle in context menu
+- [~] Toolbar actions: intermediate images, hold queue, skip copy (`jobs_toolbar.py`)
+- [~] Floating panel: “Always on Top” (when opened as panel)
+- [~] “Show Toolbar” toggle in context menu
+- [~] Job cards with drag reorder, edit/cancel, active strip
 
 ### Organize pane
 
@@ -232,15 +233,16 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 ## Menus — Image (generation)
 
-- [~] Create an image from text…
+- [~] Create an image from text… (`ImageGenUnifiedDialog` — intro, scroll fields, collapsible AI + custom size)
 - [ ] Fast create / preset submenu entries (`image_gen_menu.py`)
-- [ ] Edit / Expand / Infill dialogs
-- [ ] Cancel generation
+- [~] Edit / Expand / Infill dialogs (unified shell: icon switcher, source nav, footer Cancel/Close/Replace/Generate)
+- [~] Cancel generation (Image menu + information pane)
 - [ ] Download models / LoRAs
 - [~] Show Job Queue (⌘J floating panel)
-- [~] Job queue in right sidebar pane
-- [~] Progressive preview path display (full image preview pending)
-- [ ] LoRA picker UI (`--min` hidden)
+- [~] Job queue in right sidebar pane (AppKit cards + drag reorder)
+- [~] Progressive preview path display (tap opens browse)
+- [~] Job shortcuts: J pane, ⌘J panel, ⌃J size cycle, ⌥[/]\\, ⌥/, ⇧⌥/, ⌘⌥/
+- [ ] LoRA stack picker UI (`--min` hidden; field layout via registry bridge)
 
 ## Menus — Tools
 
@@ -314,6 +316,8 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 ## Python worker bridges
 
 - [~] `ModelTasksBridge` — generate, caption, flux_prompt, progress, cancel
+- [~] `ImageGenRegistryBridge` — list_plugins, build_payload, normalize_values, materialize_steps
+- [~] `foregroundModelTasks` — second worker for flux_prompt during generation
 - [~] `CLIPBridge` — Unix socket IPC
 - [~] `ChatBridge` — streaming chat worker
 - [~] `FaceBridge` — directory scan worker

@@ -48,19 +48,23 @@ enum StatusBarFormatter {
         return "0 x 0"
     }
 
-    static func dateLabel(path: String?, useExifDate: Bool, metadataCache: MetadataCacheService) -> String {
-        guard let path else { return "--" }
+    struct DateLabel {
+        let text: String
+        let usesExifDate: Bool?
+    }
+
+    static func dateLabel(path: String?, useExifDate: Bool, metadataCache: MetadataCacheService) -> DateLabel {
+        guard let path else { return DateLabel(text: "--", usesExifDate: nil) }
         let exifTs = metadataCache.fileTimestamp(path: path, preferExif: true)
         let fileTs = metadataCache.fileTimestamp(path: path, preferExif: false)
         let timestamp = useExifDate && exifTs > 0 ? exifTs : fileTs
-        guard timestamp > 0 else { return "--" }
+        guard timestamp > 0 else { return DateLabel(text: "--", usesExifDate: nil) }
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
         let usedExif = useExifDate && exifTs > 0 && timestamp == exifTs
-        let suffix = usedExif ? "  📷" : "  Ⓓ"
-        return formatter.string(from: date) + suffix
+        return DateLabel(text: formatter.string(from: date), usesExifDate: usedExif)
     }
 
     static func fileCountLabel(

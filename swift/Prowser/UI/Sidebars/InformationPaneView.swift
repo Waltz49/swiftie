@@ -50,6 +50,19 @@ struct InformationPaneView: View {
                             }
                         }
 
+                        if appState.imageGen.isProcessing {
+                            HStack {
+                                Text(appState.imageGen.progressMessage.isEmpty ? "Generation in progress…" : appState.imageGen.progressMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Cancel generation") {
+                                    appState.confirmCancelGeneration()
+                                }
+                                .font(.caption)
+                            }
+                        }
+
                         if !appState.informationMenuBarVisible {
                             HStack {
                                 Button("Edit Comment") { beginEditComment() }
@@ -83,7 +96,7 @@ struct InformationPaneView: View {
             case "delete":
                 deleteComment()
             case "create":
-                appState.showImageGenCreateSheet = true
+                appState.openImageGenDialog(initialPrompt: appState.userCommentForActiveImage())
             default:
                 break
             }

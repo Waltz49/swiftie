@@ -52,6 +52,29 @@ enum JobStepPersistence {
         }
     }
 
+    static func loadActivePending(config: AppConfig) -> [String: Any]? {
+        readJSONDictionary(jobActivePendingURL(config: config))
+    }
+
+    static func saveActivePending(_ doc: [String: Any]?, config: AppConfig) {
+        if let doc {
+            atomicWriteJSON(doc, to: jobActivePendingURL(config: config))
+        } else {
+            try? FileManager.default.removeItem(at: jobActivePendingURL(config: config))
+        }
+    }
+
+    static func persistStepJobFiles(
+        running: [String: Any]?,
+        pending: [String: Any]?,
+        queue: ImageGenQueueFile,
+        config: AppConfig
+    ) {
+        saveActiveRunning(running, config: config)
+        saveActivePending(pending, config: config)
+        saveQueue(queue, config: config)
+    }
+
     private static func readJSONDictionary(_ url: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -89,10 +112,15 @@ struct ImageGenQueuedJob: Identifiable {
     var function: String
     var values: [String: Any]
     var copiesTotal: Int
-    var statusLabel: String
+    var statusHTML: String
     var fullPrompt: String
+    var thumbnailPaths: [String]
+    var referencesInvalid: Bool
+    var steps: [[String: Any]]
+    var pluginUnavailable: Bool
 
     var id: String { jobID }
+    var statusLabel: String { QueueRowSnapshot.plainText(from: statusHTML) }
 
     init(
         jobID: String = UUID().uuidString.replacingOccurrences(of: "-", with: ""),
@@ -100,16 +128,24 @@ struct ImageGenQueuedJob: Identifiable {
         function: String,
         values: [String: Any],
         copiesTotal: Int = 1,
-        statusLabel: String = "Queued",
-        fullPrompt: String = ""
+        statusHTML: String = "Queued",
+        fullPrompt: String = "",
+        thumbnailPaths: [String] = [],
+        referencesInvalid: Bool = false,
+        steps: [[String: Any]] = [],
+        pluginUnavailable: Bool = false
     ) {
         self.jobID = jobID
         self.pluginID = pluginID
         self.function = function
         self.values = values
         self.copiesTotal = copiesTotal
-        self.statusLabel = statusLabel
+        self.statusHTML = statusHTML
         self.fullPrompt = fullPrompt.isEmpty ? (values["prompt"] as? String ?? "") : fullPrompt
+        self.thumbnailPaths = thumbnailPaths
+        self.referencesInvalid = referencesInvalid
+        self.steps = steps
+        self.pluginUnavailable = pluginUnavailable
     }
 
     init(document: [String: Any]) {
@@ -118,19 +154,30 @@ struct ImageGenQueuedJob: Identifiable {
         function = document["function"] as? String ?? "create"
         values = document["values"] as? [String: Any] ?? [:]
         copiesTotal = document["copies_total"] as? Int ?? 1
-        statusLabel = document["status_html"] as? String ?? "Queued"
+        statusHTML = document["status_html"] as? String ?? "Queued"
         fullPrompt = document["full_prompt"] as? String ?? (values["prompt"] as? String ?? "")
+        thumbnailPaths = document["thumbnail_paths"] as? [String] ?? []
+        referencesInvalid = document["references_invalid"] as? Bool ?? false
+        steps = document["steps"] as? [[String: Any]] ?? []
+        pluginUnavailable = document["plugin_unavailable"] as? Bool ?? false
     }
 
     var document: [String: Any] {
-        [
+        var doc: [String: Any] = [
             "job_id": jobID,
             "plugin_id": pluginID,
             "function": function,
             "values": values,
             "copies_total": copiesTotal,
-            "status_html": statusLabel,
+            "status_html": statusHTML,
             "full_prompt": fullPrompt,
+            "thumbnail_paths": thumbnailPaths,
+            "references_invalid": referencesInvalid,
+            "plugin_unavailable": pluginUnavailable,
         ]
+        if !steps.isEmpty {
+            doc["steps"] = steps
+        }
+        return doc
     }
 }

@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 final class WorkerServices {
     let modelTasks: ModelTasksBridge
+    let foregroundModelTasks: ModelTasksBridge
+    let imageGenRegistry: ImageGenRegistryBridge
     let clip: CLIPBridge
     let chat: ChatBridge
     let face: FaceBridge
@@ -16,6 +18,8 @@ final class WorkerServices {
 
     init(profilePath: String?) {
         modelTasks = ModelTasksBridge(profilePath: profilePath)
+        foregroundModelTasks = ModelTasksBridge(profilePath: profilePath)
+        imageGenRegistry = ImageGenRegistryBridge(profilePath: profilePath)
         clip = CLIPBridge(profilePath: profilePath)
         chat = ChatBridge(profilePath: profilePath)
         face = FaceBridge(profilePath: profilePath)
@@ -36,6 +40,8 @@ final class WorkerServices {
 
     func shutdown() {
         modelTasks.shutdown()
+        foregroundModelTasks.shutdown()
+        imageGenRegistry.shutdown()
         clip.shutdown()
         chat.shutdown()
         face.shutdown()

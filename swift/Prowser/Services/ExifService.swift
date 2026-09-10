@@ -121,6 +121,32 @@ enum ExifService {
         return record.description
     }
 
+    private static let userCommentSkipHeadings: Set<String> = [
+        "prompt", "prompt:", "description", "description:",
+    ]
+
+    /// Port of `exif/exif_utils.py` `truncate_usercomment_before_prompt`.
+    static func truncateUserCommentBeforePrompt(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for (index, line) in lines.enumerated() {
+            if userCommentSkipHeadings.contains(line.trimmingCharacters(in: .whitespaces).lowercased()) {
+                return lines.dropFirst(index + 1).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return trimmed
+    }
+
+    static func importPromptText(from path: String) -> String? {
+        guard let comment = userComment(path: path)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !comment.isEmpty else {
+            return nil
+        }
+        let prompt = truncateUserCommentBeforePrompt(comment)
+        return prompt.isEmpty ? nil : prompt
+    }
+
     static func exifTimestamp(path: String) -> Date? {
         let url = URL(fileURLWithPath: path)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),

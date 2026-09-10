@@ -130,7 +130,29 @@ struct ProwserCommands: Commands {
 
         CommandMenu("Image") {
             Button("Create an image from text…") {
-                Task { @MainActor in openImageGenCreate() }
+                Task { @MainActor in appState.openImageGenDialog(function: "create") }
+            }
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Button("Edit this image with AI…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "edit") }
+            }
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Button("Expand this image…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "expand") }
+            }
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Button("Infill / paint this image…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "infill") }
+            }
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Divider()
+
+            Button("Cancel Generation") {
+                Task { @MainActor in appState.confirmCancelGeneration() }
             }
             .disabled(!BundleCapabilities.imageGenUIEnabled)
 
@@ -480,18 +502,6 @@ struct ProwserCommands: Commands {
         let paths = selectedPaths()
         guard !paths.isEmpty else { return }
         _ = appState.fileOperations.confirmAndMoveToTrash(paths)
-    }
-
-    @MainActor
-    private func openImageGenCreate() {
-        guard appState.imageGen.isEnabled else {
-            let alert = NSAlert()
-            alert.messageText = "Image generation unavailable"
-            alert.informativeText = "Python workers are not available. Set PROWSER_PYTHON_ROOT or run from a full install."
-            alert.runModal()
-            return
-        }
-        appState.showImageGenCreateSheet = true
     }
 
     @MainActor
