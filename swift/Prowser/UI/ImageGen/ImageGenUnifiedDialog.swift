@@ -125,6 +125,10 @@ struct ImageGenUnifiedDialog: View {
             Toggle("Close dialog on generate", isOn: $closeOnGenerate)
                 .toggleStyle(.checkbox)
                 .font(.caption)
+                .help(
+                    "When checked, close this dialog after a job is submitted successfully. "
+                    + "When unchecked, keep the dialog open and show a brief confirmation."
+                )
                 .onChange(of: closeOnGenerate) { _, enabled in
                     ImageGenPersistence.setCloseDialogOnGenerate(enabled, config: appState.config)
                 }
@@ -137,12 +141,18 @@ struct ImageGenUnifiedDialog: View {
             }
             Button("Close") { performClose() }
                 .keyboardShortcut("w", modifiers: [.command])
+                .help("Close this dialog (⌘W).")
             if showReplaceUpdate {
                 Button(replaceUpdateLabel) { Task { await submit(replace: true) } }
                     .keyboardShortcut(.return, modifiers: [.command])
+                    .help(replaceUpdateHelp)
             }
             Button(primaryLabel) { Task { await submit(replace: false) } }
                 .keyboardShortcut(.return, modifiers: showReplaceUpdate ? [] : [.command])
+                .help(
+                    "Start making the image\nwith these settings.\n"
+                    + "Also saves settings to the EXIF user comment."
+                )
         }
     }
 
@@ -159,11 +169,26 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private var replaceUpdateLabel: String {
-        guard let replaceJobID else { return "Update" }
-        return appState.imageGen.isActiveJobRemainingUpdatable(jobID: replaceJobID) ? "Update" : "Replace"
+        guard let replaceJobID else { return "Update ⌘↩" }
+        let base = appState.imageGen.isActiveJobRemainingUpdatable(jobID: replaceJobID) ? "Update" : "Replace"
+        return "\(base) ⌘↩"
     }
 
-    private var primaryLabel: String { "Generate" }
+    private var replaceUpdateHelp: String {
+        guard let replaceJobID else {
+            return "Update this queued job with the current settings (does not add a new job)."
+        }
+        if appState.imageGen.isActiveJobRemainingUpdatable(jobID: replaceJobID) {
+            return "Update this job with the current settings "
+                + "(does not affect the copy in progress). "
+                + "Copies is the number of images still to run, including the in-flight copy."
+        }
+        return "Update this queued job with the current settings (does not add a new job)."
+    }
+
+    private var primaryLabel: String {
+        showReplaceUpdate ? "Generate" : "Generate ⌘↩"
+    }
 
     private var activeImagePath: String? {
         appState.fileData.currentImagePath

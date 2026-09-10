@@ -7,7 +7,6 @@ struct ImageGenIntSliderRow: View {
     let minValue: Int
     let maxValue: Int
     let step: Int
-    let presetValues: [Int]
     var resetDefault: Any? = nil
     @Binding var values: [String: Any]
 
@@ -34,21 +33,6 @@ struct ImageGenIntSliderRow: View {
                     .onChange(of: isEditing) { _, editing in
                         if !editing { commitTextValue() }
                     }
-                if !presetValues.isEmpty {
-                    Menu {
-                        ForEach(presetValues, id: \.self) { preset in
-                            Button("\(preset)") {
-                                setValue(preset)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption)
-                            .frame(width: 20, height: 20)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .help("Preset values")
-                }
                 if resetDefault != nil {
                     ImageGenFieldResetButton(
                         isActive: !ImageGenFieldResetLogic.matchesDefault(
@@ -120,7 +104,6 @@ struct ImageGenFloatSliderRow: View {
     let minValue: Double
     let maxValue: Double
     let step: Double
-    let presetValues: [Double]
     var resetDefault: Any? = nil
     @Binding var values: [String: Any]
 
@@ -151,21 +134,6 @@ struct ImageGenFloatSliderRow: View {
                     .onChange(of: isEditing) { _, editing in
                         if !editing { commitTextValue() }
                     }
-                if !presetValues.isEmpty {
-                    Menu {
-                        ForEach(presetValues, id: \.self) { preset in
-                            Button(format(preset)) {
-                                setValue(preset)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption)
-                            .frame(width: 20, height: 20)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .help("Preset values")
-                }
                 if resetDefault != nil {
                     ImageGenFieldResetButton(
                         isActive: !ImageGenFieldResetLogic.matchesDefault(
@@ -233,56 +201,5 @@ struct ImageGenFloatSliderRow: View {
             return
         }
         setValue(parsed)
-    }
-}
-
-enum ImageGenSliderPresets {
-    static func intPresets(
-        key: String,
-        min: Int,
-        max: Int,
-        step: Int,
-        choices: [Any]?
-    ) -> [Int] {
-        if let choices {
-            return choices.compactMap { choice in
-                if let value = choice as? Int { return value }
-                if let value = Int("\(choice)") { return value }
-                return nil
-            }
-        }
-        if key == "width" || key == "height" {
-            return dimensionPresets(min: min, max: max, step: step)
-        }
-        if key == "steps" {
-            return [1, 2, 4, 8, 12, 16, 20, 24, 30].filter { $0 >= min && $0 <= max }
-        }
-        if key == "copies" {
-            return [1, 2, 3, 4, 5, 10, 20, 30, 51].filter { $0 >= min && $0 <= max }
-        }
-        return []
-    }
-
-    static func floatPresets(min minimum: Double, max maximum: Double, step: Double, key: String) -> [Double] {
-        if key == "guidance_scale" {
-            return [0, 1, 1.5, 2, 3, 3.5, 5, 7.5, 10].filter { $0 >= minimum && $0 <= maximum }
-        }
-        let count = Swift.min(8, Int((maximum - minimum) / Swift.max(step, 0.1)) + 1)
-        guard count > 1 else { return [] }
-        return (0..<count).map { index in
-            minimum + (Double(index) * (maximum - minimum) / Double(count - 1))
-        }
-    }
-
-    private static func dimensionPresets(min: Int, max: Int, step: Int) -> [Int] {
-        let candidates = [256, 512, 640, 768, 832, 896, 1024, 1152, 1280, 1344, 1408, 1536, 1664, 1792, 1920, 2048]
-        let filtered = candidates.filter { $0 >= min && $0 <= max }
-        if filtered.contains(min) && filtered.contains(max) {
-            return filtered
-        }
-        var presets = Set(filtered)
-        presets.insert(min)
-        presets.insert(max)
-        return presets.sorted()
     }
 }

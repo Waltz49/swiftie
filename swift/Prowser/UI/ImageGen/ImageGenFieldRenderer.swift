@@ -68,13 +68,6 @@ private struct ImageGenFieldSpecView: View {
                 minValue: spec["min_value"] as? Int ?? 0,
                 maxValue: spec["max_value"] as? Int ?? 100,
                 step: spec["step"] as? Int ?? 1,
-                presetValues: ImageGenSliderPresets.intPresets(
-                    key: key,
-                    min: spec["min_value"] as? Int ?? 0,
-                    max: spec["max_value"] as? Int ?? 100,
-                    step: spec["step"] as? Int ?? 1,
-                    choices: spec["choices"] as? [Any]
-                ),
                 resetDefault: spec["reset_default"],
                 values: $values
             )
@@ -85,12 +78,6 @@ private struct ImageGenFieldSpecView: View {
                 minValue: doubleValue(spec["min_value"], default: 0),
                 maxValue: doubleValue(spec["max_value"], default: 1),
                 step: doubleValue(spec["step"], default: 0.1),
-                presetValues: ImageGenSliderPresets.floatPresets(
-                    min: doubleValue(spec["min_value"], default: 0),
-                    max: doubleValue(spec["max_value"], default: 1),
-                    step: doubleValue(spec["step"], default: 0.1),
-                    key: key
-                ),
                 resetDefault: spec["reset_default"],
                 values: $values
             )
@@ -131,9 +118,6 @@ private struct ImageGenChoiceRow: View {
     let spec: [String: Any]
     @Binding var values: [String: Any]
 
-    @State private var textValue = ""
-    @FocusState private var isEditing: Bool
-
     private var options: [(title: String, tag: String)] {
         if let pairs = spec["choices"] as? [[Any]] {
             return pairs.map { pair in
@@ -159,14 +143,6 @@ private struct ImageGenChoiceRow: View {
                 }
                 .labelsHidden()
                 .frame(minWidth: 140)
-                TextField("", text: $textValue)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 88)
-                    .focused($isEditing)
-                    .onSubmit { commitTextValue() }
-                    .onChange(of: isEditing) { _, editing in
-                        if !editing { commitTextValue() }
-                    }
                 if spec["reset_default"] != nil {
                     ImageGenFieldResetButton(
                         isActive: !ImageGenFieldResetLogic.matchesDefault(
@@ -180,19 +156,13 @@ private struct ImageGenChoiceRow: View {
                 }
             }
         }
-        .onAppear { syncTextFromSelection() }
-        .onChange(of: selectionBinding.wrappedValue) { _, _ in
-            if !isEditing {
-                syncTextFromSelection()
-            }
-        }
     }
 
     private var selectionBinding: Binding<String> {
         return Binding(
             get: {
                 if let string = values[key] as? String { return string }
-                return stringifyChoiceValue(values[key]) 
+                return stringifyChoiceValue(values[key])
             },
             set: { newValue in
                 if let intValue = Int(newValue) {
@@ -204,24 +174,6 @@ private struct ImageGenChoiceRow: View {
                 }
             }
         )
-    }
-
-    private func syncTextFromSelection() {
-        textValue = selectionBinding.wrappedValue
-    }
-
-    private func commitTextValue() {
-        let trimmed = textValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            syncTextFromSelection()
-            return
-        }
-        if let match = options.first(where: { $0.tag == trimmed || $0.title == trimmed }) {
-            values[key] = match.tag
-            textValue = match.tag
-        } else {
-            values[key] = trimmed
-        }
     }
 
     private func stringifyChoiceValue(_ value: Any?) -> String {
@@ -240,7 +192,6 @@ private struct ImageGenChoiceRow: View {
         } else {
             values[key] = ImageGenFieldResetLogic.stringify(resetDefault)
         }
-        syncTextFromSelection()
     }
 }
 
@@ -258,15 +209,26 @@ private struct ImageGenSeedRowGroup: View {
     var body: some View {
         let seedSpec = childSpecs.first { $0["key"] as? String == "seed" }
         let randomSpec = childSpecs.first { $0["key"] as? String == "random_seed" }
-        HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             if let seedSpec {
-                ImageGenSeedRow(spec: seedSpec, values: $values)
+                Text(seedSpec["label"] as? String ?? "Seed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            if let randomSpec {
-                let label = randomSpec["bool_label_override"] as? String
-                    ?? randomSpec["label"] as? String
-                    ?? "Randomize"
-                Toggle(label, isOn: bindingBool(randomSpec, key: "random_seed", default: true))
+            HStack(alignment: .center, spacing: 10) {
+                if let seedSpec {
+                    ImageGenSeedInput(spec: seedSpec, values: $values)
+                }
+                if let randomSpec {
+                    let label = randomSpec["bool_label_override"] as? String
+                        ?? randomSpec["label"] as? String
+                        ?? "Randomize"
+                    Toggle(label, isOn: bindingBool(randomSpec, key: "random_seed", default: true))
+                        .help(
+                            "Use a new random number\n"
+                            + "each time you generate."
+                        )
+                }
             }
         }
     }
@@ -309,52 +271,41 @@ private struct ImageGenSeedRow: View {
     let spec: [String: Any]
     @Binding var values: [String: Any]
 
-    @State private var seedText = ""
-    @FocusState private var isEditing: Bool
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(spec["label"] as? String ?? "Seed")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if !(values["random_seed"] as? Bool ?? true) {
-                HStack(spacing: 8) {
-                    Slider(
-                        value: seedSliderBinding,
-                        in: 0...Double(Int.max / 4),
-                        step: 1
-                    )
-                    TextField("Seed", text: $seedText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 120)
-                        .focused($isEditing)
-                        .onSubmit { commitSeedText() }
-                        .onChange(of: isEditing) { _, editing in
-                            if !editing { commitSeedText() }
-                        }
+            ImageGenSeedInput(spec: spec, values: $values)
+        }
+    }
+}
+
+@MainActor
+private struct ImageGenSeedInput: View {
+    let spec: [String: Any]
+    @Binding var values: [String: Any]
+
+    @State private var seedText = ""
+    @FocusState private var isEditing: Bool
+
+    private var seedMaximum: Int { Int(UInt32.max) }
+
+    var body: some View {
+        TextField("Seed", text: $seedText)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 96)
+            .focused($isEditing)
+            .onSubmit { commitSeedText() }
+            .onChange(of: isEditing) { _, editing in
+                if !editing { commitSeedText() }
+            }
+            .onAppear { syncSeedText() }
+            .onChange(of: values["seed"] as? Int) { _, _ in
+                if !isEditing {
+                    syncSeedText()
                 }
             }
-        }
-        .onAppear { syncSeedText() }
-        .onChange(of: values["seed"] as? Int) { _, _ in
-            if !isEditing {
-                syncSeedText()
-            }
-        }
-    }
-
-    private var seedSliderBinding: Binding<Double> {
-        Binding(
-            get: { Double(values["seed"] as? Int ?? spec["default"] as? Int ?? 0) },
-            set: { values["seed"] = max(0, Int($0.rounded())) }
-        )
-    }
-
-    private func bindingBool(_ key: String, default defaultValue: Bool) -> Binding<Bool> {
-        Binding(
-            get: { values[key] as? Bool ?? defaultValue },
-            set: { values[key] = $0 }
-        )
     }
 
     private func syncSeedText() {
@@ -366,7 +317,8 @@ private struct ImageGenSeedRow: View {
             syncSeedText()
             return
         }
-        values["seed"] = max(0, parsed)
-        seedText = String(max(0, parsed))
+        let clamped = max(0, min(seedMaximum, parsed))
+        values["seed"] = clamped
+        seedText = String(clamped)
     }
 }

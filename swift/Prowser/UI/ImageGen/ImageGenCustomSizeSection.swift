@@ -29,13 +29,6 @@ struct ImageGenCustomSizeSection: View {
                             minValue: widthSpec["min_value"] as? Int ?? 256,
                             maxValue: widthSpec["max_value"] as? Int ?? 2048,
                             step: widthSpec["step"] as? Int ?? 8,
-                            presetValues: ImageGenSliderPresets.intPresets(
-                                key: "width",
-                                min: widthSpec["min_value"] as? Int ?? 256,
-                                max: widthSpec["max_value"] as? Int ?? 2048,
-                                step: widthSpec["step"] as? Int ?? 8,
-                                choices: widthSpec["choices"] as? [Any]
-                            ),
                             resetDefault: widthSpec["reset_default"],
                             values: $values
                         )
@@ -49,13 +42,6 @@ struct ImageGenCustomSizeSection: View {
                             minValue: heightSpec["min_value"] as? Int ?? 256,
                             maxValue: heightSpec["max_value"] as? Int ?? 2048,
                             step: heightSpec["step"] as? Int ?? 8,
-                            presetValues: ImageGenSliderPresets.intPresets(
-                                key: "height",
-                                min: heightSpec["min_value"] as? Int ?? 256,
-                                max: heightSpec["max_value"] as? Int ?? 2048,
-                                step: heightSpec["step"] as? Int ?? 8,
-                                choices: heightSpec["choices"] as? [Any]
-                            ),
                             resetDefault: heightSpec["reset_default"],
                             values: $values
                         )
