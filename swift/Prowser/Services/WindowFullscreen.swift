@@ -45,8 +45,6 @@ enum WindowFullscreen {
     }
 
     static func persistMacOSSpaceMode(config: AppConfig) {
-        var restore = config.rawSettings()["restore_state"] as? [String: Any] ?? [:]
-        restore["last_macos_space_mode"] = isInMacOSSpace
-        config.updateSetting("restore_state", value: restore)
+        config.updateRestoreMacOSSpaceMode(isInMacOSSpace)
     }
 }

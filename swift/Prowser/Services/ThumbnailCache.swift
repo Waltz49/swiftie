@@ -7,6 +7,7 @@ actor ThumbnailCache {
     private let appCacheDirectory: URL
     private var ignoreExifRotation: Bool
     private var memoryCache: [String: NSImage] = [:]
+    private var memoryKeysByPath: [String: Set<String>] = [:]
     private let memoryLimit = 500
 
     init(paths: ProfilePaths, ignoreExifRotation: Bool) {
@@ -19,6 +20,16 @@ actor ThumbnailCache {
         if ignore != ignoreExifRotation {
             ignoreExifRotation = ignore
             memoryCache.removeAll()
+            memoryKeysByPath.removeAll()
+        }
+    }
+
+    func invalidate(for imagePath: String) {
+        let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
+        if let keys = memoryKeysByPath.removeValue(forKey: normalized) {
+            for key in keys {
+                memoryCache.removeValue(forKey: key)
+            }
         }
     }
 
@@ -45,13 +56,13 @@ actor ThumbnailCache {
         }
         let url = diskURL(for: imagePath, size: size)
         guard let image = NSImage(contentsOf: url) else { return nil }
-        storeInMemory(key: memoryKey, image: image)
+        storeInMemory(key: memoryKey, image: image, imagePath: imagePath)
         return image
     }
 
     func storeThumbnail(_ image: NSImage, for imagePath: String, size: Int) throws {
         let memoryKey = "\(cacheKey(for: imagePath))_\(size)"
-        storeInMemory(key: memoryKey, image: image)
+        storeInMemory(key: memoryKey, image: image, imagePath: imagePath)
 
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
@@ -84,10 +95,12 @@ actor ThumbnailCache {
         return cgImage
     }
 
-    private func storeInMemory(key: String, image: NSImage) {
+    private func storeInMemory(key: String, image: NSImage, imagePath: String) {
         if memoryCache.count >= memoryLimit {
             memoryCache.removeValue(forKey: memoryCache.keys.first!)
         }
         memoryCache[key] = image
+        let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
+        memoryKeysByPath[normalized, default: []].insert(key)
     }
 }

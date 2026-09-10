@@ -25,8 +25,14 @@ final class BrowseImageNSView: NSView {
     private var rotationDegrees: CGFloat = 0
     private var isFlippedHorizontally = false
     private var isFlippedVertically = false
+    private var themeColors = ThemeColors.dark
 
     override var isFlipped: Bool { true }
+
+    func applyTheme(_ colors: ThemeColors) {
+        themeColors = colors
+        needsDisplay = true
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -111,6 +117,27 @@ final class BrowseImageNSView: NSView {
         needsDisplay = true
     }
 
+    func panBy(dx: CGFloat, dy: CGFloat) {
+        guard canPan() else { return }
+        scrollOffset.x += dx
+        scrollOffset.y += dy
+        clampScroll()
+        needsDisplay = true
+    }
+
+    /// Fit image width to the browse canvas and scroll to the top (Python ^W).
+    func fitToCanvasWidth() {
+        guard let image = sourceImage else { return }
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0, bounds.width > 0 else { return }
+        preferredActualSize = false
+        isActualSize = false
+        onActualSizeModeChanged?(false)
+        scaleFactor = bounds.width / imageSize.width
+        scrollOffset = CGPoint(x: 0, y: 0)
+        needsDisplay = true
+    }
+
     private func loadImage() {
         resetTransforms()
         guard let imagePath else {
@@ -143,7 +170,9 @@ final class BrowseImageNSView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        drawCheckerboard(in: bounds)
+        NSColor(themeColors.browseBorderColor).setFill()
+        bounds.fill()
+
         guard let image = sourceImage else {
             drawEmptyState()
             return
@@ -151,6 +180,13 @@ final class BrowseImageNSView: NSView {
 
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let drawRect = imageDrawRect(for: image)
+
+        if themeColors.browseUseCheckerboard {
+            drawCheckerboard(in: drawRect)
+        } else {
+            NSColor(themeColors.browseTransparencyColor).setFill()
+            drawRect.fill()
+        }
 
         context.saveGState()
         context.translateBy(x: drawRect.midX, y: drawRect.midY)
@@ -165,7 +201,7 @@ final class BrowseImageNSView: NSView {
             width: drawRect.width,
             height: drawRect.height
         )
-        image.draw(in: centered)
+        image.draw(in: centered, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
         context.restoreGState()
 
         if numberOverlayVisible {
@@ -286,16 +322,32 @@ final class BrowseImageNSView: NSView {
     }
 
     private func drawCheckerboard(in rect: NSRect) {
+        guard rect.width > 0, rect.height > 0 else { return }
+
         let tile: CGFloat = 8
-        let dark = NSColor(calibratedWhite: 0.38, alpha: 1)
-        let light = NSColor(calibratedWhite: 0.50, alpha: 1)
-        var y: CGFloat = 0
-        var row = 0
-        while y < rect.height {
-            var x: CGFloat = 0
-            var col = 0
-            while x < rect.width {
-                let color = (row + col) % 2 == 0 ? light : dark
+        // Match Python `_draw_diamond_pattern`: 128 base, 96 on alternating cells.
+        let base = NSColor(calibratedRed: 128.0 / 255.0, green: 128.0 / 255.0, blue: 128.0 / 255.0, alpha: 1)
+        let alternate = NSColor(calibratedRed: 96.0 / 255.0, green: 96.0 / 255.0, blue: 96.0 / 255.0, alpha: 1)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: rect).addClip()
+        base.setFill()
+        rect.fill()
+
+        let startCol = Int(floor(rect.minX / tile))
+        let startRow = Int(floor(rect.minY / tile))
+        var row = startRow
+        var y = CGFloat(startRow) * tile
+        while y < rect.maxY {
+            var col = startCol
+            var x = CGFloat(startCol) * tile
+            while x < rect.maxX {
+                guard (row + col) % 2 == 0 else {
+                    x += tile
+                    col += 1
+                    continue
+                }
+                let color = alternate
                 color.setFill()
                 NSRect(x: x, y: y, width: tile, height: tile).fill()
                 x += tile
@@ -304,13 +356,14 @@ final class BrowseImageNSView: NSView {
             y += tile
             row += 1
         }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawEmptyState() {
         let text = "No image selected"
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 16),
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .foregroundColor: NSColor(themeColors.text),
         ]
         let size = (text as NSString).size(withAttributes: attrs)
         let rect = NSRect(

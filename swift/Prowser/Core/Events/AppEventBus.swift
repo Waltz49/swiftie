@@ -22,6 +22,7 @@ enum AppEventType: String, Sendable {
     case thumbnailNavigate
     case browseKeyboard
     case mainContentLayoutChanged
+    case thumbnailsInvalidated
 }
 
 /// Browse-view keyboard actions (zoom, etc.).
@@ -34,6 +35,11 @@ enum BrowseKeyboardAction: Sendable {
     case flipHorizontal
     case flipVertical
     case resetTransforms
+    case panLeft
+    case panRight
+    case panUp
+    case panDown
+    case fitCanvasWidth
 }
 
 /// Arrow-key navigation in the thumbnail grid (menu shortcuts and grid keyDown).

@@ -5,7 +5,11 @@ struct ImageListView: View {
 
     var body: some View {
         let images = appState.fileData.displayedImages
+        let thumbnailRefreshToken = appState.thumbnailInvalidationGeneration
         let current = appState.fileData.currentImagePath
+        let colors = appState.theme.colors
+        let rowHeight = CGFloat(appState.config.int(forKey: "list_view_row_height", default: 48))
+        let thumbSize = max(28, rowHeight - 8)
 
         List(selection: Binding(
             get: { current },
@@ -18,18 +22,31 @@ struct ImageListView: View {
         )) {
             ForEach(images, id: \.self) { path in
                 HStack {
-                    ListThumbnail(path: path, cache: appState.thumbnailCache)
-                        .frame(width: 48, height: 48)
+                    ListThumbnail(
+                        path: path,
+                        cache: appState.thumbnailCache,
+                        refreshToken: thumbnailRefreshToken
+                    )
+                        .frame(width: thumbSize, height: thumbSize)
                     VStack(alignment: .leading) {
                         Text((path as NSString).lastPathComponent)
+                            .foregroundStyle(path == current ? colors.currentImageBorder : colors.text)
                         Text(fileSizeLabel(path: path))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(colors.sidebarMutedText)
                     }
                 }
+                .listRowBackground(
+                    path == current
+                        ? colors.currentImageBackground.opacity(0.35)
+                        : colors.thumbnailGridBackground
+                )
+                .frame(height: rowHeight)
                 .tag(path as String?)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(colors.thumbnailGridBackground)
         .onTapGesture(count: 2) {
             appState.fileData.setViewMode(.browse)
         }
@@ -45,6 +62,7 @@ struct ImageListView: View {
 private struct ListThumbnail: View {
     let path: String
     let cache: ThumbnailCache
+    let refreshToken: Int
 
     @State private var image: NSImage?
 
@@ -59,7 +77,8 @@ private struct ListThumbnail: View {
                 Rectangle().fill(Color.secondary.opacity(0.15))
             }
         }
-        .task(id: path) {
+        .task(id: "\(path)-\(refreshToken)") {
+            image = nil
             guard let cgImage = await cache.generateThumbnail(for: path, size: 96) else { return }
             image = NSImage(
                 cgImage: cgImage,

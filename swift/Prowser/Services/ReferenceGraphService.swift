@@ -9,20 +9,27 @@ enum ReferenceGraphService {
     private static let fileDateLine = try? NSRegularExpression(pattern: "^\\d+(?:\\.\\d+)?$")
     private static let imageExtensions = [".png", ".jpg", ".webp", ".jpeg"]
 
-    static func imagesReferencing(targetPath: String, in candidates: [String]) -> [String] {
+    @MainActor
+    static func imagesReferencing(targetPath: String, in candidates: [String]) async -> [String] {
         let targetNorm = normalizePath(targetPath)
-        return candidates.filter { candidate in
-            normalizePath(candidate) != targetNorm && pathIsReferencedInExif(candidatePath: candidate, targetPath: targetPath)
+        var matches: [String] = []
+        for candidate in candidates {
+            if normalizePath(candidate) == targetNorm { continue }
+            if await pathIsReferencedInExif(candidatePath: candidate, targetPath: targetPath) {
+                matches.append(candidate)
+            }
         }
+        return matches
     }
 
-    static func pathIsReferencedInExif(candidatePath: String, targetPath: String) -> Bool {
+    @MainActor
+    static func pathIsReferencedInExif(candidatePath: String, targetPath: String) async -> Bool {
         guard FileManager.default.fileExists(atPath: candidatePath),
               FileManager.default.fileExists(atPath: targetPath) else {
             return false
         }
         let imageDir = (candidatePath as NSString).deletingLastPathComponent
-        let entries = referenceEntries(for: candidatePath)
+        let entries = await referenceEntries(for: candidatePath)
         guard !entries.isEmpty else { return false }
 
         let resolved = resolveReferenceEntries(imageDir: imageDir, entries: entries)
@@ -36,8 +43,9 @@ enum ReferenceGraphService {
         return false
     }
 
-    private static func referenceEntries(for path: String) -> [(String, Double?)] {
-        guard let text = ExifService.userComment(path: path), !text.isEmpty else { return [] }
+    @MainActor
+    private static func referenceEntries(for path: String) async -> [(String, Double?)] {
+        guard let text = await ExifService.userDescription(path: path), !text.isEmpty else { return [] }
         return parseReferenceEntries(from: text)
     }
 

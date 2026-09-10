@@ -121,9 +121,57 @@ enum ExifService {
         return record.description
     }
 
+    /// Python/piexif-backed user description (matches information sidebar in Qt app).
+    @MainActor
+    static func userDescription(path: String) async -> String? {
+        if let registry = ExifBridgeSupport.registry, registry.isAvailable {
+            do {
+                return try await registry.getExifUserDescription(path: path)
+            } catch {
+                return loadRecord(for: path).description
+            }
+        }
+        return loadRecord(for: path).description
+    }
+
+    @MainActor
+    static func loadRecord(for path: String, preferPythonDescription: Bool) async -> ExifRecord {
+        var record = loadRecord(for: path)
+        guard preferPythonDescription, ExifBridgeSupport.isAvailable else { return record }
+        if let description = await userDescription(path: path) {
+            record.description = description
+        }
+        return record
+    }
+
     private static let userCommentSkipHeadings: Set<String> = [
         "prompt", "prompt:", "description", "description:",
     ]
+
+    /// Port of `imagegen_plugins/image_gen_menu.py` `initial_prompt_from_usercomment`.
+    static func initialPromptFromUserComment(_ text: String) -> String? {
+        let prompt = truncateUserCommentBeforePrompt(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return prompt.isEmpty ? nil : prompt
+    }
+
+    /// Prompt text for image-gen import / ⇧⌥/ priming (display-normalized comment → prompt section only).
+    @MainActor
+    static func importPromptFromPath(_ path: String) async -> String? {
+        guard let comment = await userDescription(path: path) else { return nil }
+        return initialPromptFromUserComment(comment)
+    }
+
+    /// Sync fallback when the Python EXIF bridge is unavailable (`load_import_prompt_from_path`).
+    static func importPromptFromPathSync(_ path: String) -> String? {
+        importPromptText(from: path)
+    }
+
+    /// Port of `exif/exif_utils.py` `usercomment_text_for_clipboard`.
+    static func userCommentTextForClipboard(_ text: String, copyFull: Bool = false) -> String {
+        guard !text.isEmpty else { return text }
+        if copyFull { return text }
+        return truncateUserCommentBeforePrompt(text).replacingOccurrences(of: ";", with: ".")
+    }
 
     /// Port of `exif/exif_utils.py` `truncate_usercomment_before_prompt`.
     static func truncateUserCommentBeforePrompt(_ text: String) -> String {
@@ -171,7 +219,27 @@ enum ExifService {
 
     // MARK: - Write
 
-    static func writeUserComment(path: String, text: String) throws {
+    @MainActor
+    static func writeUserComment(path: String, text: String) async throws {
+        if let registry = ExifBridgeSupport.registry, registry.isAvailable {
+            let success = try await registry.writeExifUserComment(path: path, comment: text)
+            guard success else { throw ExifError.writeFailed }
+            return
+        }
+        try writeUserCommentImageIO(path: path, text: text)
+    }
+
+    @MainActor
+    static func deleteUserComment(path: String) async throws {
+        if let registry = ExifBridgeSupport.registry, registry.isAvailable {
+            let success = try await registry.deleteExifUserComment(path: path)
+            guard success else { throw ExifError.writeFailed }
+            return
+        }
+        try deleteUserCommentImageIO(path: path)
+    }
+
+    private static func writeUserCommentImageIO(path: String, text: String) throws {
         guard canWriteExif(path: path) else {
             throw ExifError.unsupportedFormat
         }
@@ -211,8 +279,8 @@ enum ExifService {
         }
     }
 
-    static func deleteUserComment(path: String) throws {
-        try writeUserComment(path: path, text: "")
+    private static func deleteUserCommentImageIO(path: String) throws {
+        try writeUserCommentImageIO(path: path, text: "")
     }
 
     static func resetFileDateToExif(path: String) throws {
@@ -408,7 +476,17 @@ enum ExifService {
         }
     }
 
-    private static func formatGPS(_ gps: [CFString: Any]) -> String? {
+    static func gpsCoordinates(for path: String) -> (latitude: Double, longitude: Double)? {
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] else {
+            return nil
+        }
+        return parseGPS(gps)
+    }
+
+    private static func parseGPS(_ gps: [CFString: Any]) -> (latitude: Double, longitude: Double)? {
         guard let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
               let lon = gps[kCGImagePropertyGPSLongitude] as? Double else { return nil }
         let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String ?? "N"
@@ -417,7 +495,12 @@ enum ExifService {
         var longitude = lon
         if latRef == "S" { latitude = -latitude }
         if lonRef == "W" { longitude = -longitude }
-        return String(format: "%.5f, %.5f", latitude, longitude)
+        return (latitude, longitude)
+    }
+
+    private static func formatGPS(_ gps: [CFString: Any]) -> String? {
+        guard let coords = parseGPS(gps) else { return nil }
+        return String(format: "%.5f, %.5f", coords.latitude, coords.longitude)
     }
 
     enum ExifError: LocalizedError {

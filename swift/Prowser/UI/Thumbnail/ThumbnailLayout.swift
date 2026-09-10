@@ -65,7 +65,7 @@ enum ThumbnailLayout {
         return NSRect(x: x, y: y, width: metrics.cellWidth, height: metrics.cellHeight)
     }
 
-    /// Square image area above the filename label.
+    /// Square image area above the filename/size overlay (flipped view: image at top of cell).
     static func imageFrame(
         for index: Int,
         metrics: GridMetrics,
@@ -76,6 +76,19 @@ enum ThumbnailLayout {
         let label = overlayLabelHeight(showFilename: showFilename, showImageSize: showImageSize)
         let imageHeight = metrics.cellHeight - label
         return NSRect(x: cell.minX, y: cell.minY, width: cell.width, height: imageHeight)
+    }
+
+    /// Label band below the thumbnail image (centered overlay text is drawn here).
+    static func overlayFrame(
+        for index: Int,
+        metrics: GridMetrics,
+        showFilename: Bool,
+        showImageSize: Bool = false
+    ) -> NSRect {
+        let cell = frame(for: index, metrics: metrics)
+        let label = overlayLabelHeight(showFilename: showFilename, showImageSize: showImageSize)
+        let imageHeight = metrics.cellHeight - label
+        return NSRect(x: cell.minX, y: cell.minY + imageHeight, width: cell.width, height: label)
     }
 
     /// Rounded cell background + border rect (inset by border space).

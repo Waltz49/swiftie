@@ -48,6 +48,13 @@ struct FindReferencesSheet: View {
         }
         .padding(16)
         .frame(minWidth: 520, minHeight: 380)
+        .persistedDialogGeometry(
+            DialogGeometryKey.findReferences,
+            defaultWidth: 560,
+            defaultHeight: 420,
+            minWidth: 520,
+            minHeight: 380
+        )
     }
 }
 

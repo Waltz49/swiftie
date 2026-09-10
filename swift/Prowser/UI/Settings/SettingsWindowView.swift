@@ -17,6 +17,24 @@ struct SettingsWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: 760, minHeight: 520)
+        .background(SettingsDialogChrome.background)
+        .persistedDialogGeometry(
+            DialogGeometryKey.settings,
+            defaultWidth: 920,
+            defaultHeight: 680,
+            minWidth: 760,
+            minHeight: 520,
+            sizeFallbackKey: DialogGeometryKey.settingsSizeFallback
+        )
+        .onAppear {
+            appState.theme.captureSnapshot()
+        }
+        .onDisappear {
+            ThemeColorPanelController.shared.closeIfOpen()
+            appState.theme.commitPreview()
+            appState.config.saveSettings()
+            appState.eventBus.emit(.settingsChanged)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .prowserOpenSettingsTab)) { notification in
             if let raw = notification.userInfo?["tab"] as? String,
                let tab = SettingsTab(rawValue: raw) {

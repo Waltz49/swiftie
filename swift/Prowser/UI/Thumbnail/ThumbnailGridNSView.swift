@@ -39,6 +39,7 @@ final class ThumbnailGridNSView: NSView {
 
     var overlayBoxColor: NSColor = NSColor.black.withAlphaComponent(0.94)
     var emptyStateStyle = ThumbnailEmptyStateStyle.from(theme: ThemeColors.dark)
+    private var themeColors = ThemeColors.dark
     var currentDirectory: String?
     var filterPattern: String = "*"
     var imageExtensions: [String] = []
@@ -75,6 +76,13 @@ final class ThumbnailGridNSView: NSView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
+    }
+
+    func applyTheme(_ colors: ThemeColors) {
+        themeColors = colors
+        emptyStateStyle = ThumbnailEmptyStateStyle.from(theme: colors)
+        overlayBoxColor = NSColor(colors.thumbnailFilenameOverlay)
+        needsDisplay = true
     }
 
     func reloadLayout() {
@@ -125,6 +133,17 @@ final class ThumbnailGridNSView: NSView {
     func invalidateThumbnail(path: String) {
         thumbnails.removeValue(forKey: path)
         loadingPaths.remove(path)
+    }
+
+    func invalidateThumbnails(for paths: [String]) {
+        guard !paths.isEmpty else { return }
+        for path in paths {
+            thumbnails.removeValue(forKey: path)
+            loadingPaths.remove(path)
+            imageDimensionCache.removeValue(forKey: path)
+        }
+        needsDisplay = true
+        loadVisibleThumbnails()
     }
 
     func clearThumbnails() {
@@ -586,9 +605,9 @@ final class ThumbnailGridNSView: NSView {
         context.saveGState()
         context.addPath(path)
         if isCurrent {
-            context.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor)
+            context.setFillColor(NSColor(themeColors.currentImageBackground).cgColor)
         } else {
-            context.setFillColor(NSColor.controlBackgroundColor.cgColor)
+            context.setFillColor(NSColor(themeColors.defaultImageBackground).cgColor)
         }
         context.fillPath()
         context.restoreGState()
@@ -605,13 +624,20 @@ final class ThumbnailGridNSView: NSView {
         context.saveGState()
         context.addPath(path)
         if isCurrent {
-            context.setStrokeColor(NSColor.controlAccentColor.cgColor)
-            context.setLineWidth(2)
+            let width = CGFloat(themeColors.currentImageBorderWidth)
+            if width > 0 {
+                context.setStrokeColor(NSColor(themeColors.currentImageBorder).cgColor)
+                context.setLineWidth(width)
+                context.strokePath()
+            }
         } else {
-            context.setStrokeColor(NSColor.separatorColor.withAlphaComponent(0.5).cgColor)
-            context.setLineWidth(1)
+            let width = CGFloat(themeColors.defaultImageBorderWidth)
+            if width > 0 {
+                context.setStrokeColor(NSColor(themeColors.defaultImageBorder).cgColor)
+                context.setLineWidth(width)
+                context.strokePath()
+            }
         }
-        context.strokePath()
         context.restoreGState()
     }
 
@@ -660,9 +686,11 @@ final class ThumbnailGridNSView: NSView {
             showFilename: showFilename,
             showImageSize: showImageSize
         )
+        guard overlayHeight > 0 else { return }
+
         let labelRect = NSRect(
             x: cell.minX + 4,
-            y: cell.maxY - overlayHeight,
+            y: cell.minY + cell.height - overlayHeight,
             width: max(0, cell.width - 8),
             height: overlayHeight
         )
@@ -678,23 +706,27 @@ final class ThumbnailGridNSView: NSView {
         let textHeight = CGFloat(lines.count) * ThumbnailLayout.labelHeight
         let pillRect = NSRect(
             x: labelRect.minX,
-            y: labelRect.maxY - textHeight - 4,
+            y: labelRect.minY,
             width: labelRect.width,
-            height: textHeight + 4
+            height: min(labelRect.height, textHeight + 4)
         )
         let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: 4, yRadius: 4)
         overlayBoxColor.setFill()
         pillPath.fill()
 
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraph,
         ]
-        var y = pillRect.maxY - 2
+        var y = pillRect.minY + 2
         for line in lines {
             let lineRect = NSRect(
                 x: pillRect.minX + 4,
-                y: y - ThumbnailLayout.labelHeight,
+                y: y,
                 width: pillRect.width - 8,
                 height: ThumbnailLayout.labelHeight
             )
@@ -703,7 +735,7 @@ final class ThumbnailGridNSView: NSView {
                 options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin],
                 attributes: attrs
             )
-            y -= ThumbnailLayout.labelHeight
+            y += ThumbnailLayout.labelHeight
         }
     }
 
@@ -740,7 +772,7 @@ final class ThumbnailGridNSView: NSView {
     }
 
     private func drawDropIndicator(in rect: NSRect) {
-        NSColor.controlAccentColor.withAlphaComponent(0.85).setFill()
+        NSColor(themeColors.currentImageBorder).withAlphaComponent(0.85).setFill()
         rect.fill()
     }
 

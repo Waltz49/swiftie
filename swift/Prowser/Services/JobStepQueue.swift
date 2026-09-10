@@ -37,6 +37,78 @@ enum JobStepQueue {
         return out
     }
 
+    static func promptFromStatusView(_ view: QueueJobStatusView?) -> String {
+        guard let view else { return "" }
+        for row in view.rows {
+            if case .prompt(_, let value) = row {
+                return value
+            }
+        }
+        return ""
+    }
+
+    static func resolvedFullPrompt(
+        stored: String,
+        values: [String: Any],
+        steps: [[String: Any]],
+        statusView: QueueJobStatusView?
+    ) -> String {
+        let candidates = [
+            stored,
+            values["prompt"] as? String ?? "",
+            steps.first.map { mergeStepIntoValues($0)["prompt"] as? String ?? "" } ?? "",
+            promptFromStatusView(statusView),
+        ]
+        for candidate in candidates {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return candidate
+            }
+        }
+        return ""
+    }
+
+    static func ensureStepsHavePrompt(
+        _ steps: [[String: Any]],
+        prompt: String,
+        jobValues: [String: Any]
+    ) -> [[String: Any]] {
+        let resolved = resolvedFullPrompt(stored: prompt, values: jobValues, steps: steps, statusView: nil)
+        let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return steps }
+        return steps.map { step in
+            var copy = step
+            var vals = stepValues(copy)
+            if (vals["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                vals["prompt"] = resolved
+                copy["values"] = vals
+            }
+            return copy
+        }
+    }
+
+    /// Merge step values and restore prompt from job/display when step snapshot omitted it.
+    static func generationValues(
+        from step: [String: Any],
+        jobValues: [String: Any],
+        displayFullPrompt: String,
+        statusViewPrompt: String = ""
+    ) -> [String: Any] {
+        var values = mergeStepIntoValues(step)
+        let stepPrompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !stepPrompt.isEmpty {
+            return values
+        }
+        for candidate in [displayFullPrompt, jobValues["prompt"] as? String ?? "", statusViewPrompt] {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                values["prompt"] = candidate
+                return values
+            }
+        }
+        return values
+    }
+
     static func isSeriesContinuousCopies(_ copies: Int) -> Bool {
         copies >= seriesContinuousCopies
     }

@@ -44,7 +44,8 @@ struct FileTreeView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.syncSelectionIfNeeded()
         context.coordinator.focusTreeIfRequested()
-        context.coordinator.collapseToHomeIfRequested()
+        context.coordinator.collapseUIIfRequested()
+        context.coordinator.expandToCurrentDirectoryIfRequested()
         if context.coordinator.consumeReloadIfRequested() {
             context.coordinator.reloadRoots()
         }
@@ -61,7 +62,8 @@ struct FileTreeView: NSViewRepresentable {
 
         private var settingsObserver: UUID?
         private var lastFocusToken = 0
-        private var lastCollapseToken = 0
+        private var lastCollapseUIToken = 0
+        private var lastExpandToken = 0
         private var lastReloadToken = 0
         private var lastSyncedDirectory: String?
         private var lastThemeID: String?
@@ -71,7 +73,8 @@ struct FileTreeView: NSViewRepresentable {
         init(appState: AppState) {
             self.appState = appState
             lastFocusToken = appState.fileTreeFocusToken
-            lastCollapseToken = appState.fileTreeCollapseToken
+            lastCollapseUIToken = appState.fileTreeCollapseUIToken
+            lastExpandToken = appState.fileTreeExpandToken
             lastReloadToken = appState.fileTreeReloadToken
         }
 
@@ -87,10 +90,16 @@ struct FileTreeView: NSViewRepresentable {
             outlineView?.window?.makeFirstResponder(outlineView)
         }
 
-        func collapseToHomeIfRequested() {
-            guard appState.fileTreeCollapseToken != lastCollapseToken else { return }
-            lastCollapseToken = appState.fileTreeCollapseToken
+        func collapseUIIfRequested() {
+            guard appState.fileTreeCollapseUIToken != lastCollapseUIToken else { return }
+            lastCollapseUIToken = appState.fileTreeCollapseUIToken
             collapseAllAndExpandToHome()
+        }
+
+        func expandToCurrentDirectoryIfRequested() {
+            guard appState.fileTreeExpandToken != lastExpandToken else { return }
+            lastExpandToken = appState.fileTreeExpandToken
+            syncSelection()
         }
 
         func applyThemeIfNeeded() {

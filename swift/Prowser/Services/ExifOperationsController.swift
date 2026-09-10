@@ -188,19 +188,16 @@ final class ExifOperationsController {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        for path in paths {
-            try? ExifService.deleteUserComment(path: path)
+        Task {
+            for path in paths {
+                try? await ExifService.deleteUserComment(path: path)
+            }
+            appState.refreshDirectory()
         }
-        appState.refreshDirectory()
     }
 
     func editUserCommentForCurrent() {
-        guard let appState, let path = appState.fileData.currentImagePath else { return }
-        guard ExifService.canWriteExif(path: path) else {
-            showAlert("This file format does not support EXIF User Comment editing.")
-            return
-        }
-        NotificationCenter.default.post(name: .prowserEditUserCommentRequested, object: path)
+        appState?.beginEditUserComment()
     }
 
     private func selectedPaths(appState: AppState) -> [String] {
@@ -230,8 +227,4 @@ final class ExifOperationsController {
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return f
     }()
-}
-
-extension Notification.Name {
-    static let prowserEditUserCommentRequested = Notification.Name("prowser.editUserCommentRequested")
 }

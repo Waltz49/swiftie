@@ -131,31 +131,40 @@ struct JobsToolbarView: View {
 
     var body: some View {
         let controller = appState.imageGen
-        HStack(spacing: 4) {
-            SidebarToolbarIconButton(
-                systemName: "photo.on.rectangle.angled",
-                tooltip: "Intermediate Images\nShow progressive images during generation",
-                selected: controller.showProgressiveImages,
-                enabled: controller.isEnabled
-            ) {
-                controller.setShowProgressiveImages(!controller.showProgressiveImages)
+        ZStack {
+            HStack(spacing: 4) {
+                SidebarToolbarIconButton(
+                    systemName: "photo.on.rectangle.angled",
+                    tooltip: "Intermediate Images\nShow progressive images during generation",
+                    selected: controller.showProgressiveImages,
+                    enabled: controller.isEnabled
+                ) {
+                    controller.setShowProgressiveImages(!controller.showProgressiveImages)
+                }
+                SidebarToolbarIconButton(
+                    systemName: "pause.circle",
+                    tooltip: "Hold Job Queue\nPause starting new jobs until released",
+                    selected: controller.holdJobQueue,
+                    enabled: controller.isEnabled
+                ) {
+                    controller.setHoldJobQueue(!controller.holdJobQueue)
+                }
+                SidebarToolbarIconButton(
+                    systemName: "forward.end",
+                    tooltip: "Skip This Copy\nEnd the current copy and start the next one in this series",
+                    enabled: controller.canSkipActiveSeriesCopy
+                ) {
+                    controller.skipActiveSeriesCopy()
+                }
+                Spacer(minLength: 0)
             }
-            SidebarToolbarIconButton(
-                systemName: "pause.circle",
-                tooltip: "Hold Job Queue\nPause starting new jobs until released",
-                selected: controller.holdJobQueue,
-                enabled: controller.isEnabled
-            ) {
-                controller.setHoldJobQueue(!controller.holdJobQueue)
+            .opacity(controller.skipSeriesCopyInFlight ? 0 : 1)
+
+            if controller.skipSeriesCopyInFlight {
+                Text("Skipping copy...")
+                    .font(.system(size: 12))
+                    .foregroundStyle(appState.theme.colors.sidebarText)
             }
-            SidebarToolbarIconButton(
-                systemName: "forward.end",
-                tooltip: "Skip This Copy\nEnd the current copy and start the next one in this series",
-                enabled: controller.canSkipActiveSeriesCopy
-            ) {
-                controller.skipActiveSeriesCopy()
-            }
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
         .padding(.top, 0)

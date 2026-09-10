@@ -74,7 +74,14 @@ struct PersonSearchSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(minWidth: 480, minHeight: 280)
+        .persistedDialogGeometry(
+            DialogGeometryKey.personSearch,
+            defaultWidth: 480,
+            defaultHeight: 320,
+            minWidth: 420,
+            minHeight: 280
+        )
         .onAppear { loadSavedSettings() }
     }
 

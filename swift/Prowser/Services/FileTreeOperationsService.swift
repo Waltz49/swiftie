@@ -41,6 +41,7 @@ final class FileTreeOperationsService {
         if appState.fileData.currentViewMode == .browse {
             appState.fileData.setViewMode(.thumbnail)
         }
+        appState.setSpecificFilesActive(true)
         appState.fileData.setDisplayedImages(images)
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(images[0])
@@ -86,6 +87,7 @@ final class FileTreeOperationsService {
 
         appState.loadDirectory(directory, saveHistory: true)
         appState.config.updateSetting("sort_mode", value: SortMode.duplicates.rawValue)
+        appState.setSpecificFilesActive(true)
         appState.fileData.setDisplayedImages(duplicates)
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(duplicates[0])

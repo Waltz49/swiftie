@@ -131,7 +131,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         let colors = appState.theme.colors
         return Rectangle()
             .fill(colors.sidebarHeaderBorder.opacity(0.8))
-            .frame(height: 4)
+            .frame(height: CGFloat(max(1, colors.viewBorderWidthPx)))
             .contentShape(Rectangle())
             .onHover { hovering in
                 if hovering {

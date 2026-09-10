@@ -55,6 +55,14 @@ struct FilterDialogSheet: View {
         }
         .padding(16)
         .frame(minWidth: 320, minHeight: 360)
+        .themeDialogStyle()
+        .persistedDialogGeometry(
+            DialogGeometryKey.filter,
+            defaultWidth: 360,
+            defaultHeight: 400,
+            minWidth: 320,
+            minHeight: 360
+        )
         .onAppear {
             entries = appState.config.getSavedFilters().map {
                 FilterEntry(pattern: FilterPatternFormatting.forEditing($0))

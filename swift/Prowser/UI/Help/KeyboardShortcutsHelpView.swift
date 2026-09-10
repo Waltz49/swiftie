@@ -2,6 +2,7 @@ import SwiftUI
 
 struct KeyboardShortcutsHelpView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.themeColors) private var colors
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -12,16 +13,32 @@ struct KeyboardShortcutsHelpView: View {
                     shortcutSection("Navigation", rows: [
                         ("← → ↑ ↓", "Move selection (thumbnail grid respects columns)"),
                         ("⇧← → ↑ ↓", "Range select"),
+                        ("Home / End", "First / last image"),
+                        ("⇧Home / ⇧End", "Range select to first / last"),
                         ("H / E", "First / last image"),
                         ("Return / Space", "Open browse view"),
                         ("Esc", "Clear selection or go back in history"),
                         ("⇧Esc", "Forward in directory history"),
+                        ("F3", "Browse image history"),
+                        ("F10", "Clear directory history stacks"),
                     ])
                     shortcutSection("Views", rows: [
-                        ("⌘1 / ⌘2 / ⌘3", "Thumbnails / List / Browse"),
+                        ("F", "Enter browse view"),
+                        ("F12", "Toggle list view"),
                         ("S", "Start slideshow"),
                         ("Esc", "Exit slideshow"),
                         ("Q", "Exit list view → thumbnails"),
+                    ])
+                    shortcutSection("Slideshow (mode 1)", rows: [
+                        ("1 / 2", "Slower / faster slide rate"),
+                        ("3 / 4", "Slower / faster transitions"),
+                        ("5 / 6", "Less / more max rotation"),
+                        ("7 / 8", "Less / more overlap"),
+                        ("0 / 9", "Apply slow / fast preset"),
+                        ("N", "Advance slide"),
+                        ("Arrows", "Set direction (tap again to advance)"),
+                        ("⇧R", "Random direction"),
+                        ("C", "No transition"),
                     ])
                     shortcutSection("Sort", rows: [
                         ("N / ⇧N", "Sort by name (A-Z / Z-A)"),
@@ -47,23 +64,36 @@ struct KeyboardShortcutsHelpView: View {
                     ])
                     shortcutSection("Browse", rows: [
                         ("← →", "Previous / next image"),
+                        ("Home / End", "First / last image"),
                         ("⇧← →", "Rotate image"),
                         ("⇧↑ ↓", "Flip vertical / horizontal"),
                         ("⇧R", "Reset transforms"),
                         ("A", "Toggle actual size"),
                         ("+ / −", "Zoom in / out"),
-                        ("Space", "Next image"),
+                        ("⌘← → ↑ ↓", "Pan when zoomed"),
+                        ("^W", "Fit image width to canvas"),
+                        ("T / P (double-tap)", "Exit browse, show file tree / preview"),
+                        ("Space", "Next image (or exit when space mode is exit)"),
+                        ("⇧Space", "Toggle space key mode (exit vs advance)"),
                         ("Esc / Return / Q / F", "Return to thumbnails"),
+                        ("F5", "Show reference graph for active image"),
                     ])
                     shortcutSection("Thumbnail grid", rows: [
-                        ("+ / − / 0", "Larger / smaller / reset cell size"),
+                        ("+ / − / 0", "Larger / smaller / reset cell size (list: row height)"),
                         ("⌘← → ↑ ↓", "Multi-select toggle"),
+                        ("⌘Return / ⌘⇧Return", "Collapse / expand file tree"),
+                        ("F2", "Rename selected file"),
                     ])
                     shortcutSection("File & Search", rows: [
-                        ("⌘O", "Open folder"),
+                        ("⌘O", "Open directory"),
+                        ("⌘⇧O", "Open file"),
                         ("⌘R", "Refresh"),
                         ("⇧⌘R", "Reveal in Finder"),
                         ("⌘Delete", "Move to Trash"),
+                        ("⌘C", "Copy path"),
+                        ("^C", "Copy image"),
+                        ("⌘K", "Find similar images"),
+                        ("⌘⇧H", "Show image in directory"),
                         ("⌘Z", "Undo delete (restore from Trash)"),
                         ("⇧F", "Find duplicate files (recursive)"),
                         ("⌘1–⌘9", "Move to destination"),
@@ -71,6 +101,17 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌥⌘1–⌥⌘9", "Copy to destination"),
                         ("^1–^9", "Open favorite directory"),
                     ])
+                    shortcutSection("Tools", rows: [
+                        ("⌘G", "Show GPS location on map"),
+                        ("⇧⌘E", "Edit EXIF user comment"),
+                    ])
+                    if BundleCapabilities.imageGenUIEnabled {
+                        shortcutSection("Image Generation", rows: [
+                            ("⌥/", "Open last-used image function dialog"),
+                            ("⇧⌥/", "Open image-gen dialog from current image EXIF"),
+                            ("⌘J", "Toggle floating job queue panel"),
+                        ])
+                    }
                     shortcutSection("Help", rows: [
                         ("/ or F1", "This dialog"),
                     ])
@@ -84,7 +125,15 @@ struct KeyboardShortcutsHelpView: View {
             }
         }
         .padding(24)
-        .frame(width: 520, height: 520)
+        .frame(minWidth: 520, minHeight: 520)
+        .themeDialogStyle()
+        .persistedDialogGeometry(
+            DialogGeometryKey.keyboardHelp,
+            defaultWidth: 520,
+            defaultHeight: 520,
+            minWidth: 480,
+            minHeight: 400
+        )
     }
 
     private func shortcutSection(_ title: String, rows: [(String, String)]) -> some View {
@@ -96,7 +145,7 @@ struct KeyboardShortcutsHelpView: View {
                         .font(.system(.body, design: .monospaced))
                         .frame(width: 130, alignment: .leading)
                     Text(action)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(colors.dialogMutedText)
                 }
             }
         }
@@ -105,19 +154,29 @@ struct KeyboardShortcutsHelpView: View {
 
 struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.themeColors) private var colors
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Prowser").font(.title)
             Text("Native macOS image browser (Swift port)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.dialogMutedText)
             Text("Version 0.1 (Swift migration)")
                 .font(.caption)
+                .foregroundStyle(colors.dialogMutedText)
             Spacer()
             Button("OK") { dismiss() }
                 .keyboardShortcut(.defaultAction)
         }
         .padding(32)
-        .frame(width: 320, height: 200)
+        .frame(minWidth: 320, minHeight: 200)
+        .themeDialogStyle()
+        .persistedDialogGeometry(
+            DialogGeometryKey.about,
+            defaultWidth: 320,
+            defaultHeight: 200,
+            minWidth: 280,
+            minHeight: 180
+        )
     }
 }

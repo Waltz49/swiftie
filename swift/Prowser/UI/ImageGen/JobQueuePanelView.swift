@@ -11,9 +11,9 @@ struct JobQueuePanelView: View {
         let controller = appState.imageGen
         let mode = appState.jobsQueueSizeMode
 
-        VStack(alignment: .leading, spacing: 8) {
-            if !compactForFloating, controller.isProcessing {
-                ActiveJobStripView()
+        VStack(alignment: .leading, spacing: 4) {
+            if shouldShowActiveStrip(controller: controller, mode: mode) {
+                ActiveJobStripView(includeQueueJobsRow: mode == .strip)
             }
 
             if !controller.isEnabled {
@@ -26,14 +26,6 @@ struct JobQueuePanelView: View {
                 queueContent(mode: mode)
             }
 
-            if !controller.progressMessage.isEmpty, mode != .strip {
-                Text(controller.progressMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let preview = controller.progressivePreviewPath, mode == .all {
-                progressivePreviewView(path: preview)
-            }
             if !controller.lastError.isEmpty {
                 Text(controller.lastError)
                     .font(.caption)
@@ -62,34 +54,25 @@ struct JobQueuePanelView: View {
         }
     }
 
+    private func shouldShowActiveStrip(controller: ImageGenController, mode: JobsQueueSizeMode) -> Bool {
+        controller.isProcessing || controller.cooldownSecondsRemaining > 0
+    }
+
     @ViewBuilder
     private func queueContent(mode: JobsQueueSizeMode) -> some View {
         switch mode {
         case .strip:
-            ActiveJobStripView()
+            EmptyView()
         case .one, .all:
-            JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
-                .frame(minHeight: 80)
+            GeometryReader { geometry in
+                JobQueuePanelNSViewRepresentable(
+                    compactForFloating: compactForFloating,
+                    containerWidth: max(geometry.size.width, 260)
+                )
+                .frame(width: geometry.size.width, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 
-    @ViewBuilder
-    private func progressivePreviewView(path: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text((path as NSString).lastPathComponent)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            if let image = NSImage(contentsOfFile: path) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 160)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .onTapGesture {
-                        appState.openGeneratedImageInBrowse(path: path)
-                    }
-            }
-        }
-    }
 }

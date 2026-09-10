@@ -22,6 +22,7 @@ struct BrowseView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: BrowseImageNSView, context: Context) {
+        nsView.applyTheme(appState.theme.colors)
         nsView.setImage(
             path: appState.fileData.currentImagePath,
             actualSize: appState.browseActualSizeEnabled
@@ -57,6 +58,11 @@ struct BrowseView: NSViewRepresentable {
                 case .flipHorizontal: self.view?.flipHorizontal()
                 case .flipVertical: self.view?.flipVertical()
                 case .resetTransforms: self.view?.resetTransforms()
+                case .panLeft: self.view?.panBy(dx: -40, dy: 0)
+                case .panRight: self.view?.panBy(dx: 40, dy: 0)
+                case .panUp: self.view?.panBy(dx: 0, dy: -40)
+                case .panDown: self.view?.panBy(dx: 0, dy: 40)
+                case .fitCanvasWidth: self.view?.fitToCanvasWidth()
                 }
             }
         }

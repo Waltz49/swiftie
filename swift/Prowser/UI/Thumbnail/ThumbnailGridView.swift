@@ -44,6 +44,9 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var viewModeObserver: NSObjectProtocol?
         private var filterPatternObserver: NSObjectProtocol?
         private var directoryObserver: NSObjectProtocol?
+        private var displayedImagesObserver: NSObjectProtocol?
+        private var settingsObserver: UUID?
+        private var thumbnailsInvalidatedObserver: UUID?
         private var lastSyncedIndex = -1
 
         init(appState: AppState) {
@@ -86,6 +89,27 @@ struct ThumbnailGridView: NSViewRepresentable {
                 ) { [weak self] _ in
                     let coordinator = self
                     Task { @MainActor in coordinator?.syncFromAppState() }
+                }
+            }
+            if displayedImagesObserver == nil {
+                displayedImagesObserver = NotificationCenter.default.addObserver(
+                    forName: .prowserDisplayedImagesChanged,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    let coordinator = self
+                    Task { @MainActor in coordinator?.syncFromAppState() }
+                }
+            }
+            if thumbnailsInvalidatedObserver == nil {
+                thumbnailsInvalidatedObserver = appState.eventBus.subscribe(.thumbnailsInvalidated) { [weak self] event in
+                    guard case .strings(let paths) = event.payload else { return }
+                    Task { @MainActor in self?.handleThumbnailsInvalidated(paths) }
+                }
+            }
+            if settingsObserver == nil {
+                settingsObserver = appState.eventBus.subscribe(.settingsChanged) { [weak self] _ in
+                    Task { @MainActor in self?.syncFromAppState() }
                 }
             }
         }
@@ -153,12 +177,19 @@ struct ThumbnailGridView: NSViewRepresentable {
             if let directoryObserver {
                 NotificationCenter.default.removeObserver(directoryObserver)
             }
+            if let displayedImagesObserver {
+                NotificationCenter.default.removeObserver(displayedImagesObserver)
+            }
+        }
+
+        private func handleThumbnailsInvalidated(_ paths: [String]) {
+            gridView?.invalidateThumbnails(for: paths)
         }
 
         func syncFromAppState() {
             guard let gridView else { return }
             let paths = appState.fileData.displayedImages
-            gridView.emptyStateStyle = ThumbnailEmptyStateStyle.from(theme: appState.theme.colors)
+            gridView.applyTheme(appState.theme.colors)
             gridView.currentDirectory = appState.fileData.currentDirectory
             gridView.filterPattern = appState.filterSettings.filterPattern
             gridView.imageExtensions = appState.config.imageExtensions
@@ -243,6 +274,9 @@ struct ThumbnailGridView: NSViewRepresentable {
                 let cgImage = await appState.thumbnailCache.generateThumbnail(for: path, size: size)
                 let image = cgImage.map {
                     NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+                }
+                if image != nil {
+                    appState.metadataCache.recordDiskSnapshot(path: path)
                 }
                 completion(image)
             }

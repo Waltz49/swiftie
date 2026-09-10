@@ -3,8 +3,6 @@ import SwiftUI
 struct InformationPaneView: View {
     @Environment(AppState.self) private var appState
     @State private var record: ExifRecord = .empty
-    @State private var showEditComment = false
-    @State private var editCommentText = ""
     @State private var errorMessage: String?
 
     var body: some View {
@@ -65,7 +63,7 @@ struct InformationPaneView: View {
 
                         if !appState.informationMenuBarVisible {
                             HStack {
-                                Button("Edit Comment") { beginEditComment() }
+                                Button("Edit Comment") { appState.beginEditUserComment() }
                                 Button("Copy Comment") { copyComment() }
                                 Button("Delete Comment") { deleteComment() }
                             }
@@ -78,35 +76,33 @@ struct InformationPaneView: View {
             }
         }
         .onChange(of: appState.fileData.currentImagePath) { _, newPath in
-            reload(path: newPath)
+            Task { await reload(path: newPath) }
         }
         .onAppear {
-            reload(path: appState.fileData.currentImagePath)
+            Task { await reload(path: appState.fileData.currentImagePath) }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .prowserEditUserCommentRequested)) { _ in
-            Task { @MainActor in beginEditComment() }
+        .onChange(of: appState.showEditUserCommentSheet) { _, showing in
+            if !showing {
+                Task { await reload(path: appState.fileData.currentImagePath) }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
             switch action {
             case "edit":
-                beginEditComment()
+                appState.beginEditUserComment()
             case "copy":
                 copyComment()
             case "delete":
                 deleteComment()
             case "create":
-                appState.openImageGenDialog(initialPrompt: appState.userCommentForActiveImage())
+                Task {
+                    let prompt = await appState.importPromptForActiveImageAsync()
+                    appState.openImageGenDialog(initialPrompt: prompt, autoImportEXIF: true)
+                }
             default:
                 break
             }
-        }
-        .sheet(isPresented: $showEditComment) {
-            EditUserCommentSheet(
-                text: $editCommentText,
-                onSave: { saveComment() },
-                onCancel: { showEditComment = false }
-            )
         }
         .alert("EXIF Error", isPresented: Binding(
             get: { errorMessage != nil },
@@ -146,72 +142,33 @@ struct InformationPaneView: View {
         }
     }
 
-    private func reload(path: String?) {
+    @MainActor
+    private func reload(path: String?) async {
         guard let path else {
             record = .empty
             return
         }
-        record = ExifService.loadRecord(for: path)
-    }
-
-    @MainActor
-    private func beginEditComment() {
-        guard let path = appState.fileData.currentImagePath else { return }
-        editCommentText = ExifService.userComment(path: path) ?? ""
-        showEditComment = true
-    }
-
-    @MainActor
-    private func saveComment() {
-        guard let path = appState.fileData.currentImagePath else { return }
-        do {
-            try ExifService.writeUserComment(path: path, text: editCommentText)
-            showEditComment = false
-            reload(path: path)
-            appState.refreshDirectory()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        record = await ExifService.loadRecord(for: path, preferPythonDescription: true)
     }
 
     private func copyComment() {
         guard let text = record.description else { return }
+        let clipboard = ExifService.userCommentTextForClipboard(text)
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.setString(clipboard, forType: .string)
     }
 
     @MainActor
     private func deleteComment() {
         guard let path = appState.fileData.currentImagePath else { return }
-        do {
-            try ExifService.deleteUserComment(path: path)
-            reload(path: path)
-            appState.refreshDirectory()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-}
-
-private struct EditUserCommentSheet: View {
-    @Binding var text: String
-    let onSave: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Edit EXIF User Comment")
-                .font(.headline)
-            TextEditor(text: $text)
-                .font(.body)
-                .frame(minWidth: 420, minHeight: 220)
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save", action: onSave)
-                    .keyboardShortcut(.defaultAction)
+        Task {
+            do {
+                try await ExifService.deleteUserComment(path: path)
+                await reload(path: path)
+                appState.refreshDirectory()
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
-        .padding()
     }
 }

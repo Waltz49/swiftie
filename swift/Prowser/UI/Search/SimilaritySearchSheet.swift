@@ -73,7 +73,14 @@ struct SimilaritySearchSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(minWidth: 480, minHeight: 260)
+        .persistedDialogGeometry(
+            DialogGeometryKey.similaritySearch,
+            defaultWidth: 480,
+            defaultHeight: 280,
+            minWidth: 420,
+            minHeight: 240
+        )
         .onAppear { loadSavedSettings() }
     }
 

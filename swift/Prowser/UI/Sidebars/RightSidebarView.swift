@@ -4,7 +4,8 @@ struct RightSidebarView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let jobsActive = appState.imageGen.isProcessing
+        let imageGen = appState.imageGen
+        let jobsTitle = "Job Control" + imageGen.jobsPaneTitleSuffix()
         let descriptors = [
             SidebarPaneDescriptor(
                 index: 0,
@@ -27,18 +28,18 @@ struct RightSidebarView: View {
             ),
             SidebarPaneDescriptor(
                 index: 2,
-                title: "Job Control",
+                title: jobsTitle,
                 expandedConfigKey: "jobs_visible",
                 defaultExpanded: true,
                 isDisplayed: BundleCapabilities.imageGenUIEnabled && appState.jobsDisplayMode == .pane,
-                status: jobsActive ? "●" : nil,
+                status: imageGen.jobsHeaderStatusText().isEmpty ? nil : imageGen.jobsHeaderStatusText(),
                 allowsTitlebarDrag: true,
                 isJobsPane: true,
                 showsFlyoutButton: true,
                 contextMenuKind: .jobs(floating: false),
                 preferredFitContentHeight: appState.jobsQueueSizeMode.estimatedContentHeight(
-                    jobCount: appState.imageGen.queue.jobs.count,
-                    isProcessing: jobsActive
+                    jobCount: imageGen.queue.jobs.count,
+                    isProcessing: imageGen.isProcessing
                 )
             ),
         ]

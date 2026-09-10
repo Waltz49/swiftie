@@ -45,6 +45,7 @@ struct MainWindowView: View {
         }
         .navigationTitle(appState.fileData.currentDirectory.map { ($0 as NSString).lastPathComponent } ?? "Prowser")
         .preferredColorScheme(appState.theme.preferredColorScheme)
+        .environment(\.themeColors, appState.theme.colors)
         .background(appState.theme.colors.background)
         .toolbar(.hidden, for: .windowToolbar)
         .sheet(isPresented: Binding(
@@ -52,12 +53,14 @@ struct MainWindowView: View {
             set: { appState.showKeyboardHelp = $0 }
         )) {
             KeyboardShortcutsHelpView()
+                .environment(\.themeColors, appState.theme.colors)
         }
         .sheet(isPresented: Binding(
             get: { appState.showAbout },
             set: { appState.showAbout = $0 }
         )) {
             AboutView()
+                .environment(\.themeColors, appState.theme.colors)
         }
         .sheet(isPresented: Binding(
             get: { appState.showSimilaritySearchSheet },
@@ -94,6 +97,27 @@ struct MainWindowView: View {
         )) {
             FilterDialogSheet()
                 .environment(appState)
+        }
+        .sheet(isPresented: Binding(
+            get: { appState.showEditUserCommentSheet },
+            set: { presented in
+                if !presented {
+                    appState.cancelEditUserComment()
+                } else {
+                    appState.showEditUserCommentSheet = true
+                }
+            }
+        )) {
+            EditExifUserCommentSheet()
+                .environment(appState)
+        }
+        .alert("EXIF Error", isPresented: Binding(
+            get: { appState.editUserCommentError != nil },
+            set: { if !$0 { appState.editUserCommentError = nil } }
+        )) {
+            Button("OK", role: .cancel) { appState.editUserCommentError = nil }
+        } message: {
+            Text(appState.editUserCommentError ?? "")
         }
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct ProwserApp: App {
@@ -81,6 +82,7 @@ final class AppState {
     let leftSidebarSplit: SidebarPaneSplitModel
     let rightSidebarSplit: SidebarPaneSplitModel
     let directoryHistory = DirectoryHistory()
+    let browseImageHistory = BrowseImageHistoryController()
     var jobsDisplayMode: JobsDisplayMode = .pane
     var jobsQueueSizeMode: JobsQueueSizeMode = .all
     var showFloatingJobsPanel = false
@@ -95,6 +97,11 @@ final class AppState {
     var showPersonSearchSheet = false
     var showFindReferencesSheet = false
     var showFilterDialog = false
+    var showEditUserCommentSheet = false
+    var editUserCommentText = ""
+    var editUserCommentOriginalText = ""
+    var editUserCommentPath: String?
+    var editUserCommentError: String?
     var findReferencesTargetPath: String?
     var findReferencesMatches: [String] = []
     var exifBatchConfirmation: ExifBatchConfirmationState?
@@ -106,7 +113,12 @@ final class AppState {
     var jobsToolbarVisible = true
     var chatToolbarVisible = true
     var jobsPanelAlwaysOnTop = false
-    var fileTreeCollapseToken = 0
+    /// True when viewing a custom file list (opened files, search results, etc.) — disables directory watcher refresh.
+    var specificFilesActive = false
+    /// Bumped when on-disk image content changes so list/thumbnail views reload affected thumbs.
+    var thumbnailInvalidationGeneration = 0
+    var fileTreeCollapseUIToken = 0
+    var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
     var personSearchPrefillDirectory: String?
     var leftSidebarWidth: CGFloat = 300
@@ -116,6 +128,8 @@ final class AppState {
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
     private var suppressDirectoryRefreshUntil: Date?
+    private var progressiveRefreshTask: Task<Void, Never>?
+    private var pendingProgressivePath: String?
 
     let launchOptions: LaunchOptions
     private(set) var directoryLoader: DirectoryLoadCoordinator!
@@ -149,6 +163,7 @@ final class AppState {
         theme = ThemeService(config: config)
         workers = WorkerServices(profilePath: launchOptions.profilePath)
         workers.reloadSettings(config: config)
+        ExifBridgeSupport.registry = workers.imageGenRegistry
         chat = ChatController(chatBridge: workers.chat, dataDirectory: config.dataDirectory)
         imageGen = ImageGenController(
             config: config,
@@ -164,12 +179,16 @@ final class AppState {
                 self.loadDirectory(dir, saveHistory: false)
             }
         }
+        imageGen.onProgressivePreview = { [weak self] path in
+            self?.scheduleProgressiveThumbnailRefresh(path)
+        }
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
         exifOperations.bind(self)
         searchOperations.bind(self)
         fileTreeOperations.bind(self)
         keyboardHandler.bind(self)
+        browseImageHistory.bind(self)
         workers.face.onFinished = { [weak self] count in
             Task { @MainActor in self?.status.show("Face extraction complete (\(count) cached)") }
         }
@@ -191,12 +210,138 @@ final class AppState {
         }
 
         directoryWatcher.onRefresh = { [weak self] in
-            guard let self, let dir = self.fileData.currentDirectory else { return }
-            guard !self.isDirectoryRefreshSuppressed else { return }
-            self.loadDirectory(dir, saveHistory: false)
+            guard let self else { return }
+            DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
+        }
+
+        _ = eventBus.subscribe(.filesChangedOnDisk) { [weak self] event in
+            guard let self, case .string(let directory) = event.payload else { return }
+            guard let current = self.fileData.currentDirectory,
+                  Self.directoryPathsMatch(directory, current) else { return }
+            DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .prowserCurrentImageChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            let path = notification.object as? String
+            Task { @MainActor in self.browseImageHistory.onCurrentImageChanged(path) }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .prowserViewModeChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.browseImageHistory.onViewModeChanged() }
         }
 
         startNamedPipeListener()
+    }
+
+    var spaceKeyMode: String {
+        config.string(forKey: "space_key_mode", default: "exit")
+    }
+
+    func toggleSpaceKeyMode() {
+        let next = spaceKeyMode == "exit" ? "advance" : "exit"
+        config.updateSetting("space_key_mode", value: next)
+        status.show(next == "advance" ? "Space key mode: Advance to next image" : "Space key mode: Exit browse view")
+    }
+
+    func openBrowseImageHistory() {
+        browseImageHistory.openHistory()
+    }
+
+    func showImageInDirectory() {
+        let paths = selectedImagePaths()
+        guard !paths.isEmpty else {
+            status.show("No image selected")
+            return
+        }
+
+        let directories = Set(paths.map { ($0 as NSString).deletingLastPathComponent })
+        if directories.count > 1 {
+            let alert = NSAlert()
+            alert.messageText = "Multiple Directories"
+            alert.informativeText = "Selected files belong to different directories. Choose files from one folder."
+            alert.runModal()
+            return
+        }
+        guard let directory = directories.first else { return }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return
+        }
+
+        let savedSelection = Set(paths)
+        config.updateSetting("sort_mode", value: SortMode.name.rawValue)
+        config.updateSetting("sort_reversed", value: false)
+        loadDirectory(directory, saveHistory: true)
+
+        let displayed = Set(fileData.displayedImages)
+        let restored = savedSelection.filter { displayed.contains($0) }
+        if restored.count > 1 {
+            selection.selectedFiles = restored
+            selection.emitSelectionChanged(highlightIndex: fileData.currentIndex)
+        }
+        if let focus = paths.first(where: { fileData.displayedImages.contains($0) }) {
+            fileData.setCurrentImagePath(focus)
+        }
+        fileData.setViewMode(.thumbnail)
+        status.show("Showing image in directory")
+    }
+
+    func decreaseSlideshowOverlap() {
+        let transition = config.int(forKey: "slideshow_transition_speed", default: 1300)
+        let current = config.int(forKey: "slideshow_overlap_delay", default: 0)
+        let next = min(Int(Double(transition) * 1.0), current + Int(Double(transition) * 0.1))
+        config.updateSetting("slideshow_overlap_delay", value: next)
+        config.applySettingsChange(emit: eventBus)
+        showSlideshowOverlapStatus(transition: transition, delay: next)
+    }
+
+    func increaseSlideshowOverlap() {
+        let transition = config.int(forKey: "slideshow_transition_speed", default: 1300)
+        let current = config.int(forKey: "slideshow_overlap_delay", default: 0)
+        let next = max(-Int(Double(transition) * 0.3), current - Int(Double(transition) * 0.1))
+        config.updateSetting("slideshow_overlap_delay", value: next)
+        config.applySettingsChange(emit: eventBus)
+        showSlideshowOverlapStatus(transition: transition, delay: next)
+    }
+
+    func applySlideshowPreset(_ key: String) {
+        let preset = SlideshowPresetUtils.preset(from: config.rawSettings(), key: key)
+        config.updateSetting("slideshow_rate", value: preset["rate"] as? Int ?? 3500)
+        config.updateSetting("slideshow_transition_speed", value: preset["transition_speed"] as? Int ?? 1300)
+        config.updateSetting("slideshow_max_rotation", value: preset["max_rotation"] as? Int ?? 0)
+        config.updateSetting("slideshow_overlap_delay", value: preset["overlap_delay"] as? Int ?? 0)
+        config.updateSetting("slideshow_direction", value: preset["direction"] as? String ?? "right")
+        config.applySettingsChange(emit: eventBus)
+        status.show(SlideshowPresetUtils.statusMessage(for: preset))
+    }
+
+    private func showSlideshowOverlapStatus(transition: Int, delay: Int) {
+        let percent = SlideshowPresetUtils.overlapPercent(overlapDelay: delay, transitionSpeed: transition)
+        if percent > 100 {
+            status.show("Overlap: \(percent)% (incoming early)")
+        } else {
+            status.show("Overlap: \(percent)%")
+        }
+    }
+
+    private func selectedImagePaths() -> [String] {
+        if !selection.selectedFiles.isEmpty {
+            return Array(selection.selectedFiles)
+        }
+        if let current = fileData.currentImagePath {
+            return [current]
+        }
+        return []
     }
 
     var isDirectoryRefreshSuppressed: Bool {
@@ -220,15 +365,20 @@ final class AppState {
             status.show("No images are available to search")
             return
         }
-        let matches = ReferenceGraphService.imagesReferencing(targetPath: targetPath, in: candidates)
-        if matches.isEmpty {
-            let name = (targetPath as NSString).lastPathComponent
-            status.show("No other images reference \"\(name)\" in EXIF")
-            return
+        Task { @MainActor in
+            let matches = await ReferenceGraphService.imagesReferencing(
+                targetPath: targetPath,
+                in: candidates
+            )
+            if matches.isEmpty {
+                let name = (targetPath as NSString).lastPathComponent
+                status.show("No other images reference \"\(name)\" in EXIF")
+                return
+            }
+            findReferencesTargetPath = targetPath
+            findReferencesMatches = matches
+            showFindReferencesSheet = true
         }
-        findReferencesTargetPath = targetPath
-        findReferencesMatches = matches
-        showFindReferencesSheet = true
     }
 
     private func startNamedPipeListener() {
@@ -268,6 +418,7 @@ final class AppState {
     }
 
     func loadDirectory(_ path: String, saveHistory: Bool = true) {
+        setSpecificFilesActive(false)
         directoryLoader.loadDirectory(path, saveHistory: saveHistory)
     }
 
@@ -281,11 +432,57 @@ final class AppState {
 
     func refreshDirectory() {
         guard let dir = fileData.currentDirectory else { return }
+        let previous = fileData.displayedImages
         loadDirectory(dir, saveHistory: false)
+        if fileData.displayedImages == previous {
+            DirectoryRefreshService.invalidateThumbnails(appState: self, paths: previous)
+        }
     }
 
     func watchCurrentDirectory() {
-        directoryWatcher.watch(directory: fileData.currentDirectory)
+        if DirectoryRefreshService.shouldWatchDirectory(appState: self) {
+            directoryWatcher.watch(directory: fileData.currentDirectory)
+        } else {
+            directoryWatcher.stop()
+        }
+    }
+
+    func setSpecificFilesActive(_ active: Bool) {
+        guard specificFilesActive != active else { return }
+        specificFilesActive = active
+        watchCurrentDirectory()
+    }
+
+    private static func directoryPathsMatch(_ left: String, _ right: String) -> Bool {
+        URL(fileURLWithPath: left).standardizedFileURL.path
+            == URL(fileURLWithPath: right).standardizedFileURL.path
+    }
+
+    /// Debounced thumbnail refresh for progressive image-gen previews (port of Python 750ms coalescing).
+    func scheduleProgressiveThumbnailRefresh(_ path: String) {
+        pendingProgressivePath = path
+        progressiveRefreshTask?.cancel()
+        progressiveRefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            guard !Task.isCancelled else { return }
+            guard let pending = pendingProgressivePath else { return }
+            pendingProgressivePath = nil
+            refreshProgressiveThumbnail(at: pending)
+        }
+    }
+
+    func refreshProgressiveThumbnail(at path: String) {
+        guard imageGen.showProgressiveImages else { return }
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let parent = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+        guard let current = fileData.currentDirectory,
+              parent == URL(fileURLWithPath: current).standardizedFileURL.path else { return }
+        guard !specificFilesActive else { return }
+        if fileData.displayedImages.contains(path) {
+            DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [path])
+        } else {
+            DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
+        }
     }
 
     /// Python `toggle_thumbnail_filename_overlay`: None → Name → Size → Both → None.
@@ -333,12 +530,15 @@ final class AppState {
     }
 
     func toggleFileTree() {
-        clearChromeSuppression()
-        let visible = !config.bool(forKey: "file_tree_visible", default: true)
-        config.updateSetting("file_tree_visible", value: visible)
-        if visible { revealSidebarColumn(.left) }
-        noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
+        setLeftSidebarPaneVisible(
+            configKey: "file_tree_visible",
+            visible: !config.bool(forKey: "file_tree_visible", default: true)
+        )
+    }
+
+    func showFileTree() {
+        guard !config.bool(forKey: "file_tree_visible", default: true) else { return }
+        setLeftSidebarPaneVisible(configKey: "file_tree_visible", visible: true)
     }
 
     func toggleJobsPane() {
@@ -427,9 +627,112 @@ final class AppState {
     }
 
     func collapseFileTreeToHome() {
-        fileTreeCollapseToken += 1
+        fileTreeCollapseUIToken += 1
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         loadDirectory(home, saveHistory: true)
+    }
+
+    /// ⌘Return — collapse tree UI and highlight home (Python `collapse_file_tree`).
+    func collapseFileTree() {
+        fileTreeCollapseUIToken += 1
+    }
+
+    /// ⌘⇧Return — expand tree to the current directory.
+    func expandFileTreeToCurrentDirectory() {
+        fileTreeExpandToken += 1
+    }
+
+    func clearDirectoryHistory() {
+        let cleared = directoryHistory.clearAll()
+        if cleared > 0 {
+            status.show("Cleared \(cleared) history entries")
+        } else {
+            status.show("History stacks already empty")
+        }
+    }
+
+    func toggleListView() {
+        if fileData.currentViewMode == .list {
+            fileData.setViewMode(.thumbnail)
+        } else {
+            fileData.setViewMode(.list)
+        }
+    }
+
+    func adjustListRowHeight(delta: Int) {
+        let current = config.int(forKey: "list_view_row_height", default: 48)
+        let next = min(64, max(28, current + delta))
+        config.updateSetting("list_view_row_height", value: next)
+        config.applySettingsChange(emit: eventBus)
+        status.show("List row height: \(next)px")
+    }
+
+    func resetListRowHeight() {
+        config.updateSetting("list_view_row_height", value: 48)
+        config.applySettingsChange(emit: eventBus)
+        status.show("List row height reset")
+    }
+
+    func openBrowseFromSlideshow() {
+        fileData.setViewMode(.browse)
+    }
+
+    func adjustSlideshowRate(slower: Bool) {
+        let rateMS = config.int(forKey: "slideshow_rate", default: 5000)
+        let newRateMS: Int
+        if rateMS < 1000 {
+            let rateSec = Double(rateMS) / 1000.0
+            let step = slower ? 0.125 : -0.125
+            newRateMS = Int(round(min(10.0, max(0.0, rateSec + step)) * 1000))
+        } else {
+            newRateMS = slower ? min(60_000, rateMS + 1000) : max(0, rateMS - 1000)
+        }
+        config.updateSetting("slideshow_rate", value: newRateMS)
+        config.applySettingsChange(emit: eventBus)
+        let sec = Double(newRateMS) / 1000.0
+        status.show(sec >= 1.0 ? "Slideshow rate: \(sec)s" : "Slideshow rate: \(newRateMS)ms")
+    }
+
+    func adjustSlideshowTransitionSpeed(slower: Bool) {
+        let current = config.int(forKey: "slideshow_transition_speed", default: 1300)
+        let next = slower ? min(6000, current + 100) : max(0, current - 100)
+        config.updateSetting("slideshow_transition_speed", value: next)
+        config.applySettingsChange(emit: eventBus)
+        status.show("Transition speed: \(next)ms")
+    }
+
+    func adjustSlideshowMaxRotation(increase: Bool) {
+        let current = config.int(forKey: "slideshow_max_rotation", default: 0)
+        let next = increase ? min(360, current + 5) : max(0, current - 5)
+        config.updateSetting("slideshow_max_rotation", value: next)
+        config.applySettingsChange(emit: eventBus)
+        status.show("Max rotation: \(next)°")
+    }
+
+    func setSlideshowDirection(_ direction: String) {
+        config.updateSetting("slideshow_direction", value: direction)
+        config.applySettingsChange(emit: eventBus)
+        let label: String
+        switch direction {
+        case "left": label = "From left"
+        case "right": label = "From right"
+        case "top": label = "From top"
+        case "bottom": label = "From bottom"
+        case "random": label = "Random"
+        case "none": label = "None (no transition)"
+        default: label = direction
+        }
+        status.show("Slideshow direction: \(label)")
+    }
+
+    func slideshowDirectionAdvanceIfMatches(_ direction: String) -> Bool {
+        let current = config.string(forKey: "slideshow_direction", default: "right")
+        if current == direction {
+            slideshowStep(delta: 1)
+            return true
+        }
+        setSlideshowDirection(direction)
+        return true
     }
 
     func setFileTreeFilterMode(_ mode: String) {
@@ -477,9 +780,19 @@ final class AppState {
         guard imageGen.isEnabled else { return }
         let session = ImageGenSessionState()
         let resolvedFunction = function ?? session.lastFunction(config: config)
-        var prompt = initialPrompt
+        let prompt = initialPrompt
         if autoImportEXIF, prompt == nil {
-            prompt = userCommentForActiveImage()
+            Task {
+                let imported = await importPromptForActiveImageAsync()
+                openImageGenDialog(
+                    function: resolvedFunction,
+                    replaceJobID: replaceJobID,
+                    initialPrompt: imported,
+                    autoImportEXIF: true,
+                    editSourcePaths: editSourcePaths
+                )
+            }
+            return
         }
         imageGenDialogRequest = ImageGenDialogRequest(
             function: resolvedFunction,
@@ -503,11 +816,13 @@ final class AppState {
     func openFastImageGenDialog() {
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         let action = imagegen["fast_open_action"] as? String ?? "from_text"
-        let comment = userCommentForActiveImage()
-        if action == "edit_image" {
-            openImageGenDialog(function: "edit", initialPrompt: comment, autoImportEXIF: true)
-        } else {
-            openImageGenDialog(function: "create", initialPrompt: comment, autoImportEXIF: true)
+        Task {
+            let prompt = await importPromptForActiveImageAsync()
+            if action == "edit_image" {
+                openImageGenDialog(function: "edit", initialPrompt: prompt, autoImportEXIF: true)
+            } else {
+                openImageGenDialog(function: "create", initialPrompt: prompt, autoImportEXIF: true)
+            }
         }
     }
 
@@ -532,6 +847,106 @@ final class AppState {
         let comment = ExifService.userComment(path: path) ?? ""
         let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func userCommentForActiveImageAsync() async -> String? {
+        guard let path = fileData.currentImagePath else { return nil }
+        let comment = await ExifService.userDescription(path: path) ?? ""
+        let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Prompt-only text for image-gen priming (Python `_dialog_initial_prompt_from_user_comment`).
+    func importPromptForActiveImageAsync() async -> String? {
+        guard let path = activeImagePathForExifImport() else { return nil }
+        return await ExifService.importPromptFromPath(path)
+    }
+
+    private func activeImagePathForExifImport() -> String? {
+        switch fileData.currentViewMode {
+        case .browse:
+            return fileData.currentImagePath
+        case .thumbnail:
+            let selected = Array(selection.selectedFiles)
+            return selected.count == 1 ? selected[0] : fileData.currentImagePath
+        default:
+            return fileData.currentImagePath
+        }
+    }
+
+    func beginEditUserComment() {
+        guard let path = resolveUserCommentEditPath() else {
+            status.show("No image selected")
+            return
+        }
+        guard FileManager.default.fileExists(atPath: path) else {
+            status.show("No image selected")
+            return
+        }
+        guard ExifService.canWriteExif(path: path) else {
+            let alert = NSAlert()
+            alert.messageText = "This file format does not support EXIF User Comment editing."
+            alert.runModal()
+            return
+        }
+        editUserCommentPath = path
+        editUserCommentError = nil
+        Task {
+            let text = await ExifService.userDescription(path: path) ?? ""
+            editUserCommentText = text
+            editUserCommentOriginalText = text
+            showEditUserCommentSheet = true
+        }
+    }
+
+    func saveEditUserComment() {
+        guard let path = editUserCommentPath else { return }
+        Task {
+            do {
+                try await ExifService.writeUserComment(path: path, text: editUserCommentText)
+                cancelEditUserComment()
+                metadataCache.invalidate(path: path)
+                refreshDirectory()
+            } catch {
+                editUserCommentError = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelEditUserComment() {
+        showEditUserCommentSheet = false
+        editUserCommentPath = nil
+        editUserCommentOriginalText = ""
+        editUserCommentText = ""
+        editUserCommentError = nil
+    }
+
+    func openImageInBrowse(path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        if directory != fileData.currentDirectory {
+            loadDirectory(directory, saveHistory: true)
+        }
+        fileData.setCurrentImagePath(path)
+        if let index = fileData.displayedImages.firstIndex(of: path) {
+            fileData.setCurrentIndex(index)
+        }
+        fileData.setViewMode(.browse)
+    }
+
+    private func resolveUserCommentEditPath() -> String? {
+        switch fileData.currentViewMode {
+        case .browse:
+            return fileData.currentImagePath
+        case .thumbnail, .list:
+            let selected = Array(selection.selectedFiles)
+            if selected.count == 1 {
+                return selected[0]
+            }
+            return fileData.currentImagePath
+        default:
+            return nil
+        }
     }
 
     func confirmCancelGeneration() {
@@ -671,12 +1086,103 @@ final class AppState {
     }
 
     func togglePreviewPane() {
-        clearChromeSuppression()
-        let visible = !config.bool(forKey: "preview_visible", default: true)
-        config.updateSetting("preview_visible", value: visible)
-        if visible { revealSidebarColumn(.left) }
-        noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
+        setLeftSidebarPaneVisible(
+            configKey: "preview_visible",
+            visible: !config.bool(forKey: "preview_visible", default: true)
+        )
+    }
+
+    func showPreviewPane() {
+        guard !config.bool(forKey: "preview_visible", default: true) else { return }
+        setLeftSidebarPaneVisible(configKey: "preview_visible", visible: true)
+    }
+
+    func openMapForCurrentImage() {
+        let paths: [String]
+        if !selection.selectedFiles.isEmpty {
+            paths = Array(selection.selectedFiles)
+        } else if let current = fileData.currentImagePath {
+            paths = [current]
+        } else {
+            showMapAlert(title: "No Image Selected", message: "Please select an image first.")
+            return
+        }
+
+        let preferred = config.string(forKey: "map_application", default: "apple_maps")
+        switch MapService.openMap(for: paths, preferredApp: preferred) {
+        case .success:
+            status.show("Opened map for GPS location")
+        case .failure(.noGPSData(let message)):
+            showMapAlert(title: "No GPS Data", message: message)
+        case .failure(.noImages):
+            showMapAlert(title: "No Image Selected", message: "Please select an image first.")
+        case .failure(.openFailed(let message)):
+            showMapAlert(title: "Map Error", message: message)
+        }
+    }
+
+    func openFileDialog() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Open"
+        guard panel.runModal() == .OK else { return }
+
+        let paths = panel.urls.map(\.path).filter { FileManager.default.fileExists(atPath: $0) }
+        guard !paths.isEmpty else { return }
+
+        directoryHistory.saveCurrent(fileData: fileData, config: config)
+        if fileData.currentViewMode == .browse {
+            fileData.setViewMode(.thumbnail)
+        }
+
+        let hadFilter = filterSettings.filterPattern != "*"
+        if hadFilter {
+            filterSettings.setFilterPattern("*", persist: true)
+            eventBus.emit(.filterPatternChanged)
+        }
+
+        if paths.count > 1 {
+            let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
+            guard !normalized.isEmpty else { return }
+
+            config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+            config.updateSetting("sort_reversed", value: false)
+            let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
+            setSpecificFilesActive(true)
+            fileData.setCurrentDirectory(directory)
+            fileData.setDisplayedImages(normalized)
+            fileData.setCurrentIndex(0)
+            fileData.setCurrentImagePath(normalized[0])
+            config.updateSetting("last_directory", value: directory)
+            eventBus.emit(.directoryLoaded, payload: .string(directory))
+            watchCurrentDirectory()
+            workers.onDirectoryLoaded(directory)
+            selection.clear()
+            status.show(hadFilter ? "Opened \(normalized.count) files, filter cleared" : "Opened \(normalized.count) files")
+            return
+        }
+
+        let filePath = paths[0]
+        let directory = (filePath as NSString).deletingLastPathComponent
+        setSpecificFilesActive(false)
+        config.updateSetting("sort_mode", value: SortMode.name.rawValue)
+        config.updateSetting("sort_reversed", value: false)
+        loadDirectory(directory, saveHistory: false)
+        if fileData.displayedImages.contains(filePath) {
+            fileData.setCurrentImagePath(filePath)
+        }
+        fileData.setViewMode(.thumbnail)
+        status.show(hadFilter ? "Opened file, filter cleared" : "Opened file")
+    }
+
+    private func showMapAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     /// True when at least one left sidebar pane is open (browse: chat only).
@@ -897,6 +1403,14 @@ final class AppState {
         eventBus.emit(.mainContentLayoutChanged)
     }
 
+    private func setLeftSidebarPaneVisible(configKey: String, visible: Bool) {
+        clearChromeSuppression()
+        config.updateSetting(configKey, value: visible)
+        if visible { revealSidebarColumn(.left) }
+        noteSidebarLayoutChanged()
+        config.applySettingsChange(emit: eventBus)
+    }
+
     private func revealSidebarColumn(_ side: SidebarSplitSide) {
         switch side {
         case .left:
@@ -1057,16 +1571,6 @@ final class AppState {
         }
     }
 
-    private func selectedImagePaths() -> [String] {
-        if !selection.selectedFiles.isEmpty {
-            return Array(selection.selectedFiles)
-        }
-        if let current = fileData.currentImagePath {
-            return [current]
-        }
-        return []
-    }
-
     func adjustThumbnailCellSize(multiplier: Double) {
         let current = config.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
         let newSize = min(
@@ -1146,6 +1650,7 @@ final class DirectoryLoadCoordinator {
             guard !normalized.isEmpty else { return }
             let dir = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
             appState.fileData.setCurrentDirectory(dir)
+            appState.setSpecificFilesActive(true)
             appState.fileData.setDisplayedImages(normalized)
             appState.fileData.setCurrentImagePath(normalized[0])
             appState.config.updateSetting("last_directory", value: dir)
@@ -1157,7 +1662,7 @@ final class DirectoryLoadCoordinator {
 
     func loadDirectory(_ path: String, saveHistory: Bool) {
         if saveHistory {
-            appState.directoryHistory.saveCurrent(fileData: appState.fileData)
+            appState.directoryHistory.saveCurrent(fileData: appState.fileData, config: appState.config)
         }
         let scanned = DirectoryScanner.scanDirectory(
             at: path,
@@ -1182,17 +1687,41 @@ final class DirectoryLoadCoordinator {
     }
 
     func goBack() {
-        guard let current = appState.directoryHistory.entry(from: appState.fileData),
-              let previous = appState.directoryHistory.goBack(current: current) else { return }
-        loadDirectory(previous.directory, saveHistory: false)
-        appState.directoryHistory.applyEntry(previous, to: appState.fileData)
+        let current = appState.directoryHistory.entry(from: appState.fileData, config: appState.config)
+        guard let previous = appState.directoryHistory.goBack(current: current) else { return }
+        restoreBrowsingState(previous)
     }
 
     func goForward() {
-        guard let current = appState.directoryHistory.entry(from: appState.fileData),
-              let next = appState.directoryHistory.goForward(current: current) else { return }
-        loadDirectory(next.directory, saveHistory: false)
-        appState.directoryHistory.applyEntry(next, to: appState.fileData)
+        let current = appState.directoryHistory.entry(from: appState.fileData, config: appState.config)
+        guard let next = appState.directoryHistory.goForward(current: current) else { return }
+        restoreBrowsingState(next)
+    }
+
+    private func restoreBrowsingState(_ entry: DirectoryHistory.Entry) {
+        appState.config.updateSetting("sort_mode", value: entry.sortMode)
+        appState.config.updateSetting("sort_reversed", value: entry.sortReversed)
+        if let directory = entry.directory {
+            appState.fileData.setCurrentDirectory(directory)
+        }
+        if !entry.displayedImages.isEmpty {
+            appState.fileData.setDisplayedImages(entry.displayedImages)
+            if let directory = entry.directory {
+                let scanned = Set(DirectoryScanner.scanDirectory(
+                    at: directory,
+                    extensions: appState.config.imageExtensions,
+                    filterPattern: appState.filterSettings.filterPattern
+                ))
+                appState.setSpecificFilesActive(Set(entry.displayedImages) != scanned)
+            } else {
+                appState.setSpecificFilesActive(true)
+            }
+            appState.watchCurrentDirectory()
+        } else if let directory = entry.directory {
+            loadDirectory(directory, saveHistory: false)
+        }
+        appState.directoryHistory.applyEntry(entry, to: appState.fileData)
+        appState.fileData.setViewMode(entry.viewMode)
     }
 }
 

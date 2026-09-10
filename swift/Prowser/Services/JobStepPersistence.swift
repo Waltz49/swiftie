@@ -118,6 +118,7 @@ struct ImageGenQueuedJob: Identifiable {
     var referencesInvalid: Bool
     var steps: [[String: Any]]
     var pluginUnavailable: Bool
+    var statusView: QueueJobStatusView?
 
     var id: String { jobID }
     var statusLabel: String { QueueRowSnapshot.plainText(from: statusHTML) }
@@ -133,7 +134,8 @@ struct ImageGenQueuedJob: Identifiable {
         thumbnailPaths: [String] = [],
         referencesInvalid: Bool = false,
         steps: [[String: Any]] = [],
-        pluginUnavailable: Bool = false
+        pluginUnavailable: Bool = false,
+        statusView: QueueJobStatusView? = nil
     ) {
         self.jobID = jobID
         self.pluginID = pluginID
@@ -146,34 +148,79 @@ struct ImageGenQueuedJob: Identifiable {
         self.referencesInvalid = referencesInvalid
         self.steps = steps
         self.pluginUnavailable = pluginUnavailable
+        self.statusView = statusView
     }
 
     init(document: [String: Any]) {
         jobID = document["job_id"] as? String ?? UUID().uuidString
         pluginID = document["plugin_id"] as? String ?? ""
         function = document["function"] as? String ?? "create"
-        values = document["values"] as? [String: Any] ?? [:]
-        copiesTotal = document["copies_total"] as? Int ?? 1
-        statusHTML = document["status_html"] as? String ?? "Queued"
-        fullPrompt = document["full_prompt"] as? String ?? (values["prompt"] as? String ?? "")
-        thumbnailPaths = document["thumbnail_paths"] as? [String] ?? []
-        referencesInvalid = document["references_invalid"] as? Bool ?? false
-        steps = document["steps"] as? [[String: Any]] ?? []
         pluginUnavailable = document["plugin_unavailable"] as? Bool ?? false
+        steps = document["steps"] as? [[String: Any]] ?? []
+
+        var loadedValues = document["values"] as? [String: Any] ?? [:]
+        if loadedValues.isEmpty, let firstStep = steps.first {
+            loadedValues = JobStepQueue.mergeStepIntoValues(firstStep)
+        }
+        values = loadedValues
+
+        if let display = document["display"] as? [String: Any] {
+            thumbnailPaths = display["thumbnail_paths"] as? [String] ?? document["thumbnail_paths"] as? [String] ?? []
+        } else {
+            thumbnailPaths = document["thumbnail_paths"] as? [String] ?? []
+        }
+
+        if let copies = document["copies_total"] as? Int {
+            copiesTotal = max(1, copies)
+        } else if !steps.isEmpty {
+            copiesTotal = steps.count
+        } else {
+            copiesTotal = 1
+        }
+
+        statusHTML = document["status_html"] as? String ?? "Queued"
+        referencesInvalid = document["references_invalid"] as? Bool ?? false
+        fullPrompt = JobStepQueue.resolvedFullPrompt(
+            stored: {
+                if let display = document["display"] as? [String: Any],
+                   let prompt = display["full_prompt"] as? String {
+                    return prompt
+                }
+                return document["full_prompt"] as? String ?? ""
+            }(),
+            values: values,
+            steps: steps,
+            statusView: nil
+        )
+        if !fullPrompt.isEmpty, (values["prompt"] as? String ?? "").isEmpty {
+            values["prompt"] = fullPrompt
+        }
     }
 
     var document: [String: Any] {
+        let resolvedPrompt = JobStepQueue.resolvedFullPrompt(
+            stored: fullPrompt,
+            values: values,
+            steps: steps,
+            statusView: statusView
+        )
         var doc: [String: Any] = [
+            "version": JobStepQueue.stepVersion,
             "job_id": jobID,
             "plugin_id": pluginID,
             "function": function,
             "values": values,
             "copies_total": copiesTotal,
             "status_html": statusHTML,
-            "full_prompt": fullPrompt,
+            "full_prompt": resolvedPrompt,
             "thumbnail_paths": thumbnailPaths,
             "references_invalid": referencesInvalid,
             "plugin_unavailable": pluginUnavailable,
+            "display": [
+                "full_prompt": resolvedPrompt,
+                "thumbnail_paths": thumbnailPaths,
+            ],
+            "steps_done": 0,
         ]
         if !steps.isEmpty {
             doc["steps"] = steps

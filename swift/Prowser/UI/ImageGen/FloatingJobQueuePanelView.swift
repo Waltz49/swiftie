@@ -8,8 +8,13 @@ struct FloatingJobQueuePanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Job Control")
+                Text("Job Control" + appState.imageGen.jobsPaneTitleSuffix())
                     .font(.headline)
+                if !appState.imageGen.jobsHeaderStatusText().isEmpty {
+                    Text(appState.imageGen.jobsHeaderStatusText())
+                        .font(.headline)
+                        .foregroundStyle(appState.theme.colors.sidebarHeaderText.opacity(0.85))
+                }
                 Spacer()
                 SidebarPaneToolsMenuButton(kind: .jobs(floating: true))
                     .foregroundStyle(appState.theme.colors.sidebarHeaderText)
@@ -31,7 +36,16 @@ struct FloatingJobQueuePanelView: View {
             }
         }
         .background(appState.theme.colors.sidebarBackground)
-        .background(JobsPanelWindowConfigurator(alwaysOnTop: appState.jobsPanelAlwaysOnTop))
+        .persistedDialogGeometry(
+            DialogGeometryKey.jobQueue,
+            defaultWidth: 320,
+            defaultHeight: 420,
+            minWidth: 260,
+            minHeight: 220,
+            nestedInImageGen: true,
+            windowTitle: "Job Control",
+            alwaysOnTop: appState.jobsPanelAlwaysOnTop
+        )
         .onAppear {
             appState.syncJobsPaneGeometry()
         }
@@ -41,24 +55,5 @@ struct FloatingJobQueuePanelView: View {
         .onChange(of: appState.jobsQueueSizeMode) { _, _ in
             appState.syncJobsPaneGeometry()
         }
-    }
-}
-
-private struct JobsPanelWindowConfigurator: NSViewRepresentable {
-    let alwaysOnTop: Bool
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { apply(to: view) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        apply(to: nsView)
-    }
-
-    private func apply(to view: NSView) {
-        guard let window = view.window else { return }
-        window.level = alwaysOnTop ? .floating : .normal
     }
 }

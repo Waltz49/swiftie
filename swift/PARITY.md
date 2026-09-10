@@ -39,7 +39,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 
 - [~] Shortcuts (`ShortcutsSidebarView` — favorites + destinations, Click Mode, gear → settings, path tooltips, scroll position persist)
 - [~] Information (EXIF, metadata, actions — `InformationPaneView`)
-- [~] Jobs queue panel (`JobQueuePanelView` — strip/one/all size modes, ^J cycle, ⌥[/]\\, floating panel ⌘J, progressive preview image)
+- [x] Jobs queue panel (`JobQueuePanelView` — strip/one/all size modes, ^J cycle, ⌥[/]\\, floating panel ⌘J, progressive preview image)
 
 ## Pane titlebars & inline toolbars
 
@@ -75,10 +75,11 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 
 ### Job Control pane
 
-- [~] Toolbar actions: intermediate images, hold queue, skip copy (`jobs_toolbar.py`)
-- [~] Floating panel: “Always on Top” (when opened as panel)
+- [x] Toolbar actions: intermediate images, hold queue, skip copy (`jobs_toolbar.py`)
+- [x] Floating panel: “Always on Top” (when opened as panel)
 - [~] “Show Toolbar” toggle in context menu
-- [~] Job cards with drag reorder, edit/cancel, active strip
+- [x] Job cards with structured status rows, drag reorder, edit/cancel, selection + action bar, active progress strip
+- [x] Header queue count (`+N` / `=N`) and hold suffix (` - HOLD` / ` - Quiesce`)
 
 ### Organize pane
 
@@ -106,7 +107,7 @@ Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). L
 - [~] Edit EXIF User Comment… (⇧⌘E)
 - [ ] Convert Format… (⌘M)
 - [~] Extract Faces (single file via `FaceBridge.scanDirectory` imagePaths)
-- [ ] Show Location on Map (⌘G, when GPS in EXIF)
+- [~] Show Location on Map (⌘G, when GPS in EXIF)
 - [ ] Show Reference Graph (when resolvable EXIF refs)
 - [~] Find References to This Image…
 - [~] Open in Finder (single)
@@ -145,7 +146,7 @@ Source: `status_bar_config.py` (click/right-click sections).
 - [~] File Types (`ExtensionsSettingsTab`)
 - [~] Destinations (`DestinationsSettingsTab`)
 - [~] Excludes (`ExcludesSettingsTab`)
-- [~] Theme (`ThemeSettingsTab` + `ThemeService` — subset of color editor)
+- [x] Theme (`ThemeSettingsTab` + `ThemeService` — full color editor, custom themes, browse transparency)
 - [ ] Maps and Editor (deferred)
 - [~] Slideshow (`SlideshowSettingsTab` — core timing fields)
 - [ ] Models for Search (deferred — Python bridge)
@@ -157,7 +158,7 @@ Source: `status_bar_config.py` (click/right-click sections).
 ## Menus — File
 
 - [~] Open Directory… (⌘O)
-- [ ] Open File… (⌘⇧O)
+- [~] Open File… (⌘⇧O)
 - [~] Recent… (`directory_menu_history`; dynamic labels on show)
 - [~] Favorites submenu (^1–9 slots)
 - [~] Back / Forward (⌘[ / ⌘])
@@ -199,10 +200,10 @@ Source: `status_bar_config.py` (click/right-click sections).
 - [~] Hide/Show Panes (**F4**, **.**, **⌃.** — `toggleChrome`)
 - [ ] Toggle list view (**F12**)
 - [ ] Enter / Exit Image Viewer (**F**)
-- [~] Cycle thumbnail overlay (⌘I — filename/size states)
+- [x] Cycle thumbnail overlay (⌘I — filename/size states; centered below thumb, name before size)
 - [~] Actual Size toggle (**A** in browse)
 - [~] Sort By submenu (static list; Python adds separators, reverse, dynamic checkmarks)
-- [~] Theme actions (flat list; Python Theme submenu + custom theme entries)
+- [x] Theme actions (Theme submenu + custom theme entries)
 - [~] macOS Space toggle (⌃⌘F)
 - [ ] View Last Image (⌘;, browse-only menu item)
 - [ ] Dynamic `aboutToShow` enable/check states (`update_view_menu_enabled_states`)
@@ -280,7 +281,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 ## EXIF
 
 - [~] Read/display in Information pane (`ExifService.loadRecord`)
-- [~] Edit UserComment (sheet + Tools menu)
+- [~] Edit UserComment (full dialog: actions, Recaption, image-gen; sheet not non-modal yet)
 - [~] Reset file date to EXIF / reset EXIF to file date (Tools menu)
 - [~] Delete UserComment (pane + Tools menu)
 - [ ] Delete EXIF date from file
@@ -304,7 +305,104 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [~] Find references dialog (`FindReferencesSheet`)
 - [ ] Show image in directory (specific-files workflow)
 - [ ] Move work files dialog
-- [ ] GPS / map display (⌘G)
+- [~] GPS / map display (⌘G)
+
+## Persistence (`settings.json` and related)
+
+Swift reads/writes the same profile `settings.json` as Python. Items marked **done** are saved/restored in Swift; **partial** has gaps; **missing** is not implemented.
+
+### Window & layout
+
+| Key / area | Python | Swift |
+|------------|--------|-------|
+| `sidebar_width`, `right_sidebar_width` | done | done |
+| `left_splitter_sizes`, `shortcuts_splitter_sizes` | done | done |
+| Pane visibility (`file_tree_visible`, `preview_visible`, `chat_visible`, `jobs_visible`, `shortcuts_sidebar_visible`, `information_sidebar_visible`, `status_bar_visible`, `left_sidebar_visible`, `right_sidebar_visible`) | done | done |
+| Pane toolbar visibility (`file_tree_show_toolbar`, etc.) | done | done |
+| `shortcuts_sidebar_scroll_position` | done | done (`PersistedScrollOffsetReader`) |
+| `information_section_expanded` | done | missing (info pane sections not collapsible yet) |
+| Main window geometry / position | not persisted (Qt fullscreen) | not persisted |
+| `window_size` (browse thumb size memory) | done | missing |
+
+### Session restore
+
+| Key / area | Python | Swift |
+|------------|--------|-------|
+| `restore_state` nested dict (`last_file`, `last_directory`, `last_view_mode`, `last_macos_space_mode`, `enabled`) | done | done |
+| `last_macos_space_mode` | done | done (`WindowFullscreen`) |
+
+### Dialog geometry (`*_dialog_geometry` hex)
+
+| Dialog | Python | Swift |
+|--------|--------|-------|
+| Settings | done | done |
+| Filter | done | done |
+| Image-gen unified (`dialog_geometry` in `imagegen`) | done | done |
+| Job queue panel (`job_queue_geometry`) | done | done |
+| Edit EXIF user comment | done | done |
+| Similarity / person search | done | done |
+| Find references | done | done |
+| Keyboard help / About | done | done |
+| EXIF batch confirmation | done | done |
+| Generation timing | done | missing |
+| Download models / LoRAs debug dialogs | done | missing (image-gen tooling) |
+
+### View & browsing preferences
+
+| Key | Python | Swift |
+|-----|--------|-------|
+| `thumbnail_filename_visible`, `show_image_size`, `show_extensions` | done | done |
+| `thumbnail_cell_size`, `manual_thumbnail_size` | done | done |
+| `list_view_row_height` | done | done |
+| `browse_view_actual_size` | done | done |
+| `sort_mode`, `sort_reversed`, `use_exif_date`, `ignore_exif_rotation` | done | done |
+| `filter_pattern`, `filtered_tree`, `saved_filters` | done | done |
+| `space_key_mode`, `browse_image_history_save_after_ms` | done | done |
+| Slideshow presets / rates / slideshow2/3 tuning | done | done |
+| `wrap_around`, `confirm_delete`, `debug_mode` | done | done |
+| `raise_status_bar_on_cursor_near_bottom` | done | missing |
+
+### Settings UI state
+
+| Key | Python | Swift |
+|-----|--------|-------|
+| `theme_settings_groups_expanded`, `general_settings_groups_expanded`, `directories_settings_groups_expanded` | done | done (`CollapsibleSettingsSection`) |
+| `settings_dialog_size` fallback | done | partial (geometry hex only) |
+| `edit_exif_usercomment_splitter_sizes`, instructions fields | done | partial (geometry + instructions; no splitter) |
+
+### Directories, destinations, theme
+
+| Key | Python | Swift |
+|-----|--------|-------|
+| `root_directories`, `favorite_directories`, `move_destinations` | done | done |
+| `exclude_directories`, `ignore_directories` | done | done |
+| `image_creation_directory`, `temporary_files_directory` | done | partial (UI exists; verify all paths) |
+| `ui_theme`, `*_theme_colors`, `custom_themes`, `browse_transparency_settings` | done | done |
+| `directory_menu_history` | done | done |
+
+### Image-gen & jobs (nested `imagegen` + job JSON files)
+
+| Key / file | Python | Swift |
+|------------|--------|-------|
+| Per-plugin dialog values / `last_function` | done | done |
+| `imagegen_fast_open_action`, queue UI prefs | done | done |
+| `jobs_pane_compact`, `jobs_display_mode` | done | done |
+| Job queue / active job JSON (`job_step_persistence`) | done | done |
+
+### Chat & search
+
+| Key | Python | Swift |
+|-----|--------|-------|
+| Chat messages / system prompts (`chat_system_prompts.json`) | done | done |
+| CNN / person search last directory settings | done | done |
+
+### On-disk caches (not in `settings.json`)
+
+| Cache | Python | Swift |
+|-------|--------|-------|
+| Thumbnail MD5 cache | done | done |
+| Metadata JSON cache | done | done |
+| `.prsort` custom order | done | done |
 
 ## Caches & profile compatibility
 
@@ -330,14 +428,18 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 ## Keyboard shortcuts
 
-- [~] `KeyboardHandlerController` — core navigation, sort keys, sidebars (partial: T/O/P/B/J/F12/F9/, gaps remain)
-- [~] Browse zoom, transforms, actual size, overlay
-- [~] ⌘1–9 destinations, ^1–^9 favorites, / help
-- [~] ⌘+arrow multiselect, ⇧-range select
-- [~] Thumbnail cell size +/- / 0, Page Up/Down
-- [~] Slideshow keys
-- [ ] F2 rename, F3 image history, F12 list toggle
-- [ ] ⌘F CLIP search, ⌘G map, ⌘⇧H show in directory
+- [~] `KeyboardHandlerController` — core navigation, sort keys, sidebars, F/F12/F5/F10, Home/End
+- [~] Browse zoom, transforms, actual size, overlay, ⌘+arrow pan, ^W fit width
+- [~] ⌘1–9 destinations, ^1–^9 favorites, / help, ⌘K similar search
+- [~] ⌘+arrow multiselect, ⇧-range select, ⇧Home/End range
+- [~] Thumbnail cell size +/- / 0; list row height +/- / 0; Page Up/Down
+- [~] Slideshow keys (mode 1–3 partial; overlap/presets 7/8/0/9 ported for mode 1)
+- [~] F2 rename, F12 list toggle, ⌘Return tree collapse/expand
+- [~] F3 browse image history; ⇧Space browse space mode toggle
+- [~] ⌘⇧H show image in directory
+- [ ] ⌘; last image swap
+- [ ] ⌘F CLIP search
+- [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
 - [ ] ⌘N rename prefix, ⌘M convert, ⌘⇧Z resize
 
 ## Suggested implementation order (M9+)

@@ -4,9 +4,13 @@ import Foundation
 @MainActor
 final class DirectoryHistory {
     struct Entry: Equatable {
-        let directory: String
+        let directory: String?
         let currentPath: String?
         let index: Int
+        let displayedImages: [String]
+        let viewMode: ViewMode
+        let sortMode: String
+        let sortReversed: Bool
     }
 
     private var backward: [Entry] = []
@@ -16,13 +20,9 @@ final class DirectoryHistory {
     var canGoBack: Bool { !backward.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
 
-    func saveCurrent(fileData: FileDataModel) {
-        guard let directory = fileData.currentDirectory else { return }
-        let entry = Entry(
-            directory: directory,
-            currentPath: fileData.currentImagePath,
-            index: fileData.currentIndex
-        )
+    func saveCurrent(fileData: FileDataModel, config: AppConfig) {
+        guard fileData.currentDirectory != nil || !fileData.displayedImages.isEmpty else { return }
+        let entry = entry(from: fileData, config: config)
         if backward.last == entry { return }
         backward.append(entry)
         if backward.count > maxSize {
@@ -43,12 +43,15 @@ final class DirectoryHistory {
         return next
     }
 
-    func entry(from fileData: FileDataModel) -> Entry? {
-        guard let directory = fileData.currentDirectory else { return nil }
-        return Entry(
-            directory: directory,
+    func entry(from fileData: FileDataModel, config: AppConfig) -> Entry {
+        Entry(
+            directory: fileData.currentDirectory,
             currentPath: fileData.currentImagePath,
-            index: fileData.currentIndex
+            index: fileData.currentIndex,
+            displayedImages: fileData.displayedImages,
+            viewMode: fileData.currentViewMode,
+            sortMode: config.string(forKey: "sort_mode", default: SortMode.date.rawValue),
+            sortReversed: config.bool(forKey: "sort_reversed", default: false)
         )
     }
 
@@ -57,5 +60,13 @@ final class DirectoryHistory {
             fileData.setCurrentImagePath(path)
             fileData.setCurrentIndex(entry.index)
         }
+    }
+
+    /// Clears back/forward stacks. Returns number of entries removed.
+    func clearAll() -> Int {
+        let count = backward.count + forward.count
+        backward.removeAll()
+        forward.removeAll()
+        return count
     }
 }

@@ -21,7 +21,7 @@ final class DirectoryWatcher {
         let queue = DispatchQueue.main
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
-            eventMask: [.write, .delete, .rename, .extend],
+            eventMask: [.write, .delete, .rename, .extend, .link, .attrib],
             queue: queue
         )
         source.setEventHandler { [weak self] in

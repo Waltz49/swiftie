@@ -59,6 +59,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let appState {
+            let path = appState.fileData.currentImagePath
+            let directory = appState.fileData.currentDirectory
+            if path != nil || directory != nil {
+                appState.config.saveRestoreState(
+                    filePath: path,
+                    directory: directory,
+                    viewMode: appState.fileData.currentViewMode.rawValue,
+                    macosSpaceMode: WindowFullscreen.isInMacOSSpace
+                )
+            }
+        }
+        appState?.theme.commitPreview()
+        appState?.config.saveSettings()
         appState?.persistAllSidebarLayout()
     }
 
@@ -68,10 +82,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pendingOpenPaths.removeAll()
         } else if !appState.launchOptions.paths.isEmpty {
             appState.openPaths(appState.launchOptions.paths)
-        } else if appState.config.restoreState,
-                  let lastDir = appState.config.lastDirectory,
-                  FileManager.default.fileExists(atPath: lastDir) {
-            appState.loadDirectory(lastDir)
+        } else if appState.config.restoreState, let snapshot = appState.config.getRestoreState() {
+            if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
+                appState.openPaths([file])
+            } else if let lastDir = snapshot.lastDirectory, FileManager.default.fileExists(atPath: lastDir) {
+                appState.loadDirectory(lastDir)
+            }
+            if let mode = ViewMode(rawValue: snapshot.lastViewMode) {
+                appState.fileData.setViewMode(mode)
+            }
+            if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
+                appState.fileData.setCurrentImagePath(file)
+            }
         }
 
         if appState.launchOptions.debug {

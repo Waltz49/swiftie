@@ -6,6 +6,9 @@ import Foundation
 final class KeyboardHandlerController {
     private weak var appState: AppState?
     private var monitor: Any?
+    private var doubleTapLastKey: UInt16?
+    private var doubleTapLastTime: TimeInterval = 0
+    private let doubleTapWindow: TimeInterval = 2.4
 
     func bind(_ appState: AppState) {
         self.appState = appState
@@ -106,6 +109,73 @@ final class KeyboardHandlerController {
             }
         }
 
+        // ⌘K — find similar images (Python menu shortcut).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "k" {
+            appState.searchOperations.findSimilarImages()
+            return true
+        }
+
+        // ⌘⇧H — show image in directory.
+        if hasCommand, hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "h" {
+            appState.showImageInDirectory()
+            return true
+        }
+
+        // ⌘⇧E — edit EXIF user comment (Python ShiftCmdEShortcutFilter).
+        if hasCommand, hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "e" {
+            appState.beginEditUserComment()
+            return true
+        }
+
+        // ⌘⇧O — open file (Python); ⌘O is open directory via menu.
+        if hasCommand, hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "o" {
+            appState.openFileDialog()
+            return true
+        }
+
+        // ⌘G — show GPS location on map.
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "g" {
+            appState.openMapForCurrentImage()
+            return true
+        }
+
+        // ⌘Return / ⌘⇧Return — collapse / expand file tree.
+        if hasCommand, !hasOption, !hasControl,
+           event.keyCode == 36 || event.keyCode == 76 {
+            if hasShift {
+                appState.expandFileTreeToCurrentDirectory()
+            } else {
+                appState.collapseFileTree()
+            }
+            return true
+        }
+
+        // Browse view: ⌘+arrow pans when zoomed.
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           appState.fileData.currentViewMode == .browse {
+            switch event.keyCode {
+            case 123:
+                appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.panLeft))
+                return true
+            case 124:
+                appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.panRight))
+                return true
+            case 126:
+                appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.panUp))
+                return true
+            case 125:
+                appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.panDown))
+                return true
+            default:
+                break
+            }
+        }
+
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
@@ -133,7 +203,7 @@ final class KeyboardHandlerController {
             }
         }
 
-        // ⌥[ / ⌥] / ⌥\ — jobs queue size modes.
+        // ⌥[ / ⌥] / ⌥\ — jobs queue size modes; ⌥/ — open image gen dialog.
         if hasOption, !hasCommand, !hasControl, !hasShift {
             switch event.charactersIgnoringModifiers {
             case "[":
@@ -145,19 +215,20 @@ final class KeyboardHandlerController {
             case "\\":
                 appState.setJobsQueueSizeMode(.all, requireActive: true)
                 return true
-            case "/", "÷":
-                if BundleCapabilities.imageGenUIEnabled {
-                    appState.openImageGenDialog()
-                    return true
-                }
             default:
+                if isSlashKey(event) {
+                    if BundleCapabilities.imageGenUIEnabled {
+                        appState.openImageGenDialog()
+                        return true
+                    }
+                }
                 break
             }
         }
 
         // ⇧⌥/ — fast open image generation from active image EXIF.
         if hasOption, hasShift, !hasCommand, !hasControl {
-            if event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
+            if isSlashKey(event) {
                 if BundleCapabilities.imageGenUIEnabled {
                     appState.openFastImageGenDialog()
                     return true
@@ -182,7 +253,13 @@ final class KeyboardHandlerController {
                 hasControl: hasControl
             )
         case .browse:
-            return handleBrowse(event, appState: appState, hasShift: hasShift)
+            return handleBrowse(
+                event,
+                appState: appState,
+                hasShift: hasShift,
+                hasControl: hasControl,
+                hasOption: hasOption
+            )
         case .slideshow, .slideshow2, .slideshow3:
             return handleSlideshow(event, appState: appState)
         }
@@ -219,6 +296,85 @@ final class KeyboardHandlerController {
         hasShift: Bool,
         hasControl: Bool
     ) -> Bool {
+        if !hasShift, !hasControl {
+            switch event.keyCode {
+            case 3: // F — enter browse (Python browse_view_action)
+                return openBrowse(appState: appState)
+            case 96: // F5 — reference graph for active image
+                if let path = appState.fileData.currentImagePath {
+                    appState.findReferences(to: path)
+                    return true
+                }
+            case 109: // F10 — clear directory history stacks
+                appState.clearDirectoryHistory()
+                return true
+            case 99: // F3 — browse image history
+                appState.openBrowseImageHistory()
+                return true
+            case 111: // F12 — toggle list view
+                appState.toggleListView()
+                return true
+            default:
+                break
+            }
+        }
+
+        if !hasShift, !hasControl {
+            switch event.keyCode {
+            case 115: // Home
+                jumpToFirst(appState: appState)
+                return true
+            case 119: // End
+                jumpToLast(appState: appState)
+                return true
+            default:
+                break
+            }
+        }
+
+        if hasShift, !hasControl {
+            switch event.keyCode {
+            case 115:
+                selectRangeToFirst(appState: appState)
+                return true
+            case 119:
+                selectRangeToLast(appState: appState)
+                return true
+            default:
+                break
+            }
+        }
+
+        if !hasShift, !hasControl {
+            switch event.keyCode {
+            case 27, 24, 29, 69: // -, +/=, 0, keypad =
+                if appState.fileData.currentViewMode == .list {
+                    switch event.keyCode {
+                    case 27: appState.adjustListRowHeight(delta: -2); return true
+                    case 24, 69: appState.adjustListRowHeight(delta: 2); return true
+                    case 29: appState.resetListRowHeight(); return true
+                    default: break
+                    }
+                } else if appState.fileData.currentViewMode == .thumbnail {
+                    switch event.keyCode {
+                    case 27:
+                        appState.adjustThumbnailCellSize(multiplier: 1 / 1.1)
+                        return true
+                    case 24, 69:
+                        appState.adjustThumbnailCellSize(multiplier: 1.1)
+                        return true
+                    case 29:
+                        appState.resetThumbnailCellSize()
+                        return true
+                    default:
+                        break
+                    }
+                }
+            default:
+                break
+            }
+        }
+
         if appState.fileData.currentViewMode == .thumbnail, !hasShift {
             switch event.keyCode {
             case 120: // F2 rename
@@ -226,15 +382,6 @@ final class KeyboardHandlerController {
                     appState.fileOperations.beginRename(path: path)
                     return true
                 }
-            case 27:
-                appState.adjustThumbnailCellSize(multiplier: 1 / 1.1)
-                return true
-            case 24:
-                appState.adjustThumbnailCellSize(multiplier: 1.1)
-                return true
-            case 29:
-                appState.resetThumbnailCellSize()
-                return true
             default:
                 break
             }
@@ -271,7 +418,18 @@ final class KeyboardHandlerController {
         return handleLetter(event, appState: appState)
     }
 
-    private func handleBrowse(_ event: NSEvent, appState: AppState, hasShift: Bool) -> Bool {
+    private func handleBrowse(
+        _ event: NSEvent,
+        appState: AppState,
+        hasShift: Bool,
+        hasControl: Bool,
+        hasOption: Bool
+    ) -> Bool {
+        if hasShift, !hasControl, !hasOption, event.keyCode == 49 {
+            appState.toggleSpaceKeyMode()
+            return true
+        }
+
         if hasShift {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r":
@@ -297,16 +455,43 @@ final class KeyboardHandlerController {
             }
         }
 
+        if hasControl, !hasShift, !hasOption,
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.fitCanvasWidth))
+            return true
+        }
+
         switch event.keyCode {
+        case 115: // Home
+            jumpToFirst(appState: appState)
+            return true
+        case 119: // End
+            jumpToLast(appState: appState)
+            return true
         case 123, 126: return navigateLinear(appState: appState, delta: -1)
         case 124, 125: return navigateLinear(appState: appState, delta: 1)
         case 53, 36: return returnToThumbnails(appState: appState)
-        case 49: return navigateLinear(appState: appState, delta: 1) // space
-        case 27: // minus
+        case 49:
+            if appState.spaceKeyMode == "advance" {
+                return navigateLinear(appState: appState, delta: 1)
+            }
+            return returnToThumbnails(appState: appState)
+        case 99:
+            appState.openBrowseImageHistory()
+            return true
+        case 27, 43: // minus, keypad -
             appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.zoomOut))
             return true
-        case 24: // equals/plus
+        case 24, 69: // equals/plus, keypad =
             appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.zoomIn))
+            return true
+        case 96: // F5
+            if let path = appState.fileData.currentImagePath {
+                appState.findReferences(to: path)
+                return true
+            }
+        case 109: // F10
+            appState.clearDirectoryHistory()
             return true
         case 44, 122: // /, F1
             appState.showKeyboardHelp = true
@@ -331,8 +516,15 @@ final class KeyboardHandlerController {
             appState.toggleShortcutsSidebar()
             return true
         case "t":
-            appState.toggleFileTree()
-            return true
+            return handleBrowseDoubleTap(
+                event,
+                keyCode: 17,
+                appState: appState,
+                onMatch: {
+                    returnToThumbnails(appState: appState)
+                    appState.showFileTree()
+                }
+            )
         case "j":
             if BundleCapabilities.imageGenUIEnabled {
                 appState.toggleJobsPane()
@@ -340,8 +532,15 @@ final class KeyboardHandlerController {
             }
             return false
         case "p":
-            appState.togglePreviewPane()
-            return true
+            return handleBrowseDoubleTap(
+                event,
+                keyCode: 35,
+                appState: appState,
+                onMatch: {
+                    returnToThumbnails(appState: appState)
+                    appState.showPreviewPane()
+                }
+            )
         case "b":
             appState.toggleStatusBar()
             return true
@@ -358,24 +557,180 @@ final class KeyboardHandlerController {
     }
 
     private func handleSlideshow(_ event: NSEvent, appState: AppState) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let hasShift = flags.contains(.shift)
+        let hasControl = flags.contains(.control)
+        let hasCommand = flags.contains(.command)
+
+        if event.keyCode == 44 || event.keyCode == 122 {
+            appState.showKeyboardHelp = true
+            return true
+        }
+
+        if hasCommand, !hasShift, !hasControl,
+           event.keyCode == 36 || event.keyCode == 76 {
+            appState.collapseFileTree()
+            return true
+        }
+
+        switch appState.fileData.currentViewMode {
+        case .slideshow:
+            return handleSlideshow1(event, appState: appState, hasShift: hasShift)
+        case .slideshow2:
+            return handleSlideshow2(event, appState: appState, hasShift: hasShift, hasControl: hasControl)
+        case .slideshow3:
+            return handleSlideshow3(event, appState: appState, hasShift: hasShift, hasControl: hasControl)
+        default:
+            return false
+        }
+    }
+
+    private func handleSlideshow1(_ event: NSEvent, appState: AppState, hasShift: Bool) -> Bool {
         switch event.keyCode {
-        case 53, 36: // esc, return
+        case 53:
             appState.fileData.setViewMode(.thumbnail)
             return true
-        case 123, 126:
-            appState.slideshowStep(delta: -1)
-            return true
-        case 124, 125, 49: // arrows, space
+        case 45: // N — advance
             appState.slideshowStep(delta: 1)
+            return true
+        case 18: appState.adjustSlideshowRate(slower: true); return true
+        case 19: appState.adjustSlideshowRate(slower: false); return true
+        case 20: appState.adjustSlideshowTransitionSpeed(slower: true); return true
+        case 21: appState.adjustSlideshowTransitionSpeed(slower: false); return true
+        case 23: appState.adjustSlideshowMaxRotation(increase: false); return true
+        case 22: appState.adjustSlideshowMaxRotation(increase: true); return true
+        case 26: appState.decreaseSlideshowOverlap(); return true
+        case 28: appState.increaseSlideshowOverlap(); return true
+        case 29: appState.applySlideshowPreset("0"); return true
+        case 25: appState.applySlideshowPreset("9"); return true
+        case 126: return appState.slideshowDirectionAdvanceIfMatches("top")
+        case 125: return appState.slideshowDirectionAdvanceIfMatches("bottom")
+        case 123: return appState.slideshowDirectionAdvanceIfMatches("left")
+        case 124: return appState.slideshowDirectionAdvanceIfMatches("right")
+        case 36, 49, 3: // return, space, F — enter browse
+            appState.openBrowseFromSlideshow()
             return true
         default:
             break
         }
-        if event.charactersIgnoringModifiers?.lowercased() == "q" {
-            appState.fileData.setViewMode(.thumbnail)
+
+        if hasShift, event.charactersIgnoringModifiers?.lowercased() == "r" {
+            appState.setSlideshowDirection("random")
+            return true
+        }
+        if event.charactersIgnoringModifiers?.lowercased() == "c" {
+            appState.setSlideshowDirection("none")
             return true
         }
         return false
+    }
+
+    private func handleSlideshow2(
+        _ event: NSEvent,
+        appState: AppState,
+        hasShift: Bool,
+        hasControl: Bool
+    ) -> Bool {
+        if hasControl, !hasShift,
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            // Slideshow2 fit-to-width not yet ported; consume key to match browse binding.
+            return true
+        }
+
+        switch event.keyCode {
+        case 53:
+            appState.fileData.setViewMode(.thumbnail)
+            return true
+        case 27, 43:
+            adjustSlideshow2Enlargement(appState: appState, delta: -0.2)
+            return true
+        case 24, 69:
+            adjustSlideshow2Enlargement(appState: appState, delta: 0.2)
+            return true
+        case 18:
+            adjustSlideshow2Speed(appState: appState, delta: hasShift ? -100 : -2)
+            return true
+        case 19:
+            adjustSlideshow2Speed(appState: appState, delta: hasShift ? 100 : 2)
+            return true
+        case 36, 49:
+            appState.openBrowseFromSlideshow()
+            return true
+        default:
+            break
+        }
+
+        if hasShift {
+            switch event.keyCode {
+            case 123, 126:
+                appState.slideshowStep(delta: -1)
+                return true
+            case 124, 125:
+                appState.slideshowStep(delta: 1)
+                return true
+            default:
+                break
+            }
+        }
+
+        if !hasShift, event.charactersIgnoringModifiers?.lowercased() == "q" {
+            let enabled = !appState.config.bool(forKey: "slideshow2_high_quality_scaling", default: false)
+            appState.config.updateSetting("slideshow2_high_quality_scaling", value: enabled)
+            appState.config.applySettingsChange(emit: appState.eventBus)
+            appState.status.show("High-quality scaling: \(enabled ? "enabled" : "disabled")")
+            return true
+        }
+        return false
+    }
+
+    private func handleSlideshow3(
+        _ event: NSEvent,
+        appState: AppState,
+        hasShift: Bool,
+        hasControl: Bool
+    ) -> Bool {
+        _ = hasShift
+        _ = hasControl
+        switch event.keyCode {
+        case 53:
+            appState.fileData.setViewMode(.thumbnail)
+            return true
+        case 18:
+            adjustSlideshow3Speed(appState: appState, delta: -1)
+            return true
+        case 19:
+            adjustSlideshow3Speed(appState: appState, delta: 1)
+            return true
+        case 36, 49:
+            appState.fileData.setViewMode(.thumbnail)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func adjustSlideshow2Enlargement(appState: AppState, delta: Double) {
+        let current = appState.config.double(forKey: "slideshow2_enlargement", default: 1.2)
+        let next = min(3.0, max(0.5, current + delta))
+        appState.config.updateSetting("slideshow2_enlargement", value: next)
+        appState.config.applySettingsChange(emit: appState.eventBus)
+        appState.status.show(String(format: "Panning zoom: %.1fx", next))
+    }
+
+    private func adjustSlideshow2Speed(appState: AppState, delta: Int) {
+        let current = appState.config.int(forKey: "slideshow2_speed", default: 8)
+        let next = min(1860, max(1, current + delta))
+        appState.config.updateSetting("slideshow2_speed", value: next)
+        appState.config.applySettingsChange(emit: appState.eventBus)
+        appState.status.show("Panning speed: \(next)px/s")
+    }
+
+    private func adjustSlideshow3Speed(appState: AppState, delta: Int) {
+        let current = appState.config.int(forKey: "slideshow3_speed", default: 1)
+        let next = max(1, current + delta)
+        appState.config.updateSetting("slideshow3_speed", value: next)
+        appState.config.applySettingsChange(emit: appState.eventBus)
+        appState.status.show("Floating frames speed: \(next)")
     }
 
     private func handleLetter(_ event: NSEvent, appState: AppState) -> Bool {
@@ -635,11 +990,13 @@ final class KeyboardHandlerController {
 
     private func openBrowse(appState: AppState) -> Bool {
         guard appState.fileData.currentImagePath != nil else { return false }
+        resetBrowseDoubleTap()
         appState.fileData.setViewMode(.browse)
         return true
     }
 
     private func returnToThumbnails(appState: AppState) -> Bool {
+        resetBrowseDoubleTap()
         if let path = appState.fileData.currentImagePath,
            let index = appState.fileData.displayedImages.firstIndex(of: path) {
             appState.fileData.setCurrentIndex(index)
@@ -870,6 +1227,30 @@ final class KeyboardHandlerController {
         appState.selection.emitSelectionChanged(highlightIndex: index)
     }
 
+    private func resetBrowseDoubleTap() {
+        doubleTapLastKey = nil
+        doubleTapLastTime = 0
+    }
+
+    private func handleBrowseDoubleTap(
+        _ event: NSEvent,
+        keyCode: UInt16,
+        appState: AppState,
+        onMatch: () -> Void
+    ) -> Bool {
+        if event.isARepeat { return true }
+        let now = ProcessInfo.processInfo.systemUptime
+        if doubleTapLastKey == keyCode, now - doubleTapLastTime < doubleTapWindow {
+            doubleTapLastKey = nil
+            doubleTapLastTime = 0
+            onMatch()
+            return true
+        }
+        doubleTapLastKey = keyCode
+        doubleTapLastTime = now
+        return true
+    }
+
     private func controlDigitIndex(_ event: NSEvent) -> Int? {
         // keyCodes 18-26 = 1-9, 29 = 0
         switch event.keyCode {
@@ -883,6 +1264,17 @@ final class KeyboardHandlerController {
         case 28: return 7
         case 25: return 8
         default: return nil
+        }
+    }
+
+    /// US keyboard `/` is keyCode 44; Shift+/ yields `?` in charactersIgnoringModifiers.
+    private func isSlashKey(_ event: NSEvent) -> Bool {
+        if event.keyCode == 44 { return true }
+        switch event.charactersIgnoringModifiers {
+        case "/", "÷", "?":
+            return true
+        default:
+            return false
         }
     }
 

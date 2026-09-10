@@ -67,5 +67,12 @@ struct ExifBatchConfirmationSheet: View {
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 420)
+        .persistedDialogGeometry(
+            DialogGeometryKey.exifBatchConfirmation,
+            defaultWidth: 560,
+            defaultHeight: 460,
+            minWidth: 520,
+            minHeight: 420
+        )
     }
 }

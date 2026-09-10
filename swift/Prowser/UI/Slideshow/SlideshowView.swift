@@ -10,6 +10,7 @@ struct SlideshowView: View {
     @State private var timer: Timer?
     @State private var imageOpacity = 1.0
     @State private var loadedImage: NSImage?
+    @State private var settingsObserver: UUID?
 
     var body: some View {
         let images = slideshowImages()
@@ -50,6 +51,18 @@ struct SlideshowView: View {
             slideIndex = appState.fileData.currentIndex
             loadCurrentImage(images: images)
             startTimer(images: images, interval: interval, transitionDuration: transitionDuration)
+            if settingsObserver == nil {
+                settingsObserver = appState.eventBus.subscribe(.settingsChanged) { _ in
+                    Task { @MainActor in
+                        let images = slideshowImages()
+                        startTimer(
+                            images: images,
+                            interval: slideshowInterval(),
+                            transitionDuration: slideshowTransitionDuration()
+                        )
+                    }
+                }
+            }
         }
         .onChange(of: appState.fileData.currentIndex) { _, newIndex in
             slideIndex = newIndex
@@ -57,6 +70,10 @@ struct SlideshowView: View {
         }
         .onDisappear {
             stopTimer()
+            if let settingsObserver {
+                appState.eventBus.unsubscribe(.settingsChanged, token: settingsObserver)
+            }
+            settingsObserver = nil
         }
         .onExitCommand {
             exitSlideshow()

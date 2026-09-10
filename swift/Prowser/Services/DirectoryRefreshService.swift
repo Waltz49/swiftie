@@ -1,0 +1,165 @@
+import Foundation
+
+/// Efficient directory refresh on disk changes. Port of `refresh_manager.py`.
+@MainActor
+enum DirectoryRefreshService {
+    static func shouldWatchDirectory(appState: AppState) -> Bool {
+        if appState.specificFilesActive { return false }
+        guard let directory = appState.fileData.currentDirectory else { return false }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
+        let displayed = appState.fileData.displayedImages
+        if displayed.isEmpty { return true }
+        let currentDir = URL(fileURLWithPath: directory).standardizedFileURL.path
+        return displayed.allSatisfy { path in
+            URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path == currentDir
+        }
+    }
+
+    static func checkAndRefreshIfChanged(appState: AppState) {
+        guard !appState.isDirectoryRefreshSuppressed else { return }
+        guard !appState.specificFilesActive else { return }
+        guard let directory = appState.fileData.currentDirectory,
+              FileManager.default.fileExists(atPath: directory) else { return }
+
+        let scanned = scannedDiskFiles(appState: appState)
+        let diskSet = Set(scanned)
+        let displayed = appState.fileData.displayedImages
+        let displayedSet = Set(displayed)
+
+        if diskSet == displayedSet {
+            guard appState.fileData.currentViewMode != .browse else { return }
+            guard displayedSet.count < 500 else { return }
+            let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
+            if !modified.isEmpty {
+                invalidateThumbnails(appState: appState, paths: modified)
+            }
+            return
+        }
+
+        let diskList = SortingService.sorted(
+            scanned,
+            options: SortingService.Options.from(config: appState.config),
+            metadataCache: appState.metadataCache
+        )
+        efficientRefreshWithChanges(
+            appState: appState,
+            diskList: diskList,
+            diskSet: diskSet,
+            displayed: displayed,
+            displayedSet: displayedSet
+        )
+    }
+
+    private static func scannedDiskFiles(appState: AppState) -> [String] {
+        guard let path = appState.fileData.currentDirectory else { return [] }
+        return DirectoryScanner.scanDirectory(
+            at: path,
+            extensions: appState.config.imageExtensions,
+            filterPattern: appState.filterSettings.filterPattern
+        )
+    }
+
+    private static func modifiedPaths(
+        in paths: Set<String>,
+        metadataCache: MetadataCacheService
+    ) -> [String] {
+        paths.filter { metadataCache.fileChangedOnDisk(path: $0) }
+    }
+
+    private static func efficientRefreshWithChanges(
+        appState: AppState,
+        diskList: [String],
+        diskSet: Set<String>,
+        displayed: [String],
+        displayedSet: Set<String>
+    ) {
+        let added = diskSet.subtracting(displayedSet)
+        let removed = displayedSet.subtracting(diskSet)
+
+        if !removed.isEmpty && added.isEmpty {
+            if appState.fileData.currentViewMode == .browse {
+                let preserved = appState.fileData.currentImagePath
+                let newList = displayed.filter { !removed.contains($0) }
+                appState.fileData.setDisplayedImages(newList)
+                if let preserved, newList.contains(preserved) {
+                    appState.fileData.setCurrentImagePath(preserved)
+                } else if let first = newList.first {
+                    appState.fileData.setCurrentImagePath(first)
+                }
+            } else {
+                removeDisplayedFiles(appState: appState, removed: removed, displayed: displayed)
+            }
+            return
+        }
+
+        guard let directory = appState.fileData.currentDirectory else { return }
+        appState.loadDirectory(directory, saveHistory: false)
+    }
+
+    private static func removeDisplayedFiles(
+        appState: AppState,
+        removed: Set<String>,
+        displayed: [String]
+    ) {
+        let activePath = appState.fileData.currentImagePath
+        let newList = displayed.filter { !removed.contains($0) }
+        appState.fileData.setDisplayedImages(newList)
+
+        if let activePath, newList.contains(activePath) {
+            appState.fileData.setCurrentImagePath(activePath)
+        } else {
+            let next = nextImageAfterDeletion(
+                original: displayed,
+                removed: removed,
+                activePath: activePath
+            )
+            if let next {
+                appState.fileData.setCurrentImagePath(next)
+            } else if let first = newList.first {
+                appState.fileData.setCurrentImagePath(first)
+            }
+        }
+
+        invalidateThumbnails(appState: appState, paths: Array(removed))
+    }
+
+    private static func nextImageAfterDeletion(
+        original: [String],
+        removed: Set<String>,
+        activePath: String?
+    ) -> String? {
+        guard let activePath else {
+            return original.first { !removed.contains($0) }
+        }
+        if let index = original.firstIndex(of: activePath) {
+            for candidate in original[(index + 1)...] where !removed.contains(candidate) {
+                return candidate
+            }
+            for candidate in original[..<index].reversed() where !removed.contains(candidate) {
+                return candidate
+            }
+        }
+        return original.first { !removed.contains($0) }
+    }
+
+    static func invalidateThumbnails(appState: AppState, paths: [String]) {
+        guard !paths.isEmpty else { return }
+        for path in paths {
+            appState.metadataCache.invalidate(path: path)
+        }
+        let cache = appState.thumbnailCache
+        Task {
+            for path in paths {
+                await cache.invalidate(for: path)
+            }
+        }
+        appState.thumbnailInvalidationGeneration += 1
+        appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(paths))
+        for path in paths {
+            appState.metadataCache.recordDiskSnapshot(path: path)
+        }
+    }
+}

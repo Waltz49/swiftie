@@ -159,7 +159,7 @@ struct StatusBarView: View {
     ) -> some View {
         let color = enabled
             ? appState.theme.colors.statusBarText
-            : appState.theme.colors.statusBarText.opacity(0.45)
+            : appState.theme.colors.statusBarMutedText
         let host = StatusBarSectionHost(
             text: text,
             textColor: NSColor(color),

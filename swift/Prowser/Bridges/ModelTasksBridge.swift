@@ -12,6 +12,7 @@ final class ModelTasksBridge {
     private(set) var activeJobID = ""
     private(set) var activeKind = ""
     private(set) var lastError = ""
+    private(set) var lastGenerateResult: [String: Any] = [:]
 
     var onReady: (() -> Void)?
     var onJobStarted: ((String) -> Void)?
@@ -128,7 +129,9 @@ final class ModelTasksBridge {
             let command = message["command"] as? String ?? activeKind
             onJobProcessingStarted?(command)
         case "progress":
-            if message["job_id"] as? String == activeJobID || activeJobID.isEmpty {
+            let msgJobID = message["job_id"] as? String ?? ""
+            let accept = msgJobID.isEmpty || msgJobID == activeJobID
+            if accept {
                 onProgress?(message)
             }
         case "caption_chunk":
@@ -165,8 +168,8 @@ final class ModelTasksBridge {
                 finishJob(kind: kind, success: true, error: "")
             }
         case "generate":
+            lastGenerateResult = message
             let output = message["output_path"] as? String ?? ""
-            onGenerateFinished?(true, output, "")
             finishJob(kind: kind, success: true, error: "", outputPath: output)
         default:
             finishJob(kind: kind, success: false, error: "Unknown result.")
@@ -189,5 +192,6 @@ final class ModelTasksBridge {
         activeKind = ""
         isBusy = false
         pendingCommand = nil
+        lastGenerateResult = [:]
     }
 }

@@ -7,6 +7,8 @@ extension Notification.Name {
 
 @MainActor
 struct ImageGenUnifiedDialog: View {
+    static let windowIdentifier = "imagegen-unified"
+
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
@@ -21,6 +23,7 @@ struct ImageGenUnifiedDialog: View {
     @State private var isDirty = false
     @State private var baselineValues: [String: Any] = [:]
     @State private var visitedFunctions: Set<String> = []
+    @State private var pluginSwitchGuard = false
     private let functions = ["edit", "create", "expand", "infill"]
     private let session = ImageGenSessionState()
 
@@ -40,6 +43,10 @@ struct ImageGenUnifiedDialog: View {
                     sourcePath: activeImagePath,
                     onValuesChanged: { markDirtyIfNeeded() }
                 )
+                .onChange(of: selectedPluginID) { oldValue, newValue in
+                    guard !pluginSwitchGuard, !isLoading, !oldValue.isEmpty, oldValue != newValue else { return }
+                    switchPlugin(from: oldValue, to: newValue)
+                }
             }
             if !submitNotice.isEmpty {
                 Text(submitNotice).font(.caption).foregroundStyle(.secondary)
@@ -61,7 +68,16 @@ struct ImageGenUnifiedDialog: View {
                 onShiftOptionReturn: { false }
             )
         )
-        .background(ImageGenUnifiedWindowConfigurator(title: titleText))
+        .persistedDialogGeometry(
+            DialogGeometryKey.imageGenDialog,
+            defaultWidth: 720,
+            defaultHeight: 560,
+            minWidth: 560,
+            minHeight: 420,
+            nestedInImageGen: true,
+            windowIdentifier: ImageGenUnifiedDialog.windowIdentifier,
+            windowTitle: titleText
+        )
         .task { await loadDialog() }
         .onChange(of: appState.imageGenDialogReloadToken) { _, _ in
             Task { await loadDialog() }
@@ -168,7 +184,14 @@ struct ImageGenUnifiedDialog: View {
         errorMessage = ""
         do {
             for function in functions {
-                let plugins = try await appState.workers.imageGenRegistry.listPlugins(function: function)
+                let saved = ImageGenPersistence.loadDialogSettings(
+                    function: function,
+                    config: appState.config
+                )
+                let plugins = try await appState.workers.imageGenRegistry.listPlugins(
+                    function: function,
+                    savedValues: saved.isEmpty ? nil : saved
+                )
                 pluginsByFunction[function] = plugins
             }
             if let replaceJobID, let job = appState.imageGen.queue.jobs.first(where: { $0.jobID == replaceJobID }) {
@@ -180,7 +203,10 @@ struct ImageGenUnifiedDialog: View {
             } else {
                 await switchFunction(from: "", to: selectedFunction)
                 if let prompt = request.initialPrompt, !prompt.isEmpty {
-                    values["prompt"] = prompt
+                    values["prompt"] = ExifService.initialPromptFromUserComment(prompt) ?? prompt
+                }
+                if request.autoImportEXIF {
+                    await applyAutoImportEXIF()
                 }
             }
             isDirty = false
@@ -192,6 +218,7 @@ struct ImageGenUnifiedDialog: View {
 
     private func switchFunction(from oldFunction: String, to newFunction: String) async {
         if !oldFunction.isEmpty {
+            persistCurrentFunction(oldFunction)
             session.setValues(values, for: oldFunction)
             session.setPluginID(selectedPluginID, for: oldFunction)
         }
@@ -201,27 +228,110 @@ struct ImageGenUnifiedDialog: View {
         visitedFunctions.insert(newFunction)
 
         let plugins = pluginsByFunction[newFunction] ?? []
+        let pluginIDs = plugins.compactMap { $0["plugin_id"] as? String }
+        pluginSwitchGuard = true
         if let savedID = session.pluginID(for: newFunction),
-           plugins.contains(where: { ($0["plugin_id"] as? String) == savedID }) {
+           pluginIDs.contains(savedID) {
             selectedPluginID = savedID
+        } else if let activeID = ImageGenPersistence.loadActivePluginID(
+            function: newFunction,
+            availablePluginIDs: pluginIDs,
+            config: appState.config
+        ) {
+            selectedPluginID = activeID
         } else if let first = plugins.first {
             selectedPluginID = first["plugin_id"] as? String ?? ""
         }
+        pluginSwitchGuard = false
 
-        let savedValues = session.values(for: newFunction)
-        if !savedValues.isEmpty {
-            values = savedValues
-        } else if let plugin = plugins.first(where: { ($0["plugin_id"] as? String) == selectedPluginID }),
-                  let defaults = plugin["merged_defaults"] as? [String: Any] {
-            values = defaults
-            if let prompt = values["prompt"] as? String, prompt.isEmpty,
-               let initial = request.initialPrompt {
-                values["prompt"] = initial
+        let sessionValues = session.values(for: newFunction)
+        if !sessionValues.isEmpty {
+            values = sessionValues
+        } else {
+            let persisted = ImageGenPersistence.loadPluginDialogSettings(
+                function: newFunction,
+                pluginID: selectedPluginID,
+                config: appState.config
+            )
+            if !persisted.isEmpty {
+                values = persisted
+            } else if let plugin = plugins.first(where: { ($0["plugin_id"] as? String) == selectedPluginID }),
+                      let defaults = plugin["merged_defaults"] as? [String: Any] {
+                values = defaults
             }
+        }
+
+        if let prompt = request.initialPrompt, !prompt.isEmpty,
+           (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            values["prompt"] = ExifService.initialPromptFromUserComment(prompt) ?? prompt
         }
 
         baselineValues = values
         isDirty = false
+    }
+
+    private func switchPlugin(from oldPluginID: String, to newPluginID: String) {
+        let preservedPrompt = values["prompt"] as? String ?? ""
+        values = ImageGenPersistence.switchPluginPreservingPrompt(
+            function: selectedFunction,
+            outgoingPluginID: oldPluginID,
+            outgoingValues: values,
+            incomingPluginID: newPluginID,
+            preservedPrompt: preservedPrompt,
+            editingQueueJob: replaceJobID != nil,
+            config: appState.config
+        )
+        session.setValues(values, for: selectedFunction)
+        session.setPluginID(newPluginID, for: selectedFunction)
+        baselineValues = values
+        isDirty = false
+    }
+
+    /// Python `auto_import_available` → panel `import_available` / Import Rest.
+    private func applyAutoImportEXIF() async {
+        guard let result = await ImageGenExifImport.applyImportRest(
+            function: selectedFunction,
+            sourcePath: editSourcePaths.first,
+            values: values,
+            selectedPluginID: selectedPluginID,
+            plugins: pluginsByFunction[selectedFunction] ?? [],
+            appState: appState
+        ) else {
+            return
+        }
+        values = result.values
+        if let pluginID = result.selectedPluginID {
+            selectedPluginID = pluginID
+        }
+        baselineValues = values
+        isDirty = false
+    }
+
+    private func persistCurrentFunction(_ function: String) {
+        guard !selectedPluginID.isEmpty else { return }
+        ImageGenPersistence.savePluginDialogSettings(
+            function: function,
+            pluginID: selectedPluginID,
+            values: values,
+            config: appState.config
+        )
+    }
+
+    private func persistVisitedFunctions(excluding excludedFunction: String? = nil) {
+        session.setValues(values, for: selectedFunction)
+        session.setPluginID(selectedPluginID, for: selectedFunction)
+        var sessions: [String: (values: [String: Any], pluginID: String)] = [:]
+        for function in visitedFunctions where function != excludedFunction {
+            let pluginID = function == selectedFunction
+                ? selectedPluginID
+                : (session.pluginID(for: function) ?? "")
+            guard !pluginID.isEmpty else { continue }
+            let functionValues = function == selectedFunction
+                ? values
+                : session.values(for: function)
+            sessions[function] = (functionValues, pluginID)
+        }
+        ImageGenPersistence.saveDialogSessions(sessions, config: appState.config)
     }
 
     private func cycleFunction(delta: Int) {
@@ -243,17 +353,16 @@ struct ImageGenUnifiedDialog: View {
             performCancel()
             return
         }
-        session.setValues(values, for: selectedFunction)
-        session.setPluginID(selectedPluginID, for: selectedFunction)
+        persistVisitedFunctions()
         closeDialog()
     }
 
     private func performCancel() {
         if isDirty {
             session.setValues(baselineValues, for: selectedFunction)
+            persistVisitedFunctions(excluding: selectedFunction)
         } else {
-            session.setValues(values, for: selectedFunction)
-            session.setPluginID(selectedPluginID, for: selectedFunction)
+            persistVisitedFunctions()
         }
         closeDialog()
     }
@@ -266,7 +375,7 @@ struct ImageGenUnifiedDialog: View {
     private func raiseWindow() {
         DispatchQueue.main.async {
             guard let window = NSApp.windows.first(where: {
-                $0.identifier?.rawValue == ImageGenUnifiedWindowConfigurator.windowIdentifier
+                $0.identifier?.rawValue == Self.windowIdentifier
             }) else { return }
             window.makeKeyAndOrderFront(nil)
         }
@@ -314,36 +423,21 @@ struct ImageGenUnifiedDialog: View {
             }
             session.setValues(submitValues, for: selectedFunction)
             session.setPluginID(selectedPluginID, for: selectedFunction)
+            values = submitValues
+            ImageGenPersistence.savePluginDialogSettings(
+                function: selectedFunction,
+                pluginID: selectedPluginID,
+                values: submitValues,
+                config: appState.config
+            )
             baselineValues = submitValues
             isDirty = false
             if closeOnGenerate {
+                persistVisitedFunctions()
                 closeDialog()
             }
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-}
-
-private struct ImageGenUnifiedWindowConfigurator: NSViewRepresentable {
-    static let windowIdentifier = "imagegen-unified"
-
-    let title: String
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { apply(to: view) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        apply(to: nsView)
-    }
-
-    private func apply(to view: NSView) {
-        guard let window = view.window else { return }
-        window.identifier = NSUserInterfaceItemIdentifier(Self.windowIdentifier)
-        window.title = title
-        window.isReleasedWhenClosed = false
     }
 }

@@ -49,6 +49,44 @@ final class MetadataCacheService {
         dirty = true
     }
 
+    /// Returns true when file mtime or size differs from the last recorded snapshot.
+    func fileChangedOnDisk(path: String) -> Bool {
+        guard let diskMtime = readMtime(for: path),
+              let diskSize = readSize(for: path) else { return false }
+        guard let cached = cache[path] else {
+            recordDiskSnapshot(path: path, mtime: diskMtime, size: diskSize)
+            return false
+        }
+        return abs(cached.mtime - diskMtime) >= 0.001 || cached.size != diskSize
+    }
+
+    func recordDiskSnapshot(path: String) {
+        guard let mtime = readMtime(for: path),
+              let size = readSize(for: path) else { return }
+        recordDiskSnapshot(path: path, mtime: mtime, size: size)
+    }
+
+    private func recordDiskSnapshot(path: String, mtime: TimeInterval, size: Int64) {
+        if let existing = cache[path] {
+            cache[path] = Entry(
+                mtime: mtime,
+                size: size,
+                pixelWidth: existing.pixelWidth,
+                pixelHeight: existing.pixelHeight,
+                exifTimestamp: existing.exifTimestamp
+            )
+        } else {
+            cache[path] = Entry(
+                mtime: mtime,
+                size: size,
+                pixelWidth: 0,
+                pixelHeight: 0,
+                exifTimestamp: nil
+            )
+        }
+        dirty = true
+    }
+
     func saveIfNeeded() {
         guard dirty else { return }
         dirty = false

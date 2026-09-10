@@ -132,7 +132,8 @@ struct ImageGenPromptSection: View {
             )
             return
         }
-        guard let prompt = ImageGenExifImport.importPrompt(
+        Task { @MainActor in
+        guard let prompt = await ImageGenExifImport.importPrompt(
             function: function,
             sourcePath: sourcePath,
             appState: appState
@@ -148,6 +149,7 @@ struct ImageGenPromptSection: View {
         values["prompt"] = prompt
         onValuesChanged?()
         appState.status.show("Prompt imported.")
+        }
     }
 
     private func importRest() {
@@ -158,7 +160,8 @@ struct ImageGenPromptSection: View {
             )
             return
         }
-        guard let result = ImageGenExifImport.applyImportRest(
+        Task { @MainActor in
+        guard let result = await ImageGenExifImport.applyImportRest(
             function: function,
             sourcePath: sourcePath,
             values: values,
@@ -179,6 +182,7 @@ struct ImageGenPromptSection: View {
         }
         onValuesChanged?()
         appState.status.show("Settings imported from EXIF.")
+        }
     }
 
     private var isBrowseOrThumbnail: Bool {

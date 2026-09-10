@@ -7,7 +7,12 @@ struct ProwserCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("Open…") {
+            Button("Open File…") {
+                Task { @MainActor in appState.openFileDialog() }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+
+            Button("Open Directory…") {
                 Task { @MainActor in openDirectory() }
             }
             .keyboardShortcut("o", modifiers: .command)
@@ -52,12 +57,12 @@ struct ProwserCommands: Commands {
             Button("Copy Image") {
                 Task { @MainActor in appState.fileOperations.copyImageToClipboard() }
             }
-            .keyboardShortcut("c", modifiers: .command)
+            .keyboardShortcut("c", modifiers: .control)
 
             Button("Copy Path") {
                 Task { @MainActor in copyPath() }
             }
-            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .keyboardShortcut("c", modifiers: .command)
 
             Button("Select All") {
                 Task { @MainActor in appState.fileOperations.selectAllDisplayed() }
@@ -114,6 +119,11 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.refreshDirectory() }
             }
             .keyboardShortcut("r", modifiers: .command)
+
+            Button("Image History") {
+                Task { @MainActor in appState.openBrowseImageHistory() }
+            }
+            .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF3FunctionKey)!)), modifiers: [])
 
             Divider()
 
@@ -187,6 +197,11 @@ struct ProwserCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: .shift)
 
+            Button("Show Image in Directory") {
+                Task { @MainActor in appState.showImageInDirectory() }
+            }
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+
             Divider()
 
             Button("Extract Faces") {
@@ -196,18 +211,18 @@ struct ProwserCommands: Commands {
         }
 
         CommandMenu("View") {
-            Button("Thumbnails") {
-                Task { @MainActor in appState.fileData.setViewMode(.thumbnail) }
+            Button("Enter Image Viewer") {
+                Task { @MainActor in
+                    guard appState.fileData.currentImagePath != nil else { return }
+                    appState.fileData.setViewMode(.browse)
+                }
             }
-            .keyboardShortcut("1", modifiers: .command)
-            Button("List") {
-                Task { @MainActor in appState.fileData.setViewMode(.list) }
+            .keyboardShortcut("f", modifiers: [])
+
+            Button("List View Toggle") {
+                Task { @MainActor in appState.toggleListView() }
             }
-            .keyboardShortcut("2", modifiers: .command)
-            Button("Browse") {
-                Task { @MainActor in appState.fileData.setViewMode(.browse) }
-            }
-            .keyboardShortcut("3", modifiers: .command)
+            .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
 
             Divider()
 
@@ -284,21 +299,14 @@ struct ProwserCommands: Commands {
 
             Divider()
 
-            Button("Dark Theme") {
-                Task { @MainActor in applyTheme("dark") }
-            }
-            Button("Light Theme") {
-                Task { @MainActor in applyTheme("light") }
-            }
-            Button("User Theme") {
-                Task { @MainActor in applyTheme("user") }
-            }
-            Button("System Theme") {
-                Task { @MainActor in applyTheme("system") }
-            }
+            ThemeMenuContent(appState: appState, applyTheme: applyTheme)
         }
 
         CommandMenu("Tools") {
+            MapLocationButton(appState: appState)
+
+            Divider()
+
             Menu("Slideshows") {
                 Button("Multiple Images Slideshow") {
                     Task { @MainActor in appState.startSlideshow(.slideshow) }
@@ -391,9 +399,9 @@ struct ProwserCommands: Commands {
                 Divider()
 
                 Button("Edit EXIF User Comment…") {
-                    Task { @MainActor in appState.exifOperations.editUserCommentForCurrent() }
+                    Task { @MainActor in appState.beginEditUserComment() }
                 }
-                .keyboardShortcut("e", modifiers: [.control, .shift])
+                .keyboardShortcut("e", modifiers: [.command, .shift])
 
                 Button("Delete User Comment from File…") {
                     Task { @MainActor in appState.exifOperations.deleteUserCommentForSelection() }
@@ -641,6 +649,19 @@ struct ProwserCommands: Commands {
     }
 }
 
+private struct MapLocationButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Show GPS Location on Map") {
+            appState.openMapForCurrentImage()
+        }
+        .keyboardShortcut("g", modifiers: .command)
+        .disabled(appState.fileData.currentViewMode != .thumbnail
+            && appState.fileData.currentViewMode != .browse)
+    }
+}
+
 private struct ActualSizeToggleButton: View {
     @Bindable var appState: AppState
 
@@ -720,5 +741,29 @@ private struct RecentDirectoriesMenuContent: View {
             return "~" + String(expanded.dropFirst(NSHomeDirectory().count))
         }
         return (expanded as NSString).lastPathComponent
+    }
+}
+
+@MainActor
+private struct ThemeMenuContent: View {
+    @Bindable var appState: AppState
+    let applyTheme: (String) -> Void
+
+    var body: some View {
+        Menu("Theme") {
+            Button("Dark") { applyTheme("dark") }
+            Button("Light") { applyTheme("light") }
+            Button("User") { applyTheme("user") }
+            Button("Use System Setting") { applyTheme("system") }
+            let customIDs = appState.theme.customThemeIDs
+            if !customIDs.isEmpty {
+                Divider()
+                ForEach(customIDs, id: \.self) { themeID in
+                    Button(appState.theme.customThemeDisplayName(themeID)) {
+                        applyTheme(themeID)
+                    }
+                }
+            }
+        }
     }
 }

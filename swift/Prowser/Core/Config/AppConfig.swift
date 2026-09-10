@@ -21,8 +21,83 @@ final class AppConfig {
     var logsDirectory: URL { paths.logsDirectory }
     var namedPipePath: String { paths.namedPipePath }
 
-    var restoreState: Bool { boolValue("restore_state", default: true) }
-    var lastDirectory: String? { stringValue("last_directory") }
+    var restoreState: Bool { restoreStateDict()["enabled"] as? Bool ?? true }
+    var lastDirectory: String? {
+        if let dir = restoreStateDict()["last_directory"] as? String, !dir.isEmpty {
+            return dir
+        }
+        return stringValue("last_directory")
+    }
+
+    struct RestoreStateSnapshot {
+        var lastFile: String?
+        var lastDirectory: String?
+        var lastViewMode: String
+        var lastMacOSSpaceMode: Bool?
+    }
+
+    /// Python `get_restore_state` (nil when disabled or paths missing).
+    func getRestoreState() -> RestoreStateSnapshot? {
+        guard restoreState else { return nil }
+        let dict = restoreStateDict()
+        let lastFile = dict["last_file"] as? String
+        if let lastFile, !lastFile.isEmpty, !FileManager.default.fileExists(atPath: lastFile) {
+            clearRestoreState()
+            return nil
+        }
+        let lastDirectory = dict["last_directory"] as? String
+        if let lastDirectory, !lastDirectory.isEmpty, !FileManager.default.fileExists(atPath: lastDirectory) {
+            clearRestoreState()
+            return nil
+        }
+        return RestoreStateSnapshot(
+            lastFile: lastFile,
+            lastDirectory: lastDirectory,
+            lastViewMode: dict["last_view_mode"] as? String ?? "thumbnail",
+            lastMacOSSpaceMode: dict["last_macos_space_mode"] as? Bool
+        )
+    }
+
+    /// Python `save_restore_state`.
+    func saveRestoreState(
+        filePath: String?,
+        directory: String?,
+        viewMode: String,
+        macosSpaceMode: Bool?
+    ) {
+        var restore = restoreStateDict()
+        restore["enabled"] = restore["enabled"] as? Bool ?? true
+        restore["last_file"] = filePath
+        restore["last_directory"] = directory
+        restore["last_view_mode"] = viewMode
+        restore["last_macos_space_mode"] = macosSpaceMode
+        updateSetting("restore_state", value: restore)
+        if let directory {
+            settings["last_directory"] = directory
+        }
+    }
+
+    func setRestoreStateEnabled(_ enabled: Bool) {
+        var restore = restoreStateDict()
+        restore["enabled"] = enabled
+        updateSetting("restore_state", value: restore)
+    }
+
+    func updateRestoreMacOSSpaceMode(_ enabled: Bool) {
+        var restore = restoreStateDict()
+        restore["last_macos_space_mode"] = enabled
+        updateSetting("restore_state", value: restore)
+    }
+
+    func clearRestoreState() {
+        var restore = restoreStateDict()
+        restore["enabled"] = false
+        restore["last_file"] = NSNull()
+        restore["last_directory"] = NSNull()
+        restore["last_view_mode"] = "thumbnail"
+        restore["last_macos_space_mode"] = NSNull()
+        updateSetting("restore_state", value: restore)
+    }
     var imageExtensions: [String] {
         let raw: [String]
         if let list = settings["image_extensions"] as? [String], !list.isEmpty {
@@ -55,6 +130,7 @@ final class AppConfig {
             return
         }
         settings = json
+        migrateRestoreStateIfNeeded()
         mergeMissingDefaults()
     }
 
@@ -206,6 +282,29 @@ final class AppConfig {
         }
     }
 
+    private func migrateRestoreStateIfNeeded() {
+        if settings["restore_state"] is Bool {
+            let enabled = settings["restore_state"] as? Bool ?? true
+            settings["restore_state"] = [
+                "enabled": enabled,
+                "last_file": NSNull(),
+                "last_directory": settings["last_directory"] as Any? ?? NSNull(),
+                "last_view_mode": "thumbnail",
+                "last_macos_space_mode": NSNull(),
+            ]
+        }
+    }
+
+    private func restoreStateDict() -> [String: Any] {
+        if let dict = settings["restore_state"] as? [String: Any] {
+            return dict
+        }
+        if let enabled = settings["restore_state"] as? Bool {
+            return ["enabled": enabled]
+        }
+        return ["enabled": true]
+    }
+
     private func stringValue(_ key: String) -> String? {
         settings[key] as? String
     }
@@ -230,7 +329,13 @@ final class AppConfig {
         [
             "debug_mode": false,
             "confirm_delete": true,
-            "restore_state": true,
+            "restore_state": [
+                "enabled": true,
+                "last_file": NSNull(),
+                "last_directory": NSNull(),
+                "last_view_mode": "thumbnail",
+                "last_macos_space_mode": NSNull(),
+            ] as [String: Any],
             "wrap_around": true,
             "use_exif_date": true,
             "ignore_exif_rotation": false,
@@ -296,6 +401,17 @@ final class AppConfig {
             "slideshow_direction": "right",
             "slideshow_max_rotation": 0,
             "slideshow_back_and_forth": false,
+            "slideshow_overlap_delay": 0,
+            "slideshow_preset_0": SlideshowPresetUtils.presetDefaults["0"]!,
+            "slideshow_preset_9": SlideshowPresetUtils.presetDefaults["9"]!,
+            "browse_image_history_save_after_ms": 3000,
+            "space_key_mode": "exit",
+            "map_application": "apple_maps",
+            "slideshow2_enlargement": 1.2,
+            "slideshow2_speed": 8,
+            "slideshow2_high_quality_scaling": false,
+            "slideshow3_speed": 1,
+            "list_view_row_height": 48,
             "background_clip_enabled": false,
             "background_clip_gather_thumbnails": true,
             "background_clip_extract_faces": false,

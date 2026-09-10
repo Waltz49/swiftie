@@ -87,6 +87,7 @@ final class SearchOperationsService {
 
         let savedPath = appState.fileData.currentImagePath
         appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+        appState.setSpecificFilesActive(true)
         appState.fileData.setDisplayedImages(paths)
         if let savedPath, paths.contains(savedPath) {
             appState.fileData.setCurrentImagePath(savedPath)
@@ -158,6 +159,7 @@ final class SearchOperationsService {
 
         let savedPath = appState.fileData.currentImagePath
         appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+        appState.setSpecificFilesActive(true)
         appState.fileData.setDisplayedImages(paths)
         if let savedPath, paths.contains(savedPath) {
             appState.fileData.setCurrentImagePath(savedPath)
@@ -293,6 +295,7 @@ final class SearchOperationsService {
 
         let savedPath = appState.fileData.currentImagePath
         appState.config.updateSetting("sort_mode", value: SortMode.duplicates.rawValue)
+        appState.setSpecificFilesActive(true)
         appState.fileData.setDisplayedImages(duplicates)
         if let savedPath, duplicates.contains(savedPath) {
             appState.fileData.setCurrentImagePath(savedPath)

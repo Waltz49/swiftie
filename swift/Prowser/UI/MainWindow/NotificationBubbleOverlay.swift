@@ -11,16 +11,16 @@ struct NotificationBubbleOverlay: View {
             ForEach(bubbles) { bubble in
                 Text(bubble.message)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(appState.theme.colors.text)
+                    .foregroundStyle(appState.theme.colors.dialogText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
                     .background(
                         RoundedRectangle(cornerRadius: 5)
-                            .fill(appState.theme.colors.sidebarHeaderBackground)
+                            .fill(appState.theme.colors.dialogBackground)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 5)
-                            .stroke(appState.theme.colors.sidebarHeaderBorder, lineWidth: 1)
+                            .stroke(appState.theme.colors.defaultBorder, lineWidth: 1)
                     )
                     .opacity(bubble.opacity)
             }

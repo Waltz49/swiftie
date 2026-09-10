@@ -28,17 +28,19 @@ enum ImageGenExifImport {
         return exifImportablePath(path)
     }
 
+    @MainActor
     static func importPrompt(
         function: String,
         sourcePath: String?,
         appState: AppState
-    ) -> String? {
+    ) async -> String? {
         guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
             return nil
         }
-        return ExifService.importPromptText(from: path)
+        return await ExifService.importPromptFromPath(path)
     }
 
+    @MainActor
     static func applyImportRest(
         function: String,
         sourcePath: String?,
@@ -46,11 +48,11 @@ enum ImageGenExifImport {
         selectedPluginID: String,
         plugins: [[String: Any]],
         appState: AppState
-    ) -> ImportResult? {
+    ) async -> ImportResult? {
         guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
             return nil
         }
-        guard let comment = ExifService.userComment(path: path), !comment.isEmpty else {
+        guard let comment = await ExifService.userDescription(path: path), !comment.isEmpty else {
             return nil
         }
         let parsed = parseExifGenerationMetadata(comment)
