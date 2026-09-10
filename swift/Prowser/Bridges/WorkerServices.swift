@@ -7,6 +7,7 @@ final class WorkerServices {
     let modelTasks: ModelTasksBridge
     let foregroundModelTasks: ModelTasksBridge
     let imageGenRegistry: ImageGenRegistryBridge
+    let lora: LoRABridge
     let clip: CLIPBridge
     let clipSearch: CLIPSearchBridge
     let chat: ChatBridge
@@ -21,6 +22,7 @@ final class WorkerServices {
         modelTasks = ModelTasksBridge(profilePath: profilePath)
         foregroundModelTasks = ModelTasksBridge(profilePath: profilePath)
         imageGenRegistry = ImageGenRegistryBridge(profilePath: profilePath)
+        lora = LoRABridge(profilePath: profilePath)
         clip = CLIPBridge(profilePath: profilePath)
         clipSearch = CLIPSearchBridge(profilePath: profilePath)
         chat = ChatBridge(profilePath: profilePath)
@@ -44,6 +46,7 @@ final class WorkerServices {
         modelTasks.shutdown()
         foregroundModelTasks.shutdown()
         imageGenRegistry.shutdown()
+        lora.shutdown()
         clip.shutdown()
         clipSearch.shutdown()
         chat.shutdown()

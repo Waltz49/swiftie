@@ -125,7 +125,6 @@ struct ImageGenFluxPromptSection: View {
 
             if systemPromptExpanded {
                 TextEditor(text: $systemPrompt)
-                    .font(.body.monospaced())
                     .frame(minHeight: 72, maxHeight: 120)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     .onChange(of: systemPrompt) { _, text in

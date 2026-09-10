@@ -88,7 +88,28 @@ enum ImageGenExifImport {
             updated["guidance_scale"] = Double(guidance)
         }
         if let lora = gated["lora"] as? String, !lora.isEmpty {
-            updated["mflux_lora"] = lora
+            if appState.workers.lora.isAvailable {
+                if let matched = try? await appState.workers.lora.matchExif(
+                    pluginID: pluginID,
+                    loraText: lora
+                ), !matched.ids.isEmpty {
+                    let host = plugins.first(where: { ($0["plugin_id"] as? String) == pluginID })?["lora_host_id"] as? String ?? ""
+                    if host == "sd15" {
+                        updated["mflux_lora"] = matched.ids[0]
+                        updated.removeValue(forKey: "mflux_lora_stack")
+                    } else {
+                        updated["mflux_lora_stack"] = matched.ids
+                        updated.removeValue(forKey: "mflux_lora")
+                    }
+                    if !matched.scales.isEmpty {
+                        updated["mflux_lora_scales_by_id"] = matched.scales
+                    }
+                } else {
+                    updated["mflux_lora"] = lora
+                }
+            } else {
+                updated["mflux_lora"] = lora
+            }
         }
 
         var sourcePaths: [String]?

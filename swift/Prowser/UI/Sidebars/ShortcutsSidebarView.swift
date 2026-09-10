@@ -169,7 +169,7 @@ struct ShortcutsSidebarView: View {
                     object: nil,
                     userInfo: ["tab": settingsTab.rawValue]
                 )
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                appState.openSettingsWindow()
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))

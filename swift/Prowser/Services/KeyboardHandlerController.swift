@@ -192,6 +192,13 @@ final class KeyboardHandlerController {
             }
         }
 
+        // ⌘, — settings (Python File → Settings… Ctrl+,).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers == "," || event.keyCode == 43 {
+            appState.openSettingsWindow()
+            return true
+        }
+
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
@@ -407,7 +414,8 @@ final class KeyboardHandlerController {
             appState.toggleChatPane()
             return true
         }
-        if event.keyCode == 43, !hasShift, !hasControl {
+        if event.keyCode == 43, !hasShift, !hasControl,
+           !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
             appState.toggleChatPane()
             return true
         }

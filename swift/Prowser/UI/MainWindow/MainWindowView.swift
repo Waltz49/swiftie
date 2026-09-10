@@ -79,6 +79,10 @@ struct MainWindowView: View {
                 openWindow(id: "imagegen-unified")
             }
         }
+        .onChange(of: appState.settingsOpenRequestToken) { _, _ in
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "settings")
+        }
         .overlay(alignment: .bottom) {
             StatusBarPeekMouseTracker(appState: appState)
                 .frame(maxWidth: .infinity)

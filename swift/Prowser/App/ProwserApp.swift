@@ -34,10 +34,11 @@ struct ProwserApp: App {
         }
         .defaultSize(width: 720, height: 560)
 
-        Settings {
+        Window("Settings", id: "settings") {
             SettingsWindowView()
                 .environment(appState)
         }
+        .defaultSize(width: 920, height: 680)
     }
 }
 
@@ -93,6 +94,7 @@ final class AppState {
     var showImageGenCreateSheet = false
     var showImageGenUnifiedDialog = false
     var imageGenDialogReloadToken = 0
+    var settingsOpenRequestToken = 0
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     var showKeyboardHelp = false
     var showAbout = false
@@ -1218,13 +1220,15 @@ final class AppState {
         return !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func openSettingsWindow(tab: SettingsTab = .general) {
+    func openSettingsWindow(tab: SettingsTab = .general, userInfo: [String: Any] = [:]) {
+        var info = userInfo
+        info["tab"] = tab.rawValue
         NotificationCenter.default.post(
             name: .prowserOpenSettingsTab,
             object: nil,
-            userInfo: ["tab": tab.rawValue]
+            userInfo: info
         )
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        settingsOpenRequestToken += 1
     }
 
     func openImageGenDialog(

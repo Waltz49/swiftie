@@ -131,6 +131,7 @@ struct ImageGenSettingsGearButton: View {
     @Environment(AppState.self) private var appState
     let settingsTab: SettingsTab
     var tooltip: String = "Open settings"
+    var loraModelKey: String?
 
     var body: some View {
         AppAssetIconButton(
@@ -140,7 +141,13 @@ struct ImageGenSettingsGearButton: View {
             size: ImageGenChrome.dimHelperButtonSize,
             iconSize: ImageGenChrome.gearIconSize,
             tooltip: tooltip,
-            action: { appState.openSettingsWindow(tab: settingsTab) }
+            action: {
+                var userInfo: [String: Any] = [:]
+                if let loraModelKey, !loraModelKey.isEmpty {
+                    userInfo["lora_model_key"] = loraModelKey
+                }
+                appState.openSettingsWindow(tab: settingsTab, userInfo: userInfo)
+            }
         )
     }
 }
