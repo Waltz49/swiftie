@@ -103,7 +103,8 @@ final class BrowseImageHistoryController {
 
         appState.directoryHistory.saveCurrent(
             fileData: appState.fileData,
-            config: appState.config
+            config: appState.config,
+            selection: appState.selection
         )
         appState.selection.clear()
         appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)

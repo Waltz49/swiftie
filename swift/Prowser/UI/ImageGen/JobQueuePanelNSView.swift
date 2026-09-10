@@ -33,7 +33,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        clipsToBounds = true
         registerForDraggedTypes([jobQueueDragType])
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false

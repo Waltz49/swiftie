@@ -4,6 +4,13 @@ import SwiftUI
 @MainActor
 protocol ImageListDelegate: AnyObject {
     func imageListDidSelect(index: Int, path: String)
+    func imageListDidClick(
+        index: Int,
+        path: String,
+        shiftPressed: Bool,
+        cmdPressed: Bool,
+        ctrlPressed: Bool
+    )
     func imageListDidOpenBrowse(index: Int, path: String)
     func imageListShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
 }
@@ -28,6 +35,14 @@ final class ImageListNSView: NSView {
 
     var currentPath: String? {
         didSet { syncSelection() }
+    }
+
+    var selectedPaths: Set<String> = [] {
+        didSet { tableView.reloadData() }
+    }
+
+    var multiSelectMode = false {
+        didSet { tableView.reloadData() }
     }
 
     var rowHeight: CGFloat = 48 {
@@ -132,9 +147,13 @@ private final class ImageListTableView: NSTableView, NSTableViewDataSource, NSTa
             cell.identifier = identifier
         }
         let thumbSize = max(28, host.rowHeight - 8)
+        let isCurrent = path == host.currentPath
+        let isMultiSelected = host.selectedPaths.contains(path)
         cell.configure(
             path: path,
-            selected: path == host.currentPath,
+            isCurrent: isCurrent,
+            isMultiSelected: isMultiSelected,
+            multiSelectMode: host.multiSelectMode,
             thumbSize: thumbSize,
             cache: host.thumbnailCache,
             refreshToken: host.thumbnailRefreshToken,
@@ -144,9 +163,30 @@ private final class ImageListTableView: NSTableView, NSTableViewDataSource, NSTa
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        guard let host, selectedRow >= 0, selectedRow < host.imagePaths.count else { return }
-        let path = host.imagePaths[selectedRow]
-        host.listDelegate?.imageListDidSelect(index: selectedRow, path: path)
+        // Selection is driven by explicit clicks with modifier keys.
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        guard let host, row >= 0, row < host.imagePaths.count else {
+            super.mouseDown(with: event)
+            return
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.control), !flags.contains(.command) {
+            super.mouseDown(with: event)
+            return
+        }
+        let path = host.imagePaths[row]
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        host.listDelegate?.imageListDidClick(
+            index: row,
+            path: path,
+            shiftPressed: flags.contains(.shift),
+            cmdPressed: flags.contains(.command),
+            ctrlPressed: flags.contains(.control)
+        )
     }
 
     @objc private func doubleClickRow() {
@@ -205,7 +245,9 @@ private final class ImageListRowCell: NSTableCellView {
 
     func configure(
         path: String,
-        selected: Bool,
+        isCurrent: Bool,
+        isMultiSelected: Bool,
+        multiSelectMode: Bool,
         thumbSize: CGFloat,
         cache: ThumbnailCache?,
         refreshToken: Int,
@@ -213,16 +255,30 @@ private final class ImageListRowCell: NSTableCellView {
     ) {
         loadTask?.cancel()
         nameLabel.stringValue = (path as NSString).lastPathComponent
-        nameLabel.textColor = selected ? NSColor(colors.currentImageBorder) : NSColor(colors.text)
+        if isCurrent {
+            nameLabel.textColor = NSColor(colors.currentImageBorder)
+        } else if isMultiSelected && multiSelectMode {
+            nameLabel.textColor = NSColor(colors.multiselectBorder)
+        } else {
+            nameLabel.textColor = NSColor(colors.text)
+        }
         if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
            let size = attrs[.size] as? NSNumber {
             sizeLabel.stringValue = ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)
         } else {
             sizeLabel.stringValue = ""
         }
-        layer?.backgroundColor = selected
-            ? NSColor(colors.currentImageBackground).withAlphaComponent(0.35).cgColor
-            : NSColor(colors.thumbnailGridBackground).cgColor
+        let background: NSColor
+        if isMultiSelected && multiSelectMode {
+            background = NSColor(colors.multiselectBackground).withAlphaComponent(0.35)
+        } else if isCurrent {
+            background = NSColor(colors.currentImageBackground).withAlphaComponent(0.35)
+        } else if isMultiSelected {
+            background = NSColor(colors.multiselectBackground).withAlphaComponent(0.25)
+        } else {
+            background = NSColor(colors.thumbnailGridBackground)
+        }
+        layer?.backgroundColor = background.cgColor
         wantsLayer = true
 
         thumbView.image = nil
@@ -269,24 +325,67 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
             self.appState = appState
         }
 
+        private var selectionObserver: NSObjectProtocol?
+
         func syncFromAppState() {
             guard let listView else { return }
             listView.imagePaths = appState.fileData.displayedImages
             listView.currentPath = appState.fileData.currentImagePath
+            listView.selectedPaths = appState.selection.selectedFiles
+            listView.multiSelectMode = appState.selection.multiSelectMode
             listView.rowHeight = CGFloat(appState.config.int(forKey: "list_view_row_height", default: 48))
             listView.thumbnailRefreshToken = appState.thumbnailInvalidationGeneration
             listView.themeColors = appState.theme.colors
+            installSelectionObserverIfNeeded()
+        }
+
+        private func installSelectionObserverIfNeeded() {
+            guard selectionObserver == nil else { return }
+            selectionObserver = NotificationCenter.default.addObserver(
+                forName: .prowserSelectionChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                let coordinator = self
+                Task { @MainActor in coordinator?.syncSelectionVisuals() }
+            }
+        }
+
+        private func syncSelectionVisuals() {
+            guard let listView else { return }
+            listView.selectedPaths = appState.selection.selectedFiles
+            listView.multiSelectMode = appState.selection.multiSelectMode
+            listView.currentPath = appState.fileData.currentImagePath
         }
 
         func imageListDidSelect(index: Int, path: String) {
-            appState.fileData.setCurrentIndex(index)
-            appState.fileData.setCurrentImagePath(path)
+            if appState.selection.multiSelectMode {
+                SelectionService.clearSelection(appState: appState)
+            }
+            SelectionService.selectThumbnail(appState: appState, index: index, addToSelection: false)
+        }
+
+        func imageListDidClick(
+            index: Int,
+            path: String,
+            shiftPressed: Bool,
+            cmdPressed: Bool,
+            ctrlPressed: Bool
+        ) {
+            SelectionService.handleThumbnailClick(
+                appState: appState,
+                index: index,
+                cmdPressed: cmdPressed,
+                shiftPressed: shiftPressed,
+                ctrlPressed: ctrlPressed
+            )
+            if !shiftPressed, !cmdPressed, !ctrlPressed {
+                SelectionService.openBrowseForCurrentSelection(appState: appState)
+            }
         }
 
         func imageListDidOpenBrowse(index: Int, path: String) {
-            appState.fileData.setCurrentIndex(index)
-            appState.fileData.setCurrentImagePath(path)
-            appState.fileData.setViewMode(.browse)
+            SelectionService.openBrowseForCurrentSelection(appState: appState)
         }
 
         func imageListShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView) {}

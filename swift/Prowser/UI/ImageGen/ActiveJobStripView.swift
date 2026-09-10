@@ -38,9 +38,7 @@ final class ActiveJobStripNSView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        clipsToBounds = true
         frameView.wantsLayer = true
-        frameView.clipsToBounds = true
         frameView.translatesAutoresizingMaskIntoConstraints = false
         rowsStack.orientation = .vertical
         rowsStack.alignment = .width
@@ -92,7 +90,8 @@ final class ActiveJobStripNSView: NSView {
     private func measuredContentHeight() -> CGFloat {
         let rowsHeight = rowsStack.fittingSize.height
         let cooldownHeight = cooldownRow.arrangedSubviews.isEmpty ? 0 : cooldownRow.fittingSize.height + 2
-        return 8 + rowsHeight + cooldownHeight
+        // Match Python ``_ACTIVE_JOB_STRIP_FRAME_CHROME_V`` (border + inner padding).
+        return 10 + rowsHeight + cooldownHeight
     }
 
     private func scheduleContentHeightReport() {

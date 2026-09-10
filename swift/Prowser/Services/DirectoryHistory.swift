@@ -8,6 +8,7 @@ final class DirectoryHistory {
         let currentPath: String?
         let index: Int
         let displayedImages: [String]
+        let selectedFiles: [String]
         let viewMode: ViewMode
         let sortMode: String
         let sortReversed: Bool
@@ -20,9 +21,9 @@ final class DirectoryHistory {
     var canGoBack: Bool { !backward.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
 
-    func saveCurrent(fileData: FileDataModel, config: AppConfig) {
+    func saveCurrent(fileData: FileDataModel, config: AppConfig, selection: SelectionModel) {
         guard fileData.currentDirectory != nil || !fileData.displayedImages.isEmpty else { return }
-        let entry = entry(from: fileData, config: config)
+        let entry = entry(from: fileData, config: config, selection: selection)
         if backward.last == entry { return }
         backward.append(entry)
         if backward.count > maxSize {
@@ -43,12 +44,13 @@ final class DirectoryHistory {
         return next
     }
 
-    func entry(from fileData: FileDataModel, config: AppConfig) -> Entry {
+    func entry(from fileData: FileDataModel, config: AppConfig, selection: SelectionModel) -> Entry {
         Entry(
             directory: fileData.currentDirectory,
             currentPath: fileData.currentImagePath,
             index: fileData.currentIndex,
             displayedImages: fileData.displayedImages,
+            selectedFiles: Array(selection.selectedFiles),
             viewMode: fileData.currentViewMode,
             sortMode: config.string(forKey: "sort_mode", default: SortMode.date.rawValue),
             sortReversed: config.bool(forKey: "sort_reversed", default: false)

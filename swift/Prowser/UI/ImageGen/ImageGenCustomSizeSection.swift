@@ -7,9 +7,11 @@ struct ImageGenCustomSizeSection: View {
     let widthSpec: [String: Any]
     let heightSpec: [String: Any]
     let sourcePath: String?
+    /// Edit uses optional ``use_custom_size`` (Python ``mount_edit_custom_size_section``); create/expand use collapse-for-visibility only.
+    var usesOptionalCustomSize: Bool = false
     var onValuesChanged: (() -> Void)?
 
-    @State private var isExpanded = false
+    @State private var isExpanded = true
     @State private var aspectLock = false
     @State private var aspectRatio: Double = 1.0
 
@@ -19,7 +21,7 @@ struct ImageGenCustomSizeSection: View {
             isExpanded: $isExpanded,
             tooltip: "Override output dimensions when enabled."
         ) {
-            if values["use_custom_size"] as? Bool ?? false {
+            if isExpanded {
                 HStack(alignment: .top, spacing: 6) {
                     VStack(alignment: .leading, spacing: 8) {
                         controlsRow
@@ -68,13 +70,17 @@ struct ImageGenCustomSizeSection: View {
             }
         }
         .onAppear {
-            isExpanded = values["use_custom_size"] as? Bool ?? false
+            if usesOptionalCustomSize {
+                isExpanded = values["use_custom_size"] as? Bool ?? false
+            }
             aspectLock = values["aspect_lock"] as? Bool ?? false
             captureAspectRatio()
         }
         .onChange(of: isExpanded) { _, expanded in
-            values["use_custom_size"] = expanded
-            onValuesChanged?()
+            if usesOptionalCustomSize {
+                values["use_custom_size"] = expanded
+                onValuesChanged?()
+            }
         }
     }
 
@@ -120,9 +126,16 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private var headerTitle: String {
+        if usesOptionalCustomSize {
+            let base = isExpanded ? "Custom Size" : "Use Custom Size"
+            guard !isExpanded, let size = sourcePixelSize() else { return base }
+            return "\(base) ( Current: \(size.width) x \(size.height) )"
+        }
         let base = isExpanded ? "Custom Size" : "Use Custom Size"
-        guard !isExpanded, let size = sourcePixelSize() else { return base }
-        return "\(base) ( Current: \(size.width) x \(size.height) )"
+        guard !isExpanded else { return base }
+        let width = values["width"] as? Int ?? Int(widthSpec["reset_default"] as? Int ?? 1024)
+        let height = values["height"] as? Int ?? Int(heightSpec["reset_default"] as? Int ?? 1024)
+        return "\(base) ( Current: \(width) x \(height) )"
     }
 
     private func sourcePixelSize() -> (width: Int, height: Int)? {

@@ -5,11 +5,19 @@ import ImageIO
 @MainActor
 protocol ThumbnailGridDelegate: AnyObject {
     func thumbnailGridDidSelect(index: Int, path: String)
+    func thumbnailGridDidClick(
+        index: Int,
+        path: String,
+        shiftPressed: Bool,
+        cmdPressed: Bool,
+        ctrlPressed: Bool
+    )
     func thumbnailGridDidOpenBrowse(index: Int, path: String)
     func thumbnailGridDidReorder(path: String, insertionIndex: Int)
     func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void)
     func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
     func thumbnailGridDidApplyFilter(label: String)
+    func thumbnailGridDidUpdateLayout(columns: Int)
 }
 
 /// Custom-painted thumbnail grid. Port of `thumbnails/thumbnail_canvas.py` (phase 1).
@@ -26,6 +34,14 @@ final class ThumbnailGridNSView: NSView {
     }
 
     var currentIndex: Int = 0 {
+        didSet { needsDisplay = true }
+    }
+
+    var selectedIndices: Set<Int> = [] {
+        didSet { needsDisplay = true }
+    }
+
+    var multiSelectMode: Bool = false {
         didSet { needsDisplay = true }
     }
 
@@ -52,6 +68,8 @@ final class ThumbnailGridNSView: NSView {
     private var trackingArea: NSTrackingArea?
 
     private var metrics = ThumbnailLayout.metrics(for: 800, itemCount: 0, showFilename: false, showImageSize: false)
+
+    var gridColumnCount: Int { max(1, metrics.columns) }
     private var imageDimensionCache: [String: String] = [:]
     private var thumbnails: [String: NSImage] = [:]
     private var loadingPaths: Set<String> = []
@@ -114,6 +132,7 @@ final class ThumbnailGridNSView: NSView {
         applyDocumentSize(metrics.contentSize)
         needsDisplay = true
         loadVisibleThumbnails()
+        gridDelegate?.thumbnailGridDidUpdateLayout(columns: gridColumnCount)
     }
 
     /// Called when the user scrolls; reloads thumbnails for newly visible cells only.
@@ -217,8 +236,14 @@ final class ThumbnailGridNSView: NSView {
             let borderRect = ThumbnailLayout.thumbnailBorderRect(in: imageFrame)
             let contentRect = ThumbnailLayout.imageContentRect(in: imageFrame)
             let isCurrent = index == currentIndex
+            let isSelected = selectedIndices.contains(index)
 
-            drawThumbnailBackground(in: borderRect, isCurrent: isCurrent, context: context)
+            drawThumbnailBackground(
+                in: borderRect,
+                isCurrent: isCurrent,
+                isSelected: isSelected,
+                context: context
+            )
 
             let path = imagePaths[index]
             if let image = thumbnails[path] {
@@ -229,7 +254,12 @@ final class ThumbnailGridNSView: NSView {
                 drawPlaceholder(for: path, in: contentRect)
             }
 
-            drawThumbnailBorder(in: borderRect, isCurrent: isCurrent, context: context)
+            drawThumbnailBorder(
+                in: borderRect,
+                isCurrent: isCurrent,
+                isSelected: isSelected,
+                context: context
+            )
 
             if showFilenames || showImageSize {
                 drawOverlay(
@@ -341,7 +371,16 @@ final class ThumbnailGridNSView: NSView {
         dropIndicatorRect = nil
         let path = imagePaths[index]
         currentIndex = index
-        gridDelegate?.thumbnailGridDidSelect(index: index, path: path)
+        let shiftPressed = flags.contains(.shift)
+        let cmdPressed = flags.contains(.command)
+        let ctrlPressed = flags.contains(.control)
+        gridDelegate?.thumbnailGridDidClick(
+            index: index,
+            path: path,
+            shiftPressed: shiftPressed,
+            cmdPressed: cmdPressed,
+            ctrlPressed: ctrlPressed
+        )
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -359,8 +398,12 @@ final class ThumbnailGridNSView: NSView {
            sourceIndex < imagePaths.count {
             let path = imagePaths[sourceIndex]
             gridDelegate?.thumbnailGridDidReorder(path: path, insertionIndex: insertion)
-        } else if event.clickCount >= 2, let index = indexAt(point: point) {
-            gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
+        } else if let index = indexAt(point: point) {
+            if event.clickCount >= 2 {
+                gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
+            } else if dragSourceIndex == index {
+                gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
+            }
         }
         dragSourceIndex = nil
         dragStartPoint = nil
@@ -594,7 +637,12 @@ final class ThumbnailGridNSView: NSView {
         ThumbnailLayout.frame(for: index, metrics: metrics)
     }
 
-    private func drawThumbnailBackground(in rect: NSRect, isCurrent: Bool, context: CGContext) {
+    private func drawThumbnailBackground(
+        in rect: NSRect,
+        isCurrent: Bool,
+        isSelected: Bool,
+        context: CGContext
+    ) {
         let radius = ThumbnailLayout.cornerRadius
         let path = CGPath(
             roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
@@ -604,16 +652,46 @@ final class ThumbnailGridNSView: NSView {
         )
         context.saveGState()
         context.addPath(path)
-        if isCurrent {
-            context.setFillColor(NSColor(themeColors.currentImageBackground).cgColor)
+        let fillColor: NSColor
+        if isSelected && multiSelectMode {
+            fillColor = NSColor(themeColors.multiselectBackground)
+        } else if isCurrent {
+            fillColor = NSColor(themeColors.currentImageBackground)
+        } else if isSelected {
+            fillColor = NSColor(themeColors.multiselectBackground)
         } else {
-            context.setFillColor(NSColor(themeColors.defaultImageBackground).cgColor)
+            fillColor = NSColor(themeColors.defaultImageBackground)
         }
+        context.setFillColor(fillColor.cgColor)
         context.fillPath()
         context.restoreGState()
     }
 
-    private func drawThumbnailBorder(in rect: NSRect, isCurrent: Bool, context: CGContext) {
+    private func drawThumbnailBorder(
+        in rect: NSRect,
+        isCurrent: Bool,
+        isSelected: Bool,
+        context: CGContext
+    ) {
+        guard isCurrent || isSelected else {
+            let width = CGFloat(themeColors.defaultImageBorderWidth)
+            guard width > 0 else { return }
+            let radius = ThumbnailLayout.cornerRadius
+            let path = CGPath(
+                roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+                cornerWidth: radius,
+                cornerHeight: radius,
+                transform: nil
+            )
+            context.saveGState()
+            context.addPath(path)
+            context.setStrokeColor(NSColor(themeColors.defaultImageBorder).cgColor)
+            context.setLineWidth(width)
+            context.strokePath()
+            context.restoreGState()
+            return
+        }
+
         let radius = ThumbnailLayout.cornerRadius
         let path = CGPath(
             roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
@@ -623,20 +701,19 @@ final class ThumbnailGridNSView: NSView {
         )
         context.saveGState()
         context.addPath(path)
+        let strokeColor: NSColor
+        let width: CGFloat
         if isCurrent {
-            let width = CGFloat(themeColors.currentImageBorderWidth)
-            if width > 0 {
-                context.setStrokeColor(NSColor(themeColors.currentImageBorder).cgColor)
-                context.setLineWidth(width)
-                context.strokePath()
-            }
+            strokeColor = NSColor(themeColors.currentImageBorder)
+            width = CGFloat(themeColors.currentImageBorderWidth)
         } else {
-            let width = CGFloat(themeColors.defaultImageBorderWidth)
-            if width > 0 {
-                context.setStrokeColor(NSColor(themeColors.defaultImageBorder).cgColor)
-                context.setLineWidth(width)
-                context.strokePath()
-            }
+            strokeColor = NSColor(themeColors.multiselectBorder)
+            width = CGFloat(themeColors.multiselectBorderWidth)
+        }
+        if width > 0 {
+            context.setStrokeColor(strokeColor.cgColor)
+            context.setLineWidth(width)
+            context.strokePath()
         }
         context.restoreGState()
     }

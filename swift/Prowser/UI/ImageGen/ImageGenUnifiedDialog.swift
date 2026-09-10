@@ -417,10 +417,26 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
+    private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {
+        var out = input
+        switch selectedFunction {
+        case "create":
+            out.removeValue(forKey: "source_image_path")
+            out.removeValue(forKey: "source_image_paths")
+            out.removeValue(forKey: "_canonical_source_image_paths")
+            out.removeValue(forKey: "use_custom_size")
+        case "expand", "infill":
+            out.removeValue(forKey: "use_custom_size")
+        default:
+            break
+        }
+        return out
+    }
+
     private func submit(replace: Bool) async {
         errorMessage = ""
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
-        var submitValues = values
+        var submitValues = prepareSubmitValues(values)
         submitValues["copies"] = copies
         do {
             if replace, let replaceJobID {

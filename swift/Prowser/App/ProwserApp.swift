@@ -129,6 +129,8 @@ final class AppState {
     var jobsPanelAlwaysOnTop = false
     /// True when viewing a custom file list (opened files, search results, etc.) — disables directory watcher refresh.
     var specificFilesActive = false
+    /// Live column count from the thumbnail grid layout (source of truth for keyboard navigation).
+    var thumbnailGridColumns = 1
     /// Bumped when on-disk image content changes so list/thumbnail views reload affected thumbs.
     var thumbnailInvalidationGeneration = 0
     var fileTreeCollapseUIToken = 0
@@ -1080,7 +1082,8 @@ final class AppState {
             jobCount: jobCount,
             isProcessing: imageGen.isProcessing,
             showsActiveStrip: showsActiveStrip,
-            hasMeasuredCards: measuredJobsCardStackHeight > 0
+            hasMeasuredCards: measuredJobsCardStackHeight > 0,
+            includesToolbar: jobsToolbarVisible && jobsDisplayMode == .pane
         )
     }
 
@@ -1686,7 +1689,7 @@ final class AppState {
         let paths = panel.urls.map(\.path).filter { FileManager.default.fileExists(atPath: $0) }
         guard !paths.isEmpty else { return }
 
-        directoryHistory.saveCurrent(fileData: fileData, config: config)
+        directoryHistory.saveCurrent(fileData: fileData, config: config, selection: selection)
         if fileData.currentViewMode == .browse {
             fileData.setViewMode(.thumbnail)
         }
@@ -2224,7 +2227,11 @@ final class DirectoryLoadCoordinator {
 
     func loadDirectory(_ path: String, saveHistory: Bool) {
         if saveHistory {
-            appState.directoryHistory.saveCurrent(fileData: appState.fileData, config: appState.config)
+            appState.directoryHistory.saveCurrent(
+                fileData: appState.fileData,
+                config: appState.config,
+                selection: appState.selection
+            )
         }
         let scanned = DirectoryScanner.scanDirectory(
             at: path,
@@ -2249,13 +2256,21 @@ final class DirectoryLoadCoordinator {
     }
 
     func goBack() {
-        let current = appState.directoryHistory.entry(from: appState.fileData, config: appState.config)
+        let current = appState.directoryHistory.entry(
+            from: appState.fileData,
+            config: appState.config,
+            selection: appState.selection
+        )
         guard let previous = appState.directoryHistory.goBack(current: current) else { return }
         restoreBrowsingState(previous)
     }
 
     func goForward() {
-        let current = appState.directoryHistory.entry(from: appState.fileData, config: appState.config)
+        let current = appState.directoryHistory.entry(
+            from: appState.fileData,
+            config: appState.config,
+            selection: appState.selection
+        )
         guard let next = appState.directoryHistory.goForward(current: current) else { return }
         restoreBrowsingState(next)
     }
@@ -2284,6 +2299,7 @@ final class DirectoryLoadCoordinator {
         }
         appState.directoryHistory.applyEntry(entry, to: appState.fileData)
         appState.fileData.setViewMode(entry.viewMode)
+        SelectionService.restoreSelections(appState: appState, selectedFiles: entry.selectedFiles)
     }
 }
 

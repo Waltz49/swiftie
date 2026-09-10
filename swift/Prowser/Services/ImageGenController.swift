@@ -37,6 +37,8 @@ final class ImageGenController {
     private var copyBatchActive = false
     private var activeDisplayIndex = 0
     private var activeThumbnailPaths: [String] = []
+    /// Last card-input thumbnails from ``buildQueueStatusView`` (matches Python ``_active_job_card_thumbnail_paths``).
+    private var activeJobCardThumbnailPathsCache: [String] = []
     private var activePluginID = ""
     private var activeFunction = "create"
     private var pendingValues: [String: Any] = [:]
@@ -649,7 +651,9 @@ final class ImageGenController {
         copiesTotal = job.copiesTotal
         copiesDone = 0
         copyBatchActive = job.copiesTotal > 1
-        activeThumbnailPaths = job.thumbnailPaths
+        let cardPaths = cardThumbnailPaths(job.thumbnailPaths)
+        activeThumbnailPaths = cardPaths
+        activeJobCardThumbnailPathsCache = cardPaths
         activeStatusView = job.statusView
         activeDisplayIndex = index
         stepPendingDoc = JobStepQueue.buildPendingJobDoc(
@@ -873,6 +877,7 @@ final class ImageGenController {
         progressivePreviewPath = nil
         activeOutputPath = nil
         activeThumbnailPaths = []
+        activeJobCardThumbnailPathsCache = []
         stepRunning = nil
         stepPendingDoc = nil
         copyBatchActive = false
@@ -1087,7 +1092,10 @@ final class ImageGenController {
 
     /// Port of ``ImageGenController._active_job_card_thumbnail_paths``.
     private func activeJobCardThumbnailPaths() -> [String] {
-        cardThumbnailPaths(activeThumbnailPaths)
+        if !activeJobCardThumbnailPathsCache.isEmpty {
+            return activeJobCardThumbnailPathsCache
+        }
+        return cardThumbnailPaths(activeThumbnailPaths)
     }
 
     private func cardThumbnailPaths(_ paths: [String]) -> [String] {
@@ -1195,7 +1203,9 @@ final class ImageGenController {
                 estimateSeconds: liveEstimateSeconds
             )
             activeStatusView = built.statusView
-            activeThumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
+            let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
+            activeThumbnailPaths = cardPaths
+            activeJobCardThumbnailPathsCache = cardPaths
         } catch {
             activeStatusView = QueueJobStatusView.degradedFallback(
                 prompt: pendingValues["prompt"] as? String ?? "",
@@ -1595,6 +1605,7 @@ final class ImageGenController {
         progressivePreviewPath = nil
         activeOutputPath = nil
         activeThumbnailPaths = []
+        activeJobCardThumbnailPathsCache = []
         stepRunning = nil
         stepPendingDoc = nil
         jobAIStageActive = false

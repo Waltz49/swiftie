@@ -865,8 +865,12 @@ final class KeyboardHandlerController {
             appState.fileData.setViewMode(.thumbnail)
             return true
         }
+        if appState.fileData.currentViewMode == .thumbnail, appState.specificFilesActive {
+            appState.goBack()
+            return true
+        }
         if appState.selection.multiSelectMode {
-            appState.selection.clear()
+            SelectionService.clearSelection(appState: appState)
             return true
         }
         appState.goBack()
@@ -887,13 +891,31 @@ final class KeyboardHandlerController {
         }
 
         if appState.selection.multiSelectMode {
-            appState.selection.clear()
+            SelectionService.clearSelection(appState: appState)
         }
         appState.selection.rangeAnchorIndex = nil
 
         switch appState.fileData.currentViewMode {
         case .thumbnail:
-            appState.eventBus.emit(.thumbnailNavigate, payload: .thumbnailDirection(direction))
+            if direction == .up || direction == .down {
+                let currentIndex = resolvedCurrentIndex(appState: appState, images: images)
+                let stepSign = direction == .up ? -1 : 1
+                let nextIndex = computeVerticalTargetIndex(
+                    appState: appState,
+                    currentIndex: currentIndex,
+                    stepSign: stepSign,
+                    count: images.count
+                )
+                appState.fileData.setCurrentIndex(nextIndex)
+                appState.fileData.setCurrentImagePath(images[nextIndex])
+            } else {
+                let wrap = appState.config.bool(forKey: "wrap_around", default: true)
+                let currentIndex = resolvedCurrentIndex(appState: appState, images: images)
+                let delta = direction == .left ? -1 : 1
+                let nextIndex = nextIndex(currentIndex, delta: delta, count: images.count, wrap: wrap)
+                appState.fileData.setCurrentIndex(nextIndex)
+                appState.fileData.setCurrentImagePath(images[nextIndex])
+            }
         case .list:
             navigateList(appState: appState, direction: direction, images: images)
         default:
@@ -907,28 +929,70 @@ final class KeyboardHandlerController {
         direction: ThumbnailNavigateDirection,
         images: [String]
     ) {
+        let currentIndex = resolvedCurrentIndex(appState: appState, images: images)
         if appState.selection.rangeAnchorIndex == nil {
-            appState.selection.rangeAnchorIndex = appState.fileData.currentIndex
+            appState.selection.rangeAnchorIndex = currentIndex
         }
 
-        if appState.fileData.currentViewMode == .thumbnail,
-           direction == .up || direction == .down {
-            appState.eventBus.emit(.thumbnailNavigate, payload: .thumbnailDirection(direction))
-            applyRangeSelection(appState: appState, images: images, index: appState.fileData.currentIndex)
-            return
+        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
+        let listMode = appState.fileData.currentViewMode == .list
+
+        let targetIndex: Int
+        if listMode {
+            let delta = (direction == .left || direction == .up) ? -1 : 1
+            targetIndex = nextIndex(currentIndex, delta: delta, count: images.count, wrap: wrap)
+        } else if direction == .up || direction == .down {
+            let stepSign = direction == .up ? -1 : 1
+            targetIndex = computeVerticalTargetIndex(
+                appState: appState,
+                currentIndex: currentIndex,
+                stepSign: stepSign,
+                count: images.count
+            )
+        } else {
+            targetIndex = nextIndexForDirection(
+                currentIndex,
+                direction: direction,
+                count: images.count,
+                wrap: wrap,
+                listMode: false
+            )
         }
 
-        let nextIndex = nextIndexForDirection(
-            appState.fileData.currentIndex,
-            direction: direction,
-            count: images.count,
-            wrap: appState.config.bool(forKey: "wrap_around", default: true),
-            listMode: appState.fileData.currentViewMode == .list
-        )
+        appState.fileData.setCurrentIndex(targetIndex)
+        appState.fileData.setCurrentImagePath(images[targetIndex])
+        applyRangeSelection(appState: appState, images: images, index: targetIndex)
+    }
 
-        appState.fileData.setCurrentIndex(nextIndex)
-        appState.fileData.setCurrentImagePath(images[nextIndex])
-        applyRangeSelection(appState: appState, images: images, index: nextIndex)
+    private func resolvedCurrentIndex(appState: AppState, images: [String]) -> Int {
+        if let path = appState.fileData.currentImagePath,
+           let index = images.firstIndex(of: path) {
+            return index
+        }
+        return appState.fileData.currentIndex
+    }
+
+    /// Column-aware vertical step for Shift+Up/Down. Port of Python `_compute_shift_vertical_target`.
+    private func computeVerticalTargetIndex(
+        appState: AppState,
+        currentIndex: Int,
+        stepSign: Int,
+        count: Int
+    ) -> Int {
+        guard count > 0 else { return 0 }
+        let columns = resolvedThumbnailColumns(appState: appState, count: count)
+        let row = currentIndex / columns
+        let col = currentIndex % columns
+        let targetRow = row + stepSign
+        if targetRow < 0 || targetRow > (count - 1) / columns {
+            return currentIndex
+        }
+        var targetIndex = targetRow * columns + col
+        let lastIndex = count - 1
+        if targetIndex > lastIndex {
+            targetIndex = lastIndex
+        }
+        return targetIndex
     }
 
     private func navigateList(appState: AppState, direction: ThumbnailNavigateDirection, images: [String]) {
@@ -986,7 +1050,7 @@ final class KeyboardHandlerController {
     private func jumpToFirst(appState: AppState) {
         let images = appState.fileData.displayedImages
         guard let first = images.first else { return }
-        if appState.selection.multiSelectMode { appState.selection.clear() }
+        if appState.selection.multiSelectMode { SelectionService.clearSelection(appState: appState) }
         appState.selection.rangeAnchorIndex = nil
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(first)
@@ -995,7 +1059,7 @@ final class KeyboardHandlerController {
     private func jumpToLast(appState: AppState) {
         let images = appState.fileData.displayedImages
         guard let last = images.last else { return }
-        if appState.selection.multiSelectMode { appState.selection.clear() }
+        if appState.selection.multiSelectMode { SelectionService.clearSelection(appState: appState) }
         appState.selection.rangeAnchorIndex = nil
         appState.fileData.setCurrentIndex(images.count - 1)
         appState.fileData.setCurrentImagePath(last)
@@ -1025,17 +1089,17 @@ final class KeyboardHandlerController {
     }
 
     private func applyRangeSelection(appState: AppState, images: [String], index: Int) {
-        let anchor = appState.selection.rangeAnchorIndex ?? index
-        let low = min(anchor, index)
-        let high = max(anchor, index)
-        appState.selection.selectedFiles = Set(images[low...high])
-        appState.selection.emitSelectionChanged(highlightIndex: index)
+        SelectionService.handleRangeSelection(
+            appState: appState,
+            currentIndex: index,
+            anchor: appState.selection.rangeAnchorIndex
+        )
     }
 
     private func openBrowse(appState: AppState) -> Bool {
         guard appState.fileData.currentImagePath != nil else { return false }
         resetBrowseDoubleTap()
-        appState.fileData.setViewMode(.browse)
+        SelectionService.openBrowseForCurrentSelection(appState: appState)
         return true
     }
 
@@ -1061,7 +1125,7 @@ final class KeyboardHandlerController {
         guard !images.isEmpty else { return false }
 
         if appState.selection.multiSelectMode {
-            appState.selection.clear()
+            SelectionService.clearSelection(appState: appState)
         }
         appState.selection.rangeAnchorIndex = nil
 
@@ -1231,11 +1295,22 @@ final class KeyboardHandlerController {
         if axis == "h" || listMode {
             return nextIndex(currentIndex, delta: stepSign, count: count, wrap: wrap)
         }
-        let columns = thumbnailColumns(appState: appState, count: count)
-        return nextIndex(currentIndex, delta: stepSign * columns, count: count, wrap: wrap)
+        return computeVerticalTargetIndex(
+            appState: appState,
+            currentIndex: currentIndex,
+            stepSign: stepSign,
+            count: count
+        )
     }
 
-    private func thumbnailColumns(appState: AppState, count: Int) -> Int {
+    private func resolvedThumbnailColumns(appState: AppState, count: Int) -> Int {
+        if appState.thumbnailGridColumns > 0 {
+            return appState.thumbnailGridColumns
+        }
+        return estimatedThumbnailColumns(appState: appState, count: count)
+    }
+
+    private func estimatedThumbnailColumns(appState: AppState, count: Int) -> Int {
         let cellSize = appState.config.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
         let sidebar = appState.leftSidebarColumnVisible ? appState.leftSidebarWidth : 0
         let right = appState.rightSidebarColumnVisible ? appState.rightSidebarWidth : 0
@@ -1250,6 +1325,10 @@ final class KeyboardHandlerController {
             cellSize: CGFloat(cellSize)
         )
         return max(1, metrics.columns)
+    }
+
+    private func thumbnailColumns(appState: AppState, count: Int) -> Int {
+        resolvedThumbnailColumns(appState: appState, count: count)
     }
 
     private func setCurrentIndex(appState: AppState, images: [String], index: Int) {

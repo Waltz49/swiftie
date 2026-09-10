@@ -27,7 +27,8 @@ enum JobsQueueSizeMode: String, CaseIterable {
             jobCount: jobCount,
             isProcessing: isProcessing,
             showsActiveStrip: isProcessing || jobCount > 0,
-            hasMeasuredCards: false
+            hasMeasuredCards: false,
+            includesToolbar: false
         )
     }
 }
@@ -40,6 +41,8 @@ enum JobQueuePaneMetrics {
     static let emptyStateHeight: CGFloat = 18
     static let fallbackStripHeight: CGFloat = 36
     static let fallbackSingleCardHeight: CGFloat = 96
+    /// Matches ``JobPaneToolbar`` row height + bottom margin in ``jobs_toolbar.py``.
+    static let toolbarBlockHeight: CGFloat = 29
 
     static func contentHeight(
         mode: JobsQueueSizeMode,
@@ -48,9 +51,11 @@ enum JobQueuePaneMetrics {
         jobCount: Int,
         isProcessing: Bool,
         showsActiveStrip: Bool,
-        hasMeasuredCards: Bool
+        hasMeasuredCards: Bool,
+        includesToolbar: Bool = false
     ) -> CGFloat {
         let padding = panelPadding * 2
+        let toolbar = includesToolbar ? toolbarBlockHeight : 0
         let stripBlock = stripBlockHeight(
             showsActiveStrip: showsActiveStrip,
             activeStripHeight: activeStripHeight
@@ -59,25 +64,25 @@ enum JobQueuePaneMetrics {
         switch mode {
         case .strip:
             if showsActiveStrip {
-                return padding + stripBlock
+                return padding + toolbar + stripBlock
             }
             if jobCount > 0 {
-                return padding + max(stripBlock, 22)
+                return padding + toolbar + max(stripBlock, 22)
             }
-            return padding + emptyStateHeight
+            return padding + toolbar + emptyStateHeight
 
         case .one:
-            var total = padding + stripBlock
+            var total = padding + toolbar + stripBlock
             if jobCount == 0 {
-                return max(total + (isProcessing ? 22 : emptyStateHeight), padding + emptyStateHeight)
+                return max(total + (isProcessing ? 22 : emptyStateHeight), padding + toolbar + emptyStateHeight)
             }
             let cardH = hasMeasuredCards ? cardStackHeight : fallbackSingleCardHeight
             return total + cardH + bottomSlack
 
         case .all:
-            var total = padding + stripBlock
+            var total = padding + toolbar + stripBlock
             if jobCount == 0 {
-                return max(total + (isProcessing ? 56 : emptyStateHeight), padding + emptyStateHeight)
+                return max(total + (isProcessing ? 56 : emptyStateHeight), padding + toolbar + emptyStateHeight)
             }
             if jobCount <= 1 {
                 let cardH = hasMeasuredCards ? cardStackHeight : fallbackSingleCardHeight

@@ -48,6 +48,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var settingsObserver: UUID?
         private var thumbnailsInvalidatedObserver: UUID?
         private var fileOperationObserver: UUID?
+        private var selectionObserver: NSObjectProtocol?
         private var lastSyncedIndex = -1
 
         init(appState: AppState) {
@@ -116,6 +117,16 @@ struct ThumbnailGridView: NSViewRepresentable {
             if fileOperationObserver == nil {
                 fileOperationObserver = appState.eventBus.subscribe(.fileOperationComplete) { [weak self] _ in
                     Task { @MainActor in self?.restoreKeyboardFocusAfterFileOperation() }
+                }
+            }
+            if selectionObserver == nil {
+                selectionObserver = NotificationCenter.default.addObserver(
+                    forName: .prowserSelectionChanged,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    let coordinator = self
+                    Task { @MainActor in coordinator?.syncSelectionVisuals() }
                 }
             }
         }
@@ -192,6 +203,9 @@ struct ThumbnailGridView: NSViewRepresentable {
             if let displayedImagesObserver {
                 NotificationCenter.default.removeObserver(displayedImagesObserver)
             }
+            if let selectionObserver {
+                NotificationCenter.default.removeObserver(selectionObserver)
+            }
         }
 
         private func handleThumbnailsInvalidated(_ paths: [String]) {
@@ -218,6 +232,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.showImageSize = appState.config.bool(forKey: "show_image_size", default: false)
             gridView.overlayBoxColor = NSColor(appState.theme.colors.thumbnailFilenameOverlay)
             gridView.reloadLayout()
+            appState.thumbnailGridColumns = gridView.gridColumnCount
             if index != lastSyncedIndex {
                 gridView.selectIndex(index, scroll: inThumbnailMode, notifyDelegate: false)
                 lastSyncedIndex = index
@@ -227,9 +242,18 @@ struct ThumbnailGridView: NSViewRepresentable {
                     gridView.scrollToSelectionAfterLayout()
                 }
             }
+            syncSelectionVisuals(to: gridView)
             if inThumbnailMode {
                 gridView.claimKeyboardFocus()
             }
+        }
+
+        private func syncSelectionVisuals(to gridView: ThumbnailGridNSView? = nil) {
+            let gridView = gridView ?? self.gridView
+            guard let gridView else { return }
+            gridView.selectedIndices = SelectionService.selectedIndices(appState: appState)
+            gridView.multiSelectMode = appState.selection.multiSelectMode
+            gridView.needsDisplay = true
         }
 
         private func resolvedHighlightIndex(in paths: [String]) -> Int {
@@ -262,15 +286,32 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         func thumbnailGridDidSelect(index: Int, path: String) {
             lastSyncedIndex = index
-            appState.fileData.setCurrentIndex(index)
-            appState.fileData.setCurrentImagePath(path)
-            appState.selection.selectedFiles = [path]
-            appState.selection.emitSelectionChanged(highlightIndex: index)
+            if appState.selection.multiSelectMode {
+                SelectionService.clearSelection(appState: appState)
+            }
+            SelectionService.selectThumbnail(appState: appState, index: index, addToSelection: false)
+        }
+
+        func thumbnailGridDidClick(
+            index: Int,
+            path: String,
+            shiftPressed: Bool,
+            cmdPressed: Bool,
+            ctrlPressed: Bool
+        ) {
+            lastSyncedIndex = index
+            SelectionService.handleThumbnailClick(
+                appState: appState,
+                index: index,
+                cmdPressed: cmdPressed,
+                shiftPressed: shiftPressed,
+                ctrlPressed: ctrlPressed
+            )
         }
 
         func thumbnailGridDidOpenBrowse(index: Int, path: String) {
-            thumbnailGridDidSelect(index: index, path: path)
-            appState.fileData.setViewMode(.browse)
+            lastSyncedIndex = index
+            SelectionService.openBrowseForCurrentSelection(appState: appState)
         }
 
         func thumbnailGridDidReorder(path: String, insertionIndex: Int) {
@@ -296,6 +337,10 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView) {
             ThumbnailContextMenu.show(for: event, clickedIndex: clickedIndex, in: view, appState: appState)
+        }
+
+        func thumbnailGridDidUpdateLayout(columns: Int) {
+            appState.thumbnailGridColumns = max(1, columns)
         }
 
         func thumbnailGridDidApplyFilter(label: String) {

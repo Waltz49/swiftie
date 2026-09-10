@@ -91,6 +91,7 @@ struct ImageGenPanelShell: View {
                             widthSpec: width,
                             heightSpec: height,
                             sourcePath: effectiveSourcePath,
+                            usesOptionalCustomSize: function == "edit",
                             onValuesChanged: onValuesChanged
                         )
                     }
@@ -207,6 +208,7 @@ struct ImageGenPanelShell: View {
     private func syncSources() {
         localSourcePath = sourcePath
         localSourcePaths = sourcePaths
+        guard function == "edit" || function == "expand" || function == "infill" else { return }
         if !effectiveSourcePaths.isEmpty {
             values["source_image_paths"] = effectiveSourcePaths
             values["source_image_path"] = effectiveSourcePaths[0]

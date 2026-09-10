@@ -391,12 +391,16 @@ final class FileOperationsService {
     func selectAllDisplayed() {
         guard let appState else { return }
         let images = appState.fileData.displayedImages
+        guard !images.isEmpty else { return }
         appState.selection.selectedFiles = Set(images)
-        appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
+        appState.fileData.setCurrentIndex(0)
+        appState.fileData.setCurrentImagePath(images[0])
+        appState.selection.emitSelectionChanged(highlightIndex: 0)
     }
 
     func deselectAll() {
-        appState?.selection.clear()
+        guard let appState else { return }
+        SelectionService.clearSelection(appState: appState)
     }
 
     func openFavoriteDirectory(slot: Int) {

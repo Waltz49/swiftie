@@ -74,6 +74,7 @@ final class StripProgressBarNSView: NSView {
         }
 
         ctx.setStrokeColor(NSColor(colors.progressBarBorder).cgColor)
-        ctx.stroke(CGRect(x: 0, y: 0, width: barW - 1, height: barH - 1))
+        ctx.setLineWidth(1)
+        ctx.stroke(CGRect(x: 0.5, y: 0.5, width: max(0, barW - 1), height: max(0, barH - 1)))
     }
 }
