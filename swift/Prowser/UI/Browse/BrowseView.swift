@@ -1,0 +1,64 @@
+import AppKit
+import SwiftUI
+
+struct BrowseView: NSViewRepresentable {
+    @Environment(AppState.self) private var appState
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(appState: appState)
+    }
+
+    func makeNSView(context: Context) -> BrowseImageNSView {
+        let view = BrowseImageNSView(frame: .zero)
+        view.onActualSizeModeChanged = { [weak appState] enabled in
+            guard let appState else { return }
+            if appState.browseActualSizeEnabled != enabled {
+                appState.config.updateSetting("browse_view_actual_size", value: enabled)
+            }
+        }
+        context.coordinator.view = view
+        context.coordinator.startObserving()
+        return view
+    }
+
+    func updateNSView(_ nsView: BrowseImageNSView, context: Context) {
+        nsView.setImage(
+            path: appState.fileData.currentImagePath,
+            actualSize: appState.browseActualSizeEnabled
+        )
+        nsView.numberOverlayVisible = appState.numberOverlayVisible
+        nsView.overlayIndex = appState.fileData.currentIndex
+        nsView.overlayCount = appState.fileData.displayedImages.count
+        if appState.numberOverlayVisible {
+            nsView.needsDisplay = true
+        }
+    }
+
+    @MainActor
+    final class Coordinator {
+        let appState: AppState
+        weak var view: BrowseImageNSView?
+        private var keyboardObserver: UUID?
+
+        init(appState: AppState) {
+            self.appState = appState
+        }
+
+        func startObserving() {
+            guard keyboardObserver == nil else { return }
+            keyboardObserver = appState.eventBus.subscribe(.browseKeyboard) { [weak self] event in
+                guard let self, case .browseAction(let action) = event.payload else { return }
+                switch action {
+                case .zoomIn: self.view?.zoomIn()
+                case .zoomOut: self.view?.zoomOut()
+                case .setActualSize(let enabled): self.view?.setActualSizeMode(enabled)
+                case .rotateClockwise: self.view?.rotateClockwise()
+                case .rotateCounterclockwise: self.view?.rotateCounterclockwise()
+                case .flipHorizontal: self.view?.flipHorizontal()
+                case .flipVertical: self.view?.flipVertical()
+                case .resetTransforms: self.view?.resetTransforms()
+                }
+            }
+        }
+    }
+}

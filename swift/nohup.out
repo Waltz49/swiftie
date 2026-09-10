@@ -1,0 +1,186 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/28] Compiling Prowser ExcludesSettingsTab.swift
+[4/28] Compiling Prowser ExtensionsSettingsTab.swift
+[5/28] Compiling Prowser FavoritesSettingsTab.swift
+[6/28] Compiling Prowser ModelTasksBridge.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:97:9: error: cannot find 'FD_ZERO' in scope
+        FD_ZERO(&readFDs)
+        ^~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_zero.h:29:9: note: macro 'FD_ZERO' unavailable: function like macros not supported
+#define FD_ZERO(p)      __DARWIN_FD_ZERO(p)
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:98:9: error: cannot find 'FD_SET' in scope
+        FD_SET(serverFD, &readFDs)
+        ^~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_set.h:29:9: note: macro 'FD_SET' unavailable: function like macros not supported
+#define FD_SET(n, p)    __DARWIN_FD_SET(n, p)
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:101:26: error: cannot find 'FD_ISSET' in scope
+        guard ready > 0, FD_ISSET(serverFD, &readFDs) != 0 else { return }
+                         ^~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_isset.h:29:9: note: macro 'FD_ISSET' unavailable: function like macros not supported
+#define FD_ISSET(n, p)  __DARWIN_FD_ISSET(n, p)
+        ^
+[7/28] Compiling Prowser PythonLocator.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:97:9: error: cannot find 'FD_ZERO' in scope
+        FD_ZERO(&readFDs)
+        ^~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_zero.h:29:9: note: macro 'FD_ZERO' unavailable: function like macros not supported
+#define FD_ZERO(p)      __DARWIN_FD_ZERO(p)
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:98:9: error: cannot find 'FD_SET' in scope
+        FD_SET(serverFD, &readFDs)
+        ^~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_set.h:29:9: note: macro 'FD_SET' unavailable: function like macros not supported
+#define FD_SET(n, p)    __DARWIN_FD_SET(n, p)
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:101:26: error: cannot find 'FD_ISSET' in scope
+        guard ready > 0, FD_ISSET(serverFD, &readFDs) != 0 else { return }
+                         ^~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_isset.h:29:9: note: macro 'FD_ISSET' unavailable: function like macros not supported
+#define FD_ISSET(n, p)  __DARWIN_FD_ISSET(n, p)
+        ^
+[8/28] Compiling Prowser UnixSocket.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:97:9: error: cannot find 'FD_ZERO' in scope
+        FD_ZERO(&readFDs)
+        ^~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_zero.h:29:9: note: macro 'FD_ZERO' unavailable: function like macros not supported
+#define FD_ZERO(p)      __DARWIN_FD_ZERO(p)
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:98:9: error: cannot find 'FD_SET' in scope
+        FD_SET(serverFD, &readFDs)
+        ^~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_set.h:29:9: note: macro 'FD_SET' unavailable: function like macros not supported
+#define FD_SET(n, p)    __DARWIN_FD_SET(n, p)
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/UnixSocket.swift:101:26: error: cannot find 'FD_ISSET' in scope
+        guard ready > 0, FD_ISSET(serverFD, &readFDs) != 0 else { return }
+                         ^~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/sys/_types/_fd_isset.h:29:9: note: macro 'FD_ISSET' unavailable: function like macros not supported
+#define FD_ISSET(n, p)  __DARWIN_FD_ISSET(n, p)
+        ^
+[9/31] Compiling Prowser GeneralSettingsTab.swift
+[10/31] Compiling Prowser SettingsSupport.swift
+[11/31] Compiling Prowser SettingsWindowView.swift
+[12/31] Compiling Prowser AppConfig.swift
+[13/31] Compiling Prowser ThemeColors.swift
+[14/31] Compiling Prowser ThemeDefaults.swift
+[15/31] Compiling Prowser CacheSettingsTab.swift
+[16/31] Compiling Prowser DestinationsSettingsTab.swift
+[17/31] Compiling Prowser DirectoriesSettingsTab.swift
+[18/31] Compiling Prowser ProwserApp.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/CLIPBridge.swift:102:34: error: reference to captured var 'self' in concurrently-executing code
+            Task { @MainActor in self?.pollStatus() }
+                                 ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:17: error: cannot assign to value: 'pendingCommand' is a 'let' constant
+                pendingCommand = nil
+                ^~~~~~~~~~~~~~
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:34: error: 'nil' cannot be assigned to type '[String : Any]'
+                pendingCommand = nil
+                                 ^
+[19/31] Compiling Prowser CLIPBridge.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/CLIPBridge.swift:102:34: error: reference to captured var 'self' in concurrently-executing code
+            Task { @MainActor in self?.pollStatus() }
+                                 ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:17: error: cannot assign to value: 'pendingCommand' is a 'let' constant
+                pendingCommand = nil
+                ^~~~~~~~~~~~~~
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:34: error: 'nil' cannot be assigned to type '[String : Any]'
+                pendingCommand = nil
+                                 ^
+[20/31] Compiling Prowser ChatBridge.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/CLIPBridge.swift:102:34: error: reference to captured var 'self' in concurrently-executing code
+            Task { @MainActor in self?.pollStatus() }
+                                 ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:17: error: cannot assign to value: 'pendingCommand' is a 'let' constant
+                pendingCommand = nil
+                ^~~~~~~~~~~~~~
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:34: error: 'nil' cannot be assigned to type '[String : Any]'
+                pendingCommand = nil
+                                 ^
+[21/31] Compiling Prowser JSONLineProcessBridge.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/CLIPBridge.swift:102:34: error: reference to captured var 'self' in concurrently-executing code
+            Task { @MainActor in self?.pollStatus() }
+                                 ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:17: error: cannot assign to value: 'pendingCommand' is a 'let' constant
+                pendingCommand = nil
+                ^~~~~~~~~~~~~~
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Bridges/ChatBridge.swift:83:34: error: 'nil' cannot be assigned to type '[String : Any]'
+                pendingCommand = nil
+                                 ^
+[22/31] Compiling Prowser ThemeService.swift
+[23/31] Compiling Prowser MainWindowView.swift
+[24/31] Compiling Prowser ProwserCommands.swift
+[25/31] Emitting module Prowser
+[26/31] Compiling Prowser SlideshowSettingsTab.swift
+[27/31] Compiling Prowser ThemeSettingsTab.swift
+[28/31] Compiling Prowser FileTreeView.swift
+error: fatalError
+[0/1] Planning build
+Building for debugging...
+[0/4] Write sources
+[1/4] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Compiling Prowser UnixSocket.swift
+[4/6] Emitting module Prowser
+[4/7] Write Objects.LinkFileList
+[5/7] Linking Prowser
+[6/7] Applying Prowser
+Build complete! (2.40s)
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.08s)
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.16s)
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.16s)
+[keyboard] debug tracer installed
+[keyboard] claimKeyboardFocus skipped (no window)
+[keyboard] claimKeyboardFocus skipped (no window)
+[keyboard] claimKeyboardFocus skipped (no window)
+[keyboard] claimKeyboardFocus firstResponder=ThumbnailGridNSView isGrid=true keyWindow=false
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/9] Compiling Prowser JobStepPersistence.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/JobStepPersistence.swift:8:16: error: main actor-isolated property 'prowserHome' can not be referenced from a non-isolated context
+        config.prowserHome
+               ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Core/Config/AppConfig.swift:16:9: note: property declared here
+    var prowserHome: URL { paths.prowserHome }
+        ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/JobStepPersistence.swift:7:17: note: add '@MainActor' to make static method 'prowserHome(config:)' part of global actor 'MainActor'
+    static func prowserHome(config: AppConfig) -> URL {
+                ^
+    @MainActor 
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/JobStepPersistence.swift:71:9: warning: result of 'try?' is unused
+        try? FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[4/9] Compiling Prowser ImageGenController.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/ImageGenController.swift:9:31: error: 'ExifService' cannot be constructed because it has no accessible initializers
+    private let exifService = ExifService()
+                              ^~~~~~~~~~~
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[5/9] Emitting module Prowser
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/ImageGenController.swift:9:31: error: 'ExifService' cannot be constructed because it has no accessible initializers
+    private let exifService = ExifService()
+                              ^~~~~~~~~~~
+[6/9] Compiling Prowser ImageGenPathNaming.swift
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/ImageGenPathNaming.swift:11:31: error: call to main actor-isolated instance method 'rawSettings()' in a synchronous nonisolated context
+        if let entry = config.rawSettings()["image_creation_directory"] as? [String: Any],
+                              ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Core/Config/AppConfig.swift:82:10: note: calls to instance method 'rawSettings()' from outside of its actor context are implicitly asynchronous
+    func rawSettings() -> [String: Any] { settings }
+         ^
+/Users/douglasnadel/dev/swiftie/swift/Prowser/Services/ImageGenPathNaming.swift:10:17: note: add '@MainActor' to make static method 'imageCreationDirectory(config:)' part of global actor 'MainActor'
+    static func imageCreationDirectory(config: AppConfig) -> String {
+                ^
+    @MainActor 
+error: fatalError

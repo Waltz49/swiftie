@@ -493,6 +493,7 @@ class ImageBrowserConfig:
             'cnn_recursive': False,  # Whether to search recursively in subdirectories for CNN similarity search
             'clip_model_name': 'openai/clip-vit-base-patch32',  # CLIP model to use for similarity search
             'resnet_model': 'resnet18',  # ResNet model to use for CNN similarity: 'resnet18', 'resnet50', 'resnet101'
+            'cnn_feature_batch_size': 32,  # Images per ResNet forward pass during similarity search
             'background_clip_enabled': False,  # Enable background CLIP extraction for Favorites and Recently Used directories
             'background_clip_gather_thumbnails': True,  # When background CLIP is enabled, also gather thumbnails for uncached images
             'background_clip_extract_faces': False,  # When background CLIP is enabled, also extract and cache face encodings

@@ -1,0 +1,414 @@
+import Foundation
+import ImageIO
+/// EXIF read/write via ImageIO. Port of `exif/exif_utils.py` (phase 1).
+enum ExifService {
+    private static let exifDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        return f
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .medium
+        return f
+    }()
+
+    static let supportedWriteExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "tiff", "tif", "webp",
+    ]
+
+    private static let exifDateTimeKey = "DateTime" as CFString
+
+    static func canWriteExif(path: String) -> Bool {
+        supportedWriteExtensions.contains((path as NSString).pathExtension.lowercased())
+    }
+
+    // MARK: - Read
+
+    static func loadRecord(for path: String) -> ExifRecord {
+        let url = URL(fileURLWithPath: path)
+        let fileName = url.lastPathComponent
+        let directory = url.deletingLastPathComponent().path
+        var record = ExifRecord.empty
+        record.filePath = path
+        record.fileName = fileName
+        record.directory = directory
+
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: path) {
+            if let size = attrs[.size] as? NSNumber {
+                record.fileSize = ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)
+            }
+            if let mtime = attrs[.modificationDate] as? Date {
+                record.fileDate = displayDateFormatter.string(from: mtime)
+            }
+        }
+
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return record }
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return record
+        }
+
+        if let width = props[kCGImagePropertyPixelWidth] as? Int,
+           let height = props[kCGImagePropertyPixelHeight] as? Int {
+            record.imageSize = "\(width) × \(height)"
+        }
+
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+
+        if let dateString = (exif[kCGImagePropertyExifDateTimeOriginal] as? String)
+            ?? (exif[kCGImagePropertyExifDateTimeDigitized] as? String)
+            ?? (exif[exifDateTimeKey] as? String)
+            ?? (tiff[kCGImagePropertyTIFFDateTime] as? String),
+           let date = exifDateFormatter.date(from: dateString) {
+            record.exifDate = displayDateFormatter.string(from: date)
+        }
+
+        let make = (tiff[kCGImagePropertyTIFFMake] as? String)?.trimmingCharacters(in: .whitespaces)
+        let model = (tiff[kCGImagePropertyTIFFModel] as? String)?.trimmingCharacters(in: .whitespaces)
+        let camera = [make, model].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        if !camera.isEmpty { record.camera = camera }
+
+        if let orientation = exif[kCGImagePropertyOrientation] as? Int {
+            record.orientation = orientationLabel(orientation)
+        }
+
+        let lensModel = exif[kCGImagePropertyExifLensModel] as? String
+        if let lensModel, !lensModel.isEmpty { record.lens = lensModel }
+
+        record.description = userDescription(exif: exif, tiff: tiff)
+
+        if let exposure = exif[kCGImagePropertyExifExposureTime] as? Double {
+            record.exposure = exposure < 1 ? "1/\(Int(round(1 / exposure)))s" : "\(exposure)s"
+        } else if let exposure = exif[kCGImagePropertyExifExposureTime] as? NSNumber {
+            let value = exposure.doubleValue
+            record.exposure = value < 1 ? "1/\(Int(round(1 / value)))s" : "\(value)s"
+        }
+
+        if let fNumber = exif[kCGImagePropertyExifFNumber] as? Double {
+            record.aperture = "f/\(String(format: "%.1f", fNumber))"
+        } else if let fNumber = exif[kCGImagePropertyExifFNumber] as? NSNumber {
+            record.aperture = "f/\(String(format: "%.1f", fNumber.doubleValue))"
+        }
+
+        if let iso = exif[kCGImagePropertyExifISOSpeedRatings] as? Int {
+            record.iso = "\(iso)"
+        } else if let isoArray = exif[kCGImagePropertyExifISOSpeedRatings] as? [Int], let first = isoArray.first {
+            record.iso = "\(first)"
+        }
+
+        if let focal = exif[kCGImagePropertyExifFocalLength] as? Double {
+            record.focalLength = "\(String(format: "%.1f", focal)) mm"
+        } else if let focal = exif[kCGImagePropertyExifFocalLength] as? NSNumber {
+            record.focalLength = "\(String(format: "%.1f", focal.doubleValue)) mm"
+        }
+
+        record.software = tiff[kCGImagePropertyTIFFSoftware] as? String
+        record.artist = tiff[kCGImagePropertyTIFFArtist] as? String
+
+        if let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] {
+            record.location = formatGPS(gps)
+        }
+
+        return record
+    }
+
+    static func userComment(path: String) -> String? {
+        let record = loadRecord(for: path)
+        return record.description
+    }
+
+    static func exifTimestamp(path: String) -> Date? {
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return nil
+        }
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        let candidates = [
+            exif[kCGImagePropertyExifDateTimeOriginal] as? String,
+            exif[kCGImagePropertyExifDateTimeDigitized] as? String,
+            exif[exifDateTimeKey] as? String,
+            tiff[kCGImagePropertyTIFFDateTime] as? String,
+        ]
+        for candidate in candidates {
+            if let candidate, let date = exifDateFormatter.date(from: candidate) {
+                return date
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Write
+
+    static func writeUserComment(path: String, text: String) throws {
+        guard canWriteExif(path: path) else {
+            throw ExifError.unsupportedFormat
+        }
+        let url = URL(fileURLWithPath: path)
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        let mtime = attrs[.modificationDate] as? Date
+        let atime = attrs[.creationDate] as? Date
+
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let uti = CGImageSourceGetType(source),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ExifError.readFailed
+        }
+
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        exif[kCGImagePropertyExifUserComment] = text.isEmpty ? "" : encodeUserCommentData(text)
+        properties[kCGImagePropertyExifDictionary] = exif
+
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
+            throw ExifError.writeFailed
+        }
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw ExifError.writeFailed
+        }
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+        if let mtime {
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: path)
+        }
+        if let atime {
+            try FileManager.default.setAttributes([.creationDate: atime], ofItemAtPath: path)
+        }
+    }
+
+    static func deleteUserComment(path: String) throws {
+        try writeUserComment(path: path, text: "")
+    }
+
+    static func resetFileDateToExif(path: String) throws {
+        guard let date = exifTimestamp(path: path) else { throw ExifError.noExifDate }
+        try FileManager.default.setAttributes(
+            [.modificationDate: date, .creationDate: date],
+            ofItemAtPath: path
+        )
+    }
+
+    static func resetExifDateToFileDate(path: String) throws {
+        guard canWriteExif(path: path) else { throw ExifError.unsupportedFormat }
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        guard let mtime = attrs[.modificationDate] as? Date else { throw ExifError.noFileDate }
+        let formatted = exifDateFormatter.string(from: mtime)
+
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let uti = CGImageSourceGetType(source),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ExifError.readFailed
+        }
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        exif[kCGImagePropertyExifDateTimeOriginal] = formatted
+        exif[kCGImagePropertyExifDateTimeDigitized] = formatted
+        exif[exifDateTimeKey] = formatted
+        tiff[kCGImagePropertyTIFFDateTime] = formatted
+        properties[kCGImagePropertyExifDictionary] = exif
+        properties[kCGImagePropertyTIFFDictionary] = tiff
+
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
+            throw ExifError.writeFailed
+        }
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ExifError.writeFailed }
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: path)
+    }
+
+    // MARK: - Helpers
+
+    /// Port of `exif/exif_utils.py` `decode_usercomment`.
+    static func decodeUserComment(_ data: Data) -> String {
+        if data.isEmpty { return "" }
+
+        let textBytes: Data
+        if data.count >= 8 {
+            let prefix = data.prefix(8)
+            if prefix == Data("ASCII\0\0\0".utf8) {
+                let payload = data.dropFirst(8)
+                if let ascii = String(data: payload, encoding: .ascii) {
+                    return trimNulls(ascii)
+                }
+                if let utf8 = String(data: payload, encoding: .utf8) {
+                    return trimNulls(utf8)
+                }
+                return trimNulls(String(data: payload, encoding: .isoLatin1) ?? "")
+            }
+            if prefix == Data("UNICODE\0".utf8) {
+                if let decoded = String(data: data.dropFirst(8), encoding: .utf16LittleEndian) {
+                    return trimNulls(decoded)
+                }
+                return ""
+            }
+            if prefix == Data("JIS\0\0\0\0\0".utf8) {
+                if let decoded = String(data: data.dropFirst(8), encoding: .iso2022JP) {
+                    return trimNulls(decoded)
+                }
+            }
+            if prefix == Data([0, 0, 0, 0, 0, 0, 0, 0]) {
+                textBytes = data.dropFirst(8)
+            } else {
+                textBytes = data
+            }
+        } else {
+            textBytes = data
+        }
+
+        if let utf8 = String(data: textBytes, encoding: .utf8) {
+            return trimNulls(utf8)
+        }
+        return trimNulls(String(data: textBytes, encoding: .isoLatin1) ?? "")
+    }
+
+    /// ImageIO returns UNICODE UserComment as UTF-16BE code units (e.g. U+4900 for 'I').
+    static func repairImageIOMisdecodedUTF16UserComment(_ text: String) -> String {
+        var bytes = Data()
+        bytes.reserveCapacity(text.unicodeScalars.count * 2)
+        for scalar in text.unicodeScalars {
+            let value = scalar.value
+            if value <= 0xFF {
+                bytes.append(UInt8(value))
+                bytes.append(0)
+            } else {
+                bytes.append(UInt8((value >> 8) & 0xFF))
+                bytes.append(UInt8(value & 0xFF))
+            }
+        }
+        if let repaired = String(data: bytes, encoding: .utf16LittleEndian) {
+            return trimNulls(repaired)
+        }
+        return text
+    }
+
+    static func looksLikeImageIOMisdecodedUTF16UserComment(_ text: String) -> Bool {
+        let scalars = text.unicodeScalars.map(\.value)
+        guard scalars.count >= 4 else { return false }
+        let misdecodedASCII = scalars.filter { value in
+            value >= 0x100 && (value & 0xFF) == 0 && (value >> 8) < 0x80
+        }
+        return misdecodedASCII.count >= max(4, scalars.count * 2 / 3)
+    }
+
+    static func decodeUserCommentValue(_ raw: Any) -> String? {
+        if let data = raw as? Data {
+            let decoded = trimNulls(decodeUserComment(data))
+            return decoded.isEmpty ? nil : decoded
+        }
+        if let string = raw as? String {
+            var decoded = trimNulls(string)
+            if decoded.isEmpty { return nil }
+            if looksLikeImageIOMisdecodedUTF16UserComment(decoded) {
+                decoded = repairImageIOMisdecodedUTF16UserComment(decoded)
+            }
+            decoded = trimNulls(decoded)
+            if decoded.hasPrefix("b'") || decoded.hasPrefix("b\"") { return nil }
+            return decoded.isEmpty ? nil : decoded
+        }
+        return nil
+    }
+
+    static func decodeDescriptionValue(_ raw: Any) -> String? {
+        if let data = raw as? Data {
+            let decoded = trimNulls(String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? "")
+            return decoded.isEmpty ? nil : decoded
+        }
+        if let string = raw as? String {
+            let decoded = trimNulls(string)
+            if decoded.isEmpty || decoded.hasPrefix("b'") || decoded.hasPrefix("b\"") { return nil }
+            return decoded
+        }
+        return nil
+    }
+
+    private static func trimNulls(_ text: String) -> String {
+        text.trimmingCharacters(in: CharacterSet(charactersIn: "\0"))
+    }
+
+    static func encodeUserCommentData(_ text: String) -> Data {
+        if text.canBeConverted(to: .ascii) {
+            return Data("ASCII\0\0\0".utf8) + text.data(using: .ascii)!
+        }
+        return Data("UNICODE\0".utf8) + text.data(using: .utf16LittleEndian)!
+    }
+
+    private static func userDescription(exif: [CFString: Any], tiff: [CFString: Any]) -> String? {
+        // Match Python `get_user_description_from_exif_dict` / information sidebar order.
+        if let raw = tiff[kCGImagePropertyTIFFImageDescription],
+           let desc = decodeDescriptionValue(raw) {
+            return desc
+        }
+        if let raw = exif[kCGImagePropertyExifUserComment],
+           let desc = decodeUserCommentValue(raw) {
+            return desc
+        }
+        let xpCommentKey = "{XPComment}" as CFString
+        let xpSubjectKey = "{XPSubject}" as CFString
+        if let raw = exif[xpCommentKey], let desc = decodeDescriptionValue(raw) {
+            return desc
+        }
+        if let raw = exif[xpSubjectKey], let desc = decodeDescriptionValue(raw) {
+            return desc
+        }
+        return nil
+    }
+
+    private static func orientationLabel(_ value: Int) -> String {
+        switch value {
+        case 1: return "Normal"
+        case 2: return "Mirrored"
+        case 3: return "Rotated 180°"
+        case 4: return "Rotated 180°, Mirrored"
+        case 5: return "Rotated 90° CCW, Mirrored"
+        case 6: return "Rotated 90° CW"
+        case 7: return "Rotated 90° CW, Mirrored"
+        case 8: return "Rotated 90° CCW"
+        default: return "\(value)"
+        }
+    }
+
+    private static func formatGPS(_ gps: [CFString: Any]) -> String? {
+        guard let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+              let lon = gps[kCGImagePropertyGPSLongitude] as? Double else { return nil }
+        let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String ?? "N"
+        let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String ?? "E"
+        var latitude = lat
+        var longitude = lon
+        if latRef == "S" { latitude = -latitude }
+        if lonRef == "W" { longitude = -longitude }
+        return String(format: "%.5f, %.5f", latitude, longitude)
+    }
+
+    enum ExifError: LocalizedError {
+        case unsupportedFormat
+        case readFailed
+        case writeFailed
+        case noExifDate
+        case noFileDate
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedFormat: return "This file format does not support EXIF editing."
+            case .readFailed: return "Could not read image metadata."
+            case .writeFailed: return "Could not write image metadata."
+            case .noExifDate: return "No EXIF date found in this file."
+            case .noFileDate: return "Could not read file date."
+            }
+        }
+    }
+}

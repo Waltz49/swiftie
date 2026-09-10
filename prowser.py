@@ -60,6 +60,9 @@ import sys
 _WORKER_ARGV_FLAGS = frozenset({
     "--model-tasks-worker",
     "--imagegen-worker",
+    "--chat-worker",
+    "--face-worker",
+    "--whisper-worker",
     "--test-create-deps",
 })
 
@@ -263,9 +266,50 @@ def _frozen_subprocess_bootstrap() -> None:
 
             traceback.print_exc()
         raise SystemExit(0)
+    if len(sys.argv) >= 2 and sys.argv[1] == "--chat-worker":
+        _setup_frozen_worker_logging()
+        from workers.chat_worker import main as chat_worker_main
+
+        raise SystemExit(chat_worker_main())
+    if len(sys.argv) >= 2 and sys.argv[1] == "--face-worker":
+        _setup_frozen_worker_logging()
+        from workers.face_worker import main as face_worker_main
+
+        raise SystemExit(face_worker_main())
+    if len(sys.argv) >= 2 and sys.argv[1] == "--whisper-worker":
+        _setup_frozen_worker_logging()
+        from workers.whisper_worker import main as whisper_worker_main
+
+        raise SystemExit(whisper_worker_main())
+
+
+def _dev_worker_bootstrap() -> None:
+    """Handle worker flags when running ``python prowser.py --*-worker`` in dev."""
+    if getattr(sys, "frozen", False):
+        return
+    if len(sys.argv) < 2:
+        return
+    flag = sys.argv[1]
+    if flag == "--chat-worker":
+        from workers.chat_worker import main as chat_worker_main
+
+        raise SystemExit(chat_worker_main())
+    if flag == "--face-worker":
+        from workers.face_worker import main as face_worker_main
+
+        raise SystemExit(face_worker_main())
+    if flag == "--whisper-worker":
+        from workers.whisper_worker import main as whisper_worker_main
+
+        raise SystemExit(whisper_worker_main())
+    if flag == "--model-tasks-worker":
+        from workers.model_tasks_worker import main as model_tasks_main
+
+        raise SystemExit(model_tasks_main())
 
 
 _frozen_subprocess_bootstrap()
+_dev_worker_bootstrap()
 
 import threading
 import time

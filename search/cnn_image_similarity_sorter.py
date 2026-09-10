@@ -2739,6 +2739,165 @@ class CNNImageSimilaritySorter:
         
         return feat
 
+    def _feature_batch_size(self):
+        try:
+            from config import get_config
+            size = int(get_config().load_settings().get('cnn_feature_batch_size', 32))
+            return max(1, min(size, 128))
+        except Exception:
+            return 32
+
+    def _lookup_cached_feature(self, path):
+        """Return (feature, mtime, size, cache_hit). feature may be None when cached as unreadable."""
+        mtime, size = self._get_mtime_size(path)
+        if mtime is None or size is None:
+            return None, mtime, size, False
+
+        if path in self._feature_cache:
+            feat, cached_mtime, cached_size = self._feature_cache[path]
+            if cached_mtime == mtime and cached_size == size:
+                if feat is not None and feat.device.type != self.device:
+                    feat = feat.to(self.device)
+                return feat, mtime, size, True
+
+        if self.feature_cache:
+            cached_feat = self.feature_cache.get_cnn_feature(path, mtime, size, device=self.device)
+            if cached_feat is not None:
+                self._feature_cache[path] = (cached_feat, mtime, size)
+                return cached_feat, mtime, size, True
+
+        return None, mtime, size, False
+
+    def _store_feature_cache(self, path, feat, mtime, size):
+        self._feature_cache[path] = (feat, mtime, size)
+        if self.feature_cache and mtime is not None and size is not None:
+            self.feature_cache.set_cnn_feature(path, feat, mtime, size)
+
+    def _get_features_batch(
+        self,
+        paths,
+        progress_callback=None,
+        progress_tracker=None,
+        processed_count=0,
+        total_steps=1,
+        progress_dialog=None,
+    ):
+        """
+        Get CNN features for many paths. Cache hits are resolved individually;
+        cache misses are loaded and run through ResNet in batches.
+        Returns dict path -> feature tensor (or None).
+        """
+        self._ensure_model_loaded()
+        self._ensure_feature_cache_loaded()
+        torch, F, transforms, models, ResNet18_Weights, ResNet50_Weights, ResNet101_Weights = _import_torch_modules()
+
+        results = {}
+        uncached = []
+        uncached_meta = {}
+        batch_size = self._feature_batch_size()
+
+        for path in paths:
+            if progress_dialog is not None and progress_dialog.wasCanceled():
+                raise KeyboardInterrupt("User canceled similarity calculation")
+            feat, mtime, size, cache_hit = self._lookup_cached_feature(path)
+            if cache_hit:
+                results[path] = feat
+                continue
+            uncached.append(path)
+            uncached_meta[path] = (mtime, size)
+
+        for batch_start in range(0, len(uncached), batch_size):
+            if progress_dialog is not None and progress_dialog.wasCanceled():
+                raise KeyboardInterrupt("User canceled similarity calculation")
+
+            batch_paths = uncached[batch_start:batch_start + batch_size]
+            tensors = []
+            valid_paths = []
+            for path in batch_paths:
+                image_tensor = self._load_image(path)
+                mtime, size = uncached_meta[path]
+                if image_tensor is None:
+                    self._store_feature_cache(path, None, mtime, size)
+                    results[path] = None
+                    continue
+                tensors.append(image_tensor)
+                valid_paths.append(path)
+
+            if tensors:
+                batch_tensor = torch.stack(tensors).to(self.device)
+                with torch.no_grad():
+                    feats = self.feature_extractor(batch_tensor)
+                    feats = feats.view(feats.size(0), -1)
+                for idx, path in enumerate(valid_paths):
+                    feat = feats[idx]
+                    mtime, size = uncached_meta[path]
+                    self._store_feature_cache(path, feat, mtime, size)
+                    results[path] = feat
+
+            processed_count += len(batch_paths)
+
+            if progress_tracker is not None:
+                progress_tracker.update_feature_extraction(
+                    processed_count, total_steps, "Extracting and caching features..."
+                )
+            elif progress_callback is not None:
+                try:
+                    progress_callback(processed_count, total_steps, "examining_images")
+                except TypeError:
+                    progress_callback(
+                        float(processed_count) / float(total_steps) if total_steps else 1.0
+                    )
+
+        return results, processed_count
+
+    def _score_candidates_vectorized(self, aggregate_ref_feat, features, candidates, valid_ref_paths):
+        """Score and sort candidates using batched tensor ops (cosine/euclidean/manhattan)."""
+        torch, F, transforms, models, ResNet18_Weights, ResNet50_Weights, ResNet101_Weights = _import_torch_modules()
+        valid_ref_set = set(valid_ref_paths)
+
+        ordered_paths = []
+        feat_rows = []
+        for path in candidates:
+            feat = features.get(path)
+            if feat is None:
+                continue
+            if feat.device.type != self.device:
+                feat = feat.to(self.device)
+            ordered_paths.append(path)
+            feat_rows.append(feat)
+
+        if not ordered_paths:
+            return []
+
+        feat_matrix = torch.stack(feat_rows)
+        ref = aggregate_ref_feat
+        if ref.device.type != self.device:
+            ref = ref.to(self.device)
+
+        if self.similarity_metric == 'cosine':
+            ref_norm = F.normalize(ref.unsqueeze(0), dim=1)
+            feat_norm = F.normalize(feat_matrix, dim=1)
+            sims = (feat_norm @ ref_norm.T).squeeze(1)
+        elif self.similarity_metric == 'euclidean':
+            diff = feat_matrix - ref.unsqueeze(0)
+            distances = torch.norm(diff, p=2, dim=1)
+            feat_dim = ref.numel()
+            sims = -(distances / (feat_dim ** 0.5) if feat_dim > 0 else distances)
+        elif self.similarity_metric == 'manhattan':
+            diff = feat_matrix - ref.unsqueeze(0)
+            distances = torch.norm(diff, p=1, dim=1)
+            feat_dim = ref.numel()
+            sims = -(distances / feat_dim if feat_dim > 0 else distances)
+        else:
+            sims = F.cosine_similarity(feat_matrix, ref.unsqueeze(0).expand_as(feat_matrix), dim=1)
+
+        scored = []
+        for idx, path in enumerate(ordered_paths):
+            similarity = 1.0 if path in valid_ref_set else float(sims[idx].item())
+            scored.append((similarity, path))
+        scored.sort(reverse=True, key=lambda tup: tup[0])
+        return [p for _, p in scored]
+
     def _load_clip_model(self):
         """Lazy load CLIP model if available"""
         if self._clip_loaded:
@@ -3526,32 +3685,23 @@ class CNNImageSimilaritySorter:
         total_steps = len(images_to_process) if images_to_process else 1  # At least 1 to avoid division by zero
         processed_count = 0
 
-        # Step 1: Gather features for reference images and aggregate them
-        ref_features = []
-        for ref_path in valid_ref_paths:
-            # Check for cancellation before processing each image
-            if progress_dialog is not None and progress_dialog.wasCanceled():
-                raise KeyboardInterrupt("User canceled similarity calculation")
-            
-            # Check if this needs processing (not cached)
-            was_cached = self._is_feature_cached(ref_path)
-            ref_feat = self._get_feature(ref_path)
-            # Only update progress if we actually processed it
-            if not was_cached:
-                processed_count += 1
-                if progress_tracker is not None:
-                    progress_tracker.update_feature_extraction(processed_count, total_steps, "Extracting and caching features...")
-                elif progress_callback is not None:
-                    try:
-                        progress_callback(processed_count, total_steps, "examining_images")
-                    except TypeError:
-                        progress_callback(float(processed_count) / float(total_steps) if total_steps else 1.0)
-                # Check for cancellation after progress update
-                if progress_dialog is not None and progress_dialog.wasCanceled():
-                    raise KeyboardInterrupt("User canceled similarity calculation")
-            if ref_feat is not None:
-                ref_features.append(ref_feat)
-        
+        # Step 1: Gather features for reference + candidate images (batched ResNet inference)
+        paths_to_extract = []
+        seen_extract = set()
+        for path in list(valid_ref_paths) + list(candidates):
+            if path not in seen_extract:
+                seen_extract.add(path)
+                paths_to_extract.append(path)
+
+        features, processed_count = self._get_features_batch(
+            paths_to_extract,
+            progress_callback=progress_callback,
+            progress_tracker=progress_tracker,
+            processed_count=processed_count,
+            total_steps=total_steps,
+            progress_dialog=progress_dialog,
+        )
+
         # If all images were cached, update progress to show completion
         if not images_to_process:
             if progress_tracker is not None:
@@ -3561,8 +3711,16 @@ class CNNImageSimilaritySorter:
                     progress_callback(1, 1, "examining_images")
                 except TypeError:
                     progress_callback(1.0)
-        
-        if not ref_features:
+
+        ref_features_on_device = []
+        for ref_path in valid_ref_paths:
+            ref_feat = features.get(ref_path)
+            if ref_feat is not None:
+                if ref_feat.device.type != self.device:
+                    ref_feat = ref_feat.to(self.device)
+                ref_features_on_device.append(ref_feat)
+
+        if not ref_features_on_device:
             print("Could not extract features for any reference images.")
             if progress_callback is not None:
                 try:
@@ -3573,73 +3731,17 @@ class CNNImageSimilaritySorter:
 
         # Aggregate reference features by averaging
         torch, F, transforms, models, ResNet18_Weights, ResNet50_Weights, ResNet101_Weights = _import_torch_modules()
-        
-        # Ensure all reference features are on the same device
-        ref_features_on_device = []
-        for feat in ref_features:
-            if feat is not None:
-                if feat.device.type != self.device:
-                    feat = feat.to(self.device)
-                ref_features_on_device.append(feat)
-        
-        if len(ref_features_on_device) == 0:
-            print("Could not extract features for any reference images.")
-            if progress_callback is not None:
-                try:
-                    progress_callback(1.0)
-                except Exception:
-                    pass
-            return displayed_images
-        
+
         if len(ref_features_on_device) == 1:
             aggregate_ref_feat = ref_features_on_device[0]
         else:
-            # Stack features and compute mean
             ref_features_tensor = torch.stack(ref_features_on_device)
             aggregate_ref_feat = torch.mean(ref_features_tensor, dim=0)
 
-        # Gather features for all remaining candidates (excluding reference images already processed)
-        features = {}
-        # Store reference features in features dict (already on correct device from ref_features_on_device)
-        for i, ref_path in enumerate(valid_ref_paths):
-            if i < len(ref_features_on_device):
-                features[ref_path] = ref_features_on_device[i]
-        
         sorted_images = displayed_images[:]  # Default to original order if error occurs
         missing = []
         try:
-            for path in candidates:
-                if path in valid_ref_paths:
-                    continue  # Already processed above
-                
-                # Check for cancellation before processing each image
-                if progress_dialog is not None and progress_dialog.wasCanceled():
-                    raise KeyboardInterrupt("User canceled similarity calculation")
-                
-                # Check if this needs processing (not cached)
-                was_cached = self._is_feature_cached(path)
-                feat = self._get_feature(path)
-                # Only update progress if we actually processed it
-                if not was_cached:
-                    processed_count += 1
-                    if progress_tracker is not None:
-                        progress_tracker.update_feature_extraction(processed_count, total_steps, "Extracting and caching features...")
-                    elif progress_callback is not None:
-                        try:
-                            progress_callback(processed_count, total_steps, "examining_images")
-                        except TypeError:
-                            progress_callback(float(processed_count) / float(total_steps) if total_steps else 1.0)
-                    # Check for cancellation after progress update
-                    if progress_dialog is not None and progress_dialog.wasCanceled():
-                        raise KeyboardInterrupt("User canceled similarity calculation")
-                if feat is not None:
-                    # Ensure feature is on the correct device before storing
-                    if feat.device.type != self.device:
-                        feat = feat.to(self.device)
-                    features[path] = feat
-
-            # Step 2: Score and sort using the selected similarity metric
-            # Update to comparison stage immediately after feature extraction completes
+            # Step 2: Score and sort using batched tensor similarity
             if progress_tracker is not None:
                 progress_tracker.update_comparison()
             elif progress_callback is not None:
@@ -3647,84 +3749,13 @@ class CNNImageSimilaritySorter:
                     progress_callback(total_steps, total_steps, "comparing_images")
                 except TypeError:
                     progress_callback(1.0)
-            
-            # Check for cancellation before starting comparison
+
             if progress_dialog is not None and progress_dialog.wasCanceled():
                 raise KeyboardInterrupt("User canceled similarity calculation")
-            
-            scored = []
-            comparison_count = 0
-            total_comparisons = len([p for p in candidates if p in features])
-            for path in candidates:
-                if path not in features:
-                    continue
-                
-                # Check for cancellation during comparison loop
-                if progress_dialog is not None and progress_dialog.wasCanceled():
-                    raise KeyboardInterrupt("User canceled similarity calculation")
-                
-                if path in valid_ref_paths:
-                    # Reference images always have maximum similarity
-                    similarity = 1.0
-                else:
-                    # Compute similarity using the selected metric against aggregate reference
-                    try:
-                        similarity = self._compute_similarity(aggregate_ref_feat, features[path])
-                    except RuntimeError as e:
-                        if "device" in str(e).lower() or "Expected all tensors to be on the same device" in str(e):
-                            # Device mismatch error - show user-friendly message and cancel operation
-                            error_msg = (
-                                "Device mismatch error during similarity calculation.\n\n"
-                                "This can occur when tensors are on different devices (CPU vs GPU).\n"
-                                "The operation has been cancelled.\n\n"
-                                f"Error details: {str(e)}"
-                            )
-                            print(f"Device mismatch error: {e}")
-                            # Try to show error dialog if possible
-                            try:
-                                QtWidgets, QtCore = _import_qt_modules()
-                                if QtWidgets and QtWidgets.get('QMessageBox'):
-                                    QMessageBox = QtWidgets['QMessageBox']
-                                    msg_box = QMessageBox()
-                                    msg_box.setIcon(QMessageBox.Icon.Critical)
-                                    msg_box.setWindowTitle("Similarity Calculation Error")
-                                    msg_box.setText(error_msg)
-                                    msg_box.exec()
-                            except Exception:
-                                # If we can't show dialog, at least print the error
-                                print(error_msg)
-                            # Return original order
-                            return displayed_images
-                        else:
-                            # Re-raise other RuntimeErrors
-                            raise
-                scored.append((similarity, path))
-                
-                # Update progress during comparison (show incremental progress)
-                comparison_count += 1
-                if progress_tracker is not None and total_comparisons > 0:
-                    # Only update UI when the number remaining is a multiple of 10 or it's the initial number
-                    comparisons_left = total_comparisons - comparison_count + 1
-                    should_update_ui = (
-                        comparisons_left % 10 == 0
-                        or comparisons_left == total_comparisons
-                        or comparisons_left == 1  # always update on the very last image
-                    )
 
-                    if should_update_ui:
-                        comparison_progress = float(comparison_count) / float(total_comparisons)
-                        comparison_value = int(progress_tracker.comparison_start +
-                                              comparison_progress * (100 - progress_tracker.comparison_start))
-                        progress_dialog.setValue(min(comparison_value, 100))
-                        progress_dialog.setStatusText(f"Calculating similarities... ({comparison_count}/{total_comparisons})")
-                elif progress_callback is not None and total_comparisons > 0:
-                    try:
-                        progress_callback(comparison_count, total_comparisons, "comparing_images")
-                    except TypeError:
-                        progress_callback(float(comparison_count) / float(total_comparisons) if total_comparisons else 1.0)
-
-            scored.sort(reverse=True, key=lambda tup: tup[0])
-            sorted_images = [p for _, p in scored]
+            sorted_images = self._score_candidates_vectorized(
+                aggregate_ref_feat, features, candidates, valid_ref_paths
+            )
             # Add missing/unreadable images unmodified at the end, ONLY if not in .Trashes/.Trash or Photos Library
             missing = [p for p in displayed_images if p not in sorted_images and not _is_inside_macos_trash(p) and not is_inside_photos_library_resources_or_scopes(p)]
             

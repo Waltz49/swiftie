@@ -1,0 +1,100 @@
+import AppKit
+import Foundation
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var appState: AppState?
+    private var instanceLock: InstanceLock?
+    private var pendingOpenPaths: [String] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let appState else { return }
+
+        let lockPath = appState.config.dataDirectory
+            .appendingPathComponent("instance.lock")
+
+        let lock = InstanceLock(lockURL: lockPath)
+        if lock.tryAcquire() {
+            instanceLock = lock
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            applyLaunchOptions(appState)
+        } else {
+            let message = LaunchMessage.from(launchOptions: appState.launchOptions)
+            if InstanceLock.forwardToRunningInstance(
+                message: message,
+                pipePath: appState.config.namedPipePath
+            ) {
+                NSApp.terminate(nil)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Prowser is already running"
+            alert.informativeText = "Could not forward the open request to the running instance."
+            alert.runModal()
+            NSApp.terminate(nil)
+        }
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let appState {
+            appState.openPaths(filenames)
+        } else {
+            pendingOpenPaths.append(contentsOf: filenames)
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag, let appState, let lastDir = appState.config.lastDirectory,
+           FileManager.default.fileExists(atPath: lastDir) {
+            appState.loadDirectory(lastDir)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        appState?.persistAllSidebarLayout()
+    }
+
+    private func applyLaunchOptions(_ appState: AppState) {
+        if !pendingOpenPaths.isEmpty {
+            appState.openPaths(pendingOpenPaths)
+            pendingOpenPaths.removeAll()
+        } else if !appState.launchOptions.paths.isEmpty {
+            appState.openPaths(appState.launchOptions.paths)
+        } else if appState.config.restoreState,
+                  let lastDir = appState.config.lastDirectory,
+                  FileManager.default.fileExists(atPath: lastDir) {
+            appState.loadDirectory(lastDir)
+        }
+
+        if appState.launchOptions.debug {
+            appState.config.setValue(true, forKey: "debug_mode")
+        }
+
+        let restore = appState.config.rawSettings()["restore_state"] as? [String: Any]
+        let savedSpace = restore?["last_macos_space_mode"] as? Bool
+        WindowFullscreen.applyLaunchPreference(
+            noFullscreen: appState.launchOptions.noFullscreen,
+            restoreState: appState.config.restoreState,
+            savedMacOSSpace: savedSpace
+        )
+
+        let capturedState = appState
+        for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
+            NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { _ in
+                WindowFullscreen.persistMacOSSpaceMode(config: capturedState.config)
+            }
+        }
+    }
+}
