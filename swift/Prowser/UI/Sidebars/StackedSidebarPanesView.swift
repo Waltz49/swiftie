@@ -13,7 +13,8 @@ struct SidebarPaneDescriptor {
     var isJobsPane: Bool = false
     var showsFlyoutButton: Bool = false
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
-    var preferredFitContentHeight: CGFloat = 120
+    /// Measured at double-click time (Python `_needed_pane_height`), not during body evaluation.
+    var preferredFitContentHeight: () -> CGFloat = { 120 }
 }
 
 @MainActor
@@ -203,7 +204,6 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             paneIndex: descriptor.index,
             nowVisible: !expanded
         )
-        appState.config.applySettingsChange(emit: appState.eventBus)
     }
 
     private func handleDoubleClick(_ descriptor: SidebarPaneDescriptor) {
@@ -214,8 +214,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         model.togglePaneFit(
             paneIndex: descriptor.index,
             appState: appState,
-            contentHeight: descriptor.preferredFitContentHeight
+            contentHeight: descriptor.preferredFitContentHeight()
         )
-        appState.config.applySettingsChange(emit: appState.eventBus)
     }
 }

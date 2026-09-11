@@ -9,6 +9,17 @@ enum SelectionService {
         return appState.fileData.displayedImages.filter { selected.contains($0) }
     }
 
+    /// Python `SelectionManager.get_selected_files`: ordered selection, falling back to the highlighted image.
+    static func selectedFilesOrCurrent(appState: AppState) -> [String] {
+        let ordered = orderedSelectedFiles(appState: appState)
+        if !ordered.isEmpty { return ordered }
+        if let current = appState.fileData.currentImagePath,
+           appState.fileData.displayedImages.contains(current) {
+            return [current]
+        }
+        return []
+    }
+
     static func selectedIndices(appState: AppState) -> Set<Int> {
         let images = appState.fileData.displayedImages
         var indices = Set<Int>()

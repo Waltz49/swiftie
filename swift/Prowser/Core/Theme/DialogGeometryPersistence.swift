@@ -10,6 +10,7 @@ enum DialogGeometryKey {
     static let clipSearch = "clip_search_dialog_geometry"
     static let convertFormat = "convert_format_dialog_geometry"
     static let resizeImages = "resize_images_dialog_geometry"
+    static let renamePrefix = "rename_prefix_dialog_geometry"
     static let findReferences = "find_references_dialog_geometry"
     static let referenceGraph = "reference_graph_dialog_geometry"
     static let exifBatchConfirmation = "exif_batch_confirmation_dialog_geometry"

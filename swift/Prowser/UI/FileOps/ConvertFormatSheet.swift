@@ -27,14 +27,11 @@ struct ConvertFormatSheet: View {
 
             Toggle("Delete original after conversion", isOn: $deleteOriginal)
 
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .disabled(isConverting)
-                Button("Convert") { convert() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(isConverting || appState.fileOpsTargetPaths.isEmpty)
-            }
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true, isEnabled: !isConverting) { dismiss() },
+                DialogButton("Convert", isDefault: true,
+                             isEnabled: !(isConverting || appState.fileOpsTargetPaths.isEmpty)) { convert() },
+            ])
         }
         .padding(20)
         .frame(minWidth: 360, minHeight: 200)

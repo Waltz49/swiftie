@@ -118,11 +118,9 @@ struct KeyboardShortcutsHelpView: View {
                 }
             }
 
-            HStack {
-                Spacer()
-                Button("Close") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
+            DialogButtonRow([
+                DialogButton("Close", isDefault: true, isCancel: true) { dismiss() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(24)
         .frame(minWidth: 520, minHeight: 520)
@@ -165,8 +163,9 @@ struct AboutView: View {
                 .font(.caption)
                 .foregroundStyle(colors.dialogMutedText)
             Spacer()
-            Button("OK") { dismiss() }
-                .keyboardShortcut(.defaultAction)
+            DialogButtonRow([
+                DialogButton("OK", isDefault: true, isCancel: true) { dismiss() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(32)
         .frame(minWidth: 320, minHeight: 200)

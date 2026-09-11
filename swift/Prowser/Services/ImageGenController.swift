@@ -100,6 +100,13 @@ final class ImageGenController {
         return normalizedImagePath(path) == normalizedImagePath(activeOutputPath)
     }
 
+    /// MFLUX stepwise workers still write previews to the job output path; the UI must
+    /// ignore those disk updates when intermediate images are off (Python gates browse refresh).
+    func shouldSuppressGenerationOutputDiskUpdates(for path: String) -> Bool {
+        guard !showProgressiveImages else { return false }
+        return viewingPathIsActiveGenerationOutput(path)
+    }
+
     var isDialogBuildPaused: Bool { dialogBuildPauseCount > 0 }
 
     var onImageGenerated: ((String) -> Void)?
@@ -1327,13 +1334,14 @@ final class ImageGenController {
             guard let self else { return }
             if let path = message["progressive_output_path"] as? String
                 ?? message["preview_path"] as? String
-                ?? message["path"] as? String {
+                ?? message["path"] as? String,
+               self.showProgressiveImages {
                 self.progressivePreviewPath = path
                 let step = (message["step"] as? Int) ?? Int("\(message["step"] ?? "")") ?? -1
                 let stepTotal = (message["step_total"] as? Int)
                     ?? Int("\(message["step_total"] ?? "")")
                     ?? self.liveStepTotal
-                if self.showProgressiveImages, step != 0 {
+                if step != 0 {
                     let isFinal = step > 0 && stepTotal > 0 && step >= stepTotal
                     let forceEnterBrowse = isFinal || !self.progressiveBrowseOpened
                     self.onProgressivePreview?(path, forceEnterBrowse)

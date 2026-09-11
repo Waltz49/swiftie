@@ -28,11 +28,22 @@ enum DirectoryRefreshService {
         let diskSet = Set(scanned)
         let displayed = appState.fileData.displayedImages
         let displayedSet = Set(displayed)
+        let rawAdded = diskSet.subtracting(displayedSet)
+        let removed = displayedSet.subtracting(diskSet)
+        let added = rawAdded.filter {
+            !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: $0)
+        }
 
-        if diskSet == displayedSet {
+        // In-progress step writes land on the job output path before the job finishes.
+        if !rawAdded.isEmpty, added.isEmpty, removed.isEmpty {
+            return
+        }
+
+        if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
             if appState.fileData.currentViewMode == .browse {
                 if let current = appState.fileData.currentImagePath,
-                   appState.metadataCache.fileChangedOnDisk(path: current) {
+                   appState.metadataCache.fileChangedOnDisk(path: current),
+                   !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: current) {
                     invalidateThumbnails(appState: appState, paths: [current])
                     appState.reloadBrowseImageIfCurrent(path: current)
                 }
@@ -40,6 +51,7 @@ enum DirectoryRefreshService {
             }
             guard displayedSet.count < 500 else { return }
             let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
+                .filter { !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: $0) }
             if !modified.isEmpty {
                 invalidateThumbnails(appState: appState, paths: modified)
             }
@@ -54,9 +66,11 @@ enum DirectoryRefreshService {
         efficientRefreshWithChanges(
             appState: appState,
             diskList: diskList,
-            diskSet: diskSet,
+            diskSet: Set(diskList),
             displayed: displayed,
-            displayedSet: displayedSet
+            displayedSet: displayedSet,
+            added: added,
+            removed: removed
         )
     }
 
@@ -81,11 +95,10 @@ enum DirectoryRefreshService {
         diskList: [String],
         diskSet: Set<String>,
         displayed: [String],
-        displayedSet: Set<String>
+        displayedSet: Set<String>,
+        added: Set<String>,
+        removed: Set<String>
     ) {
-        let added = diskSet.subtracting(displayedSet)
-        let removed = displayedSet.subtracting(diskSet)
-
         if !removed.isEmpty && added.isEmpty {
             if appState.fileData.currentViewMode == .browse {
                 let preserved = appState.fileData.currentImagePath

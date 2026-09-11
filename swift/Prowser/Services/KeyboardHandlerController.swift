@@ -299,6 +299,7 @@ final class KeyboardHandlerController {
         if isImageGenUnifiedDialogKeyWindow() || appState.showKeyboardHelp || appState.showAbout {
             return false
         }
+        if appState.hasModalSheetPresented { return false }
         if isTextInputFocused() { return false }
         if NSApp.keyWindow == nil { return false }
         return true
@@ -313,7 +314,7 @@ final class KeyboardHandlerController {
         return Self.isTextEditingResponder(responder)
     }
 
-    private static func isTextEditingResponder(_ responder: NSResponder) -> Bool {
+    static func isTextEditingResponder(_ responder: NSResponder) -> Bool {
         if responder is NSTextView || responder is NSTextField || responder is NSSecureTextField {
             return true
         }

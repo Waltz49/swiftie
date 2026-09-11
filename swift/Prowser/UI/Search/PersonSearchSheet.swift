@@ -53,25 +53,23 @@ struct PersonSearchSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack {
-                Spacer()
-                Button("Cancel") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) {
                     if isSearching {
                         appState.workers.personSearch.cancel()
                     } else {
                         dismiss()
                     }
-                }
-                Button(isSearching ? "Stop" : "Search") {
+                },
+                DialogButton(isSearching ? "Stop" : "Search", id: "search", isDefault: true,
+                             isEnabled: !(subjects.isEmpty || selectedSubjectID.isEmpty)) {
                     if isSearching {
                         appState.workers.personSearch.cancel()
                     } else {
                         startSearch()
                     }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(subjects.isEmpty || selectedSubjectID.isEmpty)
-            }
+                },
+            ])
         }
         .padding(20)
         .frame(minWidth: 480, minHeight: 280)

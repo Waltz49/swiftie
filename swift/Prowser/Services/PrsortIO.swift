@@ -83,6 +83,33 @@ enum PrsortIO {
         return lockedFilenames(in: directory).contains(filename)
     }
 
+    /// Port of `sorting_manager._separate_locked_unlocked`.
+    /// Locked files come first in their saved `.prsort` order; unlocked files keep the input order.
+    /// `.prsort` is never used to order unlocked files.
+    static func separateLockedUnlocked(_ paths: [String]) -> (locked: [String], unlocked: [String]) {
+        guard let first = paths.first else { return ([], []) }
+        let directory = (first as NSString).deletingLastPathComponent
+        let custom = readCustomSort(in: directory)
+        let lockedNames = custom?.lockedFilenames ?? []
+        guard !lockedNames.isEmpty else { return ([], paths) }
+
+        let nameToPath = Dictionary(paths.map { (($0 as NSString).lastPathComponent, $0) }, uniquingKeysWith: { a, _ in a })
+        var locked: [String] = []
+        var lockedSet = Set<String>()
+        for name in custom?.orderedFilenames ?? [] where lockedNames.contains(name) {
+            if let path = nameToPath[name], lockedSet.insert(path).inserted {
+                locked.append(path)
+            }
+        }
+        for path in paths where lockedNames.contains((path as NSString).lastPathComponent) {
+            if lockedSet.insert(path).inserted {
+                locked.append(path)
+            }
+        }
+        let unlocked = paths.filter { !lockedSet.contains($0) }
+        return (locked, unlocked)
+    }
+
     /// Update lock markers for files in `directory`, preserving displayed order when possible.
     static func writeLocks(
         in directory: String,

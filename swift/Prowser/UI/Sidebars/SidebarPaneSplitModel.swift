@@ -21,18 +21,22 @@ final class SidebarPaneSplitModel {
     init(side: SidebarSplitSide, config: AppConfig) {
         self.side = side
         self.config = config
-        switch side {
-        case .left:
-            sizes = config.splitterSizes(forKey: "left_splitter_sizes", default: [200, 200, 200])
-        case .right:
-            sizes = config.splitterSizes(forKey: "shortcuts_splitter_sizes", default: [150, 250, 120])
-        }
+        sizes = config.splitterSizes(forKey: Self.persistenceKey(for: side), default: Self.defaultSizes(for: side))
     }
 
-    var persistenceKey: String {
+    var persistenceKey: String { Self.persistenceKey(for: side) }
+
+    private static func persistenceKey(for side: SidebarSplitSide) -> String {
         switch side {
         case .left: return "left_splitter_sizes"
         case .right: return "shortcuts_splitter_sizes"
+        }
+    }
+
+    private static func defaultSizes(for side: SidebarSplitSide) -> [CGFloat] {
+        switch side {
+        case .left: return [200, 200, 200]
+        case .right: return [150, 250, 120]
         }
     }
 
@@ -126,11 +130,17 @@ final class SidebarPaneSplitModel {
         }
     }
 
+    /// Last user-set pane heights (Python `saved_splitter_sizes`); only drag/fit update these.
+    var savedSizes: [CGFloat] {
+        config.splitterSizes(forKey: persistenceKey, default: Self.defaultSizes(for: side))
+    }
+
+    /// Port of Python `_update_splitter_sizes`: scale the *saved* sizes to the current height.
     func layoutSizes(totalHeight: CGFloat, appState: AppState) -> [CGFloat] {
         let vis = visibility(appState: appState)
         let exp = expanded(appState: appState)
         return SidebarPaneLayout.scaledSizes(
-            saved: sizes,
+            saved: savedSizes,
             visibility: vis,
             expanded: zip(vis, exp).map { shown, expanded in shown && expanded },
             totalHeight: max(totalHeight, 1)
@@ -145,14 +155,15 @@ final class SidebarPaneSplitModel {
         }
     }
 
+    /// Port of Python `_persist_splitter_sizes`: merge live sizes of displayed panes into the
+    /// saved values. Called only after a user drag or a fit resize, never on show/hide.
     func mergePersistedSizes(appState: AppState) {
         let vis = visibility(appState: appState)
         let exp = expanded(appState: appState)
-        var saved = sizes
+        var saved = savedSizes
         for index in 0..<3 where vis[index] && exp[index] && sizes[index] > 0 {
             saved[index] = sizes[index]
         }
-        sizes = saved
         config.saveSplitterSizes(persistenceKey, sizes: saved)
     }
 

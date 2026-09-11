@@ -41,10 +41,9 @@ struct FindReferencesSheet: View {
                 }
             }
 
-            HStack {
-                Spacer()
-                Button("Close") { dismiss() }
-            }
+            DialogButtonRow([
+                DialogButton("Close", isDefault: true, isCancel: true) { dismiss() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(16)
         .frame(minWidth: 520, minHeight: 380)

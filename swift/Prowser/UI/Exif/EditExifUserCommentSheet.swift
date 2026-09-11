@@ -271,23 +271,22 @@ struct EditExifUserCommentSheet: View {
     // MARK: - Footer
 
     private var footerRow: some View {
-        HStack(spacing: 8) {
-            Button("Reset") {
+        DialogButtonRow([
+            DialogButton("Cancel", isCancel: true) { appState.cancelEditUserComment() },
+            DialogButton("Save (⌘↩)", isDefault: true) { appState.saveEditUserComment() },
+        ], leadingButtons: [
+            DialogButton("Reset", help: "Reset text to original value\n(stops AI captioning if in progress)") {
                 resetToOriginal()
-            }
-            .help("Reset text to original value\n(stops AI captioning if in progress)")
-
-            Spacer()
-
-            Button("Cancel") {
-                appState.cancelEditUserComment()
-            }
-            Button("Save (⌘↩)") {
-                appState.saveEditUserComment()
-            }
-            .keyboardShortcut(.return, modifiers: .command)
-            .keyboardShortcut(.defaultAction)
-        }
+            },
+        ])
+        .background(
+            // ⌘↩ saves even while the text editor has focus.
+            Button("") { appState.saveEditUserComment() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        )
     }
 
     // MARK: - Actions

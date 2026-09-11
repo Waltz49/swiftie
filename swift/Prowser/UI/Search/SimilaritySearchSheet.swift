@@ -52,25 +52,23 @@ struct SimilaritySearchSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack {
-                Spacer()
-                Button("Cancel") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) {
                     if isSearching {
                         appState.workers.similaritySearch.cancel()
                     } else {
                         dismiss()
                     }
-                }
-                Button(isSearching ? "Stop" : "Search") {
+                },
+                DialogButton(isSearching ? "Stop" : "Search", id: "search", isDefault: true,
+                             isEnabled: !(isSearching && progressText.isEmpty)) {
                     if isSearching {
                         appState.workers.similaritySearch.cancel()
                     } else {
                         startSearch()
                     }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(isSearching && progressText.isEmpty)
-            }
+                },
+            ])
         }
         .padding(20)
         .frame(minWidth: 480, minHeight: 260)

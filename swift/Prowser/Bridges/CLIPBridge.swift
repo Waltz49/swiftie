@@ -61,6 +61,51 @@ final class CLIPBridge {
         stopWorker()
     }
 
+    /// Port of `prepare_for_mass_rename` / `wait_for_flush_and_pause`: ask the worker to flush its
+    /// feature caches and pause, then block (bounded) until it reports an idle state.
+    /// Returns `true` when paused (or no worker running), `false` on timeout.
+    func prepareForMassRename(timeout: TimeInterval = 45.0, progress: ((String) -> Void)? = nil) -> Bool {
+        guard enabled, let process = workerProcess, process.isRunning else { return true }
+        progress?("Syncing background cache...")
+        sendControl(command: "flush_and_pause")
+
+        let start = Date()
+        var lastResend = start
+        var lastProgress = start
+        while Date().timeIntervalSince(start) < timeout {
+            guard process.isRunning else { return true }
+            statusServer?.poll()
+            if let latest = statusServer?.latestStatus, !latest.isEmpty {
+                lastStatus = latest
+                status = latest["status"] as? String ?? status
+            }
+            if ["flushed_and_paused", "paused", "waiting"].contains(status) {
+                return true
+            }
+            let now = Date()
+            if now.timeIntervalSince(lastResend) >= 1.0 {
+                sendControl(command: "flush_and_pause")
+                lastResend = now
+            }
+            if now.timeIntervalSince(lastProgress) >= 0.5 {
+                progress?("Syncing background cache... (\(Int(now.timeIntervalSince(start)))s)")
+                lastProgress = now
+            }
+            usleep(50_000)
+        }
+        return false
+    }
+
+    /// Port of `resume_after_mass_rename`.
+    func resumeAfterMassRename(priorityDirectory: String?) {
+        guard enabled else { return }
+        if workerProcess?.isRunning != true {
+            restartWithPriorityDirectory(priorityDirectory)
+        } else {
+            sendControl(command: "resume", directories: targetDirectories(priority: priorityDirectory))
+        }
+    }
+
     private func targetDirectories(priority: String?) -> [String] {
         var dirs: [String] = []
         if let priority { dirs.append(priority) }

@@ -51,6 +51,39 @@ final class MetadataCacheService {
         dirty = true
     }
 
+    /// Cached entry without disk validation (pre-rename capture; Python `get_metadata_sync(old_path)`).
+    func rawEntry(for path: String) -> Entry? {
+        cache[path]
+    }
+
+    /// Re-key a captured entry under a renamed path. mtime/size are re-read from disk; pixel
+    /// dimensions and EXIF timestamp are kept so headers are not decoded again
+    /// (Python `ImageMetadata._replace(filename=..., modified_time=..., file_size=...)`).
+    func storeMigratedEntry(_ entry: Entry, for newPath: String) {
+        guard let mtime = readMtime(for: newPath), let size = readSize(for: newPath) else { return }
+        cache[newPath] = Entry(
+            mtime: mtime,
+            size: size,
+            pixelWidth: entry.pixelWidth,
+            pixelHeight: entry.pixelHeight,
+            exifTimestamp: entry.exifTimestamp
+        )
+        dirty = true
+    }
+
+    /// Update only the recorded mtime after `os.utime` (Python `_replace(modified_time=...)`).
+    func updateModificationTime(path: String) {
+        guard let existing = cache[path], let mtime = readMtime(for: path) else { return }
+        cache[path] = Entry(
+            mtime: mtime,
+            size: existing.size,
+            pixelWidth: existing.pixelWidth,
+            pixelHeight: existing.pixelHeight,
+            exifTimestamp: existing.exifTimestamp
+        )
+        dirty = true
+    }
+
     /// Returns true when file mtime or size differs from the last recorded snapshot.
     func fileChangedOnDisk(path: String) -> Bool {
         guard let diskMtime = readMtime(for: path),

@@ -183,7 +183,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [ ] Copy user comment
 - [~] Lock / Unlock files (⌘L / ⇧⌘L — in Edit menu; Python also in Tools)
 - [~] Edit with external editor (⌃E)
-- [ ] Rename with Custom Prefix… (⌘N)
+- [x] Rename with Custom Prefix… (⌘N) — `RenamePrefixSheet` + `RenamePrefixService`/`RenamePrefixPlanner` (names, 3-phase plan, dates, .prsort locks, metadata migration; CNN/CLIP/face MD5 feature hand-off not ported)
 - [ ] Convert Image Format… (⌘M)
 - [ ] Resize… (⌘⇧Z)
 
@@ -297,7 +297,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [ ] Duplicate file
 - [ ] Convert image format
 - [ ] Resize images
-- [ ] Quick mass rename
+- [x] Quick mass rename (`RenamePrefixService.quickMassRename`, gated by `allow_quick_mass_rename`)
 - [~] Lock / unlock files (⌘L / ⇧⌘L)
 - [x] Undo delete (⌘Z)
 - [~] Undo move
@@ -446,7 +446,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] ⌘; last image swap (`BrowseImageHistoryController.swapFirstTwoAndShow`)
 - [~] ⌘F CLIP search (`ClipSearchSheet`)
 - [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
-- [~] ⌘N rename prefix, ⌘M convert, ⌘⇧Z resize
+- [~] ⌘N rename prefix (done), ⌘M convert, ⌘⇧Z resize
 
 ## Suggested implementation order (M9+)
 

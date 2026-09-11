@@ -55,15 +55,13 @@ struct ExifBatchConfirmationSheet: View {
             .frame(maxHeight: 360)
             .border(Color.secondary.opacity(0.25))
 
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { onDismiss() }
-                Button(state.confirmLabel) {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { onDismiss() },
+                DialogButton(state.confirmLabel, id: "confirm", isDefault: true) {
                     state.onConfirm()
                     onDismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
+                },
+            ], focusDefaultOnAppear: true)
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 420)

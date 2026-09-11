@@ -15,7 +15,7 @@ struct LeftSidebarView: View {
                 isDisplayed: displayVis[0],
                 omitLeftBorder: true,
                 contextMenuKind: .fileTree,
-                preferredFitContentHeight: 180
+                preferredFitContentHeight: { 180 }
             ),
             SidebarPaneDescriptor(
                 index: 1,
@@ -25,7 +25,7 @@ struct LeftSidebarView: View {
                 isDisplayed: displayVis[1],
                 omitLeftBorder: true,
                 allowsTitlebarDrag: true,
-                preferredFitContentHeight: 120
+                preferredFitContentHeight: { appState.previewPanePreferredContentHeight() }
             ),
             SidebarPaneDescriptor(
                 index: 2,
@@ -37,7 +37,7 @@ struct LeftSidebarView: View {
                 omitLeftBorder: true,
                 allowsTitlebarDrag: true,
                 contextMenuKind: .chat,
-                preferredFitContentHeight: 160
+                preferredFitContentHeight: { 160 }
             ),
         ]
 

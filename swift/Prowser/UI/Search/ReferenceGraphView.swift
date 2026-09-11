@@ -54,16 +54,16 @@ struct ReferenceGraphView: View {
                 }
             }
 
-            HStack {
-                if graph.nodes.count >= 2 {
-                    Button("Show in Browser") {
+            DialogButtonRow(
+                [DialogButton("Close", isDefault: true, isCancel: true) { dismiss() }],
+                leadingButtons: graph.nodes.count >= 2
+                    ? [DialogButton("Show in Browser") {
                         appState.openReferencePaths(graph.nodes, focusPath: graph.focusPath)
                         dismiss()
-                    }
-                }
-                Spacer()
-                Button("Close") { dismiss() }
-            }
+                    }]
+                    : [],
+                focusDefaultOnAppear: true
+            )
         }
         .padding(16)
         .frame(minWidth: 520, minHeight: 400)

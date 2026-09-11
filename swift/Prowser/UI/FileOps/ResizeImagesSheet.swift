@@ -39,14 +39,11 @@ struct ResizeImagesSheet: View {
 
             Toggle("Preserve aspect ratio", isOn: $preserveAspect)
 
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .disabled(isResizing)
-                Button("Resize") { resize() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(isResizing || appState.fileOpsTargetPaths.isEmpty)
-            }
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true, isEnabled: !isResizing) { dismiss() },
+                DialogButton("Resize", isDefault: true,
+                             isEnabled: !(isResizing || appState.fileOpsTargetPaths.isEmpty)) { resize() },
+            ])
         }
         .padding(20)
         .frame(minWidth: 380, minHeight: 220)

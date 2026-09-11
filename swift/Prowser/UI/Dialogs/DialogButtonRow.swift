@@ -1,0 +1,188 @@
+import AppKit
+import SwiftUI
+
+/// One button in a dialog's bottom row (Qt `QDialogButtonBox` parity).
+struct DialogButton: Identifiable {
+    let id: String
+    var title: String
+    /// Activated by Return when no row button has keyboard focus (Qt default button).
+    var isDefault = false
+    /// Activated by Esc (Qt `reject`).
+    var isCancel = false
+    var isEnabled = true
+    var help: String?
+    var action: () -> Void
+
+    init(
+        _ title: String,
+        id: String? = nil,
+        isDefault: Bool = false,
+        isCancel: Bool = false,
+        isEnabled: Bool = true,
+        help: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.id = id ?? title
+        self.title = title
+        self.isDefault = isDefault
+        self.isCancel = isCancel
+        self.isEnabled = isEnabled
+        self.help = help
+        self.action = action
+    }
+}
+
+/// Right-aligned dialog button row with Qt-style keyboard behaviour:
+/// buttons are focusable (Tab sequence), ←/→ move between them, Return/Space activate the
+/// focused button (Return falls back to the default button), Esc activates the cancel button.
+/// `leading` content (extra controls) is placed on the left of the row.
+struct DialogButtonRow<Leading: View>: View {
+    /// Right-aligned buttons.
+    let buttons: [DialogButton]
+    /// Left-aligned buttons (still part of the keyboard cycle).
+    let leadingButtons: [DialogButton]
+    /// Focus the default (or first) button when the dialog appears.
+    var focusDefaultOnAppear = false
+    @ViewBuilder var leading: () -> Leading
+
+    @Environment(\.themeColors) private var colors
+    @FocusState private var focusedID: String?
+
+    init(
+        _ buttons: [DialogButton],
+        leadingButtons: [DialogButton] = [],
+        focusDefaultOnAppear: Bool = false,
+        @ViewBuilder leading: @escaping () -> Leading = { EmptyView() }
+    ) {
+        self.buttons = buttons
+        self.leadingButtons = leadingButtons
+        self.focusDefaultOnAppear = focusDefaultOnAppear
+        self.leading = leading
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(leadingButtons) { rowButton($0) }
+            leading()
+            Spacer()
+            ForEach(buttons) { rowButton($0) }
+        }
+        .background(
+            DialogKeyRoutingView(handler: handle(_:))
+                .frame(width: 0, height: 0)
+        )
+        .onAppear {
+            guard focusDefaultOnAppear else { return }
+            DispatchQueue.main.async { focusedID = initialButtonID }
+        }
+    }
+
+    private func rowButton(_ button: DialogButton) -> some View {
+        Button(button.title) {
+            button.action()
+        }
+        .keyboardShortcut(button.isDefault ? .defaultAction : nil)
+        .disabled(!button.isEnabled)
+        .focusable(button.isEnabled)
+        .focused($focusedID, equals: button.id)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(focusedID == button.id ? colors.currentImageBorder : .clear, lineWidth: 1.5)
+                .padding(-2)
+        )
+        .help(button.help ?? "")
+    }
+
+    /// Keyboard cycle order (left to right).
+    private var enabledButtons: [DialogButton] { (leadingButtons + buttons).filter(\.isEnabled) }
+
+    private var initialButtonID: String? {
+        (enabledButtons.first(where: \.isDefault) ?? enabledButtons.first)?.id
+    }
+
+    /// Returns `true` when the key event was consumed.
+    @MainActor
+    private func handle(_ event: NSEvent) -> Bool {
+        let textFocused = (event.window?.firstResponder).map(KeyboardHandlerController.isTextEditingResponder) ?? false
+        switch event.keyCode {
+        case 53: // Esc
+            guard let cancel = enabledButtons.first(where: \.isCancel) else { return false }
+            cancel.action()
+            return true
+        case 123, 124: // ← →
+            guard !textFocused else { return false }
+            let enabled = enabledButtons
+            guard !enabled.isEmpty else { return false }
+            guard let current = focusedID, let index = enabled.firstIndex(where: { $0.id == current }) else {
+                focusedID = initialButtonID
+                return true
+            }
+            let step = event.keyCode == 124 ? 1 : -1
+            focusedID = enabled[(index + step + enabled.count) % enabled.count].id
+            return true
+        case 36, 76, 49: // Return, Enter, Space
+            // Text input focused: leave Return to SwiftUI (`.defaultAction` shortcut) so field
+            // values commit first, and multi-line editors keep newlines.
+            guard !textFocused else { return false }
+            if let current = focusedID, let button = enabledButtons.first(where: { $0.id == current }) {
+                button.action()
+                return true
+            }
+            if event.keyCode != 49, let def = enabledButtons.first(where: \.isDefault) {
+                def.action()
+                return true
+            }
+            return false
+        default:
+            return false
+        }
+    }
+}
+
+/// Local key monitor scoped to the window that hosts the dialog.
+private struct DialogKeyRoutingView: NSViewRepresentable {
+    let handler: @MainActor (NSEvent) -> Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.host = view
+        context.coordinator.handler = handler
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.handler = handler
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        weak var host: NSView?
+        var handler: (@MainActor (NSEvent) -> Bool)?
+        private var monitor: Any?
+
+        func start() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.host?.window, event.window === window, window.isKeyWindow else {
+                    return event
+                }
+                // Let ⌘-shortcuts (e.g. ⌘↩) through untouched.
+                if event.modifierFlags.contains(.command) { return event }
+                let consumed = MainActor.assumeIsolated { self.handler?(event) ?? false }
+                return consumed ? nil : event
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+    }
+}

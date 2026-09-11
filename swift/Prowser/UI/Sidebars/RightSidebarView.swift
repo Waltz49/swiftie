@@ -15,7 +15,7 @@ struct RightSidebarView: View {
                 defaultExpanded: true,
                 isDisplayed: true,
                 omitLeftBorder: true,
-                preferredFitContentHeight: 140
+                preferredFitContentHeight: { 140 }
             ),
             SidebarPaneDescriptor(
                 index: 1,
@@ -26,7 +26,7 @@ struct RightSidebarView: View {
                 omitLeftBorder: true,
                 allowsTitlebarDrag: true,
                 contextMenuKind: .information,
-                preferredFitContentHeight: 180
+                preferredFitContentHeight: { 180 }
             ),
             SidebarPaneDescriptor(
                 index: 2,
@@ -40,7 +40,7 @@ struct RightSidebarView: View {
                 isJobsPane: true,
                 showsFlyoutButton: true,
                 contextMenuKind: .jobs(floating: false),
-                preferredFitContentHeight: appState.jobsQueuePaneContentHeight()
+                preferredFitContentHeight: { appState.jobsQueuePaneContentHeight() }
             ),
         ]
 

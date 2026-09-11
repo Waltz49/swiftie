@@ -119,6 +119,10 @@ private struct MainWindowSheetsModifier: ViewModifier {
                 ResizeImagesSheet()
                     .environment(appState)
             }
+            .sheet(item: $appState.renamePrefixDialog) { request in
+                RenamePrefixSheet(request: request)
+                    .environment(appState)
+            }
             .sheet(isPresented: $appState.showFindReferencesSheet) {
                 FindReferencesSheet()
                     .environment(appState)

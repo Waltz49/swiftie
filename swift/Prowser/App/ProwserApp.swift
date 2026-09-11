@@ -70,6 +70,7 @@ final class AppState {
     let eventBus = AppEventBus()
     let thumbnailCache: ThumbnailCache
     let metadataCache: MetadataCacheService
+    let previewPaneCache = PreviewPaneSessionCache()
     let fileOperations: FileOperationsService
     let exifOperations = ExifOperationsController()
     let searchOperations = SearchOperationsService()
@@ -115,7 +116,26 @@ final class AppState {
     var showClipSearchSheet = false
     var showConvertFormatSheet = false
     var showResizeSheet = false
+    var renamePrefixDialog: RenamePrefixDialogRequest?
     var showEditUserCommentSheet = false
+
+    /// True when a modal SwiftUI sheet should receive keyboard input exclusively.
+    var hasModalSheetPresented: Bool {
+        showFilterDialog
+            || showClipSearchSheet
+            || showConvertFormatSheet
+            || showResizeSheet
+            || renamePrefixDialog != nil
+            || showEditUserCommentSheet
+            || exifBatchConfirmation != nil
+            || showFindReferencesSheet
+            || showSimilaritySearchSheet
+            || showPersonSearchSheet
+            || showReferenceGraphSheet
+            || showImageGenCreateSheet
+            || showKeyboardHelp
+            || showAbout
+    }
     var editUserCommentText = ""
     var editUserCommentOriginalText = ""
     var editUserCommentPath: String?
@@ -399,11 +419,11 @@ final class AppState {
     }
 
     func quickMassRename() {
-        renamePrefixService.presentRenameDialog()
+        renamePrefixService.quickMassRename()
     }
 
-    func renameWithCustomPrefix(paths: [String]? = nil) {
-        renamePrefixService.presentRenameDialog(paths: paths)
+    func renameWithCustomPrefix() {
+        renamePrefixService.renameWithCustomPrefix()
     }
 
     func backupCustomSort() {
@@ -1085,7 +1105,6 @@ final class AppState {
         config.updateSetting("information_sidebar_visible", value: visible)
         if visible { revealSidebarColumn(.right) }
         noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
     }
 
     func toggleShortcutsSidebar() {
@@ -1094,7 +1113,6 @@ final class AppState {
         config.updateSetting("shortcuts_sidebar_visible", value: visible)
         if visible { revealSidebarColumn(.right) }
         noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
     }
 
     func toggleFileTree() {
@@ -1115,7 +1133,6 @@ final class AppState {
            config.bool(forKey: "jobs_visible", default: true) {
             config.updateSetting("jobs_visible", value: false)
             noteSidebarLayoutChanged()
-            config.applySettingsChange(emit: eventBus)
             return
         }
         showJobsPane()
@@ -1129,7 +1146,6 @@ final class AppState {
         config.updateSetting("jobs_visible", value: true)
         revealSidebarColumn(.right)
         noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
         syncJobsPaneGeometry()
     }
 
@@ -1140,7 +1156,6 @@ final class AppState {
         config.updateSetting("jobs_display_mode", value: JobsDisplayMode.panel.rawValue)
         showFloatingJobsPanel = true
         noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
     }
 
     func hideJobsPanel() {
@@ -1749,14 +1764,9 @@ final class AppState {
         }
     }
 
-    func persistSplitterSizes() {
-        leftSidebarSplit.mergePersistedSizes(appState: self)
-        rightSidebarSplit.mergePersistedSizes(appState: self)
-    }
-
-    /// Flush sidebar column widths and inner pane sizes to `settings.json` (quit + layout changes).
+    /// Flush sidebar column widths to `settings.json` (quit + layout changes). Pane sizes are
+    /// already saved at drag end / fit (Python `saved_splitter_sizes`).
     func persistAllSidebarLayout() {
-        persistSplitterSizes()
         persistSidebarWidth(side: .left, width: leftSidebarWidth)
         persistSidebarWidth(side: .right, width: rightSidebarWidth)
         if !chromeSuppressed {
@@ -1781,7 +1791,6 @@ final class AppState {
         config.updateSetting("chat_visible", value: visible)
         if visible { revealSidebarColumn(.left) }
         noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
     }
 
     func togglePreviewPane() {
@@ -1794,6 +1803,11 @@ final class AppState {
     func showPreviewPane() {
         guard !config.bool(forKey: "preview_visible", default: true) else { return }
         setLeftSidebarPaneVisible(configKey: "preview_visible", visible: true)
+    }
+
+    /// Port of `combined_sidebar_widget._needed_pane_height(1)` content part (title double-click fit).
+    func previewPanePreferredContentHeight() -> CGFloat {
+        previewPaneCache.preferredContentHeight(for: fileData.currentImagePath, clientWidth: leftSidebarWidth)
     }
 
     func openMapForCurrentImage() {
@@ -1994,7 +2008,6 @@ final class AppState {
 
     func toggleChrome() {
         if isAnyChromeVisible {
-            persistSplitterSizes()
             chromeSavedLayout = captureChromeLayout()
             let from = currentChromeLayoutSnapshot()
             let to = ChromeLayoutSnapshot(leftWidth: 0, rightWidth: 0, statusBarHeight: 0)
@@ -2003,7 +2016,6 @@ final class AppState {
                 self.chromeLayoutOverride = nil
                 self.persistChromeVisibilityToConfig()
                 self.noteSidebarLayoutChanged()
-                self.config.applySettingsChange(emit: self.eventBus)
             }
         } else {
             if let saved = chromeSavedLayout {
@@ -2018,7 +2030,6 @@ final class AppState {
             animateChromeLayout(from: from, to: to) {
                 self.chromeLayoutOverride = nil
                 self.noteSidebarLayoutChanged()
-                self.config.applySettingsChange(emit: self.eventBus)
             }
         }
     }
@@ -2036,8 +2047,8 @@ final class AppState {
             rightSidebarVisible: config.bool(forKey: "right_sidebar_visible", default: true),
             leftSidebarWidth: leftSidebarWidth,
             rightSidebarWidth: rightSidebarWidth,
-            leftSplitterSizes: leftSidebarSplit.sizes,
-            rightSplitterSizes: rightSidebarSplit.sizes
+            leftSplitterSizes: leftSidebarSplit.savedSizes,
+            rightSplitterSizes: rightSidebarSplit.savedSizes
         )
     }
 
@@ -2045,10 +2056,10 @@ final class AppState {
         leftSidebarWidth = SidebarWidthLimits.clampLeft(layout.leftSidebarWidth)
         rightSidebarWidth = SidebarWidthLimits.clampRight(layout.rightSidebarWidth)
         if layout.leftSplitterSizes.count == 3 {
-            leftSidebarSplit.applySizes(layout.leftSplitterSizes, appState: self, persist: false)
+            config.saveSplitterSizes(leftSidebarSplit.persistenceKey, sizes: layout.leftSplitterSizes)
         }
         if layout.rightSplitterSizes.count == 3 {
-            rightSidebarSplit.applySizes(layout.rightSplitterSizes, appState: self, persist: false)
+            config.saveSplitterSizes(rightSidebarSplit.persistenceKey, sizes: layout.rightSplitterSizes)
         }
         config.updateSetting("status_bar_visible", value: layout.statusBarVisible)
         config.updateSetting("file_tree_visible", value: layout.fileTreeVisible)
@@ -2061,7 +2072,6 @@ final class AppState {
         config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
         persistSidebarWidth(side: .left, width: leftSidebarWidth)
         persistSidebarWidth(side: .right, width: rightSidebarWidth)
-        persistSplitterSizes()
     }
 
     private func showDefaultChrome() {
@@ -2115,12 +2125,13 @@ final class AppState {
     }
 
     func noteSidebarLayoutChanged() {
-        sidebarLayoutRevision += 1
         if !chromeSuppressed {
             config.updateSetting("left_sidebar_visible", value: leftSidebarPaneActive)
             config.updateSetting("right_sidebar_visible", value: rightSidebarPaneActive)
-            persistSplitterSizes()
         }
+        // Pane sizes are persisted only by user drag / fit (Python `_on_splitter_moved`,
+        // `_resize_pane_to_height`); show/hide relayouts from the saved sizes.
+        sidebarLayoutRevision += 1
         notifyMainContentLayoutChanged()
     }
 
@@ -2137,7 +2148,6 @@ final class AppState {
         config.updateSetting(configKey, value: visible)
         if visible { revealSidebarColumn(.left) }
         noteSidebarLayoutChanged()
-        config.applySettingsChange(emit: eventBus)
     }
 
     private func revealSidebarColumn(_ side: SidebarSplitSide) {
@@ -2163,7 +2173,6 @@ final class AppState {
                 self.config.updateSetting("status_bar_visible", value: false)
                 self.chromeLayoutOverride = nil
                 self.notifyMainContentLayoutChanged()
-                self.config.applySettingsChange(emit: self.eventBus)
             }
         } else {
             config.updateSetting("status_bar_visible", value: true)
@@ -2175,7 +2184,6 @@ final class AppState {
             animateChromeLayout(from: from, to: to) {
                 self.chromeLayoutOverride = nil
                 self.notifyMainContentLayoutChanged()
-                self.config.applySettingsChange(emit: self.eventBus)
             }
         }
     }

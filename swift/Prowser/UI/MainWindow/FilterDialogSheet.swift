@@ -36,22 +36,15 @@ struct FilterDialogSheet: View {
             }
             .frame(minHeight: 200)
 
-            HStack {
-                Button("+") {
-                    addEntry(prefill: prefillPattern())
-                }
-                .help("Add a new filter")
-
-                Spacer()
-
-                Button("Cancel") { dismiss() }
-                Button("OK") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("OK", isDefault: true, isEnabled: allValid) {
                     appState.saveFilterPresets(validEntries())
                     dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!allValid)
-            }
+                },
+            ], leadingButtons: [
+                DialogButton("+", help: "Add a new filter") { addEntry(prefill: prefillPattern()) },
+            ])
         }
         .padding(16)
         .frame(minWidth: 320, minHeight: 360)
