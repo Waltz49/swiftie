@@ -14,6 +14,7 @@ final class BrowseImageNSView: NSView {
     var overlayIndex = 0
     var overlayCount = 0
     var onActualSizeModeChanged: ((Bool) -> Void)?
+    var onExitBrowse: (() -> Void)?
 
     private var sourceImage: NSImage?
     private var scaleFactor: CGFloat = 1.0
@@ -22,6 +23,8 @@ final class BrowseImageNSView: NSView {
     private var preferredActualSize = false
     private var dragStart: CGPoint?
     private var scrollAtDragStart = CGPoint.zero
+    private var didPan = false
+    private let dragThreshold: CGFloat = 5
     private var rotationDegrees: CGFloat = 0
     private var isFlippedHorizontally = false
     private var isFlippedVertically = false
@@ -263,15 +266,23 @@ final class BrowseImageNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if canPan() {
-            dragStart = convert(event.locationInWindow, from: nil)
-            scrollAtDragStart = scrollOffset
-        }
+        guard sourceImage != nil else { return }
+        dragStart = convert(event.locationInWindow, from: nil)
+        scrollAtDragStart = scrollOffset
+        didPan = false
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onExitBrowse?()
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let dragStart else { return }
         let point = convert(event.locationInWindow, from: nil)
+        if hypot(point.x - dragStart.x, point.y - dragStart.y) >= dragThreshold {
+            didPan = true
+        }
+        guard canPan() else { return }
         scrollOffset.x = scrollAtDragStart.x - (point.x - dragStart.x)
         scrollOffset.y = scrollAtDragStart.y - (point.y - dragStart.y)
         clampScroll()
@@ -279,7 +290,11 @@ final class BrowseImageNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if dragStart != nil, !didPan {
+            onExitBrowse?()
+        }
         dragStart = nil
+        didPan = false
     }
 
     override var acceptsFirstResponder: Bool { true }

@@ -307,11 +307,20 @@ struct ThumbnailGridView: NSViewRepresentable {
                 shiftPressed: shiftPressed,
                 ctrlPressed: ctrlPressed
             )
+            if !shiftPressed, !cmdPressed, !ctrlPressed {
+                SelectionService.openBrowseFromThumbnailActivation(
+                    appState: appState,
+                    isDoubleClick: false
+                )
+            }
         }
 
         func thumbnailGridDidOpenBrowse(index: Int, path: String) {
             lastSyncedIndex = index
-            SelectionService.openBrowseForCurrentSelection(appState: appState)
+            SelectionService.openBrowseFromThumbnailActivation(
+                appState: appState,
+                isDoubleClick: true
+            )
         }
 
         func thumbnailGridDidReorder(path: String, insertionIndex: Int) {

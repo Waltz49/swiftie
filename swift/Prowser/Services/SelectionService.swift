@@ -194,6 +194,17 @@ enum SelectionService {
         appState.fileData.setViewMode(.browse)
     }
 
+    /// Port of Python ``navigation_manager.handle_thumbnail_click`` / ``_on_thumbnail_double_clicked``.
+    /// Single-click opens browse when the preview pane is hidden; double-click opens when it is visible.
+    static func openBrowseFromThumbnailActivation(appState: AppState, isDoubleClick: Bool) {
+        if isDoubleClick {
+            guard appState.isPreviewPaneVisible else { return }
+        } else {
+            guard !appState.isPreviewPaneVisible else { return }
+        }
+        openBrowseForCurrentSelection(appState: appState)
+    }
+
     /// Return with multiple files selected — open a new specific-files level.
     @discardableResult
     static func openSelectedFilesLevel(appState: AppState) -> Bool {

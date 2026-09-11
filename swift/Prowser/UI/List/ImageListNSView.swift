@@ -380,7 +380,10 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
                 ctrlPressed: ctrlPressed
             )
             if !shiftPressed, !cmdPressed, !ctrlPressed {
-                SelectionService.openBrowseForCurrentSelection(appState: appState)
+                SelectionService.openBrowseFromThumbnailActivation(
+                    appState: appState,
+                    isDoubleClick: false
+                )
             }
         }
 

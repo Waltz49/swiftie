@@ -398,12 +398,8 @@ final class ThumbnailGridNSView: NSView {
            sourceIndex < imagePaths.count {
             let path = imagePaths[sourceIndex]
             gridDelegate?.thumbnailGridDidReorder(path: path, insertionIndex: insertion)
-        } else if let index = indexAt(point: point) {
-            if event.clickCount >= 2 {
-                gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
-            } else if dragSourceIndex == index {
-                gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
-            }
+        } else if let index = indexAt(point: point), event.clickCount >= 2 {
+            gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
         }
         dragSourceIndex = nil
         dragStartPoint = nil

@@ -16,6 +16,9 @@ struct BrowseView: NSViewRepresentable {
                 appState.config.updateSetting("browse_view_actual_size", value: enabled)
             }
         }
+        view.onExitBrowse = { [weak appState] in
+            appState?.closeBrowseView()
+        }
         context.coordinator.view = view
         context.coordinator.startObserving()
         return view

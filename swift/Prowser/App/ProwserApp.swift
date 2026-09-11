@@ -966,6 +966,10 @@ final class AppState {
     /// Show a Prowser-generated output in browse immediately (port of Python ``_open_in_browse``).
     func showProwserGeneratedImage(at path: String) {
         guard !path.isEmpty else { return }
+        guard imageGen.showProgressiveImages else {
+            ensureImageListedForBrowse(path: path)
+            return
+        }
         prowserGeneratedImageOpenTask?.cancel()
         prowserGeneratedImageOpenTask = Task { @MainActor in
             cancelProgressiveBrowseRefresh()
@@ -1877,6 +1881,22 @@ final class AppState {
 
     private func showMapAlert(title: String, message: String) {
         StyledMessageDialog.showWarning(title: title, message: message)
+    }
+
+    /// Port of Python ``preview_widget.isVisible()`` for thumbnail click behavior.
+    var isPreviewPaneVisible: Bool {
+        if fileData.currentViewMode == .browse { return false }
+        guard config.bool(forKey: "left_sidebar_visible", default: true) else { return false }
+        return config.bool(forKey: "preview_visible", default: true)
+    }
+
+    /// Exit browse mode and return to thumbnail view (port of ``close_browse_view``).
+    func closeBrowseView() {
+        if let path = fileData.currentImagePath,
+           let index = fileData.displayedImages.firstIndex(of: path) {
+            fileData.setCurrentIndex(index)
+        }
+        fileData.setViewMode(.thumbnail)
     }
 
     /// True when at least one left sidebar pane is open (browse: chat only).
