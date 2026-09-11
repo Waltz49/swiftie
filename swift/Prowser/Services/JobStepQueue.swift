@@ -183,8 +183,6 @@ enum JobStepQueue {
         guard var steps = doc["steps"] as? [[String: Any]], !steps.isEmpty else { return nil }
         let step = steps.removeFirst()
         doc["steps"] = steps
-        let done = (doc["steps_done"] as? Int) ?? 0
-        doc["steps_done"] = done + 1
         return step
     }
 

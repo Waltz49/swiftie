@@ -75,8 +75,12 @@ final class ImageGenController {
 
     var isEnabled: Bool { BundleCapabilities.imageGenUIEnabled && modelTasks.isAvailable && registry.isAvailable }
 
+    /// Port of Python ``can_skip_active_series_copy``: an in-flight ``generate`` copy may be
+    /// ended early (single-copy jobs too — skipping the last copy finishes the job).
     var canSkipActiveSeriesCopy: Bool {
-        isProcessing && !skipSeriesCopyRequested && copyBatchActive
+        if skipSeriesCopyRequested { return false }
+        guard modelTasks.isBusy, modelTasks.activeKind == "generate" else { return false }
+        return cooldownSecondsRemaining == 0
     }
 
     func activeJobRelationHeading(for path: String) -> String? {
@@ -223,17 +227,31 @@ final class ImageGenController {
         skipSeriesCopyInFlight = true
         skipSeriesCopyRequested = true
         bumpQueueRevision()
-        if modelTasks.isBusy {
-            modelTasks.cancel()
+        // Python defers the worker cancel one tick so the toolbar shows "Skipping copy..." first.
+        Task { @MainActor [weak self] in
+            guard let self, self.skipSeriesCopyRequested else { return }
+            self.modelTasks.cancel()
         }
     }
 
+    /// Strip skip arrow (Python ``skip_copy_cooldown``): end the cooldown early and run the
+    /// same elapsed handler the timer would (next copy, or next queued job after a job cooldown).
     func skipCopyCooldown() {
+        guard cooldownSecondsRemaining > 0 else { return }
         cooldownTask?.cancel()
-        cooldownSecondsRemaining = 0
-        lastCooldownUISecond = nil
-        bumpQueueRevision()
-        Task { await promoteAndRunNextStep() }
+        cooldownTask = nil
+        cooldownDisplayTask?.cancel()
+        let afterJob = cooldownBeforeNextJob
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.onCooldownElapsed {
+                if afterJob {
+                    await self.startNextQueuedJobIfIdle()
+                } else {
+                    await self.promoteAndRunNextStep()
+                }
+            }
+        }
     }
 
     // MARK: - Submission
@@ -737,7 +755,7 @@ final class ImageGenController {
         }
         stepPendingDoc = doc
         stepRunning = step
-        copiesDone = (doc["steps_done"] as? Int) ?? copiesDone
+        syncCopiesDoneDisplay()
         isProcessing = true
         generationStartTime = Date()
         liveStep = 0
@@ -881,15 +899,16 @@ final class ImageGenController {
     private func handleGenerateFinished(success: Bool, outputPath: String, error: String) {
         defer {
             skipSeriesCopyRequested = false
-            skipSeriesCopyInFlight = false
         }
+        let resolvedOutput = outputPath.isEmpty ? (activeOutputPath ?? "") : outputPath
         if skipSeriesCopyRequested {
-            _ = outputPath
+            // Python ``_continue_after_aborted_step``: drop the skipped copy's partial output,
+            // then run the next pending step immediately (no inter-copy cooldown) or finish the job.
+            removePartialOutput(at: resolvedOutput)
             Task { await continueAfterAbortedStep() }
             return
         }
 
-        let resolvedOutput = outputPath.isEmpty ? (activeOutputPath ?? "") : outputPath
         if success, !resolvedOutput.isEmpty {
             if copyBatchCancelled {
                 return
@@ -956,7 +975,7 @@ final class ImageGenController {
 
     private func completeSuccessfulGenerationUnit() async {
         guard !copyBatchCancelled else { return }
-        stepRunning = nil
+        completeRunningStepAfterCopy()
         if finishCurrentUnitAndMaybeQuit() {
             return
         }
@@ -974,7 +993,9 @@ final class ImageGenController {
     }
 
     private func continueAfterAbortedStep() async {
-        stepRunning = nil
+        completeRunningStepAfterCopy()
+        skipSeriesCopyInFlight = false
+        resetActiveJobProgressTracking()
         if seriesContinues() {
             await promoteAndRunNextStep()
         } else {
@@ -1149,7 +1170,6 @@ final class ImageGenController {
         cooldownTask?.cancel()
         cooldownDisplayTask?.cancel()
         enterCopyCooldownAfterSuccess()
-        let afterJob = cooldownBeforeNextJob
         let ms = max(0, seconds * 1000)
         cooldownSecondsRemaining = max(0, seconds)
         lastCooldownUISecond = nil
@@ -1166,27 +1186,39 @@ final class ImageGenController {
                 try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
             }
             guard !Task.isCancelled else { return }
-            cooldownSecondsRemaining = 0
-            cooldownBeforeNextJob = false
-            lastCooldownUISecond = nil
-            if afterJob {
-                if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
-                    maybeQuitAfterCurrentWorker()
-                    return
-                }
-                if holdJobQueue || queueAdvanceSuppressed || startupQueueHold {
-                    return
-                }
-                await action()
-                return
-            }
+            await onCooldownElapsed(action)
+        }
+    }
+
+    /// Port of Python ``_on_copy_cooldown_elapsed`` (shared by the timer and ``skipCopyCooldown``).
+    private func onCooldownElapsed(_ action: () async -> Void) async {
+        let afterJob = cooldownBeforeNextJob
+        cooldownSecondsRemaining = 0
+        cooldownBeforeNextJob = false
+        lastCooldownUISecond = nil
+        if afterJob {
+            // No active job here: clear the cooldown strip even when the queue stays held.
+            await refreshActiveStripView(force: true)
             if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
-                finishCopyBatchForDeferredQuit()
                 maybeQuitAfterCurrentWorker()
                 return
             }
+            if holdJobQueue || queueAdvanceSuppressed || startupQueueHold {
+                return
+            }
             await action()
+            return
         }
+        if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
+            finishCopyBatchForDeferredQuit()
+            maybeQuitAfterCurrentWorker()
+            return
+        }
+        if copyBatchCancelled {
+            finishCopyBatch(cancelled: true)
+            return
+        }
+        await action()
     }
 
     private func appendPendingSteps(count: Int) {
@@ -2135,6 +2167,29 @@ final class ImageGenController {
         )
     }
 
+    /// Port of ``ImageGenController._complete_running_step_after_copy``.
+    private func completeRunningStepAfterCopy() {
+        stepRunning = nil
+        JobStepPersistence.saveActiveRunning(nil, config: config)
+        if var doc = stepPendingDoc {
+            let done = (doc["steps_done"] as? Int) ?? 0
+            doc["steps_done"] = done + 1
+            stepPendingDoc = doc
+        }
+        syncCopiesDoneDisplay()
+        syncChainStateToPendingDoc()
+        persistStepState()
+    }
+
+    /// Port of ``ImageGenController._sync_copies_done_display``.
+    private func syncCopiesDoneDisplay() {
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+            copiesDone = 0
+        } else if let doc = stepPendingDoc {
+            copiesDone = max(0, doc["steps_done"] as? Int ?? 0)
+        }
+    }
+
     private func abortActiveGenerationForShutdown() {
         if !isRunning(), !isProcessing {
             clearActiveGenerationState()
@@ -2208,11 +2263,11 @@ final class ImageGenController {
         stepPendingDoc = pendingDoc
         copiesDone = 0
         if let pendingDoc {
-            copiesDone = max(0, pendingDoc["steps_done"] as? Int ?? 0)
             if let display = pendingDoc["display"] as? [String: Any],
                let thumbs = display["thumbnail_paths"] as? [String] {
                 activeThumbnailPaths = thumbs.filter { FileManager.default.fileExists(atPath: $0) }
             }
+            syncCopiesDoneDisplay()
         }
         if activeThumbnailPaths.isEmpty,
            let steps = pendingDoc?["steps"] as? [[String: Any]],

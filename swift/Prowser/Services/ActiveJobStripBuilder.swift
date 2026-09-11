@@ -109,8 +109,8 @@ enum ActiveJobStripBuilder {
     private static func stepsProgressRow(step: Int, total: Int, label: String) -> ActiveJobStripRowKind? {
         guard total > 0 else { return nil }
         let stepClamped = max(0, min(step, total))
+        let remaining = total - stepClamped
         if stepClamped > 0 {
-            let remaining = total - stepClamped
             let fill = Int(round(100.0 * Double(stepClamped) / Double(total)))
             return .bar(
                 label: label,
@@ -124,7 +124,7 @@ enum ActiveJobStripBuilder {
         return .bar(
             label: label,
             prefix: "0/\(total)",
-            postfix: "",
+            postfix: "\(remaining)",
             fillPercent: 0,
             slotText: "",
             showPendingStart: false
@@ -137,8 +137,8 @@ enum ActiveJobStripBuilder {
             return .bar(label: "Copies:", prefix: "", postfix: "", fillPercent: 0, slotText: continuousSeriesSlotText, showPendingStart: false)
         }
         let done = max(0, min(completed, total))
+        let remaining = total - done
         if done > 0 {
-            let remaining = total - done
             let fill = Int(round(100.0 * Double(done) / Double(total)))
             return .bar(
                 label: "Copies:",
@@ -149,7 +149,14 @@ enum ActiveJobStripBuilder {
                 showPendingStart: false
             )
         }
-        return .bar(label: "Copies:", prefix: "0/\(total)", postfix: "", fillPercent: 0, slotText: "", showPendingStart: false)
+        return .bar(
+            label: "Copies:",
+            prefix: "0/\(total)",
+            postfix: "\(remaining)",
+            fillPercent: 0,
+            slotText: "",
+            showPendingStart: false
+        )
     }
 
     private static func queueJobsCountRow(totalJobs: Int) -> ActiveJobStripRowKind? {
