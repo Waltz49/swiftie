@@ -9,8 +9,8 @@
 #   ./Scripts/build_app.sh --debug
 #   ./Scripts/build_app.sh --python-root /path/to/swiftie
 #
-# The wrapper sets PROWSER_PYTHON_ROOT so Python workers can find prowser.py
-# and venv_image_browser/ (default: repo root next to swift/).
+# PROWSER_PYTHON_ROOT is set in Info.plist (LSEnvironment) so Python workers
+# can find prowser.py and venv_image_browser/ (default: repo root next to swift/).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,17 +102,10 @@ echo "Packaging $OUTPUT ..."
 rm -rf "$OUTPUT"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 
-cp "$BINARY" "$APP_MACOS/Prowser.bin"
-chmod +x "$APP_MACOS/Prowser.bin"
-ditto "$RESOURCE_BUNDLE" "$APP_MACOS/Prowser_Prowser.bundle"
-
-# Launcher sets PROWSER_PYTHON_ROOT for Finder/Dock launches (no shell env).
-cat > "$APP_MACOS/Prowser" <<EOF
-#!/bin/bash
-export PROWSER_PYTHON_ROOT="${PYTHON_ROOT}"
-exec "\$(dirname "\$0")/Prowser.bin" "\$@"
-EOF
+# CFBundleExecutable must be a Mach-O binary (shell scripts fail open with error -54).
+cp "$BINARY" "$APP_MACOS/Prowser"
 chmod +x "$APP_MACOS/Prowser"
+ditto "$RESOURCE_BUNDLE" "$APP_MACOS/Prowser_Prowser.bundle"
 
 cp "$INFO_PLIST_SRC" "$OUTPUT/Contents/Info.plist"
 
@@ -126,7 +119,7 @@ PLIST="$OUTPUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PROWSER_PYTHON_ROOT string ${PYTHON_ROOT}" "$PLIST"
 
 echo "Done: $OUTPUT"
-echo "  binary:        $APP_MACOS/Prowser.bin"
+echo "  binary:        $APP_MACOS/Prowser"
 echo "  python root:   $PYTHON_ROOT"
 echo ""
 echo "Launch:"

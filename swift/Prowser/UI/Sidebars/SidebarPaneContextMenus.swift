@@ -67,7 +67,7 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: "Show Toolbar",
+            title: toolbarToggleTitle(visible: appState.fileTreeToolbarVisible),
             checked: appState.fileTreeToolbarVisible,
             action: #selector(PaneMenuActions.treeShowToolbar(_:))
         )
@@ -93,7 +93,7 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: "Show Menu Bar",
+            title: toolbarToggleTitle(visible: appState.informationMenuBarVisible, noun: "Menu Bar"),
             checked: appState.informationMenuBarVisible,
             action: #selector(PaneMenuActions.infoShowMenuBar(_:))
         )
@@ -138,7 +138,7 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: "Show Toolbar",
+            title: toolbarToggleTitle(visible: appState.jobsToolbarVisible),
             checked: appState.jobsToolbarVisible,
             action: #selector(PaneMenuActions.jobsShowToolbar(_:))
         )
@@ -178,12 +178,17 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: "Show Toolbar",
+            title: toolbarToggleTitle(visible: appState.chatToolbarVisible),
             checked: appState.chatToolbarVisible,
             action: #selector(PaneMenuActions.chatShowToolbar(_:))
         )
         stripMenuIcons(menu)
         return menu
+    }
+
+    /// "Show Toolbar" while hidden, "Hide Toolbar" while visible (the item stays checkable).
+    private static func toolbarToggleTitle(visible: Bool, noun: String = "Toolbar") -> String {
+        (visible ? "Hide " : "Show ") + noun
     }
 
     private static func addAction(
@@ -230,6 +235,12 @@ final class PaneMenuActions: NSObject {
     static let shared = PaneMenuActions()
     weak var appState: AppState?
 
+    /// AppKit does not flip `NSMenuItem.state` on click; the item still carries the
+    /// pre-click state, so the new value is its inverse (mirrors Qt's `toggled(bool)`).
+    private func toggledValue(_ sender: NSMenuItem) -> Bool {
+        sender.state != .on
+    }
+
     @objc func treeCollapse(_ sender: NSMenuItem) {
         appState?.collapseFileTreeToHome()
     }
@@ -250,7 +261,7 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func treeShowToolbar(_ sender: NSMenuItem) {
-        appState?.setFileTreeToolbarVisible(sender.state == .on)
+        appState?.setFileTreeToolbarVisible(toggledValue(sender))
     }
 
     @objc func infoEdit(_ sender: NSMenuItem) {
@@ -278,17 +289,17 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func infoShowMenuBar(_ sender: NSMenuItem) {
-        appState?.setInformationMenuBarVisible(sender.state == .on)
+        appState?.setInformationMenuBarVisible(toggledValue(sender))
     }
 
     @objc func jobsIntermediate(_ sender: NSMenuItem) {
         guard let appState else { return }
-        appState.imageGen.setShowProgressiveImages(sender.state == .on)
+        appState.imageGen.setShowProgressiveImages(toggledValue(sender))
     }
 
     @objc func jobsHoldQueue(_ sender: NSMenuItem) {
         guard let appState else { return }
-        appState.imageGen.setHoldJobQueue(sender.state == .on)
+        appState.imageGen.setHoldJobQueue(toggledValue(sender))
     }
 
     @objc func jobsSkipCopy(_ sender: NSMenuItem) {
@@ -296,11 +307,11 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func jobsAlwaysOnTop(_ sender: NSMenuItem) {
-        appState?.setJobsPanelAlwaysOnTop(sender.state == .on)
+        appState?.setJobsPanelAlwaysOnTop(toggledValue(sender))
     }
 
     @objc func jobsShowToolbar(_ sender: NSMenuItem) {
-        appState?.setJobsToolbarVisible(sender.state == .on)
+        appState?.setJobsToolbarVisible(toggledValue(sender))
     }
 
     @objc func chatSystemPrompt(_ sender: NSMenuItem) {
@@ -309,12 +320,12 @@ final class PaneMenuActions: NSObject {
 
     @objc func chatCopyImages(_ sender: NSMenuItem) {
         guard let appState else { return }
-        appState.chat.setCopyImagesToAssistant(sender.state == .on)
+        appState.chat.setCopyImagesToAssistant(toggledValue(sender))
     }
 
     @objc func chatAutomaticCreate(_ sender: NSMenuItem) {
         guard let appState else { return }
-        appState.chat.setAutomaticCreate(sender.state == .on)
+        appState.chat.setAutomaticCreate(toggledValue(sender))
     }
 
     @objc func chatClear(_ sender: NSMenuItem) {
@@ -323,7 +334,7 @@ final class PaneMenuActions: NSObject {
 
     @objc func chatPreserve(_ sender: NSMenuItem) {
         guard let appState else { return }
-        appState.chat.setPreserveAcrossSessions(sender.state == .on)
+        appState.chat.setPreserveAcrossSessions(toggledValue(sender))
     }
 
     @objc func chatTips(_ sender: NSMenuItem) {
@@ -333,7 +344,7 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func chatShowToolbar(_ sender: NSMenuItem) {
-        appState?.setChatToolbarVisible(sender.state == .on)
+        appState?.setChatToolbarVisible(toggledValue(sender))
     }
 }
 

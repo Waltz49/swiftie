@@ -1669,6 +1669,10 @@ final class AppState {
         jobsToolbarVisible = visible
         config.updateSetting("jobs_show_toolbar", value: visible)
         config.applySettingsChange(emit: eventBus)
+        // Python: QTimer.singleShot(0, _refit_after_toolbar_visibility_change)
+        DispatchQueue.main.async { [weak self] in
+            self?.syncJobsPaneGeometry()
+        }
     }
 
     func setChatToolbarVisible(_ visible: Bool) {
