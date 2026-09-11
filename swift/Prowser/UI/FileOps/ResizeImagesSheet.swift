@@ -73,6 +73,15 @@ struct ResizeImagesSheet: View {
             }
             .pickerStyle(.radioGroup)
             .labelsHidden()
+            .onChange(of: resizeMode) { _, newMode in
+                if newMode == .percent {
+                    if percentAllowed {
+                        percentScale = min(ResizeImagesService.percentScaleDefault, maxPercent)
+                    } else {
+                        resizeMode = .dimensions
+                    }
+                }
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -80,13 +89,11 @@ struct ResizeImagesSheet: View {
                     TextField("", value: $width, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
-                        .disabled(resizeMode != .dimensions)
                         .onChange(of: width) { _, _ in onWidthChanged() }
                     Text("Height:")
                     TextField("", value: $height, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
-                        .disabled(resizeMode != .dimensions)
                         .onChange(of: height) { _, _ in onHeightChanged() }
                 }
 
@@ -98,28 +105,24 @@ struct ResizeImagesSheet: View {
                         tooltip: ImageGenDimHelperTooltips.square,
                         action: applySquareDims
                     )
-                    .disabled(resizeMode != .dimensions)
                     ImageGenDimHelperIconButton(
                         normalName: "dim_reverse_icon",
                         hoverName: "dim_reverse_icon_hover",
                         tooltip: ImageGenDimHelperTooltips.reverse,
                         action: applyReverseDims
                     )
-                    .disabled(resizeMode != .dimensions)
                     ImageGenDimHelperIconButton(
                         normalName: "dim_screen_icon",
                         hoverName: "dim_screen_icon_hover",
                         tooltip: ImageGenDimHelperTooltips.screenSize,
                         action: applyScreenDims
                     )
-                    .disabled(resizeMode != .dimensions)
                     ImageGenDimHelperIconButton(
                         normalName: "import_icon",
                         hoverName: "import_icon_hover",
                         tooltip: ImageGenDimHelperTooltips.importSize,
                         action: applyImportDims
                     )
-                    .disabled(resizeMode != .dimensions)
                 }
             }
             .padding(.leading, 20)
@@ -129,15 +132,15 @@ struct ResizeImagesSheet: View {
                     Slider(
                         value: Binding(
                             get: { Double(percentScale) },
-                            set: { percentScale = Int($0.rounded()) }
+                            set: { onPercentChanged(Int($0.rounded())) }
                         ),
                         in: Double(ResizeImagesService.percentScaleMin)...Double(maxPercent),
                         step: 1
                     )
-                    .disabled(resizeMode != .percent || !percentAllowed)
+                    .disabled(!percentAllowed)
                     Text("\(percentScale)%")
                         .frame(width: 42, alignment: .trailing)
-                        .foregroundStyle(resizeMode != .percent || !percentAllowed ? colors.dialogMutedText : colors.dialogText)
+                        .foregroundStyle(percentAllowed ? colors.dialogText : colors.dialogMutedText)
                 }
             }
             .padding(.leading, 20)
@@ -153,6 +156,7 @@ struct ResizeImagesSheet: View {
 
             Toggle("Preserve aspect ratio", isOn: $preserveAspect)
                 .onChange(of: preserveAspect) { _, checked in
+                    selectDimensionsMode()
                     if checked {
                         anchorIsWidth = true
                         applyPreserveFromWidth()
@@ -190,11 +194,6 @@ struct ResizeImagesSheet: View {
             minHeight: 440
         )
         .onAppear { loadFromSettings() }
-        .onChange(of: resizeMode) { _, newMode in
-            if newMode == .percent {
-                percentScale = min(ResizeImagesService.percentScaleDefault, maxPercent)
-            }
-        }
     }
 
     @MainActor
@@ -242,9 +241,26 @@ struct ResizeImagesSheet: View {
         updating = false
     }
 
+    private func selectDimensionsMode() {
+        if resizeMode != .dimensions {
+            resizeMode = .dimensions
+        }
+    }
+
+    private func selectPercentMode() {
+        guard percentAllowed, resizeMode != .percent else { return }
+        resizeMode = .percent
+    }
+
+    private func onPercentChanged(_ value: Int) {
+        guard !updating else { return }
+        selectPercentMode()
+        percentScale = value
+    }
+
     private func onWidthChanged() {
         guard !updating else { return }
-        resizeMode = .dimensions
+        selectDimensionsMode()
         width = max(1, min(dimSpinMax, width))
         if !preserveAspect { return }
         anchorIsWidth = true
@@ -253,7 +269,7 @@ struct ResizeImagesSheet: View {
 
     private func onHeightChanged() {
         guard !updating else { return }
-        resizeMode = .dimensions
+        selectDimensionsMode()
         height = max(1, min(dimSpinMax, height))
         if !preserveAspect { return }
         anchorIsWidth = false
@@ -291,7 +307,7 @@ struct ResizeImagesSheet: View {
     }
 
     private func applyScreenDims() {
-        resizeMode = .dimensions
+        selectDimensionsMode()
         let screen = NSScreen.main?.frame.size ?? NSSize(width: 1024, height: 1024)
         let sw = Int(screen.width.rounded())
         let sh = Int(screen.height.rounded())
@@ -313,19 +329,19 @@ struct ResizeImagesSheet: View {
     }
 
     private func applySquareDims() {
-        resizeMode = .dimensions
+        selectDimensionsMode()
         let cap = dimSpinMax
         let side = max(1, min(cap, width))
         setDimSpins(targetWidth: side, targetHeight: side)
     }
 
     private func applyReverseDims() {
-        resizeMode = .dimensions
+        selectDimensionsMode()
         setDimSpins(targetWidth: height, targetHeight: width)
     }
 
     private func applyImportDims() {
-        resizeMode = .dimensions
+        selectDimensionsMode()
         guard let path = appState.fileData.currentImagePath ?? paths.first,
               let dims = ResizeImagesService.dimensions(for: path) else {
             StyledMessageDialog.showWarning(title: "Import Size", message: "No image selected.")

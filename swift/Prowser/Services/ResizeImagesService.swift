@@ -243,27 +243,46 @@ enum ResizeImagesService {
             .appendingPathComponent(".resize_\(UUID().uuidString)")
             .appendingPathExtension((path as NSString).pathExtension)
 
-        guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
-            return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
-        }
-
-        var destProperties = properties
-        if var exif = destProperties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            if let userComment, !userComment.isEmpty {
-                exif[kCGImagePropertyExifUserComment] = ExifService.encodeUserCommentData(userComment)
+        if saveFormat == "WEBP" {
+            do {
+                try WebPImageWriter.write(
+                    image: resized,
+                    to: tempURL,
+                    sourcePathForMetadata: path,
+                    lossless: preserveTransparency && resizedHasAlpha(resized)
+                )
+            } catch {
+                try? FileManager.default.removeItem(at: tempURL)
+                return ResizeFileResult(
+                    success: false,
+                    error: error.localizedDescription,
+                    wroteFile: false,
+                    outputPath: nil
+                )
             }
-            destProperties[kCGImagePropertyExifDictionary] = exif
-        } else if let userComment, !userComment.isEmpty, ExifService.canWriteExif(path: path) {
-            destProperties[kCGImagePropertyExifDictionary] = [
-                kCGImagePropertyExifUserComment: ExifService.encodeUserCommentData(userComment),
-            ]
-        }
+        } else {
+            guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
+                return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
+            }
 
-        let saveProps = destinationProperties(for: saveFormat, base: destProperties)
-        CGImageDestinationAddImage(destination, resized, saveProps as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else {
-            try? FileManager.default.removeItem(at: tempURL)
-            return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
+            var destProperties = properties
+            if var exif = destProperties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+                if let userComment, !userComment.isEmpty {
+                    exif[kCGImagePropertyExifUserComment] = ExifService.encodeUserCommentData(userComment)
+                }
+                destProperties[kCGImagePropertyExifDictionary] = exif
+            } else if let userComment, !userComment.isEmpty, ExifService.canWriteExif(path: path) {
+                destProperties[kCGImagePropertyExifDictionary] = [
+                    kCGImagePropertyExifUserComment: ExifService.encodeUserCommentData(userComment),
+                ]
+            }
+
+            let saveProps = destinationProperties(for: saveFormat, base: destProperties)
+            CGImageDestinationAddImage(destination, resized, saveProps as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else {
+                try? FileManager.default.removeItem(at: tempURL)
+                return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
+            }
         }
 
         do {
@@ -449,6 +468,15 @@ enum ResizeImagesService {
         }
         context.draw(image, in: drawRect)
         return context.makeImage()
+    }
+
+    private static func resizedHasAlpha(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast:
+            return false
+        default:
+            return true
+        }
     }
 
     private static func resizeImage(
