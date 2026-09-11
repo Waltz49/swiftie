@@ -167,7 +167,8 @@ struct SidebarPaneSection<Content: View>: View {
 
             if isExpanded {
                 content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
                     .background(appState.theme.colors.sidebarBackground)
                     .overlay(alignment: .leading) {
                         if !omitLeftBorder {
@@ -205,7 +206,8 @@ struct SidebarPaneBody<Content: View>: View {
                 toolbar(for: kind)
             }
             content()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
         }
         .overlay {
             if let kind, !usesInternalContextMenu(kind) {
@@ -230,7 +232,7 @@ struct SidebarPaneBody<Content: View>: View {
 
     private func usesInternalContextMenu(_ kind: SidebarPaneContextMenuKind) -> Bool {
         switch kind {
-        case .fileTree, .chat:
+        case .fileTree, .chat, .jobs:
             return true
         default:
             return false

@@ -149,11 +149,11 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [x] Theme (`ThemeSettingsTab` + `ThemeService` — full color editor, custom themes, browse transparency)
 - [ ] Maps and Editor — `MapsEditorSettingsTab` (map app, external editor)
 - [~] Slideshow (`SlideshowSettingsTab` — core timing fields)
-- [ ] Models for Search — `ModelsSearchSettingsTab` (CLIP/similarity keys)
+- [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
 - [ ] Face Recognition — `FaceRecognitionSettingsTab` (`--min` hidden)
 - [ ] Captioning — `CaptioningSettingsTab` (`--min` hidden)
 - [ ] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
-- [~] Caches (`CacheSettingsTab` — clear thumbnails)
+- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, face, scrub; background CLIP toggles)
 
 ## Menus — File
 
@@ -376,9 +376,9 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 |-----|--------|-------|
 | `root_directories`, `favorite_directories`, `move_destinations` | done | done |
 | `exclude_directories`, `ignore_directories` | done | done |
-| `image_creation_directory`, `temporary_files_directory` | done | partial (UI exists; verify all paths) |
+| `image_creation_directory`, `temporary_files_directory` | done | done (settings + `AppConfig.temporaryFilesDirectory`) |
 | `ui_theme`, `*_theme_colors`, `custom_themes`, `browse_transparency_settings` | done | done |
-| `directory_menu_history` | done | done |
+| `shift_cmd_depth` | done | done (`FileTreeView` ⌘⇧↩ expand) |
 
 ### Image-gen & jobs (nested `imagegen` + job JSON files)
 
@@ -386,6 +386,12 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 |------------|--------|-------|
 | Per-plugin dialog values / `last_function` | done | done |
 | `imagegen_fast_open_action`, queue UI prefs | done | done |
+| `imagegen_job_cooldown_seconds`, `imagegen_inter_copy_cooldown_seconds` | done | done (`ImageGenDimLimits` + controller) |
+| `imagegen_output_format` | done | done (output path extension) |
+| `imagegen_max_generation_dimension`, `imagegen_low_ram` | done | done (Python worker/registry reads shared settings) |
+| `imagegen_unload_models_when_queue_held` | done | done (`ModelTasksBridge.unloadImageModel`) |
+| `use_prompt_filter_exits`, text/image exit scripts, prefix/postfix | done | partial (runtime on Python bridges for prompts) |
+| `say_exit` | done | done (`UserCommentSpeaker` + `ExitScriptUtils.sayExitArgv`) |
 | `jobs_pane_compact`, `jobs_display_mode` | done | done |
 | Job queue / active job JSON (`job_step_persistence`) | done | done |
 

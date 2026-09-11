@@ -6,6 +6,7 @@ struct FloatingJobQueuePanelView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        let _ = appState.imageGenUIRevision
         VStack(spacing: 0) {
             HStack {
                 Text("Job Control" + appState.imageGen.jobsPaneTitleSuffix())

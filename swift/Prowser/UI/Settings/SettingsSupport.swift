@@ -124,6 +124,43 @@ enum SettingsSupport {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         binding.wrappedValue = url.path
     }
+
+    static func pickDirectory(into binding: Binding<String>) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        binding.wrappedValue = url.path
+    }
+
+    static func pickFile(into binding: Binding<String>, allowedTypes: [String] = []) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        if !allowedTypes.isEmpty {
+            panel.allowedContentTypes = allowedTypes.compactMap { ext in
+                guard !ext.isEmpty else { return nil }
+                return .init(filenameExtension: ext)
+            }
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        binding.wrappedValue = url.path
+    }
+
+    static func pickApplication(into binding: Binding<String>) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        binding.wrappedValue = url.deletingPathExtension().lastPathComponent
+    }
 }
 
 struct SettingsPathRow: View {

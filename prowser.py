@@ -935,13 +935,13 @@ def main():
         os.environ["PROWSER_MIN_BUNDLE"] = "1"
 
     from workers.model_tasks_launch import set_background_mode
-    from workers.model_tasks_process_registry import reap_orphan_model_tasks_workers
+    from workers.model_tasks_process_registry import reap_orphan_workers
 
     set_background_mode(args.background)
-    reaped = reap_orphan_model_tasks_workers()
+    reaped = reap_orphan_workers()
     if reaped:
         print(
-            f"[model_tasks] reaped {len(reaped)} orphan worker(s): {reaped}",
+            f"[workers] reaped {len(reaped)} orphan worker(s): {reaped}",
             file=sys.stderr,
             flush=True,
         )

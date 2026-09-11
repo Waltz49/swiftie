@@ -285,12 +285,16 @@ def _preview_image_from_latents(pipe: Any, latents: Any) -> Any:
 
 
 def _write_progressive_preview(pipe: Any, latents: Any, output_path: str) -> bool:
-    """Decode latents and atomically update the run's output PNG for browse preview."""
+    """Decode latents and atomically update the run's output file for browse preview."""
+    from imagegen_plugins.image_gen_output_format import pil_save_kwargs_for_path
     from imagegen_plugins.pipelines.mflux_stepwise_progress import atomic_copy2
 
-    tmp_path = prowser_mkstemp_path(prefix="sd15-progress-", suffix=".png")
+    suffix = os.path.splitext(output_path)[1] or ".png"
+    tmp_path = prowser_mkstemp_path(prefix="sd15-progress-", suffix=suffix)
     try:
-        _preview_image_from_latents(pipe, latents).save(tmp_path)
+        _preview_image_from_latents(pipe, latents).save(
+            tmp_path, **pil_save_kwargs_for_path(output_path)
+        )
         atomic_copy2(tmp_path, output_path)
         return True
     finally:

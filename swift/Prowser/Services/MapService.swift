@@ -9,7 +9,11 @@ enum MapService {
         case openFailed(String)
     }
 
-    static func openMap(for paths: [String], preferredApp: String) -> Result<Void, MapError> {
+    static func openMap(
+        for paths: [String],
+        preferredApp: String,
+        temporaryDirectory: URL? = nil
+    ) -> Result<Void, MapError> {
         let existing = paths.filter { FileManager.default.fileExists(atPath: $0) }
         guard !existing.isEmpty else { return .failure(.noImages) }
 
@@ -26,17 +30,23 @@ enum MapService {
 
         let app = preferredApp.isEmpty ? "apple_maps" : preferredApp
         if app == "google_earth", located.count > 1 {
-            return openGoogleEarthKML(located)
+            return openGoogleEarthKML(located, temporaryDirectory: temporaryDirectory)
         }
 
         let (_, lat, lon) = located[0]
-        return openCoordinates(latitude: lat, longitude: lon, preferredApp: app)
+        return openCoordinates(
+            latitude: lat,
+            longitude: lon,
+            preferredApp: app,
+            temporaryDirectory: temporaryDirectory
+        )
     }
 
     private static func openCoordinates(
         latitude: Double,
         longitude: Double,
-        preferredApp: String
+        preferredApp: String,
+        temporaryDirectory: URL? = nil
     ) -> Result<Void, MapError> {
         switch preferredApp {
         case "google_maps":
@@ -45,7 +55,7 @@ enum MapService {
                 return .success(())
             }
         case "google_earth":
-            if case .success = openGoogleEarthKML([("", latitude, longitude)]) {
+            if case .success = openGoogleEarthKML([("", latitude, longitude)], temporaryDirectory: temporaryDirectory) {
                 return .success(())
             }
         default:
@@ -87,7 +97,8 @@ enum MapService {
     }
 
     private static func openGoogleEarthKML(
-        _ located: [(String, Double, Double)]
+        _ located: [(String, Double, Double)],
+        temporaryDirectory: URL?
     ) -> Result<Void, MapError> {
         let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.EarthPro")
             ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.earth")
@@ -115,8 +126,8 @@ enum MapService {
         </kml>
         """
 
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("prowser-map-\(UUID().uuidString).kml")
+        let tempRoot = temporaryDirectory ?? FileManager.default.temporaryDirectory
+        let url = tempRoot.appendingPathComponent("prowser-map-\(UUID().uuidString).kml")
         do {
             try kml.write(to: url, atomically: true, encoding: .utf8)
             let appName = appURL.deletingPathExtension().lastPathComponent

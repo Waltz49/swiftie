@@ -48,6 +48,19 @@ struct ProfilePaths: Sendable {
         return url
     }
 
+    var imageRecognitionCacheDirectory: URL {
+        let url = cacheDirectory.appendingPathComponent("image_recognition", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    var temporaryFilesDirectory: URL {
+        // Default-only; prefer ``AppConfig/temporaryFilesDirectory`` for settings-aware path.
+        let url = prowserHome.appendingPathComponent("tmp", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     var logsDirectory: URL {
         let url = prowserHome.appendingPathComponent("logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

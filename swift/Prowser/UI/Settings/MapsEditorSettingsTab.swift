@@ -20,14 +20,19 @@ struct MapsEditorSettingsTab: View {
 
                 SettingsSection(title: "External Image Editor") {
                     HStack {
-                        Text("Editor application")
-                        Spacer()
-                        Text(appState.config.string(forKey: "image_editor_app", default: "Preview"))
-                            .foregroundStyle(.secondary)
+                        TextField("Application name", text: editorBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 280)
+                        Button("Choose…") {
+                            SettingsSupport.pickApplication(into: Binding(
+                                get: { appState.config.string(forKey: "image_editor_app", default: "Preview") },
+                                set: { newValue in
+                                    appState.config.setValue(newValue, forKey: "image_editor_app")
+                                    settingsChanged()
+                                }
+                            ))
+                        }
                     }
-                    TextField("Application name", text: editorBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 280)
                     Text("Used for Edit in … context menu and ⌃E.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -17,6 +17,7 @@ enum DialogGeometryKey {
     static let about = "about_dialog_geometry"
     static let settings = "settings_dialog_geometry"
     static let settingsSizeFallback = "settings_dialog_size"
+    static let generationTiming = "generation_timing_dialog_geometry"
 
     static let imageGenDialog = "dialog_geometry"
     static let jobQueue = "job_queue_geometry"

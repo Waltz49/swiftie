@@ -99,7 +99,36 @@ struct FileTreeView: NSViewRepresentable {
         func expandToCurrentDirectoryIfRequested() {
             guard appState.fileTreeExpandToken != lastExpandToken else { return }
             lastExpandToken = appState.fileTreeExpandToken
+            let depth = appState.config.int(forKey: "shift_cmd_depth", default: 4)
+            expandFromSelection(maxLevels: max(1, depth))
             syncSelection()
+        }
+
+        private func expandFromSelection(maxLevels: Int) {
+            guard let outlineView, maxLevels > 0 else { return }
+            let startNode: FileTreeNode?
+            if outlineView.selectedRow >= 0,
+               let selected = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode {
+                startNode = selected
+            } else if let first = roots.first {
+                startNode = first
+            } else {
+                startNode = nil
+            }
+            guard let startNode else { return }
+            expandLevels(from: startNode, outlineView: outlineView, remaining: maxLevels)
+        }
+
+        private func expandLevels(from node: FileTreeNode, outlineView: NSOutlineView, remaining: Int) {
+            guard remaining > 0 else { return }
+            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+            outlineView.reloadItem(node, reloadChildren: true)
+            outlineView.expandItem(node)
+            expandedDirectoryPaths.insert(node.path)
+            guard remaining > 1, let children = node.children else { return }
+            for child in children where child.isDirectory {
+                expandLevels(from: child, outlineView: outlineView, remaining: remaining - 1)
+            }
         }
 
         func applyThemeIfNeeded() {

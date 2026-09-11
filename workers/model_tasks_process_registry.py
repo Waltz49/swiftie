@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Track and reap model_tasks_worker subprocess PIDs (macOS dev + frozen)."""
+"""Track and reap headless Python worker subprocess PIDs (macOS dev + frozen)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,14 @@ _TRACKED_PIDS: set[int] = set()
 _WORKER_MARKERS = (
     "workers.model_tasks_worker",
     "--model-tasks-worker",
+    "workers.chat_worker",
+    "workers.face_worker",
+    "workers.whisper_worker",
+    "workers.similarity_search_worker",
+    "workers.clip_search_worker",
+    "workers.person_search_worker",
+    "imagegen_plugins.lora_bridge",
+    "imagegen_plugins.registry_bridge",
 )
 
 
@@ -52,7 +60,7 @@ def _command_matches_worker(command: str) -> bool:
     return any(marker in command for marker in _WORKER_MARKERS)
 
 
-def list_model_tasks_worker_processes() -> list[tuple[int, int, str]]:
+def list_worker_processes() -> list[tuple[int, int, str]]:
     """Return (pid, ppid, command) for matching worker processes."""
     try:
         result = subprocess.run(
@@ -128,15 +136,20 @@ def terminate_worker_pid(
     return not is_pid_alive(pid)
 
 
-def reap_orphan_model_tasks_workers(
+def list_model_tasks_worker_processes() -> list[tuple[int, int, str]]:
+    """Backward-compatible alias for ``list_worker_processes``."""
+    return list_worker_processes()
+
+
+def reap_orphan_workers(
     *,
     keep_pids: Iterable[int] | None = None,
 ) -> list[int]:
-    """Kill worker processes orphaned by a prior prowser run (PPID 1 or dead parent)."""
+    """Kill worker processes orphaned by a prior app run (PPID 1 or dead parent)."""
     own_pid = os.getpid()
     keep = {int(p) for p in (keep_pids or ()) if int(p) > 0}
     killed: list[int] = []
-    for pid, ppid, _command in list_model_tasks_worker_processes():
+    for pid, ppid, _command in list_worker_processes():
         if pid == own_pid or pid in keep:
             continue
         if ppid != 1 and is_pid_alive(ppid):
@@ -145,8 +158,16 @@ def reap_orphan_model_tasks_workers(
             killed.append(pid)
         else:
             print(
-                f"[model_tasks] could not reap orphan worker pid={pid} ppid={ppid}",
+                f"[workers] could not reap orphan worker pid={pid} ppid={ppid}",
                 file=sys.stderr,
                 flush=True,
             )
     return killed
+
+
+def reap_orphan_model_tasks_workers(
+    *,
+    keep_pids: Iterable[int] | None = None,
+) -> list[int]:
+    """Backward-compatible alias for ``reap_orphan_workers``."""
+    return reap_orphan_workers(keep_pids=keep_pids)

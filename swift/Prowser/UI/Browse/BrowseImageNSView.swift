@@ -67,12 +67,18 @@ final class BrowseImageNSView: NSView {
         applyCurrentDisplayMode()
     }
 
-    func setImage(path: String?, actualSize: Bool) {
+    private var contentRevision = 0
+
+    func setImage(path: String?, actualSize: Bool, contentRevision: Int = 0) {
         let pathChanged = imagePath != path
         let modeChanged = preferredActualSize != actualSize
+        let contentChanged = self.contentRevision != contentRevision
         preferredActualSize = actualSize
+        self.contentRevision = contentRevision
         if pathChanged {
             imagePath = path
+        } else if contentChanged {
+            loadImage()
         } else if modeChanged {
             applyCurrentDisplayMode()
         }

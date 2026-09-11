@@ -21,8 +21,6 @@ enum SlideshowPresetUtils {
         ],
     ]
 
-    private static let validDirections = Set(["right", "left", "top", "bottom", "random", "none"])
-
     static func normalizePreset(_ preset: Any?, key: String) -> [String: Any] {
         let defaults = presetDefaults[key] ?? presetDefaults["0"]!
         guard let preset = preset as? [String: Any] else { return defaults }
@@ -35,7 +33,7 @@ enum SlideshowPresetUtils {
                 merged[field] = value.intValue
             }
         }
-        if let direction = preset["direction"] as? String, validDirections.contains(direction) {
+        if let direction = preset["direction"] as? String, Set(validDirections).contains(direction) {
             merged["direction"] = direction
         }
         return merged
@@ -50,6 +48,13 @@ enum SlideshowPresetUtils {
         guard transitionSpeed > 0 else { return 100 }
         return Int(100 - (Double(overlapDelay) / Double(transitionSpeed) * 100))
     }
+
+    static func overlapDelay(overlapPercent: Int, transitionSpeed: Int) -> Int {
+        guard transitionSpeed > 0 else { return 0 }
+        return Int((100 - overlapPercent) * transitionSpeed / 100)
+    }
+
+    static let validDirections = ["right", "left", "top", "bottom", "random", "none"]
 
     static func statusMessage(for preset: [String: Any]) -> String {
         let overlap = overlapPercent(

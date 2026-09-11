@@ -4,13 +4,17 @@ import SwiftUI
 struct GeneralSettingsTab: View {
     @Environment(AppState.self) private var appState
     @State private var filterDraft = ""
+    @State private var generalExpanded = true
+    @State private var thumbnailsExpanded = true
+    @State private var imageViewingExpanded = true
+    @State private var imageGenExpanded = true
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("General").font(.title2)
 
-                SettingsSection(title: "Behavior") {
+                CollapsibleSettingsSection(title: "Behavior", stateKey: "general", isExpanded: $generalExpanded) {
                     Toggle("Confirm delete (⌘Delete)", isOn: boolBinding("confirm_delete", default: true))
                     Toggle("Wrap around when navigating", isOn: boolBinding("wrap_around", default: true))
                     Toggle("Restore state on launch", isOn: restoreStateBinding)
@@ -19,23 +23,11 @@ struct GeneralSettingsTab: View {
                         "Peek status bar when cursor nears bottom",
                         isOn: boolBinding("raise_status_bar_on_cursor_near_bottom", default: true)
                     )
-                }
-
-                SettingsSection(title: "Images") {
-                    Toggle("Use EXIF rotation", isOn: Binding(
-                        get: { !appState.config.ignoreExifRotation },
-                        set: { useRotation in
-                            appState.config.setValue(!useRotation, forKey: "ignore_exif_rotation")
-                            Task {
-                                await appState.thumbnailCache.updateExifSetting(ignore: !useRotation)
-                            }
-                            settingsChanged()
-                        }
-                    ))
+                    Toggle("Use EXIF rotation", isOn: exifRotationBinding)
                     Toggle("Prefer EXIF date for sorting", isOn: boolBinding("use_exif_date", default: true))
                 }
 
-                SettingsSection(title: "Thumbnails") {
+                CollapsibleSettingsSection(title: "Thumbnails", stateKey: "thumbnails", isExpanded: $thumbnailsExpanded) {
                     Toggle("Show filenames on thumbnails", isOn: boolBinding("thumbnail_filename_visible"))
                     Toggle("Show extensions in overlays", isOn: boolBinding("show_extensions", default: true))
                     Toggle("Show image dimensions in overlays", isOn: boolBinding("show_image_size"))
@@ -54,6 +46,47 @@ struct GeneralSettingsTab: View {
                     Text("Glob pattern for filenames (e.g. *.jpg, IMG_*).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Toggle("Drag/drop changes dates when sorted by date", isOn: boolBinding("drag_drop_auto_date_change"))
+                    Toggle("Allow thumbnail locking (⇧⌘L)", isOn: boolBinding("allow_thumbnail_locking"))
+                    Toggle("Allow Quick Mass Rename (⇧⌘M)", isOn: boolBinding("allow_quick_mass_rename"))
+                }
+
+                CollapsibleSettingsSection(title: "Image Viewing", stateKey: "image_viewing", isExpanded: $imageViewingExpanded) {
+                    Picker("Space Key", selection: stringBinding("space_key_mode", default: "exit")) {
+                        Text("Exit to thumbnails").tag("exit")
+                        Text("Show next image").tag("advance")
+                    }
+                    .pickerStyle(.radioGroup)
+                    .frame(maxWidth: 360)
+
+                    HStack {
+                        Text("Remember image after")
+                        Slider(
+                            value: Binding(
+                                get: { Double(historySliderIndex) },
+                                set: { newValue in
+                                    let ms = Int(newValue) * 500
+                                    appState.config.setValue(ms, forKey: "browse_image_history_save_after_ms")
+                                    settingsChanged()
+                                }
+                            ),
+                            in: 0...10,
+                            step: 1
+                        )
+                        Text(historyDelayLabel)
+                            .monospacedDigit()
+                            .frame(width: 72, alignment: .trailing)
+                    }
+                    Text("For Image History (F3)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if BundleCapabilities.imageGenUIEnabled {
+                    CollapsibleSettingsSection(title: "Image Generation", stateKey: "image_generation", isExpanded: $imageGenExpanded) {
+                        ImageGenerationSettingsSection()
+                    }
                 }
             }
             .padding(20)
@@ -61,7 +94,33 @@ struct GeneralSettingsTab: View {
         }
         .onAppear {
             filterDraft = FilterPatternFormatting.forEditing(appState.filterSettings.filterPattern)
+            generalExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "general")
+            thumbnailsExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "thumbnails")
+            imageViewingExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_viewing")
+            imageGenExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_generation")
         }
+        .onChange(of: generalExpanded) { _, value in
+            appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "general", expanded: value)
+        }
+        .onChange(of: thumbnailsExpanded) { _, value in
+            appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "thumbnails", expanded: value)
+        }
+        .onChange(of: imageViewingExpanded) { _, value in
+            appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_viewing", expanded: value)
+        }
+        .onChange(of: imageGenExpanded) { _, value in
+            appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_generation", expanded: value)
+        }
+    }
+
+    private var historySliderIndex: Int {
+        appState.config.int(forKey: "browse_image_history_save_after_ms", default: 3000) / 500
+    }
+
+    private var historyDelayLabel: String {
+        let ms = appState.config.int(forKey: "browse_image_history_save_after_ms", default: 3000)
+        if ms == 0 { return "Immediate" }
+        return "\(ms) ms"
     }
 
     private var restoreStateBinding: Binding<Bool> {
@@ -71,8 +130,25 @@ struct GeneralSettingsTab: View {
         )
     }
 
+    private var exifRotationBinding: Binding<Bool> {
+        Binding(
+            get: { !appState.config.ignoreExifRotation },
+            set: { useRotation in
+                appState.config.setValue(!useRotation, forKey: "ignore_exif_rotation")
+                Task {
+                    await appState.thumbnailCache.updateExifSetting(ignore: !useRotation)
+                }
+                settingsChanged()
+            }
+        )
+    }
+
     private func boolBinding(_ key: String, default defaultValue: Bool = false) -> Binding<Bool> {
         SettingsSupport.boolBinding(config: appState.config, key: key, default: defaultValue, onChange: settingsChanged)
+    }
+
+    private func stringBinding(_ key: String, default defaultValue: String) -> Binding<String> {
+        SettingsSupport.stringBinding(config: appState.config, key: key, default: defaultValue, onChange: settingsChanged)
     }
 
     private func settingsChanged() {

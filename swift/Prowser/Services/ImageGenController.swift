@@ -1,7 +1,7 @@
 import Foundation
 
 /// Swift port of `imagegen_plugins/image_gen_controller.py`.
-@Observable
+/// UI refresh is driven by ``AppState/imageGenUIRevision`` (not Swift Observation).
 @MainActor
 final class ImageGenController {
     private let config: AppConfig
@@ -17,6 +17,7 @@ final class ImageGenController {
     private(set) var taskStatusHTML = ""
     private(set) var progressivePreviewPath: String?
     private(set) var showProgressiveImages = false
+    private var progressiveBrowseOpened = false
     private var activeOutputPath: String?
     private(set) var holdJobQueue = false
     private(set) var queueRevision = 0
@@ -28,6 +29,12 @@ final class ImageGenController {
 
     private var skipSeriesCopyRequested = false
     private var generationStartTime: Date?
+    private var stepProgressStartTime: Date?
+    private var stepProgressCompletedAt: Date?
+    private var frozenElapsedSeconds: Double?
+    private var stepSecondsPerStep: Double?
+    private var historicalAvgTotalSeconds: Double?
+    private var generationTimingKey: GenerationTimingKey?
     private var liveStep = 0
     private var liveStepTotal = 0
     private var liveEstimateSeconds: Double?
@@ -47,6 +54,9 @@ final class ImageGenController {
     private var jobAIStageActive = false
     private var cooldownTask: Task<Void, Never>?
     private var cooldownDisplayTask: Task<Void, Never>?
+    private var cooldownBeforeNextJob = false
+    /// Last cooldown second shown in the strip (skip redundant 500ms timer polls).
+    private var lastCooldownUISecond: Int?
     private var liveStatusTask: Task<Void, Never>?
     private var activeStatusView: QueueJobStatusView?
     private var quitAfterCurrentWorker = false
@@ -55,8 +65,9 @@ final class ImageGenController {
     private var exitQueuePersisted = false
     private var queuePersistSuppressed = false
     private var startupQueueHold = false
-    private var startupQueueReleaseTask: Task<Void, Never>?
+    private var startupQueueReleaseToken = 0
     private var copyBatchCancelled = false
+    private var pendingCancelJobID = ""
     private var suppressTaskFailureUI = false
     private let deferredQuitDialog = DeferredQuitDialog()
 
@@ -93,7 +104,8 @@ final class ImageGenController {
 
     var onImageGenerated: ((String) -> Void)?
     /// Called when a progressive step preview is written to disk (debounced by AppState).
-    var onProgressivePreview: ((String) -> Void)?
+    /// Second argument is true when browse should be entered (first preview or final step).
+    var onProgressivePreview: ((String, Bool) -> Void)?
     var onQueueChanged: (() -> Void)?
 
     init(
@@ -129,14 +141,15 @@ final class ImageGenController {
 
     func scheduleStartupQueueRelease(delayMs: Int = 6_000) {
         guard startupQueueHold, !holdJobQueue else { return }
-        startupQueueReleaseTask?.cancel()
-        startupQueueReleaseTask = Task {
-            let delay = max(0, delayMs)
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+        startupQueueReleaseToken += 1
+        let token = startupQueueReleaseToken
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if delayMs > 0 {
+                try? await Task.sleep(for: .milliseconds(delayMs))
             }
-            guard !Task.isCancelled else { return }
-            releaseStartupQueueHold()
+            guard token == self.startupQueueReleaseToken else { return }
+            self.releaseStartupQueueHold()
         }
     }
 
@@ -157,7 +170,7 @@ final class ImageGenController {
         showProgressiveImages = imagegen["show_progressive_images"] as? Bool ?? false
         let newHold = imagegen["hold_job_queue"] as? Bool ?? false
         if newHold {
-            startupQueueReleaseTask?.cancel()
+            startupQueueReleaseToken += 1
             startupQueueHold = false
         }
         holdJobQueue = newHold
@@ -167,12 +180,30 @@ final class ImageGenController {
         guard showProgressiveImages != enabled else { return }
         showProgressiveImages = enabled
         mutateImagegen { $0["show_progressive_images"] = enabled }
+        if enabled,
+           isProcessing,
+           let path = activeOutputPath,
+           !path.isEmpty {
+            progressiveBrowseOpened = false
+            onProgressivePreview?(path, true)
+        }
+    }
+
+    func resetProgressiveBrowseOpened() {
+        progressiveBrowseOpened = false
+    }
+
+    func noteProgressiveBrowseOpened() {
+        progressiveBrowseOpened = true
     }
 
     func setHoldJobQueue(_ enabled: Bool) {
         guard holdJobQueue != enabled else { return }
         holdJobQueue = enabled
         mutateImagegen { $0["hold_job_queue"] = enabled }
+        if enabled {
+            scheduleUnloadImageModelForQueueHold()
+        }
         if !enabled {
             startupQueueHold = false
             resumeAfterHoldReleased()
@@ -193,6 +224,7 @@ final class ImageGenController {
     func skipCopyCooldown() {
         cooldownTask?.cancel()
         cooldownSecondsRemaining = 0
+        lastCooldownUISecond = nil
         bumpQueueRevision()
         Task { await promoteAndRunNextStep() }
     }
@@ -420,13 +452,19 @@ final class ImageGenController {
     }
 
     func cancelActiveJob() {
-        modelTasks.cancel()
-        copyBatchActive = false
-        if let activeJobID,
-           let index = queue.jobs.firstIndex(where: { $0.jobID == activeJobID }) {
-            queue.jobs[index].statusHTML = "Cancelled"
+        guard isRunning() || activeJobID != nil else { return }
+        copyBatchCancelled = true
+        skipSeriesCopyRequested = false
+        pendingCancelJobID = activeJobID ?? ""
+        cooldownTask?.cancel()
+        cooldownDisplayTask?.cancel()
+        cooldownSecondsRemaining = 0
+        if jobAIStageActive {
+            foregroundTasks.cancel()
+            jobAIStageActive = false
         }
-        finishActiveJob(cancelled: true)
+        modelTasks.cancel()
+        finishCancelledBatchIfNeeded()
     }
 
     func removeJob(id: String) {
@@ -605,11 +643,17 @@ final class ImageGenController {
 
     private func startNextQueuedJobIfIdle() async {
         guard isEnabled, !modelTasks.isBusy, activeJobID == nil, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed else { return }
+        if modelTasks.workerNeedsCleanup {
+            Task {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                await startNextQueuedJobIfIdle()
+            }
+            return
+        }
         guard let index = queue.jobs.firstIndex(where: { $0.statusHTML == "Queued" || $0.statusLabel == "Queued" }) else {
             return
         }
         var job = queue.jobs[index]
-        queue.jobs.remove(at: index)
         let resolvedPrompt = JobStepQueue.resolvedFullPrompt(
             stored: job.fullPrompt,
             values: job.values,
@@ -642,7 +686,13 @@ final class ImageGenController {
                 )
             } catch {
                 lastError = error.localizedDescription
+                abortQueuedJobStart()
+                return
             }
+        }
+        guard !steps.isEmpty else {
+            abortQueuedJobStart()
+            return
         }
         activeJobID = job.jobID
         activePluginID = job.pluginID
@@ -670,12 +720,12 @@ final class ImageGenController {
 
     private func promoteAndRunNextStep() async {
         guard var doc = stepPendingDoc else {
-            finishActiveJob(cancelled: false)
+            finishOrAbortQueuedJobStart()
             return
         }
         guard let step = JobStepQueue.popNextStep(from: &doc) else {
             stepPendingDoc = doc
-            finishActiveJob(cancelled: false)
+            finishOrAbortQueuedJobStart()
             return
         }
         stepPendingDoc = doc
@@ -690,7 +740,8 @@ final class ImageGenController {
         taskStatusHTML = progressMessage
         startLiveStatusTimer()
         await refreshActiveJobStatusView()
-        bumpQueueRevision()
+        rebuildActiveStripViewLocally()
+        bumpStripUI()
 
         let displayPrompt = (stepPendingDoc?["display"] as? [String: Any])?["full_prompt"] as? String ?? ""
         let statusViewPrompt = JobStepQueue.promptFromStatusView(activeStatusView)
@@ -729,7 +780,18 @@ final class ImageGenController {
             await launchGeneration(values: updated)
         } catch {
             jobAIStageActive = false
-            handleStepFailure(error.localizedDescription)
+            let message = error.localizedDescription
+            if message == "Cancelled" {
+                if suppressTaskFailureUI || queuePersistSuppressed { return }
+                if !copyBatchCancelled && seriesContinues() {
+                    skipSeriesCopyRequested = false
+                    Task { await continueAfterAbortedStep() }
+                    return
+                }
+                finishCancelledBatchIfNeeded()
+                return
+            }
+            handleStepFailure(message)
         }
     }
 
@@ -765,8 +827,10 @@ final class ImageGenController {
     }
 
     private func launchGeneration(values: [String: Any]) async {
-        let outputPath = ImageGenPathNaming.nextImageGenPath(config: config, ext: ".png")
+        let ext = ImageGenDimLimits.outputExtension(from: config.rawSettings())
+        let outputPath = ImageGenPathNaming.nextImageGenPath(config: config, ext: ext)
         activeOutputPath = outputPath
+        progressiveBrowseOpened = false
         do {
             let payload = try await registry.buildPayload(
                 pluginID: activePluginID,
@@ -788,10 +852,19 @@ final class ImageGenController {
             }
             progressMessage = "Generating…"
             taskStatusHTML = progressMessage
+            if let steps = values["steps"] as? Int {
+                liveStepTotal = steps
+            } else if let steps = values["steps"] as? NSNumber {
+                liveStepTotal = steps.intValue
+            }
             generationStartTime = Date()
+            stepProgressStartTime = Date()
             await refreshActiveJobStatusView()
             await refreshActiveStripView()
             _ = try modelTasks.startGenerate(payload: payload)
+            if let activeJobID {
+                popQueuedJob(jobID: activeJobID)
+            }
             bumpQueueRevision()
         } catch {
             handleStepFailure(error.localizedDescription)
@@ -805,51 +878,83 @@ final class ImageGenController {
         }
         if skipSeriesCopyRequested {
             _ = outputPath
-            stepRunning = nil
-            if seriesContinues() {
-                Task { await promoteAndRunNextStep() }
-            } else {
-                finishActiveJob(cancelled: false)
-            }
+            Task { await continueAfterAbortedStep() }
             return
         }
 
-        if success, !outputPath.isEmpty {
+        let resolvedOutput = outputPath.isEmpty ? (activeOutputPath ?? "") : outputPath
+        if success, !resolvedOutput.isEmpty {
+            if copyBatchCancelled {
+                return
+            }
             let exifPluginID = activePluginID
             let exifValues = pendingValues
             let workerResult = modelTasks.lastGenerateResult
-            let exifElapsed = elapsedSeconds()
+            let exifElapsed = liveGenerationElapsedSeconds()
+                ?? stepProgressStartTime.map { Date().timeIntervalSince($0) }
             let fallbackSourcePaths = exifFallbackSourcePaths(from: exifValues)
+            onImageGenerated?(resolvedOutput)
+            lastError = ""
+            progressMessage = "Done"
             Task {
+                if copyBatchCancelled { return }
+                if let exifElapsed {
+                    await recordGenerationTimingRun(values: exifValues, elapsedSeconds: exifElapsed)
+                }
+                guard !copyBatchCancelled else { return }
                 await writeGenerationExif(
-                    outputPath: outputPath,
+                    outputPath: resolvedOutput,
                     pluginID: exifPluginID,
                     values: exifValues,
                     workerResult: workerResult,
                     elapsedSeconds: exifElapsed,
                     fallbackSourcePaths: fallbackSourcePaths
                 )
+                guard !copyBatchCancelled else { return }
+                await completeSuccessfulGenerationUnit()
             }
-            onImageGenerated?(outputPath)
-            lastError = ""
-            progressMessage = "Done"
+            return
         } else {
             lastError = error
             if error == "Cancelled" {
                 if suppressTaskFailureUI || queuePersistSuppressed {
                     return
                 }
-                finishActiveJob(cancelled: true)
+                if !copyBatchCancelled && seriesContinues() {
+                    skipSeriesCopyRequested = false
+                    Task { await continueAfterAbortedStep() }
+                    return
+                }
+                let pendingCancel = pendingCancelJobID
+                let activeID = activeJobID
+                if !pendingCancel.isEmpty, let activeID, pendingCancel != activeID {
+                    return
+                }
+                let outputForRepair = resolvedOutput
+                Task {
+                    await repairCancelledOutputExifReferences(outputPath: outputForRepair)
+                    finishCopyBatch(cancelled: true)
+                }
                 return
             }
+            removePartialOutput(at: resolvedOutput)
+            if !suppressTaskFailureUI {
+                let message = error.isEmpty ? "Image generation failed." : String(error.prefix(4000))
+                StyledMessageDialog.showCritical(title: "Generation failed", message: message)
+            }
+            finishCopyBatch(cancelled: false)
+            return
         }
+    }
 
+    private func completeSuccessfulGenerationUnit() async {
+        guard !copyBatchCancelled else { return }
         stepRunning = nil
         if finishCurrentUnitAndMaybeQuit() {
             return
         }
         if seriesContinues() {
-            scheduleCooldownThen { await self.promoteAndRunNextStep() }
+            scheduleCopyCooldownThen { await self.promoteAndRunNextStep() }
         } else {
             finishActiveJob(cancelled: false)
         }
@@ -861,7 +966,39 @@ final class ImageGenController {
         return JobStepQueue.pendingStepCount(stepPendingDoc) > 0
     }
 
+    private func continueAfterAbortedStep() async {
+        stepRunning = nil
+        if seriesContinues() {
+            await promoteAndRunNextStep()
+        } else {
+            finishCopyBatch(cancelled: false)
+        }
+    }
+
+    private func finishCancelledBatchIfNeeded() {
+        guard copyBatchCancelled else { return }
+        if modelTasks.isBusy || jobAIStageActive {
+            return
+        }
+        finishCopyBatch(cancelled: true)
+    }
+
     private func finishActiveJob(cancelled: Bool) {
+        finishCopyBatch(cancelled: cancelled)
+    }
+
+    private func finishCopyBatch(cancelled: Bool = false) {
+        guard activeJobID != nil || isProcessing || stepRunning != nil || stepPendingDoc != nil
+            || copyBatchCancelled || jobAIStageActive else {
+            return
+        }
+        let cancelledJobID = cancelled ? (activeJobID ?? pendingCancelJobID) : ""
+        cooldownTask?.cancel()
+        cooldownDisplayTask?.cancel()
+        cooldownSecondsRemaining = 0
+        if cancelled, !cancelledJobID.isEmpty {
+            removeCancelledJobFromQueue(jobID: cancelledJobID)
+        }
         activeJobID = nil
         isProcessing = false
         progressMessage = ""
@@ -869,13 +1006,12 @@ final class ImageGenController {
         stopLiveStatusTimer()
         activeStatusView = nil
         activeStripView = ActiveJobStripStatusView()
+        resetActiveJobProgressTracking()
         generationStartTime = nil
-        liveStep = 0
-        liveStepTotal = 0
-        liveEstimateSeconds = nil
         skipSeriesCopyInFlight = false
         progressivePreviewPath = nil
         activeOutputPath = nil
+        progressiveBrowseOpened = false
         activeThumbnailPaths = []
         activeJobCardThumbnailPathsCache = []
         stepRunning = nil
@@ -884,6 +1020,8 @@ final class ImageGenController {
         copiesTotal = 0
         copiesDone = 0
         jobAIStageActive = false
+        copyBatchCancelled = false
+        pendingCancelJobID = ""
         if !queuePersistSuppressed {
             JobStepPersistence.saveActiveRunning(nil, config: config)
             JobStepPersistence.saveActivePending(nil, config: config)
@@ -891,9 +1029,22 @@ final class ImageGenController {
         }
         bumpQueueRevision()
         if !holdJobQueue, !queueAdvanceSuppressed, !startupQueueHold {
-            Task { await startNextQueuedJobIfIdle() }
+            if !queue.jobs.isEmpty, jobCooldownSeconds() > 0 {
+                scheduleJobCooldownThen { await self.startNextQueuedJobIfIdle() }
+            } else {
+                Task { await startNextQueuedJobIfIdle() }
+            }
         }
         maybeQuitAfterCurrentWorker()
+    }
+
+    private func removeCancelledJobFromQueue(jobID: String) {
+        guard !jobID.isEmpty else { return }
+        let before = queue.jobs.count
+        queue.jobs.removeAll { $0.jobID == jobID }
+        if queue.jobs.count != before {
+            bumpQueueRevision()
+        }
     }
 
     private func handleStepFailure(_ message: String) {
@@ -901,27 +1052,106 @@ final class ImageGenController {
         lastError = message
         progressMessage = "Failed"
         taskStatusHTML = progressMessage
-        finishActiveJob(cancelled: true)
+        finishOrAbortQueuedJobStart()
+    }
+
+    private func finishOrAbortQueuedJobStart() {
+        if let activeJobID, queuedJob(byID: activeJobID) != nil {
+            abortQueuedJobStart()
+        } else {
+            finishActiveJob(cancelled: false)
+        }
+    }
+
+    private func queuedJob(byID jobID: String) -> ImageGenQueuedJob? {
+        queue.jobs.first { $0.jobID == jobID }
+    }
+
+    @discardableResult
+    private func popQueuedJob(jobID: String) -> Bool {
+        guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return false }
+        queue.jobs.remove(at: index)
+        persistQueue()
+        bumpQueueRevision()
+        return true
+    }
+
+    /// Reset after a queued job failed to start; queue row stays in place (Python ``_abort_queued_job_start``).
+    private func abortQueuedJobStart() {
+        stopLiveStatusTimer()
+        activeJobID = nil
+        isProcessing = false
+        progressMessage = ""
+        taskStatusHTML = ""
+        activeStatusView = nil
+        activeStripView = ActiveJobStripStatusView()
+        resetActiveJobProgressTracking()
+        generationStartTime = nil
+        skipSeriesCopyInFlight = false
+        progressivePreviewPath = nil
+        activeOutputPath = nil
+        progressiveBrowseOpened = false
+        activeThumbnailPaths = []
+        activeJobCardThumbnailPathsCache = []
+        stepRunning = nil
+        stepPendingDoc = nil
+        copyBatchActive = false
+        copiesTotal = 0
+        copiesDone = 0
+        jobAIStageActive = false
+        activePluginID = ""
+        activeFunction = "create"
+        pendingValues = [:]
+        if !queuePersistSuppressed {
+            JobStepPersistence.saveActiveRunning(nil, config: config)
+            JobStepPersistence.saveActivePending(nil, config: config)
+            persistQueue()
+        }
+        bumpQueueRevision()
+        Task { await startNextQueuedJobIfIdle() }
     }
 
     private func processNextIfIdle() {
         Task { await startNextQueuedJobIfIdle() }
     }
 
-    private func scheduleCooldownThen(_ action: @escaping () async -> Void) {
+    private func isMultistepSeriesJob() -> Bool {
+        copyBatchActive && copiesTotal > 1
+    }
+
+    private func copyCooldownSeconds() -> Int {
+        guard isMultistepSeriesJob() else { return 0 }
+        return ImageGenDimLimits.appInterCopyCooldownSeconds(settings: config.rawSettings())
+    }
+
+    private func jobCooldownSeconds() -> Int {
+        ImageGenDimLimits.appJobCooldownSeconds(settings: config.rawSettings())
+    }
+
+    private func scheduleCopyCooldownThen(_ action: @escaping () async -> Void) {
+        cooldownBeforeNextJob = false
+        scheduleCooldownTimer(seconds: copyCooldownSeconds(), action: action)
+    }
+
+    private func scheduleJobCooldownThen(_ action: @escaping () async -> Void) {
+        cooldownBeforeNextJob = true
+        scheduleCooldownTimer(seconds: jobCooldownSeconds(), action: action)
+    }
+
+    private func scheduleCooldownTimer(seconds: Int, action: @escaping () async -> Void) {
         cooldownTask?.cancel()
         cooldownDisplayTask?.cancel()
-        let ms = config.imageGenInt("job_cooldown_ms", default: 0)
-        let seconds = max(0, ms / 1000)
-        cooldownSecondsRemaining = seconds
-        Task { await refreshActiveStripView() }
-        bumpQueueRevision()
+        enterCopyCooldownAfterSuccess()
+        let afterJob = cooldownBeforeNextJob
+        let ms = max(0, seconds * 1000)
+        cooldownSecondsRemaining = max(0, seconds)
+        lastCooldownUISecond = nil
+        Task { await refreshActiveStripView(force: true) }
         cooldownDisplayTask = Task {
             while cooldownSecondsRemaining > 0, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 cooldownSecondsRemaining = max(0, cooldownSecondsRemaining - 1)
                 await refreshActiveStripView()
-                bumpQueueRevision()
             }
         }
         cooldownTask = Task {
@@ -930,6 +1160,19 @@ final class ImageGenController {
             }
             guard !Task.isCancelled else { return }
             cooldownSecondsRemaining = 0
+            cooldownBeforeNextJob = false
+            lastCooldownUISecond = nil
+            if afterJob {
+                if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
+                    maybeQuitAfterCurrentWorker()
+                    return
+                }
+                if holdJobQueue || queueAdvanceSuppressed || startupQueueHold {
+                    return
+                }
+                await action()
+                return
+            }
             if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
                 finishCopyBatchForDeferredQuit()
                 maybeQuitAfterCurrentWorker()
@@ -1024,9 +1267,49 @@ final class ImageGenController {
     }
 
     private func bumpQueueRevision() {
-        guard dialogBuildPauseCount == 0 else { return }
-        queueRevision += 1
+        if dialogBuildPauseCount == 0 {
+            queueRevision += 1
+        }
+        bumpStripUI()
+    }
+
+    /// Always refresh job-pane / strip SwiftUI (not blocked by dialog build pause).
+    private func bumpStripUI() {
         onQueueChanged?()
+    }
+
+    /// Port of ``ImageGenController.task_status_display_needs_refresh``.
+    private func stripDisplayNeedsRefresh() -> Bool {
+        guard cooldownSecondsRemaining > 0 else { return true }
+        return cooldownSecondsRemaining != lastCooldownUISecond
+    }
+
+    private func markStripDisplayRefreshed() {
+        if cooldownSecondsRemaining > 0 {
+            lastCooldownUISecond = cooldownSecondsRemaining
+        } else {
+            lastCooldownUISecond = nil
+        }
+    }
+
+    private func rebuildActiveStripViewLocally(includeQueueJobsRow: Bool = false) {
+        guard isProcessing || cooldownSecondsRemaining > 0 else {
+            activeStripView = ActiveJobStripStatusView()
+            return
+        }
+        let timing = currentTimingForDisplay()
+        let elapsed = timing.elapsed ?? wallClockElapsedSeconds(inCooldown: cooldownSecondsRemaining > 0) ?? 0
+        activeStripView = ActiveJobStripBuilder.build(
+            elapsedSeconds: elapsed,
+            estimateSeconds: timing.estimate,
+            step: liveStep,
+            stepTotal: liveStepTotal,
+            stepsLabel: jobAIStageActive ? "AI:" : "Steps:",
+            cooldownRemaining: cooldownSecondsRemaining,
+            completedSeries: copiesDone,
+            totalSeries: copiesTotal > 1 ? copiesTotal : nil,
+            totalQueueJobs: includeQueueJobsRow ? queueSnapshot().count : nil
+        )
     }
 
     private func wireBridgeCallbacks() {
@@ -1035,7 +1318,9 @@ final class ImageGenController {
             if kind == "generate" {
                 self.progressMessage = "Generating…"
                 self.taskStatusHTML = self.progressMessage
-                self.bumpQueueRevision()
+                Task { await self.beginGenerationProgressTracking(values: self.pendingValues) }
+                self.rebuildActiveStripViewLocally()
+                self.bumpStripUI()
             }
         }
         modelTasks.onProgress = { [weak self] message in
@@ -1045,38 +1330,53 @@ final class ImageGenController {
                 ?? message["path"] as? String {
                 self.progressivePreviewPath = path
                 let step = (message["step"] as? Int) ?? Int("\(message["step"] ?? "")") ?? -1
+                let stepTotal = (message["step_total"] as? Int)
+                    ?? Int("\(message["step_total"] ?? "")")
+                    ?? self.liveStepTotal
                 if self.showProgressiveImages, step != 0 {
-                    self.onProgressivePreview?(path)
+                    let isFinal = step > 0 && stepTotal > 0 && step >= stepTotal
+                    let forceEnterBrowse = isFinal || !self.progressiveBrowseOpened
+                    self.onProgressivePreview?(path, forceEnterBrowse)
                 }
             }
             if let step = message["step"] as? Int {
-                self.liveStep = step
-                self.progressMessage = "Step \(step)"
-                self.taskStatusHTML = self.progressMessage
+                self.updateLiveStepProgress(step: step, stepTotal: message["step_total"])
             } else if let step = message["step"] {
-                self.liveStep = (step as? Int) ?? Int("\(step)") ?? self.liveStep
-                self.progressMessage = "Step \(step)"
-                self.taskStatusHTML = self.progressMessage
-            }
-            if let total = message["step_total"] as? Int {
+                let stepInt = (step as? Int) ?? Int("\(step)") ?? self.liveStep
+                self.updateLiveStepProgress(step: stepInt, stepTotal: message["step_total"])
+            } else if let total = message["step_total"] as? Int {
                 self.liveStepTotal = total
             } else if let total = message["total_steps"] as? Int {
                 self.liveStepTotal = total
             }
-            if let estimate = message["estimate_seconds"] as? Double {
-                self.liveEstimateSeconds = estimate
-            } else if let estimate = message["estimate_seconds"] as? Int {
-                self.liveEstimateSeconds = Double(estimate)
-            }
-            Task {
-                await self.refreshActiveJobStatusView()
-                await self.refreshActiveStripView()
-                self.bumpQueueRevision()
-            }
+            _ = self.snapshotLiveTiming(inCooldown: self.cooldownSecondsRemaining > 0)
+            self.rebuildActiveStripViewLocally()
+            self.bumpStripUI()
         }
         modelTasks.onGenerateFinished = { [weak self] success, outputPath, error in
             self?.handleGenerateFinished(success: success, outputPath: outputPath, error: error)
+            self?.scheduleUnloadImageModelForQueueHold()
         }
+    }
+
+    private func unloadModelsWhenQueueHeldEnabled() -> Bool {
+        config.bool(forKey: "imagegen_unload_models_when_queue_held", default: false)
+    }
+
+    private func scheduleUnloadImageModelForQueueHold() {
+        guard holdJobQueue, unloadModelsWhenQueueHeldEnabled() else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000)
+            self?.maybeUnloadImageModelForQueueHold()
+        }
+    }
+
+    private func maybeUnloadImageModelForQueueHold() {
+        guard holdJobQueue, unloadModelsWhenQueueHeldEnabled() else { return }
+        if jobAIStageActive || modelTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
+            return
+        }
+        _ = modelTasks.unloadImageModel()
     }
 
     private func mutateImagegen(_ mutate: (inout [String: Any]) -> Void) {
@@ -1085,9 +1385,178 @@ final class ImageGenController {
         config.updateSetting("imagegen", value: imagegen)
     }
 
+    private func resetLiveQueueProgress() {
+        liveStep = 0
+        liveStepTotal = 0
+        liveEstimateSeconds = nil
+        stepSecondsPerStep = nil
+        generationTimingKey = nil
+        historicalAvgTotalSeconds = nil
+        stepProgressCompletedAt = nil
+    }
+
+    private func resetActiveJobProgressTracking() {
+        resetLiveQueueProgress()
+        stepProgressStartTime = nil
+        frozenElapsedSeconds = nil
+    }
+
+    private func beginGenerationProgressTracking(values: [String: Any]) async {
+        let now = Date()
+        stepProgressStartTime = now
+        generationStartTime = now
+        liveStep = 0
+        liveEstimateSeconds = nil
+        stepSecondsPerStep = nil
+        stepProgressCompletedAt = nil
+        if let steps = values["steps"] as? Int {
+            liveStepTotal = steps
+        } else if let steps = values["steps"] as? NSNumber {
+            liveStepTotal = steps.intValue
+        }
+        guard isEnabled, !activePluginID.isEmpty else { return }
+        if let timing = try? await registry.buildGenerationTimingKey(
+            pluginID: activePluginID,
+            values: values
+        ) {
+            generationTimingKey = timing.key
+            if let key = timing.key {
+                historicalAvgTotalSeconds = GenerationTimingStats.lookupAverage(
+                    key: key,
+                    dataDirectory: config.dataDirectory
+                )
+            } else {
+                historicalAvgTotalSeconds = nil
+            }
+        }
+        _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
+        rebuildActiveStripViewLocally()
+        bumpStripUI()
+    }
+
+    private func updateLiveStepProgress(step: Int, stepTotal: Any?) {
+        var total = liveStepTotal
+        if let stepTotal = stepTotal as? Int {
+            total = stepTotal
+        } else if let stepTotal = stepTotal as? NSNumber {
+            total = stepTotal.intValue
+        }
+        if step > 0, stepProgressStartTime != nil, let elapsed = liveGenerationElapsedSeconds() {
+            stepSecondsPerStep = elapsed / Double(step)
+        }
+        liveStep = step
+        liveStepTotal = total
+        if step >= total, total > 0, stepProgressCompletedAt == nil {
+            stepProgressCompletedAt = Date()
+        }
+        if step > 0 {
+            progressMessage = "Step \(step)"
+            taskStatusHTML = progressMessage
+        }
+    }
+
+    private func liveGenerationElapsedSeconds() -> Double? {
+        guard let start = stepProgressStartTime else { return nil }
+        if let completed = stepProgressCompletedAt {
+            return completed.timeIntervalSince(start)
+        }
+        return Date().timeIntervalSince(start)
+    }
+
+    private func wallClockElapsedSeconds(inCooldown: Bool) -> Double? {
+        guard let start = stepProgressStartTime ?? generationStartTime else { return nil }
+        if inCooldown, let frozen = frozenElapsedSeconds {
+            return frozen
+        }
+        return Date().timeIntervalSince(start)
+    }
+
+    private static func estimateRemainingSeconds(
+        elapsed: Double,
+        completedSteps: Int,
+        totalSteps: Int,
+        secondsPerStep: Double?
+    ) -> Double? {
+        guard completedSteps > 0,
+              totalSteps > 0,
+              completedSteps < totalSteps,
+              let secondsPerStep,
+              secondsPerStep > 0 else {
+            return nil
+        }
+        return max(0, Double(totalSteps) * secondsPerStep - elapsed)
+    }
+
+    @discardableResult
+    private func snapshotLiveTiming(inCooldown: Bool = false) -> (elapsed: Double?, estimate: Double?) {
+        if inCooldown {
+            if let frozen = frozenElapsedSeconds {
+                liveEstimateSeconds = nil
+                return (frozen, nil)
+            }
+            return (nil, nil)
+        }
+        guard let elapsed = liveGenerationElapsedSeconds() else {
+            return (nil, nil)
+        }
+        var estimate: Double?
+        if liveStep > 0, liveStepTotal > 0 {
+            estimate = Self.estimateRemainingSeconds(
+                elapsed: elapsed,
+                completedSteps: liveStep,
+                totalSteps: liveStepTotal,
+                secondsPerStep: stepSecondsPerStep
+            )
+        } else if let average = historicalAvgTotalSeconds, average > 0 {
+            estimate = max(0, average - elapsed)
+        }
+        liveEstimateSeconds = estimate
+        return (elapsed, estimate)
+    }
+
     private func elapsedSeconds() -> Double? {
-        guard let generationStartTime else { return nil }
-        return Date().timeIntervalSince(generationStartTime)
+        let inCooldown = cooldownSecondsRemaining > 0
+        let (elapsed, _) = snapshotLiveTiming(inCooldown: inCooldown)
+        if let elapsed { return elapsed }
+        return wallClockElapsedSeconds(inCooldown: inCooldown)
+    }
+
+    private func currentTimingForDisplay() -> (elapsed: Double?, estimate: Double?) {
+        let inCooldown = cooldownSecondsRemaining > 0
+        let snapshot = snapshotLiveTiming(inCooldown: inCooldown)
+        if snapshot.elapsed != nil {
+            return snapshot
+        }
+        let elapsed = wallClockElapsedSeconds(inCooldown: inCooldown)
+        return (elapsed, inCooldown ? nil : liveEstimateSeconds)
+    }
+
+    private func recordGenerationTimingRun(values: [String: Any], elapsedSeconds: Double) async {
+        guard elapsedSeconds > 0 else { return }
+        if let timing = try? await registry.buildGenerationTimingKey(
+            pluginID: activePluginID,
+            values: values
+        ), let key = timing.key {
+            GenerationTimingStats.recordRun(
+                key: key,
+                elapsedSeconds: elapsedSeconds,
+                dataDirectory: config.dataDirectory
+            )
+        } else if let key = generationTimingKey {
+            GenerationTimingStats.recordRun(
+                key: key,
+                elapsedSeconds: elapsedSeconds,
+                dataDirectory: config.dataDirectory
+            )
+        }
+    }
+
+    private func enterCopyCooldownAfterSuccess() {
+        let finalElapsed = liveGenerationElapsedSeconds()
+            ?? stepProgressStartTime.map { Date().timeIntervalSince($0) }
+        frozenElapsedSeconds = finalElapsed
+        stepProgressStartTime = nil
+        resetLiveQueueProgress()
     }
 
     /// Port of ``ImageGenController._active_job_card_thumbnail_paths``.
@@ -1188,6 +1657,7 @@ final class ImageGenController {
     func refreshActiveJobStatusView() async {
         guard activeJobID != nil, isEnabled else { return }
         let stepsLabel = jobAIStageActive ? "AI:" : "Steps:"
+        let timing = currentTimingForDisplay()
         do {
             let built = try await registry.buildQueueStatusView(
                 pluginID: activePluginID,
@@ -1199,8 +1669,8 @@ final class ImageGenController {
                 withAI: jobAIStageActive,
                 step: liveStepTotal > 0 ? liveStep : nil,
                 stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
-                elapsedSeconds: elapsedSeconds(),
-                estimateSeconds: liveEstimateSeconds
+                elapsedSeconds: timing.elapsed,
+                estimateSeconds: timing.estimate
             )
             activeStatusView = built.statusView
             let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
@@ -1225,6 +1695,50 @@ final class ImageGenController {
         return activeThumbnailPaths.filter { FileManager.default.isReadableFile(atPath: $0) }
     }
 
+    private func removePartialOutput(at outputPath: String) {
+        guard !outputPath.isEmpty else { return }
+        ProwserTempFiles.cleanupCancelledGenerationOutputArtifacts(outputPath: outputPath)
+    }
+
+    private func repairCancelledOutputExifReferences(outputPath: String) async {
+        guard !outputPath.isEmpty,
+              FileManager.default.fileExists(atPath: outputPath),
+              isEnabled,
+              !activePluginID.isEmpty else { return }
+        let values = pendingValues
+        let fallback = exifFallbackSourcePaths(from: values)
+        _ = try? await registry.repairCancelledOutputExifReferences(
+            pluginID: activePluginID,
+            outputPath: outputPath,
+            values: values,
+            fallbackSourcePaths: fallback
+        )
+    }
+
+    /// Port of Python progressive preview EXIF before browse refresh.
+    func writeProgressivePreviewExifIfNeeded(at path: String) async {
+        guard showProgressiveImages,
+              !path.isEmpty,
+              FileManager.default.fileExists(atPath: path),
+              isEnabled,
+              !activePluginID.isEmpty else { return }
+        let step = liveStep
+        let total = liveStepTotal
+        guard step > 0, total > 0, step < total else { return }
+        let values = pendingValues
+        let elapsed = liveGenerationElapsedSeconds()
+        let fallback = exifFallbackSourcePaths(from: values)
+        _ = try? await registry.makeReadableUserCommentBeforeBrowse(
+            pluginID: activePluginID,
+            outputPath: path,
+            values: values,
+            elapsedSeconds: elapsed,
+            completedStep: step,
+            totalSteps: total,
+            fallbackSourcePaths: fallback
+        )
+    }
+
     private func writeGenerationExif(
         outputPath: String,
         pluginID: String,
@@ -1245,19 +1759,60 @@ final class ImageGenController {
                     localElapsed: elapsedSeconds,
                     fallbackSourcePaths: fallbackSourcePaths
                 )
-                guard success else { throw ExifService.ExifError.writeFailed }
-                return
+                if success { return }
+                throw ExifService.ExifError.writeFailed
             }
-            let comment: String
-            if let prompt = values["prompt"] as? String {
-                comment = prompt
-            } else {
-                comment = ""
-            }
-            try await ExifService.writeUserComment(path: outputPath, text: comment)
+            try await writeGenerationExifFallback(
+                outputPath: outputPath,
+                pluginID: pluginID,
+                values: values,
+                workerResult: workerResult,
+                elapsedSeconds: elapsedSeconds
+            )
         } catch {
-            return
+            print(
+                "DEBUG writeGenerationExif: failed for \(outputPath): \(error) "
+                    + "(registry: \(registry.lastError))"
+            )
+            if isEnabled, !pluginID.isEmpty {
+                do {
+                    try await writeGenerationExifFallback(
+                        outputPath: outputPath,
+                        pluginID: pluginID,
+                        values: values,
+                        workerResult: workerResult,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                } catch {
+                    print(
+                        "DEBUG writeGenerationExif: fallback failed for \(outputPath): \(error)"
+                    )
+                }
+            }
         }
+    }
+
+    private func writeGenerationExifFallback(
+        outputPath: String,
+        pluginID: String,
+        values: [String: Any],
+        workerResult: [String: Any],
+        elapsedSeconds: Double?
+    ) async throws {
+        let comment: String
+        if isEnabled, !pluginID.isEmpty {
+            comment = try await registry.formatGenerationExifComment(
+                pluginID: pluginID,
+                values: values,
+                elapsedSeconds: elapsedSeconds,
+                workerResult: workerResult
+            )
+        } else if let prompt = values["prompt"] as? String {
+            comment = prompt
+        } else {
+            comment = ""
+        }
+        try await ExifService.writeUserComment(path: outputPath, text: comment)
     }
 
     private func startLiveStatusTimer() {
@@ -1268,7 +1823,6 @@ final class ImageGenController {
                 guard let self, self.isProcessing || self.cooldownSecondsRemaining > 0 else { break }
                 await self.refreshActiveJobStatusView()
                 await self.refreshActiveStripView()
-                self.bumpQueueRevision()
             }
         }
     }
@@ -1330,7 +1884,7 @@ final class ImageGenController {
         quitAfterCurrentWorker = false
         deferredQuitWaitAllJobs = false
         startupQueueHold = false
-        startupQueueReleaseTask?.cancel()
+        startupQueueReleaseToken += 1
         queueAdvanceSuppressed = true
         suppressTaskFailureUI = true
         persistJobQueueForExit()
@@ -1597,10 +2151,8 @@ final class ImageGenController {
         stopLiveStatusTimer()
         activeStatusView = nil
         activeStripView = ActiveJobStripStatusView()
+        resetActiveJobProgressTracking()
         generationStartTime = nil
-        liveStep = 0
-        liveStepTotal = 0
-        liveEstimateSeconds = nil
         skipSeriesCopyInFlight = false
         progressivePreviewPath = nil
         activeOutputPath = nil
@@ -1720,6 +2272,8 @@ final class ImageGenController {
             isProcessing = true
             generationStartTime = Date()
             startLiveStatusTimer()
+            rebuildActiveStripViewLocally()
+            bumpQueueRevision()
             if JobStepQueue.stepNeedsAI(step) {
                 Task { await runJobAIStage(values: values) }
             } else {
@@ -1757,29 +2311,19 @@ final class ImageGenController {
         }
     }
 
-    func refreshActiveStripView(includeQueueJobsRow: Bool = false) async {
+    func refreshActiveStripView(includeQueueJobsRow: Bool = false, force: Bool = false) async {
         guard isEnabled, isProcessing || cooldownSecondsRemaining > 0 else {
             activeStripView = ActiveJobStripStatusView()
+            lastCooldownUISecond = nil
+            bumpStripUI()
             return
         }
-        let stepsLabel = jobAIStageActive ? "AI:" : "Steps:"
-        let totalJobs = queueSnapshot().count
-        do {
-            activeStripView = try await registry.buildActiveJobStripView(
-                elapsedSeconds: elapsedSeconds(),
-                estimateSeconds: liveEstimateSeconds,
-                step: liveStep,
-                stepTotal: liveStepTotal,
-                stepsLabel: stepsLabel,
-                cooldownRemaining: cooldownSecondsRemaining,
-                completedSeries: copiesDone,
-                totalSeries: copiesTotal > 1 ? copiesTotal : nil,
-                totalQueueJobs: includeQueueJobsRow ? totalJobs : nil,
-                includeQueueJobsRow: includeQueueJobsRow
-            )
-        } catch {
-            activeStripView = ActiveJobStripStatusView()
+        if !force, !stripDisplayNeedsRefresh() {
+            return
         }
+        rebuildActiveStripViewLocally(includeQueueJobsRow: includeQueueJobsRow)
+        markStripDisplayRefreshed()
+        bumpStripUI()
     }
 }
 
@@ -1794,12 +2338,5 @@ enum ImageGenError: LocalizedError {
         case .unavailable: return "Image generation is not available."
         case .pipelineFailed(let message): return message
         }
-    }
-}
-
-private extension AppConfig {
-    func imageGenInt(_ key: String, default defaultValue: Int) -> Int {
-        let imagegen = rawSettings()["imagegen"] as? [String: Any] ?? [:]
-        return imagegen[key] as? Int ?? defaultValue
     }
 }

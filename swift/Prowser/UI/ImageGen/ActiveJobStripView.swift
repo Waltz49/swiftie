@@ -8,9 +8,16 @@ struct ActiveJobStripView: View {
     var includeQueueJobsRow: Bool = false
 
     var body: some View {
-        let _ = appState.imageGen.activeStripView.fingerprint()
-        ActiveJobStripNSViewRepresentable(includeQueueJobsRow: includeQueueJobsRow)
-            .fixedSize(horizontal: false, vertical: true)
+        let _ = appState.imageGenUIRevision
+        let controller = appState.imageGen
+        let strip = controller.activeStripView
+        ActiveJobStripNSViewRepresentable(
+            stripView: strip,
+            stripFingerprint: strip.fingerprint(),
+            includeQueueJobsRow: includeQueueJobsRow
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -26,8 +33,13 @@ final class ActiveJobStripNSView: NSView {
     }
 
     private let frameView = NSView()
+    private let frameRow = NSStackView()
+    private let contentColumn = NSStackView()
     private let rowsStack = NSStackView()
     private let cooldownRow = NSStackView()
+    private let iconColumn = NSView()
+    private var cooldownSkipView: CooldownSkipNSView?
+    private var cancelButton: NSButton?
     private var colors: ThemeColors = .dark
     private var lastStructureKey = ""
     private var lastColorsID = ""
@@ -40,28 +52,45 @@ final class ActiveJobStripNSView: NSView {
         super.init(frame: frameRect)
         frameView.wantsLayer = true
         frameView.translatesAutoresizingMaskIntoConstraints = false
+        frameRow.orientation = .horizontal
+        frameRow.alignment = .centerY
+        frameRow.distribution = .fill
+        frameRow.spacing = 4
+        frameRow.translatesAutoresizingMaskIntoConstraints = false
+        contentColumn.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        contentColumn.orientation = .vertical
+        contentColumn.alignment = .leading
+        contentColumn.spacing = 2
+        contentColumn.translatesAutoresizingMaskIntoConstraints = false
         rowsStack.orientation = .vertical
-        rowsStack.alignment = .width
+        rowsStack.alignment = .leading
         rowsStack.spacing = 2
         rowsStack.translatesAutoresizingMaskIntoConstraints = false
         cooldownRow.orientation = .horizontal
-        cooldownRow.spacing = 4
+        cooldownRow.alignment = .centerY
+        cooldownRow.distribution = .fill
+        cooldownRow.spacing = 0
         cooldownRow.translatesAutoresizingMaskIntoConstraints = false
-        frameView.addSubview(rowsStack)
-        frameView.addSubview(cooldownRow)
+        iconColumn.translatesAutoresizingMaskIntoConstraints = false
+        iconColumn.isHidden = true
+        contentColumn.addArrangedSubview(cooldownRow)
+        contentColumn.addArrangedSubview(rowsStack)
+        frameRow.addArrangedSubview(contentColumn)
+        frameRow.addArrangedSubview(iconColumn)
+        frameView.addSubview(frameRow)
         addSubview(frameView)
+        iconColumn.widthAnchor.constraint(equalToConstant: JobQueueLayout.actionButtonSize).isActive = true
+        rowsStack.widthAnchor.constraint(equalTo: contentColumn.widthAnchor).isActive = true
+        cooldownRow.widthAnchor.constraint(equalTo: contentColumn.widthAnchor).isActive = true
         NSLayoutConstraint.activate([
             frameView.leadingAnchor.constraint(equalTo: leadingAnchor),
             frameView.trailingAnchor.constraint(equalTo: trailingAnchor),
             frameView.topAnchor.constraint(equalTo: topAnchor),
             frameView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            rowsStack.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 4),
-            rowsStack.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -4),
-            rowsStack.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 4),
-            cooldownRow.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 4),
-            cooldownRow.trailingAnchor.constraint(lessThanOrEqualTo: frameView.trailingAnchor, constant: -4),
-            cooldownRow.topAnchor.constraint(equalTo: rowsStack.bottomAnchor, constant: 2),
-            cooldownRow.bottomAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -4),
+            frameRow.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: 4),
+            frameRow.trailingAnchor.constraint(equalTo: frameView.trailingAnchor, constant: -4),
+            frameRow.topAnchor.constraint(equalTo: frameView.topAnchor, constant: 4),
+            frameRow.bottomAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -4),
         ])
     }
 
@@ -71,10 +100,10 @@ final class ActiveJobStripNSView: NSView {
 
     func refreshCachedContentHeight(forWidth width: CGFloat) {
         guard width > 0 else { return }
-        if abs(bounds.width - width) > 0.5 {
-            frame.size.width = width
-        }
         layoutSubtreeIfNeeded()
+        for handle in barHandles {
+            handle.bar.needsDisplay = true
+        }
         let measured = max(measuredContentHeight(), 28)
         guard abs(measured - cachedContentHeight) > 1 else { return }
         cachedContentHeight = measured
@@ -88,10 +117,11 @@ final class ActiveJobStripNSView: NSView {
     }
 
     private func measuredContentHeight() -> CGFloat {
+        let cooldownHeight = cooldownRow.isHidden ? 0 : cooldownRow.fittingSize.height
         let rowsHeight = rowsStack.fittingSize.height
-        let cooldownHeight = cooldownRow.arrangedSubviews.isEmpty ? 0 : cooldownRow.fittingSize.height + 2
+        let contentHeight = cooldownHeight + rowsHeight
         // Match Python ``_ACTIVE_JOB_STRIP_FRAME_CHROME_V`` (border + inner padding).
-        return 10 + rowsHeight + cooldownHeight
+        return 10 + max(contentHeight, 28 - 10)
     }
 
     private func scheduleContentHeightReport() {
@@ -128,15 +158,17 @@ final class ActiveJobStripNSView: NSView {
     }
 
     private func updateLiveFields(_ stripView: ActiveJobStripStatusView) {
-        if !stripView.cooldownText.isEmpty {
-            let labels = cooldownRow.arrangedSubviews.compactMap { $0 as? NSTextField }
-            if labels.count >= 2 {
-                labels[0].stringValue = stripView.cooldownText
-                labels[1].stringValue = stripView.cooldownCountText
+        if stripView.mode == "cooldown" {
+            if let cooldownSkipView {
+                cooldownSkipView.configure(
+                    prefix: stripView.cooldownText,
+                    count: stripView.cooldownCountText,
+                    showSkip: stripView.showSkipIcon
+                )
             } else {
                 rebuild(stripView: stripView, colors: colors)
-                return
             }
+            return
         }
 
         let barRows = stripView.rows.compactMap { row -> ActiveJobStripRowKind? in
@@ -165,6 +197,7 @@ final class ActiveJobStripNSView: NSView {
         applyTheme(colors)
         rowsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         cooldownRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        cooldownSkipView = nil
         barHandles.removeAll()
 
         for row in stripView.rows {
@@ -176,8 +209,7 @@ final class ActiveJobStripNSView: NSView {
                     postfix: postfix,
                     fillPercent: fillPercent,
                     slotText: slotText,
-                    showPendingStart: showPendingStart,
-                    showCancel: stripView.showCancelIcon
+                    showPendingStart: showPendingStart
                 ))
             case .count(let label, let count):
                 let rowView = NSStackView()
@@ -193,16 +225,26 @@ final class ActiveJobStripNSView: NSView {
         }
 
         if !stripView.cooldownText.isEmpty {
-            cooldownRow.addArrangedSubview(makeLabel(stripView.cooldownText, muted: true))
-            cooldownRow.addArrangedSubview(makeLabel(stripView.cooldownCountText, muted: false))
-            if stripView.showSkipIcon {
-                cooldownRow.addArrangedSubview(makeSkipIconButton())
-            }
-            if stripView.showCancelIcon {
-                cooldownRow.addArrangedSubview(makeCancelIconButton())
-            }
+            let skipView = CooldownSkipNSView()
+            skipView.applyTheme(colors)
+            skipView.configure(
+                prefix: stripView.cooldownText,
+                count: stripView.cooldownCountText,
+                showSkip: stripView.showSkipIcon
+            )
+            skipView.onSkip = { [weak self] in self?.onSkipCooldown?() }
+            skipView.setContentHuggingPriority(.required, for: .horizontal)
+            skipView.setContentCompressionResistancePriority(.required, for: .horizontal)
+            cooldownSkipView = skipView
+            cooldownRow.addArrangedSubview(skipView)
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            cooldownRow.addArrangedSubview(spacer)
+        } else {
+            cooldownSkipView = nil
         }
-        cooldownRow.isHidden = cooldownRow.arrangedSubviews.isEmpty
+        cooldownRow.isHidden = cooldownSkipView == nil
+        updateCancelButton(show: stripView.showCancelIcon)
         for case let row as NSStackView in rowsStack.arrangedSubviews {
             row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
         }
@@ -227,12 +269,12 @@ final class ActiveJobStripNSView: NSView {
         postfix: String,
         fillPercent: Int,
         slotText: String,
-        showPendingStart: Bool,
-        showCancel: Bool
+        showPendingStart: Bool
     ) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
+        row.distribution = .fill
         row.spacing = 4
         let lbl = makeLabel(label, muted: true)
         lbl.widthAnchor.constraint(equalToConstant: JobQueueLayout.labelWidth).isActive = true
@@ -256,11 +298,23 @@ final class ActiveJobStripNSView: NSView {
         post.widthAnchor.constraint(equalToConstant: 48).isActive = true
         row.addArrangedSubview(post)
 
-        if showCancel {
-            row.addArrangedSubview(makeCancelIconButton())
-        }
         barHandles.append(BarHandle(prefix: pre, postfix: post, bar: bar))
         return row
+    }
+
+    private func updateCancelButton(show: Bool) {
+        cancelButton?.removeFromSuperview()
+        cancelButton = nil
+        iconColumn.isHidden = !show
+        guard show else { return }
+        let button = makeCancelIconButton()
+        cancelButton = button
+        iconColumn.addSubview(button)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: iconColumn.centerXAnchor),
+            button.centerYAnchor.constraint(equalTo: iconColumn.centerYAnchor),
+        ])
     }
 
     private func makeCancelIconButton() -> NSButton {
@@ -275,28 +329,17 @@ final class ActiveJobStripNSView: NSView {
         return button
     }
 
-    private func makeSkipIconButton() -> NSButton {
-        let button = NSAssetIconButton(
-            normalName: "jobs_skip_copy",
-            hoverName: "jobs_skip_copy_hover",
-            size: 16,
-            tooltip: "Skip copy cooldown"
-        )
-        button.target = self
-        button.action = #selector(skipAction)
-        return button
-    }
-
     @objc private func cancelAction() { onCancel?() }
-    @objc private func skipAction() { onSkipCooldown?() }
 }
 
 struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     @Environment(AppState.self) private var appState
+    var stripView: ActiveJobStripStatusView
+    var stripFingerprint: String
     var includeQueueJobsRow: Bool = false
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ActiveJobStripNSView, context: Context) -> CGSize? {
-        let width = proposal.width ?? max(nsView.bounds.width, 200)
+        let width = resolvedLayoutWidth(proposal: proposal, nsView: nsView)
         nsView.refreshCachedContentHeight(forWidth: width)
         let height = max(nsView.cachedContentHeight, 28)
         return CGSize(width: width, height: height)
@@ -314,20 +357,26 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ActiveJobStripNSView, context: Context) {
-        let controller = appState.imageGen
         let colors = appState.theme.colors
         nsView.onContentHeightChanged = { [weak nsView] in
             guard let nsView else { return }
             reportMeasuredHeight(nsView: nsView, appState: appState)
         }
-        nsView.update(stripView: controller.activeStripView, colors: colors)
-        let width = max(nsView.bounds.width, 200)
-        nsView.refreshCachedContentHeight(forWidth: width)
+        nsView.update(stripView: stripView, colors: colors)
+    }
+
+    private func resolvedLayoutWidth(
+        proposal: ProposedViewSize?,
+        nsView: ActiveJobStripNSView
+    ) -> CGFloat {
+        if let proposalWidth = proposal?.width, proposalWidth > 1 { return proposalWidth }
+        if nsView.bounds.width > 1 { return nsView.bounds.width }
+        return 1
     }
 
     @MainActor
     private func reportMeasuredHeight(nsView: ActiveJobStripNSView, appState: AppState) {
-        let width = max(nsView.bounds.width, 200)
+        let width = max(nsView.bounds.width, 1)
         nsView.refreshCachedContentHeight(forWidth: width)
         appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, 28))
     }

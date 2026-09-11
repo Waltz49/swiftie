@@ -402,10 +402,8 @@ def _handle_format_generation_exif_comment(cmd: Dict[str, Any]) -> Dict[str, Any
     from imagegen_plugins.image_gen_seed_persistence import (
         extract_used_seed_from_worker_result,
     )
-    from imagegen_plugins.lora_trigger_prompt_guard import (
-        lora_name_for_exif_from_values,
-        prompt_text_for_exif,
-    )
+    from imagegen_plugins.lora_trigger_prompt_guard import prompt_text_for_exif
+    from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
 
     plugin_id = str(cmd.get("plugin_id") or "").strip()
     values = cmd.get("values")
@@ -506,10 +504,8 @@ def _handle_write_generation_exif(cmd: Dict[str, Any]) -> Dict[str, Any]:
     from imagegen_plugins.image_gen_seed_persistence import (
         extract_used_seed_from_worker_result,
     )
-    from imagegen_plugins.lora_trigger_prompt_guard import (
-        lora_name_for_exif_from_values,
-        prompt_text_for_exif,
-    )
+    from imagegen_plugins.lora_trigger_prompt_guard import prompt_text_for_exif
+    from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
 
     plugin_id = str(cmd.get("plugin_id") or "").strip()
     output_path = str(cmd.get("output_path") or "").strip()
@@ -705,6 +701,190 @@ def _handle_materialize_steps(cmd: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _handle_repair_cancelled_output_exif_references(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    from imagegen_plugins import plugin_by_id
+    from imagegen_plugins.image_gen_naming import write_exif_user_comment
+
+    plugin_id = str(cmd.get("plugin_id") or "").strip()
+    output_path = str(cmd.get("output_path") or "").strip()
+    values = cmd.get("values")
+    fallback_source_paths = cmd.get("fallback_source_paths")
+    if not isinstance(values, dict):
+        raise ValueError("values must be an object")
+    if not plugin_id or not output_path:
+        raise ValueError("plugin_id and output_path are required")
+    if not os.path.isfile(output_path):
+        return {
+            "type": "result",
+            "job_id": cmd.get("job_id", ""),
+            "command": "repair_cancelled_output_exif_references",
+            "success": False,
+        }
+
+    plugin = plugin_by_id(plugin_id)
+    if plugin is None:
+        raise ValueError(f"Unknown plugin: {plugin_id}")
+
+    try:
+        from exif.exif_utils import decode_usercomment, get_usercomment_from_path
+
+        raw = get_usercomment_from_path(output_path)
+        if not raw:
+            return {
+                "type": "result",
+                "job_id": cmd.get("job_id", ""),
+                "command": "repair_cancelled_output_exif_references",
+                "success": False,
+            }
+        comment = decode_usercomment(raw).strip()
+        if not comment.startswith("Image Model:"):
+            return {
+                "type": "result",
+                "job_id": cmd.get("job_id", ""),
+                "command": "repair_cancelled_output_exif_references",
+                "success": False,
+            }
+        fallback = (
+            fallback_source_paths
+            if isinstance(fallback_source_paths, list) and fallback_source_paths
+            else None
+        )
+        ref_entries, allow_cross_dir = _exif_reference_entries_for_output(
+            plugin,
+            values,
+            output_path,
+            fallback_source_paths=fallback,
+        )
+        if not ref_entries:
+            return {
+                "type": "result",
+                "job_id": cmd.get("job_id", ""),
+                "command": "repair_cancelled_output_exif_references",
+                "success": False,
+            }
+        success = write_exif_user_comment(
+            output_path,
+            comment,
+            reference_entries=ref_entries,
+            allow_cross_directory_references=allow_cross_dir,
+        )
+        return {
+            "type": "result",
+            "job_id": cmd.get("job_id", ""),
+            "command": "repair_cancelled_output_exif_references",
+            "success": bool(success),
+        }
+    except Exception:
+        return {
+            "type": "result",
+            "job_id": cmd.get("job_id", ""),
+            "command": "repair_cancelled_output_exif_references",
+            "success": False,
+        }
+
+
+def _handle_make_readable_user_comment_before_browse(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    from imagegen_plugins import plugin_by_id
+    from imagegen_plugins.image_gen_naming import make_readable_user_comment_before_browse
+
+    plugin_id = str(cmd.get("plugin_id") or "").strip()
+    output_path = str(cmd.get("output_path") or "").strip()
+    values = cmd.get("values")
+    fallback_source_paths = cmd.get("fallback_source_paths")
+    if not isinstance(values, dict):
+        raise ValueError("values must be an object")
+    if not plugin_id or not output_path:
+        raise ValueError("plugin_id and output_path are required")
+    if not os.path.isfile(output_path):
+        return {
+            "type": "result",
+            "job_id": cmd.get("job_id", ""),
+            "command": "make_readable_user_comment_before_browse",
+            "success": False,
+        }
+
+    plugin = plugin_by_id(plugin_id)
+    if plugin is None:
+        raise ValueError(f"Unknown plugin: {plugin_id}")
+
+    try:
+        completed_step = int(cmd.get("completed_step") or 0)
+    except (TypeError, ValueError):
+        completed_step = 0
+    try:
+        total_steps = int(cmd.get("total_steps") or 0)
+    except (TypeError, ValueError):
+        total_steps = 0
+    elapsed = cmd.get("elapsed_seconds")
+    elapsed_f = float(elapsed) if elapsed is not None else None
+    fallback = (
+        fallback_source_paths
+        if isinstance(fallback_source_paths, list) and fallback_source_paths
+        else None
+    )
+    ref_entries, allow_cross_dir = _exif_reference_entries_for_output(
+        plugin,
+        values,
+        output_path,
+        fallback_source_paths=fallback,
+    )
+    include_quantization = plugin.plugin_reports_quantization(values)
+    try:
+        make_readable_user_comment_before_browse(
+            output_path,
+            model_name=plugin.menu_label(values),
+            values=values,
+            elapsed_seconds=elapsed_f,
+            completed_step=completed_step,
+            total_steps=total_steps,
+            reference_entries=ref_entries,
+            allow_cross_directory_references=allow_cross_dir,
+            include_quantization=include_quantization,
+            quantization=(
+                plugin.quantize_for_exif(values) if include_quantization else None
+            ),
+        )
+        return {
+            "type": "result",
+            "job_id": cmd.get("job_id", ""),
+            "command": "make_readable_user_comment_before_browse",
+            "success": True,
+        }
+    except Exception:
+        return {
+            "type": "result",
+            "job_id": cmd.get("job_id", ""),
+            "command": "make_readable_user_comment_before_browse",
+            "success": False,
+        }
+
+
+def _handle_build_generation_timing_key(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    from imagegen_plugins import plugin_by_id
+    from imagegen_plugins.generation_timing_stats import (
+        build_generation_timing_key,
+        lookup_average,
+    )
+
+    plugin_id = str(cmd.get("plugin_id") or "").strip()
+    values = cmd.get("values")
+    if not isinstance(values, dict):
+        raise ValueError("values must be an object")
+    plugin = plugin_by_id(plugin_id)
+    if plugin is None:
+        raise ValueError(f"Unknown plugin: {plugin_id}")
+    key = build_generation_timing_key(plugin, values)
+    key_list = list(key) if key is not None else None
+    average = lookup_average(key) if key is not None else None
+    return {
+        "type": "result",
+        "job_id": cmd.get("job_id", ""),
+        "command": "build_generation_timing_key",
+        "key": key_list,
+        "average_seconds": average,
+    }
+
+
 def _handle_command(cmd: Dict[str, Any]) -> Any:
     command = str(cmd.get("command") or "").strip()
     if command == "shutdown":
@@ -716,6 +896,9 @@ def _handle_command(cmd: Dict[str, Any]) -> Any:
         "materialize_steps": _handle_materialize_steps,
         "build_queue_status_view": _handle_build_queue_status_view,
         "build_active_job_strip_view": _handle_build_active_job_strip_view,
+        "build_generation_timing_key": _handle_build_generation_timing_key,
+        "repair_cancelled_output_exif_references": _handle_repair_cancelled_output_exif_references,
+        "make_readable_user_comment_before_browse": _handle_make_readable_user_comment_before_browse,
         "format_generation_exif_comment": _handle_format_generation_exif_comment,
         "write_generation_exif": _handle_write_generation_exif,
         "get_exif_user_description": _handle_get_exif_user_description,

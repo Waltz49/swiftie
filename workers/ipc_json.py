@@ -48,6 +48,10 @@ def run_json_command_loop(
         line = read_line_fn()
         if line is None:
             break
+        # readline() returns "" on EOF; without this check the loop spins at 100% CPU
+        # when the parent exits without closing the worker cleanly.
+        if line == "":
+            break
         line = line.strip()
         if not line:
             continue

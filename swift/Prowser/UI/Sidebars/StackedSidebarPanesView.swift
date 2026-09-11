@@ -40,30 +40,42 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(displayed.enumerated()), id: \.element.index) { position, descriptor in
-                    paneBlock(descriptor: descriptor, height: model.sizes[descriptor.index])
+                    paneBlock(
+                        descriptor: descriptor,
+                        height: model.sizes[descriptor.index]
+                    )
                     if position < displayed.count - 1 {
                         splitterHandle(betweenUpperIndex: descriptor.index)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onAppear {
-                relayout(totalHeight: geometry.size.height)
+                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
             }
             .onChange(of: geometry.size.height) { _, newHeight in
-                relayout(totalHeight: newHeight)
+                relayout(totalHeight: newHeight, displayedCount: displayed.count)
             }
             .onChange(of: appState.sidebarLayoutRevision) { _, _ in
-                relayout(totalHeight: geometry.size.height)
+                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
             }
             .onChange(of: appState.jobsDisplayMode) { _, _ in
-                relayout(totalHeight: geometry.size.height)
+                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
             }
             .onChange(of: appState.jobsQueueSizeMode) { _, _ in
-                relayout(totalHeight: geometry.size.height)
+                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(appState.theme.colors.sidebarBackground)
+        .overlay(alignment: .leading) {
+            // Python right_sidebar: omit_left_border on every pane; column edge is one full-height line.
+            if model.side == .right {
+                Rectangle()
+                    .fill(appState.theme.colors.sidebarHeaderBorder)
+                    .frame(width: CGFloat(max(1, appState.theme.colors.viewBorderWidthPx)))
+            }
+        }
     }
 
     private var layoutSignature: String {
@@ -85,7 +97,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         )
         let paneHeight = max(height, SidebarPaneLayout.headerHeight)
 
-        SidebarPaneSection(
+        let section = SidebarPaneSection(
             title: descriptor.title,
             isExpanded: expanded,
             onToggle: { togglePane(descriptor) },
@@ -105,7 +117,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                 ? { model.endTitlebarDrag(appState: appState) }
                 : nil,
             status: descriptor.status,
-            omitLeftBorder: descriptor.omitLeftBorder,
+            omitLeftBorder: model.side == .right ? true : descriptor.omitLeftBorder,
             showsFlyoutButton: descriptor.showsFlyoutButton,
             onFlyout: descriptor.showsFlyoutButton ? { appState.showJobsPanel() } : nil,
             contextMenuKind: descriptor.contextMenuKind
@@ -114,8 +126,10 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                 paneContent(for: descriptor.index)
             }
         }
-        .frame(height: paneHeight, alignment: .top)
-        .clipped()
+
+        section
+            .frame(height: paneHeight, alignment: .top)
+            .clipped()
     }
 
     @ViewBuilder
@@ -160,9 +174,22 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             )
     }
 
-    private func relayout(totalHeight: CGFloat) {
-        let updated = model.layoutSizes(totalHeight: totalHeight, appState: appState)
+    private func relayout(totalHeight: CGFloat, displayedCount: Int) {
+        let handle = SidebarPaneLayout.splitterHandleHeight(
+            viewBorderWidthPx: appState.theme.colors.viewBorderWidthPx
+        )
+        let splitterTotal = CGFloat(max(0, displayedCount - 1)) * handle
+        let allocHeight = max(totalHeight - splitterTotal, CGFloat(displayedCount) * SidebarPaneLayout.headerHeight)
+        let updated = model.layoutSizes(totalHeight: allocHeight, appState: appState)
         model.applySizes(updated, appState: appState, persist: false)
+        refitJobsPane(appState: appState)
+    }
+
+    /// `scaledSizes` drift goes to the last pane; re-pin jobs to content. In ALL+multi-job
+    /// mode `resizeJobsPaneToMode` is grow-only, so the user's height is otherwise kept.
+    private func refitJobsPane(appState: AppState) {
+        guard model.side == .right, appState.jobsDisplayMode == .pane else { return }
+        model.resizeJobsPaneToMode(appState: appState)
     }
 
     private func togglePane(_ descriptor: SidebarPaneDescriptor) {

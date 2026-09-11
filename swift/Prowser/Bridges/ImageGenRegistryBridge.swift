@@ -1,7 +1,6 @@
 import Foundation
 
 /// Swift client for `imagegen_plugins/registry_bridge.py`.
-@Observable
 @MainActor
 final class ImageGenRegistryBridge {
     private var bridge: JSONLineProcessBridge?
@@ -19,10 +18,10 @@ final class ImageGenRegistryBridge {
     var isAvailable: Bool { environment != nil }
 
     func shutdown() {
+        failPendingRequests()
         bridge?.terminate()
         bridge = nil
         isReady = false
-        pendingRequests.removeAll()
     }
 
     func listPlugins(function: String? = nil, savedValues: [String: Any]? = nil) async throws -> [[String: Any]] {
@@ -168,6 +167,28 @@ final class ImageGenRegistryBridge {
         return ActiveJobStripStatusView.fromBridgeDictionary(viewDict)
     }
 
+    struct GenerationTimingKeyResult {
+        var key: GenerationTimingKey?
+        var averageSeconds: Double?
+    }
+
+    func buildGenerationTimingKey(
+        pluginID: String,
+        values: [String: Any]
+    ) async throws -> GenerationTimingKeyResult {
+        let result = try await sendRequest([
+            "command": "build_generation_timing_key",
+            "job_id": UUID().uuidString,
+            "plugin_id": pluginID,
+            "values": values,
+        ])
+        let keyArray = result["key"] as? [Any]
+        let key = keyArray.flatMap { GenerationTimingKey(bridgeArray: $0) }
+        let average = result["average_seconds"] as? Double
+            ?? (result["average_seconds"] as? NSNumber)?.doubleValue
+        return GenerationTimingKeyResult(key: key, averageSeconds: average)
+    }
+
     func formatGenerationExifComment(
         pluginID: String,
         values: [String: Any],
@@ -210,13 +231,57 @@ final class ImageGenRegistryBridge {
         return result["success"] as? Bool ?? false
     }
 
+    func repairCancelledOutputExifReferences(
+        pluginID: String,
+        outputPath: String,
+        values: [String: Any],
+        fallbackSourcePaths: [String]
+    ) async throws -> Bool {
+        let result = try await sendRequest([
+            "command": "repair_cancelled_output_exif_references",
+            "job_id": UUID().uuidString,
+            "plugin_id": pluginID,
+            "values": values,
+            "output_path": outputPath,
+            "fallback_source_paths": fallbackSourcePaths,
+        ])
+        return result["success"] as? Bool ?? false
+    }
+
+    func makeReadableUserCommentBeforeBrowse(
+        pluginID: String,
+        outputPath: String,
+        values: [String: Any],
+        elapsedSeconds: Double?,
+        completedStep: Int,
+        totalSteps: Int,
+        fallbackSourcePaths: [String]
+    ) async throws -> Bool {
+        var cmd: [String: Any] = [
+            "command": "make_readable_user_comment_before_browse",
+            "job_id": UUID().uuidString,
+            "plugin_id": pluginID,
+            "values": values,
+            "output_path": outputPath,
+            "completed_step": completedStep,
+            "total_steps": totalSteps,
+            "fallback_source_paths": fallbackSourcePaths,
+        ]
+        if let elapsedSeconds { cmd["elapsed_seconds"] = elapsedSeconds }
+        let result = try await sendRequest(cmd)
+        return result["success"] as? Bool ?? false
+    }
+
     func getExifUserDescription(path: String) async throws -> String? {
         let result = try await sendRequest([
             "command": "get_exif_user_description",
             "job_id": UUID().uuidString,
             "path": path,
         ])
-        return result["description"] as? String
+        if result["description"] is NSNull { return nil }
+        guard let description = result["description"] as? String else { return nil }
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func writeExifUserComment(path: String, comment: String) async throws -> Bool {
@@ -275,6 +340,14 @@ final class ImageGenRegistryBridge {
         try processBridge.start(module: "imagegen_plugins.registry_bridge")
         bridge = processBridge
         isReady = false
+    }
+
+    private func failPendingRequests() {
+        let handlers = pendingRequests
+        pendingRequests.removeAll()
+        for handler in handlers.values {
+            handler(.failure(BridgeError.workerNotRunning))
+        }
     }
 
     private func handleMessage(_ message: [String: Any]) {

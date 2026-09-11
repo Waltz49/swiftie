@@ -9,22 +9,6 @@ struct ModelsSearchSettingsTab: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Models for Search").font(.title2)
 
-                SettingsSection(title: "Background CLIP") {
-                    Toggle("Enable background CLIP extraction", isOn: boolBinding("background_clip_enabled"))
-                    Toggle(
-                        "Gather thumbnails for uncached images",
-                        isOn: boolBinding("background_clip_gather_thumbnails", default: true)
-                    )
-                    .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
-                    if BundleCapabilities.facesUIEnabled {
-                        Toggle(
-                            "Extract face encodings in background",
-                            isOn: boolBinding("background_clip_extract_faces")
-                        )
-                        .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
-                    }
-                }
-
                 SettingsSection(title: "Similarity Search") {
                     Picker("Metric", selection: stringBinding("similarity_metric", default: "cosine")) {
                         Text("Cosine").tag("cosine")
@@ -56,10 +40,6 @@ struct ModelsSearchSettingsTab: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-    }
-
-    private func boolBinding(_ key: String, default defaultValue: Bool = false) -> Binding<Bool> {
-        SettingsSupport.boolBinding(config: appState.config, key: key, default: defaultValue, onChange: settingsChanged)
     }
 
     private func stringBinding(_ key: String, default defaultValue: String) -> Binding<String> {

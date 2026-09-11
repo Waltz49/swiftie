@@ -11,6 +11,11 @@ enum SidebarPaneLayout {
     static let paneFitHeightToleranceMin: CGFloat = 8
     static let jobsPaneSizeChangeTolerance: CGFloat = 4
 
+    /// Height of one inter-pane splitter grip (matches Qt `setHandleWidth`).
+    static func splitterHandleHeight(viewBorderWidthPx: Int) -> CGFloat {
+        CGFloat(max(1, viewBorderWidthPx))
+    }
+
     static func paneFitHeightTolerance(needed: CGFloat) -> CGFloat {
         if needed <= 0 { return paneFitHeightToleranceMin }
         return max(paneFitHeightToleranceMin, needed * 0.02)

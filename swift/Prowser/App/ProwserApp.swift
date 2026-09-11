@@ -77,6 +77,8 @@ final class AppState {
     let renamePrefixService = RenamePrefixService()
     let status = StatusNotificationService()
     private let keyboardHandler = KeyboardHandlerController()
+    private let statusBarPeekMonitor = StatusBarPeekMonitor()
+    private let generationTimingDialog = GenerationTimingDialogController()
     let chat: ChatController
     let theme: ThemeService
     let workers: WorkerServices
@@ -94,6 +96,8 @@ final class AppState {
     var showImageGenCreateSheet = false
     var showImageGenUnifiedDialog = false
     var imageGenDialogReloadToken = 0
+    /// Bumped when the image-gen queue or active job display changes (replaces ``ImageGenController`` Observation).
+    var imageGenUIRevision = 0
     var settingsOpenRequestToken = 0
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     var showKeyboardHelp = false
@@ -133,6 +137,8 @@ final class AppState {
     var thumbnailGridColumns = 1
     /// Bumped when on-disk image content changes so list/thumbnail views reload affected thumbs.
     var thumbnailInvalidationGeneration = 0
+    /// Bumped when the active browse image file changes on disk at the same path.
+    var browseImageContentRevision = 0
     var fileTreeCollapseUIToken = 0
     var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
@@ -151,6 +157,8 @@ final class AppState {
     private var suppressDirectoryRefreshUntil: Date?
     private var progressiveRefreshTask: Task<Void, Never>?
     private var pendingProgressivePath: String?
+    private var pendingProgressiveForceEnterBrowse = false
+    private var prowserGeneratedImageOpenTask: Task<Void, Never>?
 
     let launchOptions: LaunchOptions
     private(set) var directoryLoader: DirectoryLoadCoordinator!
@@ -197,14 +205,13 @@ final class AppState {
         imageGen.scheduleStartupQueueRelease()
         observeViewModeChanges()
         imageGen.onImageGenerated = { [weak self] path in
-            guard let self else { return }
-            let dir = URL(fileURLWithPath: path).deletingLastPathComponent().path
-            if dir == self.fileData.currentDirectory {
-                self.loadDirectory(dir, saveHistory: false)
-            }
+            self?.showProwserGeneratedImage(at: path)
         }
-        imageGen.onProgressivePreview = { [weak self] path in
-            self?.scheduleProgressiveThumbnailRefresh(path)
+        imageGen.onProgressivePreview = { [weak self] path, forceEnterBrowse in
+            self?.scheduleProgressiveBrowseRefresh(path, forceEnterBrowse: forceEnterBrowse)
+        }
+        imageGen.onQueueChanged = { [weak self] in
+            self?.bumpImageGenUI()
         }
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
@@ -214,6 +221,7 @@ final class AppState {
         fileTreeOperations.bind(self)
         renamePrefixService.bind(self)
         keyboardHandler.bind(self)
+        statusBarPeekMonitor.bind(self)
         browseImageHistory.bind(self)
         workers.face.onFinished = { [weak self] count in
             Task { @MainActor in self?.status.show("Face extraction complete (\(count) cached)") }
@@ -439,7 +447,7 @@ final class AppState {
                 status.show("No user comment to speak")
                 return
             }
-            commentSpeaker.speakOrStop(text)
+            commentSpeaker.speakOrStop(text, settings: config.rawSettings())
         }
     }
 
@@ -683,6 +691,11 @@ final class AppState {
         }
     }
 
+    func showGenerationTimingDialog() {
+        guard BundleCapabilities.imageGenUIEnabled else { return }
+        generationTimingDialog.show(appState: self)
+    }
+
     func updateStatusBarPeek(nearBottom: Bool) {
         guard config.bool(forKey: "raise_status_bar_on_cursor_near_bottom", default: true) else { return }
         guard !chromeSuppressed else { return }
@@ -693,9 +706,11 @@ final class AppState {
         }
         if nearBottom && !statusBarPeekActive {
             statusBarPeekActive = true
+            sidebarLayoutRevision += 1
             notifyMainContentLayoutChanged()
         } else if !nearBottom && statusBarPeekActive {
             statusBarPeekActive = false
+            sidebarLayoutRevision += 1
             notifyMainContentLayoutChanged()
         }
     }
@@ -907,30 +922,128 @@ final class AppState {
             == URL(fileURLWithPath: right).standardizedFileURL.path
     }
 
-    /// Debounced thumbnail refresh for progressive image-gen previews (port of Python 750ms coalescing).
-    func scheduleProgressiveThumbnailRefresh(_ path: String) {
+    /// Debounced browse refresh for progressive image-gen previews (port of Python 750ms coalescing).
+    func scheduleProgressiveBrowseRefresh(_ path: String, forceEnterBrowse: Bool) {
         pendingProgressivePath = path
-        progressiveRefreshTask?.cancel()
+        pendingProgressiveForceEnterBrowse = pendingProgressiveForceEnterBrowse || forceEnterBrowse
+        if forceEnterBrowse {
+            flushProgressiveBrowseRefresh()
+            return
+        }
+        if progressiveRefreshTask != nil { return }
         progressiveRefreshTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 750_000_000)
             guard !Task.isCancelled else { return }
-            guard let pending = pendingProgressivePath else { return }
-            pendingProgressivePath = nil
-            refreshProgressiveThumbnail(at: pending)
+            flushProgressiveBrowseRefresh()
         }
     }
 
-    func refreshProgressiveThumbnail(at path: String) {
+    private func cancelProgressiveBrowseRefresh() {
+        progressiveRefreshTask?.cancel()
+        progressiveRefreshTask = nil
+        pendingProgressivePath = nil
+        pendingProgressiveForceEnterBrowse = false
+    }
+
+    private func flushProgressiveBrowseRefresh() {
+        progressiveRefreshTask?.cancel()
+        progressiveRefreshTask = nil
+        guard let path = pendingProgressivePath else { return }
+        let forceEnterBrowse = pendingProgressiveForceEnterBrowse
+        pendingProgressivePath = nil
+        pendingProgressiveForceEnterBrowse = false
+        Task { @MainActor in
+            await flushProgressiveBrowseRefreshAsync(path: path, forceEnterBrowse: forceEnterBrowse)
+        }
+    }
+
+    private func flushProgressiveBrowseRefreshAsync(path: String, forceEnterBrowse: Bool) async {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        await imageGen.writeProgressivePreviewExifIfNeeded(at: path)
+        refreshProgressiveImageInBrowse(at: path, forceEnterBrowse: forceEnterBrowse)
+    }
+
+    /// Show a Prowser-generated output in browse immediately (port of Python ``_open_in_browse``).
+    func showProwserGeneratedImage(at path: String) {
+        guard !path.isEmpty else { return }
+        prowserGeneratedImageOpenTask?.cancel()
+        prowserGeneratedImageOpenTask = Task { @MainActor in
+            cancelProgressiveBrowseRefresh()
+            imageGen.resetProgressiveBrowseOpened()
+            // Defer one tick (Python QTimer.singleShot(0)) then retry until the file exists.
+            await Task.yield()
+            for attempt in 0..<40 {
+                if Task.isCancelled { return }
+                if FileManager.default.fileExists(atPath: path) {
+                    ensureImageListedForBrowse(path: path)
+                    openImageInBrowse(path: path, saveHistory: false)
+                    reloadBrowseImageIfCurrent(path: path)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+    }
+
+    private func refreshProgressiveImageInBrowse(at path: String, forceEnterBrowse: Bool) {
         guard imageGen.showProgressiveImages else { return }
+        guard !isSlideshowActive else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
         let parent = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
         guard let current = fileData.currentDirectory,
               parent == URL(fileURLWithPath: current).standardizedFileURL.path else { return }
         guard !specificFilesActive else { return }
-        if fileData.displayedImages.contains(path) {
-            DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [path])
-        } else {
+
+        if config.string(forKey: "sort_mode", default: "date") == SortMode.date.rawValue {
+            config.updateSetting("sort_reversed", value: false)
+        }
+
+        beginSuppressDirectoryRefresh()
+        ensureImageListedForBrowse(path: path)
+        fileData.setCurrentImagePath(path)
+        if let index = fileData.displayedImages.firstIndex(of: path) {
+            fileData.setCurrentIndex(index)
+        }
+        DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [path])
+        reloadBrowseImageIfCurrent(path: path)
+
+        if forceEnterBrowse {
+            fileData.setViewMode(.browse)
+        }
+        imageGen.noteProgressiveBrowseOpened()
+    }
+
+    /// Force the browse canvas to reload when a file is overwritten at the same path.
+    func reloadBrowseImageIfCurrent(path: String) {
+        guard fileData.currentViewMode == .browse else { return }
+        guard let normalized = FileDataModel.normalizePath(path) else { return }
+        guard normalized == fileData.currentImagePath else { return }
+        browseImageContentRevision += 1
+    }
+
+    private func ensureImageListedForBrowse(path: String) {
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        if directory != fileData.currentDirectory {
+            loadDirectory(directory, saveHistory: false)
+        } else if !fileData.displayedImages.contains(path) {
             DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
+        }
+        if !fileData.displayedImages.contains(path) {
+            var images = fileData.displayedImages
+            images.append(path)
+            let options = SortingService.Options.from(config: config)
+            fileData.setDisplayedImages(
+                SortingService.sorted(images, options: options, metadataCache: metadataCache)
+            )
+        }
+    }
+
+    private var isSlideshowActive: Bool {
+        switch fileData.currentViewMode {
+        case .slideshow, .slideshow2, .slideshow3:
+            return true
+        default:
+            return false
         }
     }
 
@@ -1066,9 +1179,29 @@ final class AppState {
         applyJobsQueueSizeMode(jobsQueueSizeMode.next(), forceRefit: true)
     }
 
+    func bumpImageGenUI() {
+        imageGenUIRevision += 1
+    }
+
+    /// Port of `JobQueuePanelWidget.should_shrink_wrap_client()`.
+    func shouldShrinkWrapJobsClient() -> Bool {
+        if imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0 {
+            return false
+        }
+        if !imageGen.queue.jobs.isEmpty {
+            return false
+        }
+        return imageGen.queueSnapshot().isEmpty
+    }
+
     func syncJobsPaneGeometry() {
         guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
         rightSidebarSplit.resizeJobsPaneToMode(appState: self)
+    }
+
+    func growJobsPaneForActionBar(extra: CGFloat) {
+        guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
+        rightSidebarSplit.growJobsPaneForActionBar(extraContentHeight: extra, appState: self)
     }
 
     func jobsQueuePaneContentHeight(for mode: JobsQueueSizeMode? = nil) -> CGFloat {
@@ -1414,11 +1547,11 @@ final class AppState {
         editUserCommentError = nil
     }
 
-    func openImageInBrowse(path: String) {
+    func openImageInBrowse(path: String, saveHistory: Bool = true) {
         guard FileManager.default.fileExists(atPath: path) else { return }
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
         if directory != fileData.currentDirectory {
-            loadDirectory(directory, saveHistory: true)
+            loadDirectory(directory, saveHistory: saveHistory)
         }
         fileData.setCurrentImagePath(path)
         if let index = fileData.displayedImages.firstIndex(of: path) {
@@ -1443,7 +1576,7 @@ final class AppState {
     }
 
     func confirmCancelGeneration() {
-        guard imageGen.isProcessing else { return }
+        guard imageGen.isRunning() else { return }
         if StyledMessageDialog.showConfirm(
             title: "Cancel job?",
             message: "Cancel the running job?",
@@ -1665,7 +1798,11 @@ final class AppState {
         }
 
         let preferred = config.string(forKey: "map_application", default: "apple_maps")
-        switch MapService.openMap(for: paths, preferredApp: preferred) {
+        switch MapService.openMap(
+            for: paths,
+            preferredApp: preferred,
+            temporaryDirectory: config.temporaryFilesDirectory
+        ) {
         case .success:
             status.show("Opened map for GPS location")
         case .failure(.noGPSData(let message)):

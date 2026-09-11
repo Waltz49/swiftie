@@ -31,6 +31,9 @@ final class WorkerServices {
         personSearch = PersonSearchBridge(profilePath: profilePath)
         whisper = WhisperBridge(profilePath: profilePath)
         pythonAvailable = modelTasks.isAvailable
+        if let environment = PythonLocator.resolve(profilePath: profilePath) {
+            PythonLocator.reapOrphanWorkers(environment: environment)
+        }
     }
 
     func reloadSettings(config: AppConfig) {

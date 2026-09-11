@@ -25,7 +25,8 @@ struct BrowseView: NSViewRepresentable {
         nsView.applyTheme(appState.theme.colors)
         nsView.setImage(
             path: appState.fileData.currentImagePath,
-            actualSize: appState.browseActualSizeEnabled
+            actualSize: appState.browseActualSizeEnabled,
+            contentRevision: appState.browseImageContentRevision
         )
         nsView.numberOverlayVisible = appState.numberOverlayVisible
         nsView.overlayIndex = appState.fileData.currentIndex

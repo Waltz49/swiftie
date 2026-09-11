@@ -13,13 +13,26 @@ final class AppConfig {
         settings = Self.defaultSettings()
     }
 
+    var profilePaths: ProfilePaths { paths }
     var prowserHome: URL { paths.prowserHome }
     var dataDirectory: URL { paths.dataDirectory }
+    var imageRecognitionCacheDirectory: URL { paths.imageRecognitionCacheDirectory }
     var settingsFile: URL { paths.settingsFile }
     var thumbnailCacheDirectory: URL { paths.thumbnailCacheDirectory }
     var metadataCacheDirectory: URL { paths.metadataCacheDirectory }
     var logsDirectory: URL { paths.logsDirectory }
     var namedPipePath: String { paths.namedPipePath }
+
+    /// Resolved temp work directory (settings override or profile `tmp/`).
+    var temporaryFilesDirectory: URL {
+        let path = ProwserTempFiles.resolveTemporaryFilesDirectory(
+            settings: settings,
+            prowserHome: paths.prowserHome
+        )
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 
     var restoreState: Bool { restoreStateDict()["enabled"] as? Bool ?? true }
     var lastDirectory: String? {
@@ -459,6 +472,103 @@ final class AppConfig {
             "background_clip_enabled": false,
             "background_clip_gather_thumbnails": true,
             "background_clip_extract_faces": false,
+            "shift_cmd_depth": 4,
+            "search_depth": 4,
+            "image_creation_directory": ["path": NSNull(), "enabled": false] as [String: Any],
+            "temporary_files_directory": NSNull(),
+            "ignore_directories": [
+                ["path": NSNull(), "enabled": false],
+                ["path": NSNull(), "enabled": false],
+                ["path": NSNull(), "enabled": false],
+            ],
+            "drag_drop_auto_date_change": false,
+            "allow_thumbnail_locking": false,
+            "allow_quick_mass_rename": false,
+            "destination_menu_action": "move",
+            "slideshow_overlap_percent": 100,
+            "imagegen_max_generation_dimension": 1024,
+            "imagegen_job_cooldown_seconds": 0,
+            "imagegen_inter_copy_cooldown_seconds": 23,
+            "imagegen_add_chat_prefix_postfix": true,
+            "imagegen_fast_open_action": "from_text",
+            "imagegen_output_format": "png",
+            "imagegen_low_ram": true,
+            "imagegen_include_triggers_in_exif": false,
+            "imagegen_unload_models_when_queue_held": false,
+            "use_prompt_filter_exits": false,
+            "text_ai_exit": "",
+            "image_ai_exit": "",
+            "say_exit": "",
+            "general_settings_groups_expanded": [
+                "general": true,
+                "thumbnails": true,
+                "image_viewing": true,
+                "image_generation": true,
+            ] as [String: Bool],
+            "directories_settings_groups_expanded": [
+                "root_directories": true,
+                "scanning_options": true,
+                "depth": true,
+                "image_creation_temp_files": true,
+                "ignore_directories": true,
+            ] as [String: Bool],
         ]
+    }
+
+    func ignoreDirectories() -> [[String: Any]] {
+        let raw = settings["ignore_directories"] as? [[String: Any]] ?? []
+        if raw.count >= 3 { return Array(raw.prefix(3)) }
+        var padded = raw
+        while padded.count < 3 {
+            padded.append(["path": NSNull(), "enabled": false])
+        }
+        return padded
+    }
+
+    func setIgnoreDirectories(_ entries: [[String: Any]]) {
+        settings["ignore_directories"] = entries
+        saveSettings()
+    }
+
+    func imageCreationDirectory() -> (path: String?, enabled: Bool) {
+        guard let dict = settings["image_creation_directory"] as? [String: Any] else {
+            return (nil, false)
+        }
+        let path = dict["path"] as? String
+        let enabled = dict["enabled"] as? Bool ?? false
+        return (path, enabled)
+    }
+
+    func setImageCreationDirectory(path: String?, enabled: Bool) {
+        settings["image_creation_directory"] = [
+            "path": path as Any? ?? NSNull(),
+            "enabled": enabled,
+        ]
+        saveSettings()
+    }
+
+    func temporaryFilesDirectoryRaw() -> String? {
+        if settings["temporary_files_directory"] is NSNull { return nil }
+        let value = settings["temporary_files_directory"] as? String
+        return value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? value : nil
+    }
+
+    func setTemporaryFilesDirectory(_ path: String?) {
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        settings["temporary_files_directory"] = trimmed.isEmpty ? NSNull() : trimmed
+        saveSettings()
+        ProwserTempFiles.invalidateCache()
+    }
+
+    func settingsGroupExpanded(storageKey: String, groupKey: String, default defaultValue: Bool = true) -> Bool {
+        guard let dict = settings[storageKey] as? [String: Bool] else { return defaultValue }
+        return dict[groupKey] ?? defaultValue
+    }
+
+    func setSettingsGroupExpanded(storageKey: String, groupKey: String, expanded: Bool) {
+        var dict = settings[storageKey] as? [String: Bool] ?? [:]
+        dict[groupKey] = expanded
+        settings[storageKey] = dict
+        saveSettings()
     }
 }

@@ -1,7 +1,6 @@
 import Foundation
 
 /// Swift port of `workers/model_tasks_controller.py` (subprocess mode).
-@Observable
 @MainActor
 final class ModelTasksBridge {
     private var bridge: JSONLineProcessBridge?
@@ -32,6 +31,13 @@ final class ModelTasksBridge {
     }
 
     var isAvailable: Bool { environment != nil }
+
+    /// Matches Python ``worker_needs_cleanup``: idle ready workers are fine to reuse.
+    var workerNeedsCleanup: Bool {
+        if isReady { return false }
+        if isBusy { return false }
+        return bridge?.isRunning == true
+    }
 
     func startGenerate(payload: [String: Any]) throws -> String {
         let jobID = UUID().uuidString
@@ -87,6 +93,20 @@ final class ModelTasksBridge {
         finishJob(kind: activeKind, success: false, error: "Cancelled")
         bridge?.terminate()
         isReady = false
+    }
+
+    @discardableResult
+    func unloadImageModel() -> Bool {
+        guard let environment, !isBusy else { return false }
+        do {
+            try ensureWorker(environment: environment)
+            let jobID = UUID().uuidString
+            try bridge?.send(["command": "unload_image", "job_id": jobID])
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
     }
 
     func shutdown() {
@@ -148,8 +168,10 @@ final class ModelTasksBridge {
         case "flux_prompt_chunk":
             if let text = message["text"] as? String { onFluxPromptChunk?(text) }
         case "result":
+            guard isBusy else { return }
             handleResult(message)
         case "error":
+            guard isBusy else { return }
             let error = message["message"] as? String ?? "Task failed."
             finishJob(kind: activeKind, success: false, error: error)
         default:

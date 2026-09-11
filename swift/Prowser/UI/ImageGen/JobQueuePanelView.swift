@@ -7,7 +7,12 @@ struct JobQueuePanelView: View {
 
     var compactForFloating: Bool = false
 
+    private var fillsAvailableHeight: Bool {
+        appState.jobsQueueSizeMode == .all && appState.imageGen.queue.jobs.count > 1
+    }
+
     var body: some View {
+        let _ = appState.imageGenUIRevision
         let controller = appState.imageGen
         let mode = appState.jobsQueueSizeMode
 
@@ -33,12 +38,10 @@ struct JobQueuePanelView: View {
             }
         }
         .padding(compactForFloating ? 10 : 8)
-        .frame(
-            minHeight: appState.jobsQueuePaneContentHeight(),
-            alignment: .top
-        )
-        .onChange(of: controller.queueRevision) { _, _ in
-            guard mode != .strip else { return }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .modifier(JobQueuePanelVerticalSizing(fillsAvailableHeight: fillsAvailableHeight))
+        .background(appState.theme.colors.sidebarBackground)
+        .onAppear {
             appState.syncJobsPaneGeometry()
         }
         .onChange(of: mode) { _, _ in
@@ -66,16 +69,49 @@ struct JobQueuePanelView: View {
         switch mode {
         case .strip:
             EmptyView()
-        case .one, .all:
-            GeometryReader { geometry in
-                JobQueuePanelNSViewRepresentable(
-                    compactForFloating: compactForFloating,
-                    containerWidth: max(geometry.size.width, 260)
-                )
-                .frame(width: geometry.size.width, alignment: .topLeading)
+        case .one:
+            JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        case .all:
+            if appState.imageGen.queue.jobs.count <= 1 {
+                JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            } else {
+                ExpandingLayout {
+                    JobQueuePanelNSViewRepresentable(
+                        compactForFloating: compactForFloating,
+                        fillsAvailableHeight: true
+                    )
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
+}
 
+/// Python `_sync_jobs_mode_geometry`: fixed content height (ONE/strip/≤1 job) vs Expanding
+/// scroll (ALL + multiple jobs). `fixedSize` proposes nil height so the queue reports its
+/// measured height and the pane splitter slice hugs the content.
+private struct JobQueuePanelVerticalSizing: ViewModifier {
+    let fillsAvailableHeight: Bool
+
+    func body(content: Content) -> some View {
+        if fillsAvailableHeight {
+            content.frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            content.fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// ALL mode with multiple jobs: queue scroll fills the splitter slice (Python scroll stretch).
+private struct ExpandingLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let subview = subviews.first else { return }
+        subview.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
 }

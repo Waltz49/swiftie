@@ -30,7 +30,14 @@ enum DirectoryRefreshService {
         let displayedSet = Set(displayed)
 
         if diskSet == displayedSet {
-            guard appState.fileData.currentViewMode != .browse else { return }
+            if appState.fileData.currentViewMode == .browse {
+                if let current = appState.fileData.currentImagePath,
+                   appState.metadataCache.fileChangedOnDisk(path: current) {
+                    invalidateThumbnails(appState: appState, paths: [current])
+                    appState.reloadBrowseImageIfCurrent(path: current)
+                }
+                return
+            }
             guard displayedSet.count < 500 else { return }
             let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
             if !modified.isEmpty {

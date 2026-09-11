@@ -83,57 +83,6 @@ struct MainWindowView: View {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "settings")
         }
-        .overlay(alignment: .bottom) {
-            StatusBarPeekMouseTracker(appState: appState)
-                .frame(maxWidth: .infinity)
-                .frame(height: 35)
-        }
-    }
-}
-
-/// Shows the status bar when the cursor nears the bottom edge (Python peek zone).
-private struct StatusBarPeekMouseTracker: NSViewRepresentable {
-    let appState: AppState
-
-    func makeNSView(context: Context) -> StatusBarPeekTrackingView {
-        let view = StatusBarPeekTrackingView()
-        view.appState = appState
-        return view
-    }
-
-    func updateNSView(_ nsView: StatusBarPeekTrackingView, context: Context) {
-        nsView.appState = appState
-    }
-}
-
-@MainActor
-private final class StatusBarPeekTrackingView: NSView {
-    weak var appState: AppState?
-    private let peekZoneHeight: CGFloat = 35
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        window?.acceptsMouseMovedEvents = true
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        guard let appState else { return }
-        let location = convert(event.locationInWindow, from: nil)
-        let nearBottom = location.y <= peekZoneHeight
-        appState.updateStatusBarPeek(nearBottom: nearBottom)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach { removeTrackingArea($0) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.activeAlways, .mouseMoved, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
     }
 }
 

@@ -129,21 +129,26 @@ enum ExifService {
     /// Python/piexif-backed user description (matches information sidebar in Qt app).
     @MainActor
     static func userDescription(path: String) async -> String? {
+        let native = loadRecord(for: path).description
         if let registry = ExifBridgeSupport.registry, registry.isAvailable {
             do {
-                return try await registry.getExifUserDescription(path: path)
+                if let description = try await registry.getExifUserDescription(path: path),
+                   !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return description
+                }
             } catch {
-                return loadRecord(for: path).description
+                // Fall back to native ImageIO decode below.
             }
         }
-        return loadRecord(for: path).description
+        return native
     }
 
     @MainActor
     static func loadRecord(for path: String, preferPythonDescription: Bool) async -> ExifRecord {
         var record = loadRecord(for: path)
         guard preferPythonDescription, ExifBridgeSupport.isAvailable else { return record }
-        if let description = await userDescription(path: path) {
+        if let description = await userDescription(path: path),
+           !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             record.description = description
         }
         return record

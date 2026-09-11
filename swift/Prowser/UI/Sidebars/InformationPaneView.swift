@@ -58,12 +58,6 @@ struct InformationPaneView: View {
             themeRevision += 1
             rebuildHTML()
         }
-        .onChange(of: appState.imageGen.isProcessing) { _, _ in
-            rebuildHTML()
-        }
-        .onChange(of: appState.imageGen.cooldownSecondsRemaining) { _, _ in
-            rebuildHTML()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
             switch action {
@@ -176,7 +170,7 @@ struct InformationPaneView: View {
     private func speakComment() {
         let text = overlayData.speakablePlainText ?? ""
         let spoken = ExifService.truncateUserCommentBeforePrompt(text)
-        appState.commentSpeaker.speakOrStop(spoken)
+        appState.commentSpeaker.speakOrStop(spoken, settings: appState.config.rawSettings())
     }
 
     @MainActor

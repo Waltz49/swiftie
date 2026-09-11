@@ -364,6 +364,18 @@ final class PaneContextMenuView: NSView {
     var kind: SidebarPaneContextMenuKind = .fileTree
     weak var appState: AppState?
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override var isOpaque: Bool { false }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         if Self.isResolvingUnderlyingView { return nil }
         guard bounds.contains(point) else { return nil }

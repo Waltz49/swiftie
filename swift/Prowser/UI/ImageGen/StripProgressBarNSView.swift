@@ -11,6 +11,8 @@ final class StripProgressBarNSView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = false
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
 
     required init?(coder: NSCoder) {
@@ -30,7 +32,7 @@ final class StripProgressBarNSView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: JobQueueLayout.stripBarMinWidth, height: JobQueueLayout.stripBarHeight)
+        NSSize(width: NSView.noIntrinsicMetric, height: JobQueueLayout.stripBarHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {

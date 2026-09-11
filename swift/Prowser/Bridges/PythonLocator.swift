@@ -52,6 +52,30 @@ enum PythonLocator {
         ["-u", "-m", module]
     }
 
+    /// Kill orphaned worker subprocesses left behind when a prior app instance exited uncleanly.
+    static func reapOrphanWorkers(environment: Environment) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: environment.executable)
+        process.arguments = [
+            "-c",
+            "from workers.model_tasks_process_registry import reap_orphan_workers; "
+                + "reaped = reap_orphan_workers(); "
+                + "print(f'[workers] reaped {len(reaped)} orphan worker(s): {reaped}', flush=True) "
+                + "if reaped else None",
+        ]
+        process.currentDirectoryURL = environment.repoRoot
+        var env = ProcessInfo.processInfo.environment
+        env["PROWSER_PYTHON_ROOT"] = environment.repoRoot.path
+        env["PYTHONUNBUFFERED"] = "1"
+        process.environment = env
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            // Best-effort cleanup; worker startup still proceeds if this fails.
+        }
+    }
+
     static func prowserWorkerArguments(_ flag: String) -> [String] {
         ["-u", "prowser.py", flag]
     }

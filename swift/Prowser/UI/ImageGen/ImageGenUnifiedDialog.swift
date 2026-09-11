@@ -24,6 +24,8 @@ struct ImageGenUnifiedDialog: View {
     @State private var baselineValues: [String: Any] = [:]
     @State private var visitedFunctions: Set<String> = []
     @State private var pluginSwitchGuard = false
+    @State private var suppressCloseOnGeneratePersist = false
+    @State private var loadGeneration = 0
     private let functions = ["edit", "create", "expand", "infill"]
     private let session = ImageGenSessionState()
 
@@ -130,6 +132,7 @@ struct ImageGenUnifiedDialog: View {
                     + "When unchecked, keep the dialog open and show a brief confirmation."
                 )
                 .onChange(of: closeOnGenerate) { _, enabled in
+                    guard !suppressCloseOnGeneratePersist else { return }
                     ImageGenPersistence.setCloseDialogOnGenerate(enabled, config: appState.config)
                 }
 
@@ -201,6 +204,9 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private func loadDialog() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let pendingAutoGenerate = request.autoGenerate
         appState.imageGen.beginImageGenDialogBuild()
         defer { appState.imageGen.endImageGenDialogBuild() }
         closeOnGenerate = ImageGenPersistence.closeDialogOnGenerate(config: appState.config)
@@ -239,7 +245,27 @@ struct ImageGenUnifiedDialog: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
-        if request.autoGenerate, errorMessage.isEmpty, replaceJobID == nil {
+        guard generation == loadGeneration else { return }
+        if pendingAutoGenerate, errorMessage.isEmpty, replaceJobID == nil {
+            appState.imageGenDialogRequest.autoGenerate = false
+            scheduleAutoGenerate()
+        }
+    }
+
+    /// Match Python ``ImageGenUnifiedDialog._schedule_auto_generate`` (next event-loop turn).
+    private func scheduleAutoGenerate() {
+        suppressCloseOnGeneratePersist = true
+        closeOnGenerate = true
+        suppressCloseOnGeneratePersist = false
+        let generation = loadGeneration
+        Task { @MainActor in
+            await Task.yield()
+            guard generation == loadGeneration else { return }
+            guard errorMessage.isEmpty, replaceJobID == nil else { return }
+            guard !selectedPluginID.isEmpty else { return }
+            let prompt = (values["prompt"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !prompt.isEmpty else { return }
             await submit(replace: false)
         }
     }

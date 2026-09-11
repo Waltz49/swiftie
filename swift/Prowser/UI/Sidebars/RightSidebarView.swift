@@ -4,6 +4,7 @@ struct RightSidebarView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
+        let _ = appState.imageGenUIRevision
         let imageGen = appState.imageGen
         let jobsTitle = "Job Control" + imageGen.jobsPaneTitleSuffix()
         let descriptors = [
@@ -22,6 +23,7 @@ struct RightSidebarView: View {
                 expandedConfigKey: "information_sidebar_visible",
                 defaultExpanded: true,
                 isDisplayed: true,
+                omitLeftBorder: true,
                 allowsTitlebarDrag: true,
                 contextMenuKind: .information,
                 preferredFitContentHeight: 180
@@ -33,6 +35,7 @@ struct RightSidebarView: View {
                 defaultExpanded: true,
                 isDisplayed: BundleCapabilities.imageGenUIEnabled && appState.jobsDisplayMode == .pane,
                 status: imageGen.jobsHeaderStatusText().isEmpty ? nil : imageGen.jobsHeaderStatusText(),
+                omitLeftBorder: true,
                 allowsTitlebarDrag: true,
                 isJobsPane: true,
                 showsFlyoutButton: true,
@@ -46,7 +49,7 @@ struct RightSidebarView: View {
             descriptors: descriptors,
             pane0: { ShortcutsSidebarView() },
             pane1: { InformationPaneView().frame(minHeight: 80) },
-            pane2: { JobQueuePanelView().frame(minHeight: 60) }
+            pane2: { JobQueuePanelView() }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -452,6 +452,12 @@ struct ProwserCommands: Commands {
                 }
                 .keyboardShortcut("l", modifiers: .control)
 
+                if BundleCapabilities.imageGenUIEnabled {
+                    Button("See Timings") {
+                        Task { @MainActor in appState.showGenerationTimingDialog() }
+                    }
+                }
+
                 Divider()
 
                 Button("Toggle Debug Mode") {
