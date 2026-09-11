@@ -69,7 +69,7 @@ enum FileTreeFilter {
             return true
         }
 
-        let pattern = mode == "use_filter" ? (appState.filterSettings.filterPattern ?? "*") : "*"
+        let pattern = mode == "use_filter" ? appState.filterSettings.filterPattern : "*"
         let key = "\(mode)|\(pattern)"
         if key != cacheKey {
             cache.removeAll()

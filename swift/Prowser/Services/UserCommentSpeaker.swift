@@ -1,10 +1,10 @@
 import AppKit
 
-/// NSSpeechSynthesizer wrapper for reading user comments aloud. Port of `speech_utils.py`.
+/// AVSpeechSynthesizer wrapper for reading user comments aloud. Port of `speech_utils.py`.
 @MainActor
 @Observable
-final class UserCommentSpeaker: NSObject, NSSpeechSynthesizerDelegate {
-    private var synthesizer: NSSpeechSynthesizer?
+final class UserCommentSpeaker {
+    private var speechHelper: AVSpeechHelper?
     private var speechProcess: Process?
     private var speechStopRequested = false
     private(set) var isSpeaking = false
@@ -25,10 +25,13 @@ final class UserCommentSpeaker: NSObject, NSSpeechSynthesizerDelegate {
             return
         }
 
-        let synth = NSSpeechSynthesizer()
-        synth.delegate = self
-        synthesizer = synth
-        synth.startSpeaking(spoken)
+        let helper = AVSpeechHelper()
+        helper.onFinish = { [weak self] in
+            self?.speechHelper = nil
+            self?.isSpeaking = false
+        }
+        speechHelper = helper
+        helper.speak(spoken)
         isSpeaking = true
     }
 
@@ -38,8 +41,8 @@ final class UserCommentSpeaker: NSObject, NSSpeechSynthesizerDelegate {
             speechProcess.terminate()
         }
         speechProcess = nil
-        synthesizer?.stopSpeaking()
-        synthesizer = nil
+        speechHelper?.stop()
+        speechHelper = nil
         isSpeaking = false
     }
 
@@ -84,13 +87,6 @@ final class UserCommentSpeaker: NSObject, NSSpeechSynthesizerDelegate {
             print("DEBUG UserCommentSpeaker: failed to launch say exit: \(error)")
             speechProcess = nil
             isSpeaking = false
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ sender: NSSpeechSynthesizer, didFinishSpeaking finishedSpeaking: Bool) {
-        Task { @MainActor in
-            isSpeaking = false
-            synthesizer = nil
         }
     }
 }

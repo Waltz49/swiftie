@@ -858,7 +858,7 @@ private struct SortMenuButton: View {
     let title: String
     let mode: SortMode
     let reversed: Bool
-    let apply: (SortMode, Bool) -> Void
+    let apply: @MainActor (SortMode, Bool) -> Void
 
     var body: some View {
         let checked = MenuStateHelpers.sortMenuItemChecked(mode: mode, reversed: reversed, config: appState.config)
@@ -982,7 +982,7 @@ private struct RecentDirectoriesMenuContent: View {
 @MainActor
 private struct ThemeMenuContent: View {
     @Bindable var appState: AppState
-    let applyTheme: (String) -> Void
+    let applyTheme: @MainActor (String) -> Void
 
     var body: some View {
         Menu("Theme") {

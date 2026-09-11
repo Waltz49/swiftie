@@ -721,10 +721,12 @@ final class AppState {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self else { return }
-            let raw = notification.object as? String ?? ""
-            let newMode = ViewMode(rawValue: raw) ?? .thumbnail
-            handleViewModeTransition(to: newMode)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let raw = notification.object as? String ?? ""
+                let newMode = ViewMode(rawValue: raw) ?? .thumbnail
+                self.handleViewModeTransition(to: newMode)
+            }
         }
     }
 
@@ -976,7 +978,7 @@ final class AppState {
             imageGen.resetProgressiveBrowseOpened()
             // Defer one tick (Python QTimer.singleShot(0)) then retry until the file exists.
             await Task.yield()
-            for attempt in 0..<40 {
+            for _ in 0..<40 {
                 if Task.isCancelled { return }
                 if FileManager.default.fileExists(atPath: path) {
                     ensureImageListedForBrowse(path: path)

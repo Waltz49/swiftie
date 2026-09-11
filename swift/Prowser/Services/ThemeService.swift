@@ -300,9 +300,11 @@ final class ThemeService {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            if self.themeID == "system" {
-                self.reload()
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.themeID == "system" {
+                    self.reload()
+                }
             }
         }
     }

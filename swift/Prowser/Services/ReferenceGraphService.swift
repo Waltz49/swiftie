@@ -155,7 +155,7 @@ enum ReferenceGraphService {
         var seenPaths = Set<String>()
         var seenNames = Set<String>()
         var output: [String] = []
-        var extensionSwapped = false
+        let extensionSwapped = false
 
         func visit(path: String, directEntries: [(String, Double?)]) async {
             let normalized = normalizePath(path)

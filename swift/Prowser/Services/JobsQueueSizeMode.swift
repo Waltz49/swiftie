@@ -72,7 +72,7 @@ enum JobQueuePaneMetrics {
             return padding + toolbar + emptyStateHeight
 
         case .one:
-            var total = padding + toolbar + stripBlock
+            let total = padding + toolbar + stripBlock
             if jobCount == 0 {
                 return max(total + (isProcessing ? 22 : emptyStateHeight), padding + toolbar + emptyStateHeight)
             }
@@ -80,7 +80,7 @@ enum JobQueuePaneMetrics {
             return total + cardH + bottomSlack
 
         case .all:
-            var total = padding + toolbar + stripBlock
+            let total = padding + toolbar + stripBlock
             if jobCount == 0 {
                 return max(total + (isProcessing ? 56 : emptyStateHeight), padding + toolbar + emptyStateHeight)
             }

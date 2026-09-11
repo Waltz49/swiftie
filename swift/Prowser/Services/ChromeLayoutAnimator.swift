@@ -44,7 +44,7 @@ enum ChromeLayoutAnimator {
                 let current = ChromeLayoutSnapshot.lerp(from, to, eased)
                 onUpdate(current)
                 if t >= 1 {
-                    timer.invalidate()
+                    activeTimer?.invalidate()
                     activeTimer = nil
                     onComplete()
                 }

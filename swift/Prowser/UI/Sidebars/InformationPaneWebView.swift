@@ -52,11 +52,12 @@ struct InformationPaneWebView: NSViewRepresentable {
             self.onLink = onLink
         }
 
-        func webView(
+        nonisolated func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
+            MainActor.assumeIsolated {
             guard let url = navigationAction.request.url else {
                 decisionHandler(.allow)
                 return
@@ -67,6 +68,7 @@ struct InformationPaneWebView: NSViewRepresentable {
                 return
             }
             decisionHandler(.allow)
+            }
         }
 
         private func handle(url: URL, modifiers: NSEvent.ModifierFlags) -> Bool {

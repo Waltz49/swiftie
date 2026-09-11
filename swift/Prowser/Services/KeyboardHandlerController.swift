@@ -565,7 +565,7 @@ final class KeyboardHandlerController {
                 keyCode: 17,
                 appState: appState,
                 onMatch: {
-                    returnToThumbnails(appState: appState)
+                    _ = returnToThumbnails(appState: appState)
                     appState.showFileTree()
                 }
             )
@@ -581,7 +581,7 @@ final class KeyboardHandlerController {
                 keyCode: 35,
                 appState: appState,
                 onMatch: {
-                    returnToThumbnails(appState: appState)
+                    _ = returnToThumbnails(appState: appState)
                     appState.showPreviewPane()
                 }
             )
@@ -1001,12 +1001,12 @@ final class KeyboardHandlerController {
         case .left, .up: delta = -1
         case .right, .down: delta = 1
         }
-        navigateLinear(appState: appState, delta: delta, images: images)
+        _ = navigateLinear(appState: appState, delta: delta, images: images)
     }
 
     private func navigateLinear(appState: AppState, direction: ThumbnailNavigateDirection, images: [String]) {
         let delta = (direction == .left || direction == .up) ? -1 : 1
-        navigateLinear(appState: appState, delta: delta, images: images)
+        _ = navigateLinear(appState: appState, delta: delta, images: images)
     }
 
     private func navigateLinear(appState: AppState, delta: Int, images: [String]? = nil) -> Bool {

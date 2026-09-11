@@ -240,7 +240,7 @@ struct ImageGenLoraPicker: View {
     }
 
     private func commitSelection() {
-        var selected = draftSelectedIDs.filter { $0 != "none" }
+        let selected = draftSelectedIDs.filter { $0 != "none" }
         if choicesState.stackMode {
             values["mflux_lora_stack"] = selected
             values.removeValue(forKey: "mflux_lora")

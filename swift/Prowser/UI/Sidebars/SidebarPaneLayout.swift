@@ -86,7 +86,7 @@ enum SidebarPaneLayout {
         let total = max(totalHeight, 1)
         let otherIndices = visibility.indices.filter { visibility[$0] && $0 != targetIdx }
         let targetHeader = headerHeightForPane(targetIdx)
-        var needed = max(neededTarget, paneMinHeight(headerHeight: targetHeader))
+        let needed = max(neededTarget, paneMinHeight(headerHeight: targetHeader))
 
         var otherMins: [Int: CGFloat] = [:]
         for index in otherIndices {

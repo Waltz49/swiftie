@@ -69,7 +69,7 @@ final class FileTreeImageDiscovery {
     }
 
     private func filterPattern(mode: String, appState: AppState) -> String {
-        mode == "use_filter" ? (appState.filterSettings.filterPattern ?? "*") : "*"
+        mode == "use_filter" ? appState.filterSettings.filterPattern : "*"
     }
 
     nonisolated static func directoryContainsImages(
@@ -93,7 +93,7 @@ final class FileTreeImageDiscovery {
             if isExcludedPath(dirPath, excluded: excludedPaths) { continue }
             if depth > maxDepth { continue }
 
-            var options: FileManager.DirectoryEnumerationOptions = includeHidden ? [] : [.skipsHiddenFiles]
+            let options: FileManager.DirectoryEnumerationOptions = includeHidden ? [] : [.skipsHiddenFiles]
             guard let entries = try? FileManager.default.contentsOfDirectory(
                 at: dirURL,
                 includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey],

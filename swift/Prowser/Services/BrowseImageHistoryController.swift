@@ -110,7 +110,7 @@ final class BrowseImageHistoryController {
         appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         appState.config.updateSetting("sort_reversed", value: false)
         appState.setSpecificFilesActive(true)
-        if let firstDirectory = paths.first.map { ($0 as NSString).deletingLastPathComponent } {
+        if let firstDirectory = paths.first.map({ ($0 as NSString).deletingLastPathComponent }) {
             appState.fileData.setCurrentDirectory(firstDirectory)
         }
         appState.fileData.setDisplayedImages(paths)

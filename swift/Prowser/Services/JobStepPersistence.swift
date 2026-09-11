@@ -92,7 +92,7 @@ enum JobStepPersistence {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let tmp = url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".tmp")
         try? data.write(to: tmp, options: .atomic)
-        try? FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        _ = try? FileManager.default.replaceItemAt(url, withItemAt: tmp)
     }
 }
 

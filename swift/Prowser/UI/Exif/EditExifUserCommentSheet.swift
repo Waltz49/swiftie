@@ -508,8 +508,8 @@ struct EditExifUserCommentSheet: View {
 
 @MainActor
 @Observable
-final class SpeechController: NSObject, NSSpeechSynthesizerDelegate {
-    private var synthesizer: NSSpeechSynthesizer?
+final class SpeechController {
+    private var speechHelper: AVSpeechHelper?
     private(set) var isSpeaking = false
 
     func toggleSpeaking(_ text: String) {
@@ -518,24 +518,20 @@ final class SpeechController: NSObject, NSSpeechSynthesizerDelegate {
             return
         }
         guard !text.isEmpty else { return }
-        let synth = NSSpeechSynthesizer()
-        synth.delegate = self
-        synthesizer = synth
-        synth.startSpeaking(text)
+        let helper = AVSpeechHelper()
+        helper.onFinish = { [weak self] in
+            self?.speechHelper = nil
+            self?.isSpeaking = false
+        }
+        speechHelper = helper
+        helper.speak(text)
         isSpeaking = true
     }
 
     func stop() {
-        synthesizer?.stopSpeaking()
-        synthesizer = nil
+        speechHelper?.stop()
+        speechHelper = nil
         isSpeaking = false
-    }
-
-    nonisolated func speechSynthesizer(_ sender: NSSpeechSynthesizer, didFinishSpeaking finishedSpeaking: Bool) {
-        Task { @MainActor in
-            isSpeaking = false
-            synthesizer = nil
-        }
     }
 }
 

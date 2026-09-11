@@ -73,7 +73,7 @@ struct ImageGenPromptActionButtons: View {
     private func speakText() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        NSSpeechSynthesizer().startSpeaking(trimmed)
+        SpeechSynthesis.speak(trimmed)
     }
 
     private func appendFavoritePrompt() {

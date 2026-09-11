@@ -139,7 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { _ in
-                WindowFullscreen.persistMacOSSpaceMode(config: capturedState.config)
+                MainActor.assumeIsolated {
+                    WindowFullscreen.persistMacOSSpaceMode(config: capturedState.config)
+                }
             }
         }
     }
