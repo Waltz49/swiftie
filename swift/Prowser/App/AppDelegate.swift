@@ -95,9 +95,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleMenuBarDeduplication() {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
             MenuBarTitles.removeDuplicateStandardMenus()
+            self?.rewireStandardAboutMenuItems()
         }
+    }
+
+    /// Route Application-menu About to our custom dialog instead of `orderFrontStandardAboutPanel`.
+    private func rewireStandardAboutMenuItems() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+        for topItem in mainMenu.items {
+            guard let submenu = topItem.submenu else { continue }
+            for item in submenu.items {
+                guard item.action == #selector(NSApplication.orderFrontStandardAboutPanel(_:)) else {
+                    continue
+                }
+                item.target = self
+                item.action = #selector(showCustomAboutPanel(_:))
+            }
+        }
+    }
+
+    @objc private func showCustomAboutPanel(_ sender: Any?) {
+        appState?.showAboutDialog()
     }
 
     private func applyLaunchOptions(_ appState: AppState) {

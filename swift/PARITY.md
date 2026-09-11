@@ -171,7 +171,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [ ] Last Image (⌘; browse history swap)
 - [ ] Image History (F3)
 - [~] Close Window (⌘W) / Quit (⌘Q)
-- [~] About (Help menu in Swift; File menu in Python)
+- [x] About (File + Help menus — non-modal window, License/Credits HTML popups)
 
 ## Menus — Edit
 
@@ -184,8 +184,8 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Lock / Unlock files (⌘L / ⇧⌘L — in Edit menu; Python also in Tools)
 - [~] Edit with external editor (⌃E)
 - [x] Rename with Custom Prefix… (⌘N) — `RenamePrefixSheet` + `RenamePrefixService`/`RenamePrefixPlanner` (names, 3-phase plan, dates, .prsort locks, metadata migration; CNN/CLIP/face MD5 feature hand-off not ported)
-- [ ] Convert Image Format… (⌘M)
-- [ ] Resize… (⌘⇧Z)
+- [~] Convert Image Format… (⌘M)
+- [x] Resize… (⌘⇧Z)
 
 ## Menus — View
 
@@ -234,7 +234,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 ## Menus — Image (generation)
 
-- [~] Create an image from text… (`ImageGenUnifiedDialog` — intro, scroll fields, collapsible AI + custom size)
+- [x] Create an image from text… (`ImageGenUnifiedDialog` — intro, scroll fields, collapsible AI + custom size with pipeline dim limits)
 - [ ] Fast create / preset submenu entries (`image_gen_menu.py`)
 - [~] Edit / Expand / Infill dialogs (unified shell: icon switcher, source nav, footer Cancel/Close/Replace/Generate)
 - [~] Cancel generation (Image menu + information pane)
@@ -261,7 +261,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 ## Menus — Help
 
 - [~] Keyboard shortcuts (`/` — `KeyboardShortcutsHelpView`)
-- [~] About (`AboutView`)
+- [x] About (`AboutDialogController` — icon, version, Python version, build date, background jobs, License/Credits HTML windows)
 
 ## Dynamic menu & shortcut infrastructure
 
@@ -296,7 +296,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [ ] Inline thumbnail rename (F2)
 - [ ] Duplicate file
 - [ ] Convert image format
-- [ ] Resize images
+- [x] Resize images (dimensions + percent modes, copy/replace, EXIF UserComment, batch progress+cancel)
 - [x] Quick mass rename (`RenamePrefixService.quickMassRename`, gated by `allow_quick_mass_rename`)
 - [~] Lock / unlock files (⌘L / ⇧⌘L)
 - [x] Undo delete (⌘Z)
@@ -388,7 +388,8 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `imagegen_fast_open_action`, queue UI prefs | done | done |
 | `imagegen_job_cooldown_seconds`, `imagegen_inter_copy_cooldown_seconds` | done | done (`ImageGenDimLimits` + controller) |
 | `imagegen_output_format` | done | done (output path extension) |
-| `imagegen_max_generation_dimension`, `imagegen_low_ram` | done | done (Python worker/registry reads shared settings) |
+| `imagegen_max_generation_dimension`, `imagegen_low_ram` | done | done (Python worker/registry reads shared settings; Swift UI reclamps dims on change) |
+| `resize_preserve_aspect`, `resize_resample_method`, `resize_delete_original`, `resize_preserve_dates`, `resize_anchor_is_width` | done | done |
 | `imagegen_unload_models_when_queue_held` | done | done (`ModelTasksBridge.unloadImageModel`) |
 | `use_prompt_filter_exits`, text/image exit scripts, prefix/postfix | done | partial (runtime on Python bridges for prompts) |
 | `say_exit` | done | done (`UserCommentSpeaker` + `ExitScriptUtils.sayExitArgv`) |
@@ -446,7 +447,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] ⌘; last image swap (`BrowseImageHistoryController.swapFirstTwoAndShow`)
 - [~] ⌘F CLIP search (`ClipSearchSheet`)
 - [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
-- [~] ⌘N rename prefix (done), ⌘M convert, ⌘⇧Z resize
+- [x] ⌘N rename prefix (done), ⌘M convert, ⌘⇧Z resize (full dialog)
 
 ## Suggested implementation order (M9+)
 
@@ -488,14 +489,20 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 |---|---|---|
 | File: Open, Recent, Favorites, Back/Forward | done | Dynamic favorite/destination labels via `MenuStateHelpers` |
 | File: Settings, Last Image, Delete, Trash view | partial | Settings via scene; Last Image ⌘; done; Trash view deferred (bundled app limit) |
-| Edit: copy path/image, lock, rename prefix, convert, resize | done | |
+| Edit: copy path/image, lock, rename prefix, convert, resize | done | Resize: CG vs Pillow filters (functional, not bit-identical) |
 | View: pane toggles, sort (checkmarks), theme, chrome | done | Hide/Show dynamic labels |
 | Search: similar, CLIP, person, duplicates, show in dir | done | Quick person search partial |
 | Move/Copy top-level menu | partial | Folded into File → Move to |
 | Image: create/edit/expand/infill, job queue | partial | Fast-create presets, model download deferred (Python backend) |
 | Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting |
 | Tools: Debug | partial | Browser debug done; imagegen debug stays Python |
-| Help: shortcuts, about, docs | partial | PF Keys / Hidden Gems placeholders |
+| Help: shortcuts, about, docs | partial | About complete; PF Keys / Hidden Gems placeholders |
+
+## Intentional Swift differences (documented)
+
+- Resize appears in thumbnail **context menu** (Swift-only; Python Edit menu only).
+- Resize resampling uses Core Graphics interpolation (Python: Pillow); filter names match, output may differ slightly.
+- Image-gen submit still delegates final dim alignment to Python `buildPayload`; Swift UI now mirrors live limit math.
 
 ## Remaining gate items (manual sign-off)
 

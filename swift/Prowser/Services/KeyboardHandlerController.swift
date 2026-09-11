@@ -296,7 +296,7 @@ final class KeyboardHandlerController {
 
     private func shouldHandle(_ event: NSEvent) -> Bool {
         guard let appState else { return false }
-        if isImageGenUnifiedDialogKeyWindow() || appState.showKeyboardHelp || appState.showAbout {
+        if isImageGenUnifiedDialogKeyWindow() || appState.showKeyboardHelp || appState.isAboutDialogVisible {
             return false
         }
         if appState.hasModalSheetPresented { return false }
@@ -891,7 +891,8 @@ final class KeyboardHandlerController {
             return true
         }
 
-        if appState.selection.multiSelectMode {
+        // Python arrow handlers clear thumbnail selection before moving highlight.
+        if !appState.selection.selectedFiles.isEmpty {
             SelectionService.clearSelection(appState: appState)
         }
         appState.selection.rangeAnchorIndex = nil

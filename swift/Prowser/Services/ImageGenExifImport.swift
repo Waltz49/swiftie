@@ -135,16 +135,22 @@ enum ImageGenExifImport {
         }
     }
 
-    private static func activeImagePath(_ appState: AppState) -> String? {
+    /// Active image for EXIF import in browse/thumbnail views.
+    /// Uses `currentImagePath` as the single source of truth (Python `current_image_path`;
+    /// thumbnail selection is cleared on arrow navigation before highlight moves).
+    static func activeImagePathForBrowseOrThumbnail(appState: AppState) -> String? {
         switch appState.fileData.currentViewMode {
-        case .browse:
-            return appState.fileData.currentImagePath
-        case .thumbnail:
-            let selected = Array(appState.selection.selectedFiles)
-            return selected.count == 1 ? selected[0] : nil
+        case .browse, .thumbnail:
+            guard let path = appState.fileData.currentImagePath,
+                  FileManager.default.isReadableFile(atPath: path) else { return nil }
+            return path
         default:
             return nil
         }
+    }
+
+    private static func activeImagePath(_ appState: AppState) -> String? {
+        activeImagePathForBrowseOrThumbnail(appState: appState)
     }
 
     private static func exifImportablePath(_ path: String) -> String? {

@@ -80,6 +80,7 @@ final class AppState {
     private let keyboardHandler = KeyboardHandlerController()
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
     private let generationTimingDialog = GenerationTimingDialogController()
+    private let aboutDialog = AboutDialogController()
     let chat: ChatController
     let theme: ThemeService
     let workers: WorkerServices
@@ -102,7 +103,7 @@ final class AppState {
     var settingsOpenRequestToken = 0
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     var showKeyboardHelp = false
-    var showAbout = false
+    var isAboutDialogVisible: Bool { aboutDialog.isVisible }
     var showSimilaritySearchSheet = false
     var showPersonSearchSheet = false
     var showFindReferencesSheet = false
@@ -134,7 +135,7 @@ final class AppState {
             || showReferenceGraphSheet
             || showImageGenCreateSheet
             || showKeyboardHelp
-            || showAbout
+            || isAboutDialogVisible
     }
     var editUserCommentText = ""
     var editUserCommentOriginalText = ""
@@ -714,6 +715,14 @@ final class AppState {
     func showGenerationTimingDialog() {
         guard BundleCapabilities.imageGenUIEnabled else { return }
         generationTimingDialog.show(appState: self)
+    }
+
+    func showAboutDialog() {
+        aboutDialog.show(appState: self)
+    }
+
+    func closeAboutDialog() {
+        aboutDialog.close()
     }
 
     func updateStatusBarPeek(nearBottom: Bool) {
@@ -1447,12 +1456,14 @@ final class AppState {
             autoGenerate: autoGenerate,
             editSourcePaths: editSourcePaths
         )
-        if showImageGenUnifiedDialog {
-            imageGenDialogReloadToken += 1
+        let wasAlreadyOpen = showImageGenUnifiedDialog
+        if wasAlreadyOpen {
             NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
         } else {
             showImageGenUnifiedDialog = true
         }
+        // Always bump so a closed-then-reopened dialog reloads (SwiftUI Window view may persist).
+        imageGenDialogReloadToken += 1
     }
 
     func closeImageGenUnifiedDialog() {
@@ -1460,8 +1471,7 @@ final class AppState {
     }
 
     func openFastImageGenDialog() {
-        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
-        let action = imagegen["fast_open_action"] as? String ?? "from_text"
+        let action = config.string(forKey: "imagegen_fast_open_action", default: "from_text")
         Task {
             let prompt = await importPromptForActiveImageAsync()
             if action == "edit_image" {
@@ -1502,22 +1512,11 @@ final class AppState {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Prompt-only text for image-gen priming (Python `_dialog_initial_prompt_from_user_comment`).
+    /// Prompt-only text for image-gen priming (Python `_user_comment_for_active_image` → `_dialog_initial_prompt_from_user_comment`).
     func importPromptForActiveImageAsync() async -> String? {
-        guard let path = activeImagePathForExifImport() else { return nil }
+        guard let path = fileData.currentImagePath,
+              FileManager.default.isReadableFile(atPath: path) else { return nil }
         return await ExifService.importPromptFromPath(path)
-    }
-
-    private func activeImagePathForExifImport() -> String? {
-        switch fileData.currentViewMode {
-        case .browse:
-            return fileData.currentImagePath
-        case .thumbnail:
-            let selected = Array(selection.selectedFiles)
-            return selected.count == 1 ? selected[0] : fileData.currentImagePath
-        default:
-            return fileData.currentImagePath
-        }
     }
 
     func beginEditUserComment() {

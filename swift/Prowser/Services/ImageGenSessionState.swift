@@ -32,6 +32,11 @@ final class ImageGenSessionState {
         config.updateSetting("imagegen", value: imagegen)
     }
 
+    func reset() {
+        valuesByFunction.removeAll()
+        pluginIDByFunction.removeAll()
+    }
+
     func copyValues(_ values: [String: Any]) -> [String: Any] {
         guard JSONSerialization.isValidJSONObject(values),
               let data = try? JSONSerialization.data(withJSONObject: values),

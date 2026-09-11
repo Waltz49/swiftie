@@ -95,10 +95,6 @@ private struct MainWindowSheetsModifier: ViewModifier {
                 KeyboardShortcutsHelpView()
                     .environment(\.themeColors, appState.theme.colors)
             }
-            .sheet(isPresented: $appState.showAbout) {
-                AboutView()
-                    .environment(\.themeColors, appState.theme.colors)
-            }
             .sheet(isPresented: $appState.showSimilaritySearchSheet) {
                 SimilaritySearchSheet()
                     .environment(appState)

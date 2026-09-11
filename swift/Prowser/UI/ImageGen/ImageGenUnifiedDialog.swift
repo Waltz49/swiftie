@@ -207,10 +207,14 @@ struct ImageGenUnifiedDialog: View {
         loadGeneration += 1
         let generation = loadGeneration
         let pendingAutoGenerate = request.autoGenerate
+        let pendingRequest = request
         appState.imageGen.beginImageGenDialogBuild()
         defer { appState.imageGen.endImageGenDialogBuild() }
         closeOnGenerate = ImageGenPersistence.closeDialogOnGenerate(config: appState.config)
-        selectedFunction = request.function.isEmpty ? session.lastFunction(config: appState.config) : request.function
+        selectedFunction = pendingRequest.function.isEmpty ? session.lastFunction(config: appState.config) : pendingRequest.function
+        if pendingRequest.replaceJobID == nil {
+            session.reset()
+        }
         isLoading = true
         errorMessage = ""
         do {
@@ -225,7 +229,8 @@ struct ImageGenUnifiedDialog: View {
                 )
                 pluginsByFunction[function] = plugins
             }
-            if let replaceJobID, let job = appState.imageGen.queue.jobs.first(where: { $0.jobID == replaceJobID }) {
+            if let replaceJobID = pendingRequest.replaceJobID,
+               let job = appState.imageGen.queue.jobs.first(where: { $0.jobID == replaceJobID }) {
                 selectedFunction = job.function
                 selectedPluginID = job.pluginID
                 values = job.values
@@ -233,10 +238,10 @@ struct ImageGenUnifiedDialog: View {
                 visitedFunctions.insert(selectedFunction)
             } else {
                 await switchFunction(from: "", to: selectedFunction)
-                if let prompt = request.initialPrompt, !prompt.isEmpty {
+                if let prompt = pendingRequest.initialPrompt, !prompt.isEmpty {
                     values["prompt"] = ExifService.initialPromptFromUserComment(prompt) ?? prompt
                 }
-                if request.autoImportEXIF {
+                if pendingRequest.autoImportEXIF {
                     await applyAutoImportEXIF()
                 }
             }

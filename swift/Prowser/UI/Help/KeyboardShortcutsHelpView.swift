@@ -95,6 +95,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘K", "Find similar images"),
                         ("⌘⇧H", "Show image in directory"),
                         ("⌘Z", "Undo delete (restore from Trash)"),
+                        ("⌘⇧Z", "Resize images"),
                         ("⇧F", "Find duplicate files (recursive)"),
                         ("⌘1–⌘9", "Move to destination"),
                         ("⌘0", "Move to last drop location"),
@@ -150,32 +151,3 @@ struct KeyboardShortcutsHelpView: View {
     }
 }
 
-struct AboutView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.themeColors) private var colors
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Prowser").font(.title)
-            Text("Native macOS image browser (Swift port)")
-                .foregroundStyle(colors.dialogMutedText)
-            Text("Version 0.1 (Swift migration)")
-                .font(.caption)
-                .foregroundStyle(colors.dialogMutedText)
-            Spacer()
-            DialogButtonRow([
-                DialogButton("OK", isDefault: true, isCancel: true) { dismiss() },
-            ], focusDefaultOnAppear: true)
-        }
-        .padding(32)
-        .frame(minWidth: 320, minHeight: 200)
-        .themeDialogStyle()
-        .persistedDialogGeometry(
-            DialogGeometryKey.about,
-            defaultWidth: 320,
-            defaultHeight: 200,
-            minWidth: 280,
-            minHeight: 180
-        )
-    }
-}

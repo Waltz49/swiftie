@@ -6,6 +6,12 @@ struct ProwserCommands: Commands {
     @Bindable var appState: AppState
 
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About Prowser") {
+                Task { @MainActor in appState.showAboutDialog() }
+            }
+        }
+
         CommandMenu(MenuBarTitles.edit) {
             ExternalEditorButton(appState: appState)
 
@@ -150,6 +156,12 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in NSApp.keyWindow?.close() }
             }
             .keyboardShortcut("w", modifiers: .command)
+
+            Divider()
+
+            Button("About…") {
+                Task { @MainActor in appState.showAboutDialog() }
+            }
 
             Button("Quit Prowser") {
                 Task { @MainActor in NSApp.terminate(nil) }
@@ -519,7 +531,7 @@ struct ProwserCommands: Commands {
             }
 
             Button("About Prowser") {
-                Task { @MainActor in appState.showAbout = true }
+                Task { @MainActor in appState.showAboutDialog() }
             }
         }
     }

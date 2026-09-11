@@ -85,11 +85,14 @@ struct ImageGenPanelShell: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if let width = dimensionSpecs.width, let height = dimensionSpecs.height {
+                    if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
+                       let plugin = selectedPlugin {
                         ImageGenCustomSizeSection(
                             values: $values,
                             widthSpec: width,
                             heightSpec: height,
+                            pipelineID: plugin["pipeline_id"] as? String ?? "",
+                            pluginMaxDimension: plugin["max_generation_dimension"] as? Int ?? 2048,
                             sourcePath: effectiveSourcePath,
                             usesOptionalCustomSize: function == "edit",
                             onValuesChanged: onValuesChanged

@@ -3,9 +3,13 @@ import SwiftUI
 
 @MainActor
 struct ImageGenCustomSizeSection: View {
+    @Environment(AppState.self) private var appState
+
     @Binding var values: [String: Any]
     let widthSpec: [String: Any]
     let heightSpec: [String: Any]
+    let pipelineID: String
+    let pluginMaxDimension: Int
     let sourcePath: String?
     /// Edit uses optional ``use_custom_size`` (Python ``mount_edit_custom_size_section``); create/expand use collapse-for-visibility only.
     var usesOptionalCustomSize: Bool = false
@@ -14,6 +18,10 @@ struct ImageGenCustomSizeSection: View {
     @State private var isExpanded = true
     @State private var aspectLock = false
     @State private var aspectRatio: Double = 1.0
+    @State private var aspectLockPrevW: Int?
+    @State private var aspectLockPrevH: Int?
+    @State private var aspectLockUpdating = false
+    @State private var settingsObserver: UUID?
 
     var body: some View {
         ImageGenCollapsibleSection(
@@ -25,32 +33,26 @@ struct ImageGenCustomSizeSection: View {
                 HStack(alignment: .top, spacing: 6) {
                     VStack(alignment: .leading, spacing: 8) {
                         controlsRow
-                        ImageGenIntSliderRow(
+                        ImageGenDimSliderRow(
                             label: widthSpec["label"] as? String ?? "Width",
                             key: "width",
-                            minValue: widthSpec["min_value"] as? Int ?? 256,
-                            maxValue: widthSpec["max_value"] as? Int ?? 2048,
-                            step: widthSpec["step"] as? Int ?? 8,
+                            minValue: widthMin,
+                            maxValue: effectiveMaxSide,
+                            step: dimStep,
                             resetDefault: widthSpec["reset_default"],
-                            values: $values
+                            values: $values,
+                            onValueChanged: { onDimValueChanged(changed: "width", value: $0) }
                         )
-                        .onChange(of: values["width"] as? Int) { _, _ in
-                            applyAspectLock(changed: "width")
-                            onValuesChanged?()
-                        }
-                        ImageGenIntSliderRow(
+                        ImageGenDimSliderRow(
                             label: heightSpec["label"] as? String ?? "Height",
                             key: "height",
-                            minValue: heightSpec["min_value"] as? Int ?? 256,
-                            maxValue: heightSpec["max_value"] as? Int ?? 2048,
-                            step: heightSpec["step"] as? Int ?? 8,
+                            minValue: heightMin,
+                            maxValue: effectiveMaxSide,
+                            step: dimStep,
                             resetDefault: heightSpec["reset_default"],
-                            values: $values
+                            values: $values,
+                            onValueChanged: { onDimValueChanged(changed: "height", value: $0) }
                         )
-                        .onChange(of: values["height"] as? Int) { _, _ in
-                            applyAspectLock(changed: "height")
-                            onValuesChanged?()
-                        }
                     }
                     VStack(spacing: 4) {
                         ImageGenDimHelperIconButton(
@@ -73,8 +75,18 @@ struct ImageGenCustomSizeSection: View {
             if usesOptionalCustomSize {
                 isExpanded = values["use_custom_size"] as? Bool ?? false
             }
-            aspectLock = values["aspect_lock"] as? Bool ?? false
+            aspectLock = values["aspect_ratio_lock"] as? Bool ?? false
             captureAspectRatio()
+            syncAspectLockPrevDims()
+            applyEffectiveMaxIfNeeded()
+            settingsObserver = appState.eventBus.subscribe(.settingsChanged) { _ in
+                refreshGenerationDimLimits()
+            }
+        }
+        .onDisappear {
+            if let settingsObserver {
+                appState.eventBus.unsubscribe(.settingsChanged, token: settingsObserver)
+            }
         }
         .onChange(of: isExpanded) { _, expanded in
             if usesOptionalCustomSize {
@@ -82,6 +94,39 @@ struct ImageGenCustomSizeSection: View {
                 onValuesChanged?()
             }
         }
+        .onChange(of: pluginMaxDimension) { _, _ in
+            refreshGenerationDimLimits()
+        }
+        .onChange(of: pipelineID) { _, _ in
+            refreshGenerationDimLimits()
+        }
+    }
+
+    private var dimStep: Int {
+        max(1, widthSpec["step"] as? Int ?? 8)
+    }
+
+    private var widthMin: Int {
+        widthSpec["min_value"] as? Int ?? 256
+    }
+
+    private var heightMin: Int {
+        heightSpec["min_value"] as? Int ?? 256
+    }
+
+    private var effectiveMaxSide: Int {
+        ImageGenDimLimits.effectiveMaxGenerationDimension(
+            pluginMax: pluginMaxDimension,
+            settings: appState.config.rawSettings()
+        )
+    }
+
+    private var wBounds: ImageGenDimMath.Bounds {
+        ImageGenDimMath.Bounds(min: widthMin, max: effectiveMaxSide)
+    }
+
+    private var hBounds: ImageGenDimMath.Bounds {
+        ImageGenDimMath.Bounds(min: heightMin, max: effectiveMaxSide)
     }
 
     private var controlsRow: some View {
@@ -89,10 +134,11 @@ struct ImageGenCustomSizeSection: View {
             Toggle("Lock aspect ratio", isOn: $aspectLock)
                 .help(ImageGenDimHelperTooltips.aspect)
                 .onChange(of: aspectLock) { _, locked in
-                    values["aspect_lock"] = locked
+                    values["aspect_ratio_lock"] = locked
                     if locked {
                         captureAspectRatio()
                     }
+                    syncAspectLockPrevDims()
                     onValuesChanged?()
                 }
             Spacer(minLength: 0)
@@ -153,95 +199,212 @@ struct ImageGenCustomSizeSection: View {
         aspectRatio = Double(width) / Double(height)
     }
 
-    private func applyAspectLock(changed: String) {
-        guard aspectLock, aspectRatio > 0 else { return }
-        if changed == "width" {
-            let width = max(1, values["width"] as? Int ?? 1024)
-            let height = max(1, Int((Double(width) / aspectRatio).rounded()))
-            values["height"] = height
-        } else {
-            let height = max(1, values["height"] as? Int ?? 1024)
-            let width = max(1, Int((Double(height) * aspectRatio).rounded()))
-            values["width"] = width
-        }
+    private func syncAspectLockPrevDims() {
+        let width = values["width"] as? Int
+        let height = values["height"] as? Int
+        guard let width, let height else { return }
+        aspectLockPrevW = width
+        aspectLockPrevH = height
     }
 
-    private func widthBounds() -> (min: Int, max: Int, step: Int) {
-        (
-            widthSpec["min_value"] as? Int ?? 256,
-            widthSpec["max_value"] as? Int ?? 2048,
-            widthSpec["step"] as? Int ?? 8
+    private func refreshGenerationDimLimits() {
+        applyEffectiveMaxIfNeeded()
+        onValuesChanged?()
+    }
+
+    private func applyEffectiveMaxIfNeeded() {
+        let width = values["width"] as? Int ?? 1024
+        let height = values["height"] as? Int ?? 1024
+        guard width > 0, height > 0 else { return }
+        let (w, h, scaledDown) = ImageGenDimMath.applyEffectiveMax(
+            width: width,
+            height: height,
+            effectiveMaxSide: effectiveMaxSide
         )
-    }
-
-    private func heightBounds() -> (min: Int, max: Int, step: Int) {
-        (
-            heightSpec["min_value"] as? Int ?? 256,
-            heightSpec["max_value"] as? Int ?? 2048,
-            heightSpec["step"] as? Int ?? 8
-        )
-    }
-
-    private func setDims(width: Int, height: Int) {
-        let wb = widthBounds()
-        let hb = heightBounds()
-        let w = ImageGenDimScaleLogic.snap(width, step: wb.step, min: wb.min, max: wb.max)
-        let h = ImageGenDimScaleLogic.snap(height, step: hb.step, min: hb.min, max: hb.max)
+        aspectLockUpdating = true
         values["width"] = w
         values["height"] = h
-        if aspectLock {
+        if scaledDown {
+            aspectLock = true
+            values["aspect_ratio_lock"] = true
+            aspectRatio = Double(width) / Double(height)
+        } else if aspectLock {
             captureAspectRatio()
         }
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+    }
+
+    private func onDimValueChanged(changed: String, value: Int) {
+        if aspectLockUpdating { return }
+        if aspectLock {
+            applyAspectLockedDims(changed: changed, value: value)
+            return
+        }
+        let snapped = ImageGenDimMath.snapDimFloor(value, step: dimStep)
+        let bounds = changed == "width" ? wBounds : hBounds
+        let clamped = max(bounds.min, min(bounds.max, snapped))
+        if clamped == value {
+            syncAspectLockPrevDims()
+            onValuesChanged?()
+            return
+        }
+        aspectLockUpdating = true
+        values[changed] = clamped
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
+    }
+
+    private func applyAspectLockedDims(changed: String, value: Int) {
+        if aspectLockPrevW == nil || aspectLockPrevH == nil {
+            syncAspectLockPrevDims()
+        }
+        guard let prevW = aspectLockPrevW, let prevH = aspectLockPrevH else { return }
+        let oldVal = changed == "width" ? prevW : prevH
+        if value == oldVal { return }
+        let direction = value > oldVal ? 1 : -1
+        let (w, h) = ImageGenDimMath.nextAspectLockedDims(
+            changed: changed,
+            direction: direction,
+            currentW: prevW,
+            currentH: prevH,
+            ratio: aspectRatio,
+            wBounds: wBounds,
+            hBounds: hBounds,
+            step: dimStep
+        )
+        if w == prevW && h == prevH {
+            let currentW = values["width"] as? Int
+            let currentH = values["height"] as? Int
+            if currentW != prevW || currentH != prevH {
+                aspectLockUpdating = true
+                values["width"] = prevW
+                values["height"] = prevH
+                aspectLockUpdating = false
+            }
+            return
+        }
+        aspectLockUpdating = true
+        values["width"] = w
+        values["height"] = h
+        aspectLockUpdating = false
+        aspectLockPrevW = w
+        aspectLockPrevH = h
         onValuesChanged?()
     }
 
     private func applyScreenDims() {
         let screen = NSScreen.main?.frame.size ?? NSSize(width: 1024, height: 1024)
-        setDims(width: Int(screen.width.rounded()), height: Int(screen.height.rounded()))
+        let sw = Int(screen.width.rounded())
+        let sh = Int(screen.height.rounded())
+        let aligned = ImageGenDimMath.alignDimsForPipeline(
+            pipelineID: pipelineID,
+            width: sw,
+            height: sh,
+            effectiveMaxSide: effectiveMaxSide,
+            dimStep: dimStep,
+            widthMin: widthMin,
+            heightMin: heightMin
+        )
+        aspectLockUpdating = true
+        values["width"] = aligned.width
+        values["height"] = aligned.height
+        if aspectLock {
+            captureAspectRatio()
+        }
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
     }
 
     private func applySquareDims() {
-        let wb = widthBounds()
-        let hb = heightBounds()
-        let lo = max(wb.min, hb.min)
-        let hi = min(wb.max, hb.max)
         let width = values["width"] as? Int ?? 1024
-        var side = ImageGenDimScaleLogic.snap(width, step: wb.step, min: lo, max: hi)
+        let lo = max(widthMin, heightMin)
+        let hi = min(wBounds.max, hBounds.max)
+        var side = ImageGenDimMath.snapDimFloor(width, step: dimStep)
         side = max(lo, min(hi, side))
+        aspectLockUpdating = true
         if aspectLock {
             aspectRatio = 1.0
         }
-        setDims(width: side, height: side)
+        values["width"] = side
+        values["height"] = side
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
     }
 
     private func applyReverseDims() {
         let width = values["width"] as? Int ?? 1024
         let height = values["height"] as? Int ?? 1024
+        aspectLockUpdating = true
         if aspectLock, width > 0 {
             aspectRatio = Double(height) / Double(width)
         }
-        setDims(width: height, height: width)
+        values["width"] = height
+        values["height"] = width
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
     }
 
     private func applyImportDims() {
         guard let size = sourcePixelSize() else { return }
-        setDims(width: size.width, height: size.height)
+        let srcW = size.width
+        let srcH = size.height
+        let aligned = ImageGenDimMath.alignDimsForPipeline(
+            pipelineID: pipelineID,
+            width: srcW,
+            height: srcH,
+            effectiveMaxSide: effectiveMaxSide,
+            dimStep: dimStep,
+            widthMin: widthMin,
+            heightMin: heightMin
+        )
+        let scaledDown = aligned.width < srcW || aligned.height < srcH
+        aspectLockUpdating = true
+        values["width"] = aligned.width
+        values["height"] = aligned.height
+        if scaledDown {
+            aspectLock = true
+            values["aspect_ratio_lock"] = true
+            aspectRatio = Double(srcW) / Double(srcH)
+        } else if aspectLock {
+            captureAspectRatio()
+        }
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
     }
 
     private func applyAreaScale(multiplier: Double) {
         let width = values["width"] as? Int ?? 1024
         let height = values["height"] as? Int ?? 1024
         let ratio = aspectLock ? aspectRatio : (height > 0 ? Double(width) / Double(height) : 1.0)
-        let scaled = ImageGenDimScaleLogic.scaleForAreaMultiplier(
+        let scaled = ImageGenDimMath.scaleDimsForAreaMultiplier(
             width: width,
             height: height,
             multiplier: multiplier,
+            pipelineID: pipelineID,
+            effectiveMaxSide: effectiveMaxSide,
+            wBounds: wBounds,
+            hBounds: hBounds,
+            step: dimStep,
             ratio: ratio,
-            widthBounds: widthBounds(),
-            heightBounds: heightBounds()
+            widthMin: widthMin,
+            heightMin: heightMin
         )
         if scaled.width == width, scaled.height == height { return }
-        setDims(width: scaled.width, height: scaled.height)
+        aspectLockUpdating = true
+        values["width"] = scaled.width
+        values["height"] = scaled.height
+        if aspectLock {
+            captureAspectRatio()
+        }
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
     }
 }
 
@@ -265,33 +428,6 @@ enum ImageGenDimHelperTooltips {
         "Halve the pixel area (width × height),\n"
         + "keeping aspect ratio.\n"
         + "Limited by min/max size and Settings."
-}
-
-enum ImageGenDimScaleLogic {
-    static func snap(_ value: Int, step: Int, min minValue: Int, max maxValue: Int) -> Int {
-        let stepValue = max(1, step)
-        let snapped = ((value + stepValue / 2) / stepValue) * stepValue
-        return max(minValue, min(maxValue, snapped))
-    }
-
-    static func scaleForAreaMultiplier(
-        width: Int,
-        height: Int,
-        multiplier: Double,
-        ratio: Double,
-        widthBounds: (min: Int, max: Int, step: Int),
-        heightBounds: (min: Int, max: Int, step: Int)
-    ) -> (width: Int, height: Int) {
-        guard width > 0, height > 0, ratio > 0, multiplier > 0 else {
-            return (width, height)
-        }
-        let area = Double(width * height) * multiplier
-        var newWidth = Int(sqrt(area * ratio).rounded())
-        var newHeight = Int(sqrt(area / ratio).rounded())
-        newWidth = snap(newWidth, step: widthBounds.step, min: widthBounds.min, max: widthBounds.max)
-        newHeight = snap(newHeight, step: heightBounds.step, min: heightBounds.min, max: heightBounds.max)
-        return (newWidth, newHeight)
-    }
 }
 
 enum ImageGenFieldLayoutFilter {
