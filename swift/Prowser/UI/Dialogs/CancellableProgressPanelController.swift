@@ -9,7 +9,9 @@ final class CancellableProgressPanelController {
     private let panel: NSPanel
     private let label: NSTextField
     private let indicator: NSProgressIndicator
+    private let cancelButton: FocusableDialogButton
     private let cancelTarget = CancelTarget()
+    private var keyboardMonitor: Any?
     private(set) var cancelRequested = false
 
     init(title: String, labelText: String, maximum: Int) {
@@ -39,9 +41,10 @@ final class CancellableProgressPanelController {
         indicator.doubleValue = 0
         indicator.translatesAutoresizingMaskIntoConstraints = false
 
-        let cancelButton = NSButton(title: "Cancel", target: cancelTarget, action: #selector(CancelTarget.tapped))
+        let cancelButton = FocusableDialogButton(title: "Cancel", target: cancelTarget, action: #selector(CancelTarget.tapped))
         cancelButton.bezelStyle = .rounded
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        self.cancelButton = cancelButton
         cancelTarget.onCancel = { [weak self] in
             self?.cancelRequested = true
         }
@@ -69,11 +72,21 @@ final class CancellableProgressPanelController {
 
     func show() {
         panel.center()
+        keyboardMonitor = AppKitDialogKeyboardNavigation.install(
+            on: panel,
+            buttonsLeftToRight: [cancelButton],
+            escapeButton: cancelButton
+        )
         panel.orderFrontRegardless()
+        panel.makeFirstResponder(cancelButton)
         refresh()
     }
 
     func close() {
+        if let keyboardMonitor {
+            NSEvent.removeMonitor(keyboardMonitor)
+        }
+        keyboardMonitor = nil
         panel.orderOut(nil)
     }
 

@@ -59,11 +59,11 @@ enum StyledMessageDialog {
             initialFirstResponder: initialFirstResponder
         )
 
-        let monitor = installKeyboardNavigation(
+        let monitor = AppKitDialogKeyboardNavigation.install(
             on: controller.panel,
             buttonsLeftToRight: controller.buttonsLeftToRight,
             escapeButton: controller.escapeButton,
-            hasAccessoryView: accessoryView != nil
+            hasTextAccessory: accessoryView != nil
         )
         defer {
             if let monitor {
@@ -240,67 +240,6 @@ enum StyledMessageDialog {
         return ordered.isEmpty ? nil : 0
     }
 
-    private static func installKeyboardNavigation(
-        on panel: NSPanel,
-        buttonsLeftToRight: [NSButton],
-        escapeButton: NSButton?,
-        hasAccessoryView: Bool
-    ) -> Any? {
-        guard escapeButton != nil || buttonsLeftToRight.count >= 1 else { return nil }
-
-        return NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard panel.isKeyWindow, event.window === panel else { return event }
-
-            if event.keyCode == 53, let escapeButton {
-                escapeButton.performClick(nil)
-                return nil
-            }
-
-            let focused = panel.firstResponder as? NSButton
-            let currentIndex = focused.flatMap { buttonsLeftToRight.firstIndex(of: $0) }
-
-            // Qt parity: Return activates the *focused* button (falls back to the default one).
-            if event.keyCode == 36 || event.keyCode == 76, let currentIndex {
-                buttonsLeftToRight[currentIndex].performClick(nil)
-                return nil
-            }
-
-            guard buttonsLeftToRight.count >= 2 else { return event }
-
-            // Text field focused (text-input prompt): keep arrows for the caret and let the
-            // window's key-view loop handle Tab.
-            if let responder = panel.firstResponder, KeyboardHandlerController.isTextEditingResponder(responder) {
-                return event
-            }
-
-            let direction: Int?
-            switch event.keyCode {
-            case 123: direction = -1
-            case 124: direction = 1
-            // With an accessory (text field) the window's key-view loop owns Tab so focus can
-            // return to the field; otherwise Tab cycles the buttons like the arrows do.
-            case 48 where !hasAccessoryView: direction = event.modifierFlags.contains(.shift) ? -1 : 1
-            default: direction = nil
-            }
-            guard let direction else { return event }
-
-            let nextIndex: Int
-            if let currentIndex {
-                nextIndex = (currentIndex + direction + buttonsLeftToRight.count) % buttonsLeftToRight.count
-            } else {
-                nextIndex = direction > 0 ? 0 : buttonsLeftToRight.count - 1
-            }
-            panel.makeFirstResponder(buttonsLeftToRight[nextIndex])
-            return nil
-        }
-    }
-}
-
-/// Dialog button that is always part of the Tab sequence / focusable (Qt `QPushButton` parity),
-/// independent of the system "Full Keyboard Access" setting.
-private final class FocusableDialogButton: NSButton {
-    override var acceptsFirstResponder: Bool { isEnabled }
-    override var canBecomeKeyView: Bool { isEnabled && !isHidden }
 }
 
 @MainActor
@@ -327,10 +266,12 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             defer: false
         )
         panel.title = title
-        panel.isFloatingPanel = true
+        // Non-floating so the dialog becomes key window and buttons receive focus/arrow keys.
+        panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.level = .modalPanel
+        panel.identifier = NSUserInterfaceItemIdentifier("styled-message-dialog")
 
         let content = NSView()
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -402,6 +343,12 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             }
         }
         buttonsLeftToRight = builtButtons
+        if builtButtons.count >= 2 {
+            for index in 0 ..< builtButtons.count - 1 {
+                builtButtons[index].nextKeyView = builtButtons[index + 1]
+            }
+            builtButtons[builtButtons.count - 1].nextKeyView = builtButtons[0]
+        }
         escapeButton = escapeButtonIndex.flatMap { index in
             guard index >= 0, index < builtButtons.count else { return nil }
             return builtButtons[index]
@@ -457,6 +404,10 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     func runModal() {
         panel.center()
         NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
+            panel.makeFirstResponder(firstResponder)
+        }
         NSApp.runModal(for: panel)
     }
 

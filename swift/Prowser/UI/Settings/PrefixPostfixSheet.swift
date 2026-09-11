@@ -57,16 +57,15 @@ struct PrefixPostfixSheet: View {
                 .width(100)
             }
 
-            HStack {
-                Button("Add") { addEntry() }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("OK") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("OK", isDefault: true) {
                     PrefixPostfixStore.save(entries, dataDirectory: appState.config.dataDirectory)
                     dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
+                },
+            ], leadingButtons: [
+                DialogButton("Add") { addEntry() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(20)
         .frame(minWidth: 720, minHeight: 400)
@@ -148,15 +147,13 @@ private struct PrefixPostfixTextEditSheet: View {
                 .font(.body)
                 .frame(minHeight: 120)
                 .border(Color.secondary.opacity(0.3))
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("OK") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("OK", isDefault: true) {
                     onSave(text)
                     dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
+                },
+            ], focusDefaultOnAppear: true)
         }
         .padding(20)
         .frame(width: 420)

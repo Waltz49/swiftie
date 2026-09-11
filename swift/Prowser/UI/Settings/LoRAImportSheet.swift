@@ -89,20 +89,16 @@ struct LoRAImportSheet: View {
                 Text(errorMessage).font(.caption).foregroundStyle(.red)
             }
 
-            HStack {
-                if modeIsEdit {
-                    Button("Find source online") {
-                        Task { await findOriginOnline() }
-                    }
-                    .disabled(isFindingOrigin)
-                }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(primaryButtonTitle) {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton(primaryButtonTitle, isDefault: true) {
                     Task { await primaryAction() }
-                }
-                .keyboardShortcut(.defaultAction)
-            }
+                },
+            ], leadingButtons: modeIsEdit ? [
+                DialogButton("Find source online", isEnabled: !isFindingOrigin) {
+                    Task { await findOriginOnline() }
+                },
+            ] : [], focusDefaultOnAppear: true)
         }
         .padding(16)
         .frame(width: 580)
@@ -399,10 +395,9 @@ private struct LoRAFindSheet: View {
                         }
                 }
             }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-            }
+            DialogButtonRow([
+                DialogButton("Cancel", isDefault: true, isCancel: true) { dismiss() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(16)
         .frame(width: 480, height: 420)
@@ -437,10 +432,9 @@ private struct LoRAImportProgressOverlay: View {
                 } else {
                     ProgressView()
                 }
-                HStack {
-                    Spacer()
-                    Button("Cancel", action: onCancel)
-                }
+                DialogButtonRow([
+                    DialogButton("Cancel", isDefault: true, isCancel: true, action: onCancel),
+                ], focusDefaultOnAppear: true)
             }
             .padding(16)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))

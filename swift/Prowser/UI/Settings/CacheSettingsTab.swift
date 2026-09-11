@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 @MainActor
@@ -144,13 +143,13 @@ struct CacheSettingsTab: View {
     }
 
     private func confirm(_ title: String, _ message: String) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Clear")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        StyledMessageDialog.showConfirm(
+            title: title,
+            message: message,
+            confirmTitle: "Clear",
+            cancelTitle: "Cancel",
+            defaultCancel: true
+        )
     }
 
     private func boolBinding(_ key: String, default defaultValue: Bool = false) -> Binding<Bool> {

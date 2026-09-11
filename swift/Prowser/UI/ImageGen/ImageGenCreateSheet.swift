@@ -26,13 +26,14 @@ struct ImageGenCreateSheet: View {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
 
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Generate") { submit() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton(
+                    "Generate",
+                    isDefault: true,
+                    isEnabled: !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) { submit() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(24)
         .frame(minWidth: 480, minHeight: 320)

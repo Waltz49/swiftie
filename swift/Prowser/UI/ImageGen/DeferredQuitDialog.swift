@@ -5,7 +5,9 @@ import AppKit
 final class DeferredQuitDialog {
     private var window: NSWindow?
     private var statusLabel: NSTextField?
-    private var toggleButton: NSButton?
+    private var toggleButton: FocusableDialogButton?
+    private var cancelButton: FocusableDialogButton?
+    private var keyboardMonitor: Any?
     private weak var imageGen: ImageGenController?
 
     func show(imageGen: ImageGenController, appState: AppState) {
@@ -39,16 +41,17 @@ final class DeferredQuitDialog {
         let stripView = stripHost.view
         stripView.translatesAutoresizingMaskIntoConstraints = false
 
-        let toggle = NSButton(title: imageGen.deferredQuitToggleButtonLabel(), target: self, action: #selector(toggleMode))
+        let toggle = FocusableDialogButton(title: imageGen.deferredQuitToggleButtonLabel(), target: self, action: #selector(toggleMode))
         toggle.bezelStyle = .rounded
         toggle.translatesAutoresizingMaskIntoConstraints = false
         toggle.isHidden = !imageGen.deferredQuitShowWaitForAllOption()
         toggleButton = toggle
 
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
+        let cancel = FocusableDialogButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\r"
         cancel.translatesAutoresizingMaskIntoConstraints = false
+        cancelButton = cancel
 
         let buttonRow = NSStackView(views: [toggle, NSView(), cancel])
         buttonRow.orientation = .horizontal
@@ -77,8 +80,10 @@ final class DeferredQuitDialog {
 
         panel.contentView = content
         window = panel
+        installKeyboardNavigation()
         panel.center()
         panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(cancel)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -89,14 +94,46 @@ final class DeferredQuitDialog {
         if showToggle {
             toggleButton?.title = imageGen.deferredQuitToggleButtonLabel()
         }
+        installKeyboardNavigation()
     }
 
     func dismiss() {
+        removeKeyboardNavigation()
         window?.close()
         window = nil
         statusLabel = nil
         toggleButton = nil
+        cancelButton = nil
         imageGen = nil
+    }
+
+    private func installKeyboardNavigation() {
+        removeKeyboardNavigation()
+        guard let window else { return }
+        let buttons = visibleButtonsLeftToRight()
+        keyboardMonitor = AppKitDialogKeyboardNavigation.install(
+            on: window,
+            buttonsLeftToRight: buttons,
+            escapeButton: cancelButton
+        )
+    }
+
+    private func removeKeyboardNavigation() {
+        if let keyboardMonitor {
+            NSEvent.removeMonitor(keyboardMonitor)
+        }
+        keyboardMonitor = nil
+    }
+
+    private func visibleButtonsLeftToRight() -> [NSButton] {
+        var buttons: [NSButton] = []
+        if let toggleButton, !toggleButton.isHidden {
+            buttons.append(toggleButton)
+        }
+        if let cancelButton {
+            buttons.append(cancelButton)
+        }
+        return buttons
     }
 
     @objc private func toggleMode() {

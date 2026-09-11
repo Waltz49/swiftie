@@ -21,18 +21,16 @@ struct ExitScriptsSheet: View {
             exitScriptRow(title: "Image AI exit", subtitle: "Image generation prompts", text: $imageAIExit)
             exitScriptRow(title: "Say exit", subtitle: "Speak buttons", text: $sayExit)
 
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("OK") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("OK", isDefault: true) {
                     appState.config.setValue(textAIExit, forKey: ExitScriptUtils.settingTextAIExit)
                     appState.config.setValue(imageAIExit, forKey: ExitScriptUtils.settingImageAIExit)
                     appState.config.setValue(sayExit, forKey: ExitScriptUtils.settingSayExit)
                     appState.config.applySettingsChange(emit: appState.eventBus)
                     dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
+                },
+            ], focusDefaultOnAppear: true)
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 280)

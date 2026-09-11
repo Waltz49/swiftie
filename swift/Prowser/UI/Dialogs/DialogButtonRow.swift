@@ -32,6 +32,13 @@ struct DialogButton: Identifiable {
     }
 }
 
+enum DialogButtonRowLayout {
+    /// Leading controls on the left, trailing buttons on the right (default sheet footer).
+    case standard
+    /// Buttons only — embed in a parent `HStack` (e.g. image-gen dialog footer).
+    case inline
+}
+
 /// Right-aligned dialog button row with Qt-style keyboard behaviour:
 /// buttons are focusable (Tab sequence), ←/→ move between them, Return/Space activate the
 /// focused button (Return falls back to the default button), Esc activates the cancel button.
@@ -43,6 +50,7 @@ struct DialogButtonRow<Leading: View>: View {
     let leadingButtons: [DialogButton]
     /// Focus the default (or first) button when the dialog appears.
     var focusDefaultOnAppear = false
+    var layout: DialogButtonRowLayout = .standard
     @ViewBuilder var leading: () -> Leading
 
     @Environment(\.themeColors) private var colors
@@ -52,20 +60,33 @@ struct DialogButtonRow<Leading: View>: View {
         _ buttons: [DialogButton],
         leadingButtons: [DialogButton] = [],
         focusDefaultOnAppear: Bool = false,
+        layout: DialogButtonRowLayout = .standard,
         @ViewBuilder leading: @escaping () -> Leading = { EmptyView() }
     ) {
         self.buttons = buttons
         self.leadingButtons = leadingButtons
         self.focusDefaultOnAppear = focusDefaultOnAppear
+        self.layout = layout
         self.leading = leading
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(leadingButtons) { rowButton($0) }
-            leading()
-            Spacer()
-            ForEach(buttons) { rowButton($0) }
+        Group {
+            switch layout {
+            case .standard:
+                HStack(spacing: 8) {
+                    ForEach(leadingButtons) { rowButton($0) }
+                    leading()
+                    Spacer()
+                    ForEach(buttons) { rowButton($0) }
+                }
+            case .inline:
+                HStack(spacing: 8) {
+                    ForEach(leadingButtons) { rowButton($0) }
+                    leading()
+                    ForEach(buttons) { rowButton($0) }
+                }
+            }
         }
         .background(
             DialogKeyRoutingView(handler: handle(_:))

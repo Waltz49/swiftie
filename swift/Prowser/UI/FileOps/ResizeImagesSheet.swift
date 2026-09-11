@@ -25,6 +25,8 @@ struct ResizeImagesSheet: View {
     @State private var deleteOriginal = false
     @State private var isResizing = false
     @State private var updating = false
+    /// When the slider switches to percent mode, skip resetting to the default scale (Python: `_on_percent_changed` vs `_on_percent_radio_clicked`).
+    @State private var percentChangeFromSlider = false
 
     private var paths: [String] { appState.fileOpsTargetPaths }
 
@@ -76,7 +78,11 @@ struct ResizeImagesSheet: View {
             .onChange(of: resizeMode) { _, newMode in
                 if newMode == .percent {
                     if percentAllowed {
-                        percentScale = min(ResizeImagesService.percentScaleDefault, maxPercent)
+                        if percentChangeFromSlider {
+                            percentChangeFromSlider = false
+                        } else {
+                            percentScale = min(ResizeImagesService.percentScaleDefault, maxPercent)
+                        }
                     } else {
                         resizeMode = .dimensions
                     }
@@ -254,6 +260,9 @@ struct ResizeImagesSheet: View {
 
     private func onPercentChanged(_ value: Int) {
         guard !updating else { return }
+        if resizeMode != .percent {
+            percentChangeFromSlider = true
+        }
         selectPercentMode()
         percentScale = value
     }

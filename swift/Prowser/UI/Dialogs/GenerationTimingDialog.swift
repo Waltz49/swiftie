@@ -131,16 +131,15 @@ private struct GenerationTimingDialogView: View {
                 }
             }
 
-            HStack {
-                Spacer()
-                Button("Refresh") {
-                    Task { await reloadRows() }
-                }
-                Button("Close") {
+            DialogButtonRow([
+                DialogButton("Close", isDefault: true, isCancel: true) {
                     NSApp.keyWindow?.close()
-                }
-                .keyboardShortcut(.cancelAction)
-            }
+                },
+            ], leadingButtons: [
+                DialogButton("Refresh") {
+                    Task { await reloadRows() }
+                },
+            ], focusDefaultOnAppear: true)
         }
         .padding(16)
         .frame(minWidth: 720, minHeight: 360)

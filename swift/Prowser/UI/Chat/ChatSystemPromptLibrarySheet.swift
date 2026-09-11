@@ -45,23 +45,27 @@ struct ChatSystemPromptLibrarySheet: View {
                 syncPreviewFromSelection()
             }
 
-            HStack(spacing: 8) {
-                Button("Add…") { showAddPrompt = true }
-                Button("Rename") {
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("Save", isDefault: true) { save() },
+            ], leadingButtons: [
+                DialogButton("Add…") { showAddPrompt = true },
+                DialogButton(
+                    "Rename",
+                    isEnabled: selectedID != ChatPromptConfig.systemDefaultID
+                ) {
                     if selectedID != ChatPromptConfig.systemDefaultID,
                        let prompt = store.namedPrompts.first(where: { $0.id == selectedID }) {
                         newName = prompt.name
                         showRenamePrompt = true
                     }
-                }
-                .disabled(selectedID == ChatPromptConfig.systemDefaultID)
-                Button("Delete", role: .destructive) { deleteSelected() }
-                    .disabled(selectedID == ChatPromptConfig.systemDefaultID)
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
-            }
+                },
+                DialogButton(
+                    "Delete",
+                    id: "delete",
+                    isEnabled: selectedID != ChatPromptConfig.systemDefaultID
+                ) { deleteSelected() },
+            ], focusDefaultOnAppear: true)
         }
         .padding(16)
         .frame(minWidth: 520, minHeight: 520)

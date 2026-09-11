@@ -138,25 +138,42 @@ struct ImageGenUnifiedDialog: View {
 
             Spacer()
 
-            if isDirty {
-                Button("Cancel") { performCancel() }
-                    .help("Discard changes and close.")
-            }
-            Button("Close") { performClose() }
-                .keyboardShortcut("w", modifiers: [.command])
-                .help("Close this dialog (⌘W).")
-            if showReplaceUpdate {
-                Button(replaceUpdateLabel) { Task { await submit(replace: true) } }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .help(replaceUpdateHelp)
-            }
-            Button(primaryLabel) { Task { await submit(replace: false) } }
-                .keyboardShortcut(.return, modifiers: showReplaceUpdate ? [] : [.command])
-                .help(
-                    "Start making the image\nwith these settings.\n"
-                    + "Also saves settings to the EXIF user comment."
-                )
+            DialogButtonRow(footerActionButtons, layout: .inline)
         }
+    }
+
+    private var footerActionButtons: [DialogButton] {
+        var buttons: [DialogButton] = []
+        if isDirty {
+            buttons.append(
+                DialogButton("Cancel", isCancel: true, help: "Discard changes and close.") {
+                    performCancel()
+                }
+            )
+        }
+        buttons.append(
+            DialogButton("Close", help: "Close this dialog (⌘W).") {
+                performClose()
+            }
+        )
+        if showReplaceUpdate {
+            buttons.append(
+                DialogButton(replaceUpdateLabel, id: "replace", help: replaceUpdateHelp) {
+                    Task { await submit(replace: true) }
+                }
+            )
+        }
+        buttons.append(
+            DialogButton(
+                primaryLabel,
+                id: "primary",
+                isDefault: true,
+                help: "Start making the image\nwith these settings.\nAlso saves settings to the EXIF user comment."
+            ) {
+                Task { await submit(replace: false) }
+            }
+        )
+        return buttons
     }
 
     private var request: ImageGenDialogRequest {

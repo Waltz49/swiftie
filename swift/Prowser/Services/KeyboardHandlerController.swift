@@ -296,6 +296,7 @@ final class KeyboardHandlerController {
 
     private func shouldHandle(_ event: NSEvent) -> Bool {
         guard let appState else { return false }
+        if NSApp.modalWindow != nil { return false }
         if isImageGenUnifiedDialogKeyWindow() || appState.showKeyboardHelp || appState.isAboutDialogVisible {
             return false
         }
