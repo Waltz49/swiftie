@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 struct ThumbnailEmptyStateStyle {
     var background: NSColor
@@ -11,13 +12,13 @@ struct ThumbnailEmptyStateStyle {
 
     static func from(theme: ThemeColors) -> ThumbnailEmptyStateStyle {
         ThumbnailEmptyStateStyle(
-            background: NSColor(theme.thumbnailGridBackground),
-            text: NSColor(theme.text),
-            buttonBackground: NSColor(theme.thumbnailEmptyFilterButtonBackground),
-            buttonBackgroundHover: NSColor(theme.thumbnailEmptyFilterButtonBackgroundHover),
-            buttonBorder: NSColor(theme.thumbnailEmptyFilterButtonBorder),
-            buttonBorderHover: NSColor(theme.thumbnailEmptyFilterButtonBorderHover),
-            buttonTextHover: NSColor(theme.thumbnailEmptyFilterButtonTextHover)
+            background: theme.thumbnailGridBackground.nsColor,
+            text: theme.text.nsColor,
+            buttonBackground: theme.thumbnailEmptyFilterButtonBackground.nsColor,
+            buttonBackgroundHover: theme.thumbnailEmptyFilterButtonBackgroundHover.nsColor,
+            buttonBorder: theme.thumbnailEmptyFilterButtonBorder.nsColor,
+            buttonBorderHover: theme.thumbnailEmptyFilterButtonBorderHover.nsColor,
+            buttonTextHover: theme.thumbnailEmptyFilterButtonTextHover.nsColor
         )
     }
 }

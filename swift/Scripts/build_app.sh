@@ -144,7 +144,10 @@ mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 # CFBundleExecutable must be a Mach-O binary (shell scripts fail open with error -54).
 cp "$BINARY" "$APP_MACOS/Prowser"
 chmod +x "$APP_MACOS/Prowser"
-ditto "$RESOURCE_BUNDLE" "$APP_MACOS/Prowser_Prowser.bundle"
+# SwiftPM Bundle.module looks for Prowser_Prowser.bundle at Bundle.main.bundleURL
+# (the .app wrapper). Contents/MacOS is ignored once the binary is inside an .app.
+ditto "$RESOURCE_BUNDLE" "$OUTPUT/Prowser_Prowser.bundle"
+ditto "$RESOURCE_BUNDLE" "$APP_RESOURCES/Prowser_Prowser.bundle"
 
 cp "$INFO_PLIST_SRC" "$OUTPUT/Contents/Info.plist"
 

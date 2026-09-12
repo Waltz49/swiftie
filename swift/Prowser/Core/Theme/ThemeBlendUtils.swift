@@ -89,8 +89,8 @@ enum ThemeBlendUtils {
 
 extension NSColor {
     convenience init?(hex: String) {
-        guard let color = Color(hex: hex) else { return nil }
-        self.init(color)
+        guard let c = ThemeHexColor.components(from: hex) else { return nil }
+        self.init(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
     }
 
     var hexString: String {

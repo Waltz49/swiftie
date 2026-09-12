@@ -76,17 +76,19 @@ enum SortingService {
         metadataCache: MetadataCacheService?
     ) -> [String] {
         let descending = sortDescending(mode: .size, reversed: reversed)
-        return paths.sorted { lhs, rhs in
-            let left = sizeSortTuple(for: lhs, reversed: reversed, metadataCache: metadataCache)
-            let right = sizeSortTuple(for: rhs, reversed: reversed, metadataCache: metadataCache)
-            if left.area != right.area {
-                return descending ? left.area > right.area : left.area < right.area
-            }
-            if left.widthKey != right.widthKey {
-                return descending ? left.widthKey > right.widthKey : left.widthKey < right.widthKey
-            }
-            return descending ? left.path > right.path : left.path < right.path
+        // Python `_sort_by_size` uses `sort(key=...)` so dimensions are read once per file.
+        let keyed = paths.map { path in
+            (path, sizeSortTuple(for: path, reversed: reversed, metadataCache: metadataCache))
         }
+        return keyed.sorted { lhs, rhs in
+            if lhs.1.area != rhs.1.area {
+                return descending ? lhs.1.area > rhs.1.area : lhs.1.area < rhs.1.area
+            }
+            if lhs.1.widthKey != rhs.1.widthKey {
+                return descending ? lhs.1.widthKey > rhs.1.widthKey : lhs.1.widthKey < rhs.1.widthKey
+            }
+            return descending ? lhs.1.path > rhs.1.path : lhs.1.path < rhs.1.path
+        }.map(\.0)
     }
 
     private struct SizeSortTuple {

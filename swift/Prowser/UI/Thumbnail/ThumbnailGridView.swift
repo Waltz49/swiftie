@@ -231,7 +231,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.wrapAround = appState.config.bool(forKey: "wrap_around", default: true)
             gridView.showFilenames = appState.config.bool(forKey: "thumbnail_filename_visible", default: false)
             gridView.showImageSize = appState.config.bool(forKey: "show_image_size", default: false)
-            gridView.overlayBoxColor = NSColor(appState.theme.colors.thumbnailFilenameOverlay)
+            gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
             gridView.reloadLayout()
             appState.thumbnailGridColumns = gridView.gridColumnCount
             if index != lastSyncedIndex {
@@ -334,12 +334,16 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void) {
             Task { @MainActor in
-                let cgImage = await appState.thumbnailCache.generateThumbnail(for: path, size: size)
-                let image = cgImage.map {
-                    NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+                let result = await appState.thumbnailCache.generateThumbnailResult(for: path, size: size)
+                let image = result.map {
+                    NSImage(cgImage: $0.image, size: NSSize(width: $0.image.width, height: $0.image.height))
                 }
-                if image != nil {
-                    appState.metadataCache.recordDiskSnapshot(path: path)
+                if let result, result.originalWidth > 0, result.originalHeight > 0 {
+                    appState.metadataCache.storePixelSize(
+                        path: path,
+                        width: result.originalWidth,
+                        height: result.originalHeight
+                    )
                 }
                 completion(image)
             }

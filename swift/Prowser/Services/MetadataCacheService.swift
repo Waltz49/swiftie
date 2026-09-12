@@ -36,14 +36,41 @@ final class MetadataCacheService {
     }
 
     func fileSize(path: String) -> Int64 {
-        entry(for: path)?.size ?? readSize(for: path) ?? 0
+        if let cached = cache[path], cached.size > 0 {
+            return cached.size
+        }
+        return entry(for: path)?.size ?? readSize(for: path) ?? 0
     }
 
     func pixelSize(path: String) -> (width: Int, height: Int)? {
-        if let entry = entry(for: path), entry.pixelWidth > 0, entry.pixelHeight > 0 {
-            return (entry.pixelWidth, entry.pixelHeight)
+        if let cached = cache[path], cached.pixelWidth > 0, cached.pixelHeight > 0 {
+            return (cached.pixelWidth, cached.pixelHeight)
         }
-        return loadPixelSize(path: path)
+        guard let dims = loadPixelSize(path: path) else { return nil }
+        storePixelSize(path: path, width: dims.width, height: dims.height)
+        return dims
+    }
+
+    /// Store original dimensions captured while generating a thumbnail
+    /// (Python `cache_thumbnail_sync` → `_cache_metadata_from_loader`).
+    func storePixelSize(path: String, width: Int, height: Int) {
+        guard width > 0, height > 0 else { return }
+        if var existing = cache[path] {
+            if existing.pixelWidth == width, existing.pixelHeight == height { return }
+            existing.pixelWidth = width
+            existing.pixelHeight = height
+            cache[path] = existing
+            dirty = true
+            return
+        }
+        cache[path] = Entry(
+            mtime: readMtime(for: path) ?? 0,
+            size: readSize(for: path) ?? 0,
+            pixelWidth: width,
+            pixelHeight: height,
+            exifTimestamp: nil
+        )
+        dirty = true
     }
 
     func invalidate(path: String) {
@@ -139,14 +166,13 @@ final class MetadataCacheService {
             return cached
         }
         let size = readSize(for: path) ?? 0
-        let pixels = loadPixelSize(path: path) ?? (0, 0)
-        let exif = loadExifTimestamp(path: path)
+        let props = loadImageIOProps(path: path)
         let entry = Entry(
             mtime: mtime,
             size: size,
-            pixelWidth: pixels.width,
-            pixelHeight: pixels.height,
-            exifTimestamp: exif
+            pixelWidth: props?.width ?? 0,
+            pixelHeight: props?.height ?? 0,
+            exifTimestamp: props?.exifTimestamp
         )
         cache[path] = entry
         dirty = true
@@ -173,20 +199,43 @@ final class MetadataCacheService {
     }
 
     private func loadPixelSize(path: String) -> (width: Int, height: Int)? {
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0 else {
+        guard let props = loadImageIOProps(path: path), props.width > 0, props.height > 0 else {
             return nil
         }
-        return (width, height)
+        return (props.width, props.height)
     }
 
-    private func loadExifTimestamp(path: String) -> Int? {
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] else {
+    private func loadImageIOProps(path: String) -> (width: Int, height: Int, exifTimestamp: Int?)? {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(
+            URL(fileURLWithPath: path) as CFURL,
+            sourceOptions as CFDictionary
+        ) else {
+            return nil
+        }
+        let propertyOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let props = CGImageSourceCopyPropertiesAtIndex(
+            source, 0, propertyOptions as CFDictionary
+        ) as? [CFString: Any] else {
+            return nil
+        }
+        let rawWidth = props[kCGImagePropertyPixelWidth] as? Int ?? 0
+        let rawHeight = props[kCGImagePropertyPixelHeight] as? Int ?? 0
+        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        let width: Int
+        let height: Int
+        if (5...8).contains(orientation) {
+            width = rawHeight
+            height = rawWidth
+        } else {
+            width = rawWidth
+            height = rawHeight
+        }
+        return (width, height, exifTimestamp(from: props))
+    }
+
+    private func exifTimestamp(from props: [CFString: Any]) -> Int? {
+        guard let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] else {
             return nil
         }
         let keys = [

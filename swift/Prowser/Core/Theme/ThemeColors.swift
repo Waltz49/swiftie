@@ -239,8 +239,8 @@ struct ThemeColors: Equatable {
     }
 }
 
-extension Color {
-    init?(hex: String) {
+enum ThemeHexColor {
+    static func components(from hex: String) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat)? {
         var value = hex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if value.hasPrefix("#") { value.removeFirst() }
 
@@ -253,19 +253,39 @@ extension Color {
         guard value.count == 6 || value.count == 8,
               let number = UInt64(value, radix: 16) else { return nil }
 
-        let r, g, b, a: Double
         if value.count == 8 {
-            r = Double((number & 0xff00_0000) >> 24) / 255
-            g = Double((number & 0x00ff_0000) >> 16) / 255
-            b = Double((number & 0x0000_ff00) >> 8) / 255
-            a = Double(number & 0x0000_00ff) / 255
-        } else {
-            r = Double((number & 0xff0000) >> 16) / 255
-            g = Double((number & 0x00ff00) >> 8) / 255
-            b = Double(number & 0x0000ff) / 255
-            a = 1
+            return (
+                r: CGFloat((number & 0xff00_0000) >> 24) / 255,
+                g: CGFloat((number & 0x00ff_0000) >> 16) / 255,
+                b: CGFloat((number & 0x0000_ff00) >> 8) / 255,
+                a: CGFloat(number & 0x0000_00ff) / 255
+            )
         }
-        self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
+        return (
+            r: CGFloat((number & 0xff0000) >> 16) / 255,
+            g: CGFloat((number & 0x00ff00) >> 8) / 255,
+            b: CGFloat(number & 0x0000ff) / 255,
+            a: 1
+        )
+    }
+}
+
+extension Color {
+    init?(hex: String) {
+        guard let c = ThemeHexColor.components(from: hex) else { return nil }
+        self.init(.sRGB, red: Double(c.r), green: Double(c.g), blue: Double(c.b), opacity: Double(c.a))
+    }
+
+    /// AppKit-safe sRGB snapshot. `NSColor(Color).cgColor` can be black outside a SwiftUI
+    /// environment — which is the packaged `.app` case, but not `swift run`.
+    var nsColor: NSColor {
+        let resolved = resolve(in: EnvironmentValues())
+        return NSColor(
+            srgbRed: CGFloat(resolved.red),
+            green: CGFloat(resolved.green),
+            blue: CGFloat(resolved.blue),
+            alpha: CGFloat(resolved.opacity)
+        )
     }
 
     init?(rgbaCSV: String) {

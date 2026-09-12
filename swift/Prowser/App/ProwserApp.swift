@@ -8,41 +8,40 @@ struct ProwserApp: App {
 
     var body: some Scene {
         Window("Prowser", id: "main") {
-            if appDelegate.isPrimary {
-                MainWindowView()
-                    .environment(appDelegate.appState)
-            } else {
-                SecondaryLaunchView()
-            }
+            PrimaryOrSecondaryRoot(isPrimary: appDelegate.isPrimary, appState: appDelegate.appState)
         }
         .defaultSize(width: 1280, height: 840)
         .commands {
-            if appDelegate.isPrimary {
-                ProwserCommands(appState: appDelegate.appState)
+            if let appState = appDelegate.appState, appDelegate.isPrimary {
+                ProwserCommands(appState: appState)
             }
         }
 
-        if appDelegate.isPrimary {
-            Window("Job Control", id: "jobs-panel") {
+        Window("Job Control", id: "jobs-panel") {
+            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
                 FloatingJobQueuePanelView()
-                    .environment(appDelegate.appState)
+                    .environment(appState)
                     .frame(minWidth: 280, minHeight: 220)
             }
-            .windowStyle(.hiddenTitleBar)
-            .defaultSize(width: 320, height: 420)
-
-            Window("Image Generation", id: "imagegen-unified") {
-                ImageGenUnifiedDialog()
-                    .environment(appDelegate.appState)
-            }
-            .defaultSize(width: 720, height: 560)
-
-            Window("Settings", id: "settings") {
-                SettingsWindowView()
-                    .environment(appDelegate.appState)
-            }
-            .defaultSize(width: 920, height: 680)
         }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 320, height: 420)
+
+        Window("Image Generation", id: "imagegen-unified") {
+            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
+                ImageGenUnifiedDialog()
+                    .environment(appState)
+            }
+        }
+        .defaultSize(width: 720, height: 560)
+
+        Window("Settings", id: "settings") {
+            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
+                SettingsWindowView()
+                    .environment(appState)
+            }
+        }
+        .defaultSize(width: 920, height: 680)
     }
 }
 
@@ -416,7 +415,7 @@ final class AppState {
 
         let reversed = !config.bool(forKey: "sort_reversed", default: false)
         config.updateSetting("sort_reversed", value: reversed)
-        refreshDirectory()
+        applyCurrentSort()
         status.show("Sort order reversed")
     }
 
@@ -426,7 +425,7 @@ final class AppState {
         }
         let wasRandom = config.string(forKey: "sort_mode", default: "date") == SortMode.random.rawValue
         config.updateSetting("sort_mode", value: SortMode.random.rawValue)
-        refreshDirectory()
+        applyCurrentSort()
         status.show(wasRandom ? "Random Sort (reshuffled)" : "Random Sort")
     }
 
@@ -2326,9 +2325,58 @@ final class AppState {
     }
 
     func applySortMode(_ mode: SortMode, reversed: Bool) {
+        if fileData.currentViewMode == .list {
+            fileData.setViewMode(.thumbnail)
+        }
+        guard fileData.currentViewMode == .thumbnail || fileData.currentViewMode == .browse else { return }
+        guard !fileData.displayedImages.isEmpty else { return }
+
         config.updateSetting("sort_mode", value: mode.rawValue)
         config.updateSetting("sort_reversed", value: reversed)
-        refreshDirectory()
+        applyCurrentSort()
+        status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
+    }
+
+    /// Re-sort the current displayed list in place (Python `apply_current_sort`).
+    /// Does not rescan the directory.
+    func applyCurrentSort() {
+        let current = fileData.currentImagePath
+        let options = SortingService.Options.from(config: config)
+        let sorted = SortingService.sorted(
+            fileData.displayedImages,
+            options: options,
+            metadataCache: metadataCache
+        )
+        metadataCache.saveIfNeeded()
+        fileData.setDisplayedImages(sorted)
+        if let current, sorted.contains(current) {
+            fileData.setCurrentImagePath(current)
+        }
+    }
+
+    private static func sortStatusMessage(mode: SortMode, reversed: Bool) -> String {
+        switch mode {
+        case .size:
+            let direction = reversed ? "Smallest first" : "Largest first"
+            return "Sort mode set to Size (\(direction))"
+        case .name:
+            return reversed ? "Sort mode set to Name (Z-A)" : "Sort mode set to Name (A-Z)"
+        case .date:
+            let direction = reversed ? "Oldest first" : "Newest first"
+            return "Sort mode set to Date (\(direction))"
+        case .exifDate:
+            let direction = reversed ? "Oldest first" : "Newest first"
+            return "Sort mode set to EXIF Date (\(direction))"
+        case .exifYear:
+            let direction = reversed ? "Oldest first" : "Newest first"
+            return "Sort mode set to EXIF Year (\(direction))"
+        case .custom:
+            return "Sort mode set to Custom"
+        case .random:
+            return "Random Sort"
+        default:
+            return "Sort mode set to \(mode.displayName)"
+        }
     }
 
     func setUseExifDate(_ enabled: Bool) {

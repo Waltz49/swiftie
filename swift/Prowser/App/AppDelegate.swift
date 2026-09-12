@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
             hideAllWindows()
             NotificationCenter.default.addObserver(
-                forName: NSWindow.willDisplayNotification,
+                forName: NSWindow.didExposeNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] note in
@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// SwiftUI can still create a transient duplicate main window for Finder Open With.
     private func installMainWindowGuard() {
         NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeVisibleNotification,
+            forName: NSWindow.didExposeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -286,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             savedMacOSSpace: savedSpace
         )
 
-        let capturedState = appState
+        let capturedState = appState!
         for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
             NotificationCenter.default.addObserver(
                 forName: name,
@@ -314,7 +314,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private struct SecondaryLaunchView: View {
+struct OptionalAppStateWindow<Content: View>: View {
+    let appState: AppState?
+    @ViewBuilder var content: (AppState) -> Content
+
+    var body: some View {
+        if let appState {
+            content(appState)
+        } else {
+            SecondaryLaunchView()
+        }
+    }
+}
+
+struct PrimaryOrSecondaryRoot: View {
+    let isPrimary: Bool
+    let appState: AppState?
+
+    var body: some View {
+        if isPrimary, let appState {
+            MainWindowView()
+                .environment(appState)
+        } else {
+            SecondaryLaunchView()
+        }
+    }
+}
+
+struct SecondaryLaunchView: View {
     var body: some View {
         Color.clear.frame(width: 1, height: 1)
     }

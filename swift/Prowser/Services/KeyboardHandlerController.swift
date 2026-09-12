@@ -1117,9 +1117,7 @@ final class KeyboardHandlerController {
     }
 
     private func applySort(_ mode: SortMode, reversed: Bool, appState: AppState) {
-        appState.config.updateSetting("sort_mode", value: mode.rawValue)
-        appState.config.updateSetting("sort_reversed", value: reversed)
-        appState.refreshDirectory()
+        appState.applySortMode(mode, reversed: reversed)
     }
 
     private func pageScroll(appState: AppState, direction: Int) -> Bool {

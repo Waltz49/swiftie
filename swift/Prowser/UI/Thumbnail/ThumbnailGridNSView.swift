@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import SwiftUI
 
 @MainActor
 protocol ThumbnailGridDelegate: AnyObject {
@@ -111,7 +112,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     func applyTheme(_ colors: ThemeColors) {
         themeColors = colors
         emptyStateStyle = ThumbnailEmptyStateStyle.from(theme: colors)
-        overlayBoxColor = NSColor(colors.thumbnailFilenameOverlay)
+        overlayBoxColor = colors.thumbnailFilenameOverlay.nsColor
         needsDisplay = true
     }
 
@@ -329,13 +330,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             drawThumbnailBackground(
                 in: borderRect,
                 isCurrent: isCurrent,
-                isSelected: isSelected,
-                context: context
+                isSelected: isSelected
             )
 
             let path = imagePaths[index]
             if let image = thumbnails[path] {
-                drawThumbnail(image, in: contentRect, context: context)
+                drawThumbnail(image, in: contentRect)
             } else {
                 NSColor.quaternaryLabelColor.setFill()
                 contentRect.fill()
@@ -345,8 +345,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             drawThumbnailBorder(
                 in: borderRect,
                 isCurrent: isCurrent,
-                isSelected: isSelected,
-                context: context
+                isSelected: isSelected
             )
 
             if showFilenames || showImageSize {
@@ -887,85 +886,66 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func drawThumbnailBackground(
         in rect: NSRect,
         isCurrent: Bool,
-        isSelected: Bool,
-        context: CGContext
+        isSelected: Bool
     ) {
-        let radius = ThumbnailLayout.cornerRadius
-        let path = CGPath(
-            roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
-            cornerWidth: radius,
-            cornerHeight: radius,
-            transform: nil
-        )
-        context.saveGState()
-        context.addPath(path)
         let fillColor: NSColor
         if isSelected && multiSelectMode {
-            fillColor = NSColor(themeColors.multiselectBackground)
+            fillColor = themeColors.multiselectBackground.nsColor
         } else if isCurrent {
-            fillColor = NSColor(themeColors.currentImageBackground)
+            fillColor = themeColors.currentImageBackground.nsColor
         } else if isSelected {
-            fillColor = NSColor(themeColors.multiselectBackground)
+            fillColor = themeColors.multiselectBackground.nsColor
         } else {
-            fillColor = NSColor(themeColors.defaultImageBackground)
+            fillColor = themeColors.defaultImageBackground.nsColor
         }
-        context.setFillColor(fillColor.cgColor)
-        context.fillPath()
-        context.restoreGState()
+        fillRoundedThumbnailRect(rect, fill: fillColor, stroke: nil, lineWidth: 0)
     }
 
     private func drawThumbnailBorder(
         in rect: NSRect,
         isCurrent: Bool,
-        isSelected: Bool,
-        context: CGContext
+        isSelected: Bool
     ) {
-        guard isCurrent || isSelected else {
-            let width = CGFloat(themeColors.defaultImageBorderWidth)
-            guard width > 0 else { return }
-            let radius = ThumbnailLayout.cornerRadius
-            let path = CGPath(
-                roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
-                cornerWidth: radius,
-                cornerHeight: radius,
-                transform: nil
-            )
-            context.saveGState()
-            context.addPath(path)
-            context.setStrokeColor(NSColor(themeColors.defaultImageBorder).cgColor)
-            context.setLineWidth(width)
-            context.strokePath()
-            context.restoreGState()
-            return
-        }
-
-        let radius = ThumbnailLayout.cornerRadius
-        let path = CGPath(
-            roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
-            cornerWidth: radius,
-            cornerHeight: radius,
-            transform: nil
-        )
-        context.saveGState()
-        context.addPath(path)
         let strokeColor: NSColor
         let width: CGFloat
         if isCurrent {
-            strokeColor = NSColor(themeColors.currentImageBorder)
+            strokeColor = themeColors.currentImageBorder.nsColor
             width = CGFloat(themeColors.currentImageBorderWidth)
-        } else {
-            strokeColor = NSColor(themeColors.multiselectBorder)
+        } else if isSelected {
+            strokeColor = themeColors.multiselectBorder.nsColor
             width = CGFloat(themeColors.multiselectBorderWidth)
+        } else {
+            strokeColor = themeColors.defaultImageBorder.nsColor
+            width = CGFloat(themeColors.defaultImageBorderWidth)
         }
-        if width > 0 {
-            context.setStrokeColor(strokeColor.cgColor)
-            context.setLineWidth(width)
-            context.strokePath()
-        }
-        context.restoreGState()
+        guard width > 0 else { return }
+        fillRoundedThumbnailRect(rect, fill: nil, stroke: strokeColor, lineWidth: width)
     }
 
-    private func drawThumbnail(_ image: NSImage, in rect: NSRect, context: CGContext) {
+    private func fillRoundedThumbnailRect(
+        _ rect: NSRect,
+        fill: NSColor?,
+        stroke: NSColor?,
+        lineWidth: CGFloat
+    ) {
+        let radius = ThumbnailLayout.cornerRadius
+        let path = NSBezierPath(
+            roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: radius,
+            yRadius: radius
+        )
+        if let fill {
+            fill.setFill()
+            path.fill()
+        }
+        if let stroke, lineWidth > 0 {
+            stroke.setStroke()
+            path.lineWidth = lineWidth
+            path.stroke()
+        }
+    }
+
+    private func drawThumbnail(_ image: NSImage, in rect: NSRect) {
         guard rect.width > 0, rect.height > 0 else { return }
         let imageSize = pixelSize(of: image)
         guard imageSize.width > 0, imageSize.height > 0 else { return }
@@ -979,17 +959,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             height: drawSize.height
         )
 
-        context.saveGState()
-        context.interpolationQuality = .high
-        image.draw(
-            in: drawRect,
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .copy,
-            fraction: 1.0,
-            respectFlipped: true,
-            hints: nil
-        )
-        context.restoreGState()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        ImageDisplayLoader.draw(image, in: drawRect)
     }
 
     private func pixelSize(of image: NSImage) -> NSSize {
@@ -1096,7 +1067,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func drawDropIndicator(in rect: NSRect) {
-        NSColor(themeColors.currentImageBorder).withAlphaComponent(0.85).setFill()
+        themeColors.currentImageBorder.nsColor.withAlphaComponent(0.85).setFill()
         rect.fill()
     }
 

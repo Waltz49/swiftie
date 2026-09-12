@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 
 /// Thumbnail memory + disk cache. Port of `cache/image_cache.py` (incremental).
 actor ThumbnailCache {
@@ -73,16 +74,34 @@ actor ThumbnailCache {
         try jpeg.write(to: url, options: .atomic)
     }
 
+    struct GeneratedThumbnail: Sendable {
+        let image: CGImage
+        /// Original pixel size after EXIF orientation, matching Python `loader_metadata`.
+        /// Zero when served from the thumbnail JPEG cache (that file is not the original).
+        let originalWidth: Int
+        let originalHeight: Int
+    }
+
     /// Returns `CGImage` so callers on `@MainActor` can build `NSImage` without crossing a non-Sendable boundary.
     func generateThumbnail(for imagePath: String, size: Int) async -> CGImage? {
+        await generateThumbnailResult(for: imagePath, size: size)?.image
+    }
+
+    func generateThumbnailResult(for imagePath: String, size: Int) async -> GeneratedThumbnail? {
         if let cached = cachedThumbnail(for: imagePath, size: size),
            let cgImage = cached.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            return cgImage
+            return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
         }
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: imagePath) as CFURL, nil) else {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(
+            URL(fileURLWithPath: imagePath) as CFURL,
+            sourceOptions as CFDictionary
+        ) else {
             return nil
         }
+        let dims = originalPixelSize(from: source)
         let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
             kCGImageSourceThumbnailMaxPixelSize: size,
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: !ignoreExifRotation,
@@ -92,7 +111,25 @@ actor ThumbnailCache {
         }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         try? storeThumbnail(image, for: imagePath, size: size)
-        return cgImage
+        return GeneratedThumbnail(
+            image: cgImage,
+            originalWidth: dims.width,
+            originalHeight: dims.height
+        )
+    }
+
+    private func originalPixelSize(from source: CGImageSource) -> (width: Int, height: Int) {
+        let propertyOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, propertyOptions as CFDictionary) as? [CFString: Any],
+              let rawWidth = props[kCGImagePropertyPixelWidth] as? Int,
+              let rawHeight = props[kCGImagePropertyPixelHeight] as? Int else {
+            return (0, 0)
+        }
+        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        if !ignoreExifRotation, (5...8).contains(orientation) {
+            return (rawHeight, rawWidth)
+        }
+        return (rawWidth, rawHeight)
     }
 
     func statistics() -> (memoryCount: Int, diskCount: Int) {
