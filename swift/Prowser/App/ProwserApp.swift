@@ -108,6 +108,8 @@ final class AppState {
     var showPersonSearchSheet = false
     var showFindReferencesSheet = false
     var showReferenceGraphSheet = false
+    var referenceGraphActive = false
+    var referenceGraphFocusPath: String?
     var referenceGraphData: ReferenceGraph?
     var slideshow2ViewportSize = CGSize(width: 800, height: 600)
     var statusBarPeekActive = false
@@ -251,6 +253,11 @@ final class AppState {
             Task { @MainActor in self?.status.show(message) }
         }
         KeyboardInputTracer.installIfNeeded(config: config)
+
+        directoryHistory.referenceGraphStateProvider = { [weak self] in
+            guard let self else { return (active: false, focusPath: nil) }
+            return (active: self.referenceGraphActive, focusPath: self.referenceGraphFocusPath)
+        }
 
         _ = eventBus.subscribe(.settingsChanged) { [weak self] _ in
             guard let self else { return }
@@ -583,54 +590,172 @@ final class AppState {
         suppressDirectoryRefreshUntil = Date().addingTimeInterval(0.6)
     }
 
-    func showReferenceLevel(optionHeld: Bool) {
-        guard let path = fileData.currentImagePath else { return }
-        Task {
+    /// Python ``InformationSidebar._on_anchor_clicked`` for ``reflevel://``.
+    func handleInformationReferenceLevelClick(optionHeld: Bool) {
+        guard let path = fileData.currentImagePath,
+              FileManager.default.isReadableFile(atPath: path) else { return }
+        Task { @MainActor in
             guard let comment = await ExifService.userDescription(path: path) else { return }
             let imageDir = (path as NSString).deletingLastPathComponent
             let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
             guard !entries.isEmpty else { return }
-            let resolved = ReferenceGraphService.resolveReferenceEntries(imageDir: imageDir, entries: entries)
-            let directPaths = entries.compactMap {
-                resolved[$0.0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()]
-            }
-            let paths: [String]
+
             if optionHeld {
-                paths = Array(Set(directPaths))
-            } else {
-                paths = Array(Set(directPaths + [path]))
+                let (paths, _, extensionSwapped) = ReferenceGraphService.resolveExifReferencePaths(
+                    imageDir: imageDir,
+                    currentPath: path,
+                    entries: entries
+                )
+                guard !paths.isEmpty else { return }
+                if extensionSwapped {
+                    status.show(
+                        "Some references were found with a different file extension",
+                        duration: 5
+                    )
+                }
+                openReferencePaths(paths, focusPath: path)
+                return
             }
+
+            let (paths, extensionSwapped) = await ReferenceGraphService.collectReferenceChainPaths(
+                imageDir: imageDir,
+                rootPath: path,
+                entries: entries
+            )
             guard paths.count >= 2 else { return }
-            openReferencePaths(paths, focusPath: optionHeld ? nil : path)
+            if extensionSwapped {
+                status.show(
+                    "Some references were found with a different file extension",
+                    duration: 5
+                )
+            }
+            await openReferenceGraphPresentation(
+                paths: paths,
+                focusPath: path,
+                extensionSwapped: extensionSwapped
+            )
         }
     }
 
     func showReferenceGraph(for path: String? = nil) {
         guard let imagePath = path ?? fileData.currentImagePath else { return }
-        Task {
-            guard let comment = await ExifService.userDescription(path: imagePath) else {
-                status.show("No EXIF user comment on this image")
-                return
-            }
-            let imageDir = (imagePath as NSString).deletingLastPathComponent
-            let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
-            guard !entries.isEmpty else {
-                status.show("No reference information in EXIF user comment")
-                return
-            }
-            let (paths, _) = await ReferenceGraphService.collectReferenceChainPaths(
-                imageDir: imageDir,
-                rootPath: imagePath,
-                entries: entries
-            )
-            guard paths.count >= 2 else {
-                status.show("No references found for this image")
-                return
-            }
-            let graph = await ReferenceGraphService.buildReferenceGraph(paths: paths, focusPath: imagePath)
-            referenceGraphData = graph
-            showReferenceGraphSheet = true
+        Task { @MainActor in
+            await openReferenceGraph(for: imagePath)
         }
+    }
+
+    /// Python ``open_reference_graph_for_path``.
+    func openReferenceGraph(for imagePath: String) async {
+        guard FileManager.default.isReadableFile(atPath: imagePath) else { return }
+        guard let comment = await ExifService.userDescription(path: imagePath) else {
+            status.show("No EXIF user comment on this image")
+            return
+        }
+        let imageDir = (imagePath as NSString).deletingLastPathComponent
+        let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
+        guard !entries.isEmpty else {
+            StyledMessageDialog.showInformation(
+                title: "No References Found",
+                message: """
+                This image has no reference information in its EXIF user comment. \
+                References are saved there by the image generation functions when \
+                an image is created from other images.
+                """
+            )
+            return
+        }
+        let (paths, extensionSwapped) = await ReferenceGraphService.collectReferenceChainPaths(
+            imageDir: imageDir,
+            rootPath: imagePath,
+            entries: entries
+        )
+        guard paths.count >= 2 else {
+            StyledMessageDialog.showInformation(
+                title: "No References Found",
+                message: """
+                This image has no reference information in its EXIF user comment. \
+                References are saved there by the image generation functions when \
+                an image is created from other images.
+                """
+            )
+            return
+        }
+        await openReferenceGraphPresentation(
+            paths: paths,
+            focusPath: imagePath,
+            extensionSwapped: extensionSwapped
+        )
+    }
+
+    func clearReferenceGraphPresentation() {
+        referenceGraphActive = false
+        referenceGraphData = nil
+        referenceGraphFocusPath = nil
+    }
+
+    /// Python ``set_reference_graph_presentation``: build the DAG for a specific-files level.
+    /// Focus falls back to the current image, then the first path, when not in the set.
+    func setReferenceGraphPresentation(paths: [String], focusPath: String?) async {
+        let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
+        guard normalized.count > 1 else {
+            clearReferenceGraphPresentation()
+            return
+        }
+        var focus = focusPath ?? fileData.currentImagePath ?? normalized[0]
+        if let focusNorm = FileDataModel.normalizePath(focus), !normalized.contains(focusNorm) {
+            focus = normalized[0]
+        }
+        let graph = await ReferenceGraphService.buildReferenceGraph(paths: normalized, focusPath: focus)
+        referenceGraphActive = true
+        referenceGraphData = graph
+        referenceGraphFocusPath = graph.focusPath ?? focus
+    }
+
+    func openReferenceGraphPresentation(
+        paths: [String],
+        focusPath: String,
+        extensionSwapped: Bool = false
+    ) async {
+        let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
+        guard normalized.count >= 2 else { return }
+        if extensionSwapped {
+            status.show(
+                "Some references were found with a different file extension",
+                duration: 5
+            )
+        }
+
+        directoryHistory.saveCurrent(fileData: fileData, config: config, selection: selection)
+
+        await setReferenceGraphPresentation(paths: normalized, focusPath: focusPath)
+
+        config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+        config.updateSetting("sort_reversed", value: false)
+        let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
+        setSpecificFilesActive(true)
+        fileData.setCurrentDirectory(directory)
+        fileData.setDisplayedImages(normalized)
+        if let focus = referenceGraphFocusPath,
+           let index = normalized.firstIndex(where: {
+               FileDataModel.normalizePath($0) == FileDataModel.normalizePath(focus)
+           }) {
+            fileData.setCurrentIndex(index)
+            fileData.setCurrentImagePath(normalized[index])
+        } else {
+            fileData.setCurrentIndex(0)
+            fileData.setCurrentImagePath(normalized[0])
+        }
+        if fileData.currentViewMode != .thumbnail {
+            fileData.setViewMode(.thumbnail)
+        }
+        config.updateSetting("last_directory", value: directory)
+        // Note: do not emit `.settingsChanged` here — its subscriber reloads the whole
+        // directory, which would discard the specific-files reference level.
+        eventBus.emit(.directoryLoaded, payload: .string(directory))
+        watchCurrentDirectory()
+        workers.onDirectoryLoaded(directory)
+        selection.clear()
+        status.show("Reference graph: \(normalized.count) files")
     }
 
     func fitSlideshow2ToCanvasWidth() {
@@ -833,6 +958,7 @@ final class AppState {
     func openReferencePaths(_ paths: [String], focusPath: String?) {
         let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
         guard normalized.count >= 2 else { return }
+        clearReferenceGraphPresentation()
         config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         config.updateSetting("sort_reversed", value: false)
         let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
@@ -945,6 +1071,9 @@ final class AppState {
     func setSpecificFilesActive(_ active: Bool) {
         guard specificFilesActive != active else { return }
         specificFilesActive = active
+        if !active {
+            clearReferenceGraphPresentation()
+        }
         watchCurrentDirectory()
     }
 
@@ -2458,7 +2587,9 @@ final class DirectoryLoadCoordinator {
         }
         if !entry.displayedImages.isEmpty {
             appState.fileData.setDisplayedImages(entry.displayedImages)
-            if let directory = entry.directory {
+            if entry.referenceGraphActive {
+                appState.setSpecificFilesActive(true)
+            } else if let directory = entry.directory {
                 let scanned = Set(DirectoryScanner.scanDirectory(
                     at: directory,
                     extensions: appState.config.imageExtensions,
@@ -2467,6 +2598,16 @@ final class DirectoryLoadCoordinator {
                 appState.setSpecificFilesActive(Set(entry.displayedImages) != scanned)
             } else {
                 appState.setSpecificFilesActive(true)
+            }
+            // Python `_restore_state_direct`: restore reference_graph presentation for that level.
+            if entry.referenceGraphActive {
+                let paths = entry.displayedImages
+                let focus = entry.referenceGraphFocusPath ?? entry.currentPath
+                Task { @MainActor in
+                    await appState.setReferenceGraphPresentation(paths: paths, focusPath: focus)
+                }
+            } else {
+                appState.clearReferenceGraphPresentation()
             }
             appState.watchCurrentDirectory()
         } else if let directory = entry.directory {

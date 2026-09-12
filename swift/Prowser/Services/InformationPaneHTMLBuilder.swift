@@ -5,8 +5,9 @@ import SwiftUI
 struct InformationOverlayData {
     var filename: String
     var fieldValuePairs: [(String, String)]
-    var descriptionHTML: String?
     var speakablePlainText: String?
+    var imageDirectory: String = ""
+    var imagePath: String = ""
 }
 
 /// Builds HTML for the information pane. Port of `information_sidebar.py` `_build_info_overlay_html`.
@@ -88,14 +89,12 @@ enum InformationPaneHTMLBuilder {
             }
         }
 
-        var descriptionHTML: String?
         var speakablePlainText: String?
         if let description = record.description?.replacingOccurrences(of: "\u{0000}", with: ""),
            !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            !description.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("b'"),
            !description.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("b\"") {
             speakablePlainText = description.trimmingCharacters(in: .whitespacesAndNewlines)
-            descriptionHTML = Self.descriptionHTML(from: description, imageDirectory: imageDirectory, imagePath: imagePath)
         }
 
         let remaining = remainingFieldPairs(from: record)
@@ -104,8 +103,9 @@ enum InformationPaneHTMLBuilder {
         return InformationOverlayData(
             filename: record.fileName,
             fieldValuePairs: pairs,
-            descriptionHTML: descriptionHTML,
-            speakablePlainText: speakablePlainText
+            speakablePlainText: speakablePlainText,
+            imageDirectory: imageDirectory,
+            imagePath: imagePath
         )
     }
 
@@ -120,6 +120,7 @@ enum InformationPaneHTMLBuilder {
         let textHex = colorHex(colors.sidebarText)
         let borderHex = colorHex(colors.sidebarMutedText)
         let backgroundHex = colorHex(colors.sidebarBackground)
+        let accentHex = colorHex(colors.sidebarHeaderText)
         var parts: [String] = [
             "<html><head><meta charset=\"utf-8\"><style>",
             globalStyles(textHex: textHex, backgroundHex: backgroundHex),
@@ -174,8 +175,16 @@ enum InformationPaneHTMLBuilder {
                 "<div style=\"padding-top: 10px; padding-bottom: 6px; margin-top: 10px; "
                 + "border-top: 1px solid \(borderHex); color: \(textHex); font-size: \(bodyFontSize);\">"
             )
-            if let descriptionHTML = data.descriptionHTML,
-               !descriptionHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let speakable = data.speakablePlainText,
+               !speakable.isEmpty,
+               let descriptionHTML = descriptionHTML(
+                from: speakable,
+                imageDirectory: data.imageDirectory,
+                imagePath: data.imagePath,
+                accentHex: accentHex,
+                textHex: textHex,
+                contentWidth: contentWidth
+               ) {
                 let wrapped = wrapDescriptionWithCollapsibleSections(
                     descriptionHTML,
                     sectionState: sectionState,
@@ -227,7 +236,14 @@ enum InformationPaneHTMLBuilder {
 
     // MARK: - Description markup
 
-    private static func descriptionHTML(from text: String, imageDirectory: String, imagePath: String) -> String {
+    private static func descriptionHTML(
+        from text: String,
+        imageDirectory: String,
+        imagePath: String,
+        accentHex: String,
+        textHex: String,
+        contentWidth: Int
+    ) -> String? {
         var disp = InformationFormatting.escapeHTML(text)
         disp = disp.replacingOccurrences(of: "\n", with: "<br>")
         disp = disp.replacingOccurrences(of: "Image Model:<br>", with: imageModelH4)
@@ -243,8 +259,8 @@ enum InformationPaneHTMLBuilder {
             disp = regex.stringByReplacingMatches(in: disp, range: range, withTemplate: "$1<h4>Negative prompt</h4>")
         }
         disp = highlightImageModelElapsedHTML(disp)
-        disp = applyReferencesMarkup(disp, imageDirectory: imageDirectory, imagePath: imagePath, accentHex: "#50c8ff")
-        disp = formatImageModelSectionAsTable(disp, textHex: "#b6b6b6", contentWidth: 250, hoveredAnchor: nil)
+        disp = applyReferencesMarkup(disp, imageDirectory: imageDirectory, imagePath: imagePath, accentHex: accentHex)
+        disp = formatImageModelSectionAsTable(disp, textHex: textHex, contentWidth: contentWidth, hoveredAnchor: nil)
         return disp
     }
 
@@ -360,10 +376,13 @@ enum InformationPaneHTMLBuilder {
         let middle = String(disp[bodyStart..<end])
         let segments = middle.components(separatedBy: "<br>")
         let plainMiddle = stripHTML(middle.replacingOccurrences(of: "<br>", with: "\n"))
-        let entries = ReferenceGraphService.parseReferenceEntries(from: plainMiddle)
+        let entries = ReferenceGraphService.parseReferenceEntries(from: "References:\n\(plainMiddle)")
         guard !entries.isEmpty else { return disp }
-        let resolved = ReferenceGraphService.resolveReferenceEntries(imageDir: imageDirectory, entries: entries)
-        let levelPaths = resolved.values.map { $0 }
+        let (levelPaths, _, _) = ReferenceGraphService.resolveExifReferencePaths(
+            imageDir: imageDirectory,
+            currentPath: imagePath,
+            entries: entries
+        )
         guard levelPaths.count > 1 else { return disp }
 
         var newSegments: [String] = []
@@ -380,7 +399,7 @@ enum InformationPaneHTMLBuilder {
                 let next = segments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
                 if next.range(of: "^\\d+(?:\\.\\d+)?$", options: .regularExpression) != nil {
                     let label = unescapeHTML(trimmed)
-                    if resolved[label.lowercased()] != nil {
+                    if ReferenceGraphService.resolveReferencePath(imageDir: imageDirectory, label: label) != nil {
                         newSegments.append(
                             "<a href=\"reflevel://\" style=\"color:\(accentHex);text-decoration:underline;\">\(segment)</a>"
                         )
@@ -392,7 +411,7 @@ enum InformationPaneHTMLBuilder {
                 }
             }
             let label = unescapeHTML(trimmed)
-            if resolved[label.lowercased()] != nil {
+            if ReferenceGraphService.resolveReferencePath(imageDir: imageDirectory, label: label) != nil {
                 newSegments.append(
                     "<a href=\"reflevel://\" style=\"color:\(accentHex);text-decoration:underline;\">\(segment)</a>"
                 )

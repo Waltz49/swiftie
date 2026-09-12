@@ -347,7 +347,7 @@ final class KeyboardHandlerController {
                 return openBrowse(appState: appState)
             case 96: // F5 — reference graph for active image
                 if let path = appState.fileData.currentImagePath {
-                    appState.findReferences(to: path)
+                    appState.showReferenceGraph(for: path)
                     return true
                 }
             case 109: // F10 — clear directory history stacks

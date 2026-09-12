@@ -5,6 +5,8 @@ struct ReferenceGraph {
     var nodes: [String]
     var edges: [(String, String)] // (source, target) reference -> product
     var focusPath: String?
+    /// Normalized path -> preorder index (defaults from `nodes` enumeration when empty).
+    var pathOrder: [String: Int] = [:]
 }
 
 /// EXIF reference parsing for Find References. Port of `search/reference_graph.py` (subset).
@@ -125,23 +127,74 @@ enum ReferenceGraphService {
         imageDir: String,
         entries: [(String, Double?)]
     ) -> [String: String] {
-        var resolved: [String: String] = [:]
-        for (label, expectedMtime) in entries {
-            let key = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if let path = resolveReferencePath(imageDir: imageDir, label: label, expectedMtime: expectedMtime) {
-                resolved[key] = path
-            }
-        }
-        return resolved
+        resolveReferenceEntriesMap(imageDir: imageDir, entries: entries).resolved
     }
 
-    private static func resolveReferencePath(
+    /// Python ``resolve_reference_entries_map``.
+    static func resolveReferenceEntriesMap(
+        imageDir: String,
+        entries: [(String, Double?)]
+    ) -> (resolved: [String: String], extensionSwapped: Bool) {
+        var resolved: [String: String] = [:]
+        var extensionSwapped = false
+        for (label, expectedMtime) in entries {
+            let key = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if resolved[key] != nil { continue }
+            let (path, swapped) = resolveReferencePathWithSwap(
+                imageDir: imageDir,
+                label: label,
+                expectedMtime: expectedMtime
+            )
+            if let path {
+                resolved[key] = path
+                extensionSwapped = extensionSwapped || swapped
+            }
+        }
+        return (resolved, extensionSwapped)
+    }
+
+    /// Python ``resolve_reference_path``.
+    static func resolveReferencePath(
+        imageDir: String,
+        label: String,
+        expectedMtime: Double? = nil
+    ) -> String? {
+        resolveReferencePathWithSwap(imageDir: imageDir, label: label, expectedMtime: expectedMtime).path
+    }
+
+    /// Python ``resolve_exif_reference_paths``.
+    static func resolveExifReferencePaths(
+        imageDir: String,
+        currentPath: String,
+        entries: [(String, Double?)]
+    ) -> (paths: [String], resolved: [String: String], extensionSwapped: Bool) {
+        guard FileManager.default.fileExists(atPath: currentPath) else {
+            return ([], [:], false)
+        }
+        let (resolved, extensionSwapped) = resolveReferenceEntriesMap(imageDir: imageDir, entries: entries)
+        var paths: [String] = []
+        var seenPaths = Set<String>()
+        paths.append(currentPath)
+        seenPaths.insert(normalizePath(currentPath))
+        for (label, _) in entries {
+            let key = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard let refPath = resolved[key] else { continue }
+            let normalized = normalizePath(refPath)
+            guard !seenPaths.contains(normalized) else { continue }
+            paths.append(refPath)
+            seenPaths.insert(normalized)
+        }
+        return (paths, resolved, extensionSwapped)
+    }
+
+    /// Python ``resolve_reference_path_with_swap``.
+    private static func resolveReferencePathWithSwap(
         imageDir: String,
         label: String,
         expectedMtime: Double?
-    ) -> String? {
+    ) -> (path: String?, extensionSwapped: Bool) {
         var candidates: [String] = []
-        if label.hasPrefix("~") || label.hasPrefix("/") {
+        if label.hasPrefix("~") || label.hasPrefix("/") || label.contains("/") {
             candidates.append((label as NSString).expandingTildeInPath)
         }
         let relative = label.hasPrefix("./") ? String(label.dropFirst(2)) : label
@@ -149,8 +202,11 @@ enum ReferenceGraphService {
 
         for candidate in candidates {
             let normalized = normalizePath(candidate)
-            if FileManager.default.fileExists(atPath: normalized), passesMtime(normalized, expected: expectedMtime) {
-                return normalized
+            if FileManager.default.fileExists(atPath: normalized) {
+                if passesMtime(normalized, expected: expectedMtime) {
+                    return (normalized, false)
+                }
+                continue
             }
             let root = (normalized as NSString).deletingPathExtension
             let ext = (normalized as NSString).pathExtension
@@ -158,11 +214,11 @@ enum ReferenceGraphService {
             for alt in imageExtensions where alt != ".\(ext.lowercased())" {
                 let altPath = root + alt
                 if FileManager.default.fileExists(atPath: altPath), passesMtime(altPath, expected: expectedMtime) {
-                    return altPath
+                    return (altPath, true)
                 }
             }
         }
-        return nil
+        return (nil, false)
     }
 
     private static func passesMtime(_ path: String, expected: Double?) -> Bool {
@@ -189,7 +245,7 @@ enum ReferenceGraphService {
         var seenPaths = Set<String>()
         var seenNames = Set<String>()
         var output: [String] = []
-        let extensionSwapped = false
+        var extensionSwapped = false
 
         func visit(path: String, directEntries: [(String, Double?)]) async {
             let normalized = normalizePath(path)
@@ -198,7 +254,11 @@ enum ReferenceGraphService {
             output.append(path)
 
             let localDir = (path as NSString).deletingLastPathComponent
-            let resolved = resolveReferenceEntries(imageDir: localDir.isEmpty ? imageDir : localDir, entries: directEntries)
+            let (resolved, swapped) = resolveReferenceEntriesMap(
+                imageDir: localDir.isEmpty ? imageDir : localDir,
+                entries: directEntries
+            )
+            extensionSwapped = extensionSwapped || swapped
             for (label, _) in directEntries {
                 let nameKey = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if seenNames.contains(nameKey) { continue }
@@ -264,6 +324,10 @@ enum ReferenceGraphService {
         if focus == nil {
             focus = canonical.first
         }
-        return ReferenceGraph(nodes: canonical, edges: edges, focusPath: focus)
+        var pathOrder: [String: Int] = [:]
+        for (index, path) in canonical.enumerated() {
+            pathOrder[normalizePath(path)] = index
+        }
+        return ReferenceGraph(nodes: canonical, edges: edges, focusPath: focus, pathOrder: pathOrder)
     }
 }

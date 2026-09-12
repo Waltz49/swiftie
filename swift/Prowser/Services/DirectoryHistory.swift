@@ -12,7 +12,13 @@ final class DirectoryHistory {
         let viewMode: ViewMode
         let sortMode: String
         let sortReversed: Bool
+        /// Python `state['presentation'] == 'reference_graph'`.
+        var referenceGraphActive: Bool = false
+        var referenceGraphFocusPath: String? = nil
     }
+
+    /// Supplies the reference-graph presentation flags (owned by `AppState`) when capturing state.
+    var referenceGraphStateProvider: (() -> (active: Bool, focusPath: String?))?
 
     private var backward: [Entry] = []
     private var forward: [Entry] = []
@@ -45,7 +51,8 @@ final class DirectoryHistory {
     }
 
     func entry(from fileData: FileDataModel, config: AppConfig, selection: SelectionModel) -> Entry {
-        Entry(
+        let graphState = referenceGraphStateProvider?() ?? (active: false, focusPath: nil)
+        return Entry(
             directory: fileData.currentDirectory,
             currentPath: fileData.currentImagePath,
             index: fileData.currentIndex,
@@ -53,7 +60,9 @@ final class DirectoryHistory {
             selectedFiles: Array(selection.selectedFiles),
             viewMode: fileData.currentViewMode,
             sortMode: config.string(forKey: "sort_mode", default: SortMode.date.rawValue),
-            sortReversed: config.bool(forKey: "sort_reversed", default: false)
+            sortReversed: config.bool(forKey: "sort_reversed", default: false),
+            referenceGraphActive: graphState.active,
+            referenceGraphFocusPath: graphState.focusPath
         )
     }
 

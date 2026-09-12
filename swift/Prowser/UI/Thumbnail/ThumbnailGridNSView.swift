@@ -60,6 +60,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     var filterPattern: String = "*"
     var imageExtensions: [String] = []
     var directoryListingDenied = false
+    /// Reference-graph presentation (Python `reference_graph_data`); the coordinator calls
+    /// `reloadLayout()` after setting this.
+    var referenceGraph: ReferenceGraph?
 
     private var suggestedFilters: [String] = []
     private var hasImagesInFolder = false
@@ -68,8 +71,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var trackingArea: NSTrackingArea?
 
     private var metrics = ThumbnailLayout.metrics(for: 800, itemCount: 0, showFilename: false, showImageSize: false)
+    private var referenceLayout: ReferenceGraphLayoutResult?
+    private var referenceNodeFrames: [Int: NSRect] = [:]
 
-    var gridColumnCount: Int { max(1, metrics.columns) }
+    var gridColumnCount: Int { max(1, isReferenceGraphMode ? 1 : metrics.columns) }
+    private var isReferenceGraphMode: Bool {
+        referenceGraph != nil && !imagePaths.isEmpty
+    }
     private var imageDimensionCache: [String: String] = [:]
     private var thumbnails: [String: NSImage] = [:]
     private var loadingPaths: Set<String> = []
@@ -112,6 +120,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let width = max(viewportWidth, 200)
         lastLayoutViewportWidth = width
         if imagePaths.isEmpty {
+            referenceLayout = nil
+            referenceNodeFrames = [:]
             let viewport = emptyStateViewportSize()
             applyDocumentSize(
                 NSSize(
@@ -122,6 +132,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             needsDisplay = true
             return
         }
+        if let graph = referenceGraph {
+            reloadReferenceGraphLayout(graph: graph, viewportWidth: width)
+            return
+        }
+        referenceLayout = nil
+        referenceNodeFrames = [:]
         let cellSize = CGFloat(
             configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
                 ?? ThumbnailLayout.defaultCellSize
@@ -137,6 +153,69 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         needsDisplay = true
         loadVisibleThumbnails()
         gridDelegate?.thumbnailGridDidUpdateLayout(columns: gridColumnCount)
+    }
+
+    private func reloadReferenceGraphLayout(graph: ReferenceGraph, viewportWidth: CGFloat) {
+        let viewport = viewportSizeForLayout()
+        let overlayHeight = ThumbnailLayout.overlayLabelHeight(
+            showFilename: showFilenames,
+            showImageSize: showImageSize
+        )
+        let manualSize = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        let thumbSize: Int
+        if manualSize {
+            thumbSize = Int(
+                configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
+                    ?? ThumbnailLayout.defaultCellSize
+            )
+        } else {
+            thumbSize = ReferenceGraphLayout.computeDynamicThumbnailSize(
+                graph: graph,
+                viewportWidth: Int(viewportWidth),
+                viewportHeight: Int(max(viewport.height, 300)),
+                overlayHeight: Int(overlayHeight)
+            )
+        }
+        // Python `reference_graph_edge_color_theme`: light palette only for the resolved light theme.
+        let isLight = themeColors.themeID.lowercased() == "light"
+        let layout = ReferenceGraphLayout.computeLayout(
+            graph: graph,
+            viewportWidth: Int(viewportWidth),
+            thumbnailSize: thumbSize,
+            overlayHeight: Int(overlayHeight),
+            fitToViewportWidth: !manualSize,
+            edgeColorTheme: ReferenceGraphLayout.edgeColorTheme(isLight: isLight)
+        )
+        referenceLayout = layout
+        referenceNodeFrames = [:]
+        for (index, path) in imagePaths.enumerated() {
+            if let rect = layout.nodeRects[path] {
+                referenceNodeFrames[index] = rect
+                continue
+            }
+            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+            if let rect = layout.nodeRects.first(where: {
+                URL(fileURLWithPath: $0.key).standardizedFileURL.path == normalized
+            })?.value {
+                referenceNodeFrames[index] = rect
+            }
+        }
+        applyDocumentSize(
+            NSSize(
+                width: CGFloat(layout.canvasWidth),
+                height: CGFloat(layout.canvasHeight)
+            )
+        )
+        metrics = ThumbnailLayout.metrics(
+            for: viewportWidth,
+            itemCount: imagePaths.count,
+            showFilename: showFilenames,
+            showImageSize: showImageSize,
+            cellSize: CGFloat(thumbSize)
+        )
+        needsDisplay = true
+        loadVisibleThumbnails()
+        gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1)
     }
 
     /// Called when the user scrolls; reloads thumbnails for newly visible cells only.
@@ -227,16 +306,21 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         emptyStateStyle.background.setFill()
         bounds.fill()
 
+        if isReferenceGraphMode, let layout = referenceLayout {
+            ReferenceGraphEdgeRenderer.paint(
+                routes: layout.edgeRoutes,
+                in: dirtyRect,
+                context: context,
+                pathsOnly: true,
+                arrowheadsOnly: false
+            )
+        }
+
         for index in 0..<imagePaths.count {
-            let cell = ThumbnailLayout.frame(for: index, metrics: metrics)
+            let cell = cellFrame(for: index)
             guard cell.intersects(dirtyRect) else { continue }
 
-            let imageFrame = ThumbnailLayout.imageFrame(
-                for: index,
-                metrics: metrics,
-                showFilename: showFilenames,
-                showImageSize: showImageSize
-            )
+            let imageFrame = imageFrame(in: cell)
             let borderRect = ThumbnailLayout.thumbnailBorderRect(in: imageFrame)
             let contentRect = ThumbnailLayout.imageContentRect(in: imageFrame)
             let isCurrent = index == currentIndex
@@ -273,6 +357,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     showImageSize: showImageSize
                 )
             }
+        }
+
+        if isReferenceGraphMode, let layout = referenceLayout {
+            ReferenceGraphEdgeRenderer.paint(
+                routes: layout.edgeRoutes,
+                in: dirtyRect,
+                context: context,
+                pathsOnly: false,
+                arrowheadsOnly: true
+            )
         }
 
         if let rect = dropIndicatorRect {
@@ -509,11 +603,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     // MARK: - Internal reorder via drop (Python ``dropEvent``)
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard !localFilePaths(from: sender).isEmpty else { return [] }
+        guard !isReferenceGraphMode, !localFilePaths(from: sender).isEmpty else { return [] }
         return sender.draggingSourceOperationMask.intersection([.copy, .move])
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !isReferenceGraphMode else { return [] }
         let paths = localFilePaths(from: sender)
         guard !paths.isEmpty else { return [] }
         let point = convert(sender.draggingLocation, from: nil)
@@ -600,12 +695,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     func navigate(_ direction: ThumbnailNavigateDirection) {
         guard !imagePaths.isEmpty else { return }
+        let columns = gridColumnCount
         let delta: Int
         switch direction {
         case .left: delta = -1
         case .right: delta = 1
-        case .up: delta = -metrics.columns
-        case .down: delta = metrics.columns
+        case .up: delta = -columns
+        case .down: delta = columns
         }
         applySelectionDelta(delta, wrap: wrapAround && (direction == .left || direction == .right))
     }
@@ -658,7 +754,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard currentIndex >= 0, currentIndex < imagePaths.count else { return }
         layoutSubtreeIfNeeded()
         scrollView.layoutSubtreeIfNeeded()
-        let cell = ThumbnailLayout.frame(for: currentIndex, metrics: metrics)
+        let cell = cellFrame(for: currentIndex)
         scrollView.contentView.scrollToVisible(cell.insetBy(dx: -20, dy: -20))
     }
 
@@ -670,11 +766,31 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func indexAt(point: NSPoint) -> Int? {
         for index in 0..<imagePaths.count {
-            if ThumbnailLayout.frame(for: index, metrics: metrics).contains(point) {
+            if cellFrame(for: index).contains(point) {
                 return index
             }
         }
         return nil
+    }
+
+    private func cellFrame(for index: Int) -> NSRect {
+        if let rect = referenceNodeFrames[index] {
+            return rect
+        }
+        return ThumbnailLayout.frame(for: index, metrics: metrics)
+    }
+
+    private func imageFrame(in cell: NSRect) -> NSRect {
+        let overlay = ThumbnailLayout.overlayLabelHeight(
+            showFilename: showFilenames,
+            showImageSize: showImageSize
+        )
+        return NSRect(
+            x: cell.minX,
+            y: cell.minY,
+            width: cell.width,
+            height: max(0, cell.height - overlay)
+        )
     }
 
     private func viewportWidthForLayout() -> CGFloat {
@@ -682,6 +798,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             return scrollView.contentSize.width
         }
         return bounds.width
+    }
+
+    private func viewportSizeForLayout() -> NSSize {
+        if let scrollView = enclosingScrollView {
+            return scrollView.contentSize
+        }
+        return bounds.size
     }
 
     private func emptyStateViewportSize() -> NSSize {
@@ -725,11 +848,20 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func loadVisibleThumbnails() {
         guard let scrollView = enclosingScrollView else { return }
         let visible = scrollView.documentVisibleRect
-        let indices = ThumbnailLayout.visibleIndices(
-            in: visible,
-            metrics: metrics,
-            itemCount: imagePaths.count
-        )
+        let indices: [Int]
+        if isReferenceGraphMode {
+            indices = imagePaths.indices.filter { index in
+                cellFrame(for: index).intersects(
+                    visible.insetBy(dx: -metrics.cellWidth, dy: -metrics.cellHeight)
+                )
+            }
+        } else {
+            indices = ThumbnailLayout.visibleIndices(
+                in: visible,
+                metrics: metrics,
+                itemCount: imagePaths.count
+            )
+        }
         let pixelSize = max(thumbnailPixelSize, Int(metrics.cellWidth * 2))
         for index in indices {
             let path = imagePaths[index]
@@ -749,7 +881,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func thumbnailRect(for index: Int) -> NSRect {
-        ThumbnailLayout.frame(for: index, metrics: metrics)
+        cellFrame(for: index)
     }
 
     private func drawThumbnailBackground(

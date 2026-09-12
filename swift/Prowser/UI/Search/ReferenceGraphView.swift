@@ -58,8 +58,13 @@ struct ReferenceGraphView: View {
                 [DialogButton("Close", isDefault: true, isCancel: true) { dismiss() }],
                 leadingButtons: graph.nodes.count >= 2
                     ? [DialogButton("Show in Browser") {
-                        appState.openReferencePaths(graph.nodes, focusPath: graph.focusPath)
                         dismiss()
+                        Task { @MainActor in
+                            await appState.openReferenceGraphPresentation(
+                                paths: graph.nodes,
+                                focusPath: graph.focusPath ?? graph.nodes[0]
+                            )
+                        }
                     }]
                     : [],
                 focusDefaultOnAppear: true

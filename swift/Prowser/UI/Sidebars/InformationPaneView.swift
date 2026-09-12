@@ -144,8 +144,8 @@ struct InformationPaneView: View {
         case .toggleSection(let key, let expandAll):
             sectionState.toggleSection(key, expandAll: expandAll)
             rebuildHTML()
-        case .refLevel:
-            appState.showReferenceGraph()
+        case .refLevel(let optionHeld):
+            appState.handleInformationReferenceLevelClick(optionHeld: optionHeld)
         case .speak:
             speakComment()
         case .copy(let full):

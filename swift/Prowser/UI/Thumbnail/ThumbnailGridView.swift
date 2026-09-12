@@ -224,6 +224,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 gridView.clearThumbnails()
                 lastSyncedIndex = -1
             }
+            gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
             gridView.updateEmptyStateContext()
             let index = resolvedHighlightIndex(in: paths)
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail

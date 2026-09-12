@@ -28,8 +28,8 @@ struct FindReferencesSheet: View {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                         ForEach(appState.findReferencesMatches, id: \.self) { path in
                             Button {
-                                appState.openPaths([path])
                                 dismiss()
+                                appState.showReferenceGraph(for: path)
                             } label: {
                                 ReferenceThumbnailCell(path: path, size: thumbSize, showLabel: true)
                             }
