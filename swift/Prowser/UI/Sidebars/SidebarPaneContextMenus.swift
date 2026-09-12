@@ -246,7 +246,7 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func treeRenameStatus(_ sender: NSMenuItem) {
-        appState?.status.show("Rename status checking is not available in the Swift build yet.")
+        appState?.toggleRenameStatusChecking()
     }
 
     @objc func treeOpenSettings(_ sender: NSMenuItem) {

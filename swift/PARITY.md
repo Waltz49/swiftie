@@ -33,7 +33,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 - [~] File tree (`FileTreeView` — lazy NSOutlineView, root dirs from settings)
 - [~] Preview (`PreviewPaneView` — click opens browse)
 - [~] Chat (`ChatPaneView` + `ChatController` via `ChatBridge`; persistence when preserve enabled)
-- [ ] Jobs (left strip when applicable)
+- [x] Jobs — N/A on left; Python jobs pane is on the right sidebar only (Swift: `RightSidebarView` / `JobQueuePanelView`)
 
 ## Right sidebar panes
 
@@ -50,14 +50,14 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 - [~] Titlebar minus/plus hide/show pane (`SidebarPaneChrome`, config keys per pane)
 - [~] Titlebar drag resize (preview, chat, information, jobs)
 - [~] Titlebar double-click fit / jobs size cycle
-- [ ] Titlebar **context menu** (right-click / control-click on empty titlebar → pane tools menu; Python wires per-pane)
-- [ ] Titlebar **gear / tools button** menu (tree, information, jobs, chat)
+- [x] Titlebar **context menu** (right-click / control-click on empty titlebar → pane tools menu; Python wires per-pane)
+- [x] Titlebar **gear / tools button** menu (tree, information, jobs, chat)
 
 ### File tree pane
 
-- [ ] Inline toolbar: collapse all, rename status, settings, filter presets (all / images only / use filter)
-- [ ] Toolbar visibility toggle (“Show Toolbar”) in tools/context menu
-- [ ] Tree pane empty-area context menu → same as tools menu (`tree_tools_menu.py`)
+- [x] Inline toolbar: collapse all, rename status, settings, filter presets (all / images only / use filter)
+- [x] Toolbar visibility toggle (“Show Toolbar”) in tools/context menu
+- [x] Tree pane empty-area context menu → same as tools menu (`tree_tools_menu.py`)
 
 ### Preview pane
 
@@ -65,13 +65,13 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 
 ### Chat pane
 
-- [ ] Toolbar actions: system prompt, copy images, clear chat (`chat_tools_menu.py`)
-- [ ] Menu extras: preserve chat across sessions, tips dialog, show toolbar toggle
+- [x] Toolbar actions: system prompt, copy images, clear chat (`chat_tools_menu.py`)
+- [x] Menu extras: preserve chat across sessions, tips dialog, show toolbar toggle
 
 ### Information pane
 
-- [ ] Action bar / menu: edit user comment, copy, speak, create image from comment, edit with AI, delete comment (`information_tools_menu.py`)
-- [ ] “Show Menu Bar” toggle in context menu
+- [x] Action bar / menu: edit user comment, copy, speak, create image from comment, edit with AI, delete comment (`information_tools_menu.py`)
+- [x] “Show Menu Bar” toggle in context menu
 
 ### Job Control pane
 
@@ -84,7 +84,7 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 ### Organize pane
 
 - [~] Favorites/destination links + settings gear (HTML parity)
-- [ ] Suppress default WebKit/link context menus on organize links (Python `_NoContextMenuLabel`)
+- [x] Suppress default WebKit/link context menus on organize links (Python `_NoContextMenuLabel`)
 
 ## Context menus
 
@@ -96,7 +96,7 @@ Source: `browser_window/managers/thumbnail_context_menu.py`, `thumbnail_canvas.p
 
 Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). List rows use same handler.
 
-- [~] Rename (F2 — alert rename in `FileOperationsService.beginRename`; inline rename deferred)
+- [x] Rename (F2 — inline rename in `ThumbnailGridNSView`; file-tree F2 uses alert dialog)
 - [~] Delete / Delete… (`ThumbnailContextMenu` + `confirm_delete`)
 - [~] Copy pathname (⌘C)
 - [~] Copy image (⌃C, single selection)
@@ -135,8 +135,8 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 
 - [~] Filter section menu: Edit…, No Filter (\*), saved filter presets with checkmarks
 - [~] Sort section menu: all sort modes + random + custom (mirrors keyboard sort keys)
-- [ ] Image count / selection section menus (properties, date tools, etc.)
-- [ ] Status bar peek-on-hover chrome behavior
+- [x] Image count section menu (background CLIP toggle); filename/dimensions display-only
+- [x] Status bar peek-on-hover chrome behavior
 
 ## Settings tabs (⌘,)
 
@@ -147,12 +147,12 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Destinations (`DestinationsSettingsTab`)
 - [~] Excludes (`ExcludesSettingsTab`)
 - [x] Theme (`ThemeSettingsTab` + `ThemeService` — full color editor, custom themes, browse transparency)
-- [ ] Maps and Editor — `MapsEditorSettingsTab` (map app, external editor)
+- [x] Maps and Editor — `MapsEditorSettingsTab` (map app, external editor)
 - [~] Slideshow (`SlideshowSettingsTab` — core timing fields)
 - [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
-- [ ] Face Recognition — `FaceRecognitionSettingsTab` (`--min` hidden)
-- [ ] Captioning — `CaptioningSettingsTab` (`--min` hidden)
-- [ ] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
+- [x] Face Recognition — `FaceRecognitionSettingsTab` (`--min` hidden)
+- [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
+- [x] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
 - [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, face, scrub; background CLIP toggles)
 
 ## Menus — File
@@ -163,13 +163,13 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Favorites submenu (^1–9 slots)
 - [~] Back / Forward (⌘[ / ⌘])
 - [~] Move to submenu (destinations 1–9, last drop — currently under File; Python uses top-level Move/Copy menu)
-- [ ] Settings… (⌘,)
+- [x] Settings… (⌘,)
 - [~] Reveal in Finder (⇧⌘R)
 - [~] Move to Trash (⌘Delete; `confirm_delete`)
 - [~] Refresh (⌘R)
-- [ ] View Copy of Trash… (⌘⇧T, when trash has images)
-- [ ] Last Image (⌘; browse history swap)
-- [ ] Image History (F3)
+- [x] View Copy of Trash… (⌘⇧T, when trash has images)
+- [x] Last Image (⌘; browse history swap)
+- [x] Image History (F3)
 - [~] Close Window (⌘W) / Quit (⌘Q)
 - [x] About (File + Help menus — non-modal window, License/Credits HTML popups)
 
@@ -180,7 +180,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Select All (⌘A) / Deselect All
 - [~] Copy Path (⌘⇧C in Swift; Python ⌘C copies path — verify shortcut parity)
 - [~] Copy Image (⌘C in Swift; Python ⌃C copies image)
-- [ ] Copy user comment
+- [x] Copy user comment
 - [~] Lock / Unlock files (⌘L / ⇧⌘L — in Edit menu; Python also in Tools)
 - [~] Edit with external editor (⌃E)
 - [x] Rename with Custom Prefix… (⌘N) — `RenamePrefixSheet` + `RenamePrefixService`/`RenamePrefixPlanner` (names, 3-phase plan, dates, .prsort locks, metadata migration; CNN/CLIP/face MD5 feature hand-off not ported)
@@ -198,15 +198,15 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Show Chat (View menu + **,** key; F9 deferred)
 - [~] Toggle status bar (**B**)
 - [~] Hide/Show Panes (**F4**, **.**, **⌃.** — `toggleChrome`)
-- [ ] Toggle list view (**F12**)
-- [ ] Enter / Exit Image Viewer (**F**)
+- [x] Toggle list view (**F12**)
+- [x] Enter / Exit Image Viewer (**F**)
 - [x] Cycle thumbnail overlay (⌘I — filename/size states; centered below thumb, name before size)
 - [~] Actual Size toggle (**A** in browse)
 - [~] Sort By submenu (static list; Python adds separators, reverse, dynamic checkmarks)
 - [x] Theme actions (Theme submenu + custom theme entries)
 - [~] macOS Space toggle (⌃⌘F)
-- [ ] View Last Image (⌘;, browse-only menu item)
-- [ ] Dynamic `aboutToShow` enable/check states (`update_view_menu_enabled_states`)
+- [x] View Last Image (⌘;, browse-only menu item)
+- [~] Dynamic `aboutToShow` enable/check states (`MenuRefreshState` + dynamic menu buttons)
 
 ## Menus — Move / Copy (top-level in Python)
 
@@ -214,49 +214,49 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 - [~] Destination slots 1–9 (⌘1–9 move; ⌥⌘1–9 copy via keyboard)
 - [~] Last drop location (⌘0 / ⌥⌘0)
-- [ ] Move Work Files…
-- [ ] Edit Destinations… (opens Settings → Destinations)
-- [ ] Dynamic visibility when `destination_menu_action` is `none`
-- [ ] Per-slot labels from configured paths on menu open
+- [x] Move Work Files…
+- [x] Edit Destinations… (opens Settings → Destinations)
+- [x] Dynamic visibility when `destination_menu_action` is `none`
+- [~] Per-slot labels from configured paths on menu open
 
 ## Menus — Search
 
 - [~] Find Similar Image Files… (⌘K — CNN worker)
-- [ ] Search by Text… (⌘F / ⌘⇧K — CLIP reorder)
+- [x] Search by Text… (⌘F / ⌘⇧K — CLIP reorder)
 - [~] Search by Person… (⌘P)
-- [ ] Quick Person Search (⌃⌘P)
+- [x] Quick Person Search (⌃⌘P)
 - [~] Extract Faces (⇧⌘P in Python Search menu)
 - [~] Find Duplicate Image Files — in directory
 - [~] Find Duplicate Image Files — recursive (⇧F)
 - [ ] Find Similar Image Files submenu (in directory / recursive — separate from ⌘K reorder)
-- [ ] Show Image in Directory (⇧⌘H)
-- [ ] Dynamic `aboutToShow` (`update_search_menu_states`)
+- [x] Show Image in Directory (⇧⌘H)
+- [~] Dynamic `aboutToShow` (`update_search_menu_states`)
 
 ## Menus — Image (generation)
 
 - [x] Create an image from text… (`ImageGenUnifiedDialog` — intro, scroll fields, collapsible AI + custom size with pipeline dim limits)
-- [ ] Fast create / preset submenu entries (`image_gen_menu.py`)
+- [~] Fast create / preset submenu entries (`image_gen_menu.py` — ⇧⌥/ fast-open; per-function submenu partial)
 - [~] Edit / Expand / Infill dialogs (unified shell: icon switcher, source nav, footer Cancel/Close/Replace/Generate)
 - [~] Cancel generation (Image menu + information pane)
-- [ ] Download models / LoRAs
+- [~] Download models / LoRAs (Help → Downloading AI Models; Check LoRAs in Debug)
 - [~] Show Job Queue (⌘J floating panel)
 - [~] Job queue in right sidebar pane (AppKit cards + drag reorder)
 - [~] Progressive preview path display (tap opens browse)
 - [~] Job shortcuts: J pane, ⌘J panel, ⌃J size cycle, ⌥[/]\\, ⌥/, ⇧⌥/, ⌘⌥/
-- [ ] LoRA stack picker UI (`--min` hidden; field layout via registry bridge)
+- [x] LoRA stack picker UI (`--min` hidden; field layout via registry bridge)
 
 ## Menus — Tools
 
-- [ ] Quick Mass Rename… (⌘⇧M)
-- [ ] Backup Custom Sort / Restore Custom Sort
+- [x] Quick Mass Rename… (⌘⇧M)
+- [x] Backup Custom Sort / Restore Custom Sort
 - [~] Lock / Unlock (see Edit)
-- [~] EXIF and Dates submenu (reset dates, edit/delete user comment; **delete EXIF date** deferred)
+- [x] EXIF and Dates submenu (reset dates, edit/delete user comment, delete EXIF date)
 - [~] Slideshows submenu (S / ⇧S / ⇧⌃S)
 - [~] Create Screen Size Copy submenu
 - [~] Wallpaper submenu (⇧⌘W last used + fit modes)
 - [~] Find References to This Image…
 - [ ] LM Studio / voice / transcription tools (when enabled)
-- [~] Debug submenu (⇧⌘D debug, ⌃D view log, ⇧⌘I number overlay)
+- [~] Debug submenu (⇧⌘D debug, ⌃D view log, ⇧⌘I number overlay, Check LoRAs)
 
 ## Menus — Help
 
@@ -265,7 +265,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 ## Dynamic menu & shortcut infrastructure
 
-- [ ] `aboutToShow` handlers refresh labels, checkmarks, enabled state (Python `menu_manager.py` update_* methods)
+- [~] `aboutToShow` handlers refresh labels, checkmarks, enabled state (`MenuRefreshState` + dynamic SwiftUI menu buttons)
 - [ ] Window-level QAction shortcuts for focus-independent keys (Python adds actions to `main_window`)
 - [ ] Menu section headers (UI Elements, Thumbnail Control, etc. — `TextSeparator` widgets)
 - [ ] Edit menu macOS system-item stripping (`_clean_edit_menu_periodically`)
@@ -284,18 +284,18 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [~] Edit UserComment (full dialog: actions, Recaption, image-gen; sheet not non-modal yet)
 - [~] Reset file date to EXIF / reset EXIF to file date (Tools menu)
 - [~] Delete UserComment (pane + Tools menu)
-- [ ] Delete EXIF date from file
+- [x] Delete EXIF date from file
 - [~] Batch EXIF confirmation dialogs (`ExifBatchConfirmationSheet`)
 - [~] Write UserComment on generated images (`ImageGenController` on completion)
-- [ ] Speak user comment (information pane / menu)
-- [ ] Reference graph viewer (context menu + EXIF refs)
+- [x] Speak user comment (information pane / menu)
+- [x] Reference graph viewer (context menu + EXIF refs)
 
 ## File operations
 
 - [~] Move, copy to destinations, delete (Trash)
-- [ ] Inline thumbnail rename (F2)
-- [ ] Duplicate file
-- [ ] Convert image format
+- [x] Inline thumbnail rename (F2)
+- [x] Duplicate file
+- [x] Convert image format
 - [x] Resize images (dimensions + percent modes, copy/replace, EXIF UserComment, batch progress+cancel)
 - [x] Quick mass rename (`RenamePrefixService.quickMassRename`, gated by `allow_quick_mass_rename`)
 - [~] Lock / unlock files (⌘L / ⇧⌘L)
@@ -303,8 +303,8 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [~] Undo move
 - [~] External editor (⌃E)
 - [~] Find references dialog (`FindReferencesSheet`)
-- [ ] Show image in directory (specific-files workflow)
-- [ ] Move work files dialog
+- [x] Show image in directory (specific-files workflow)
+- [x] Move work files dialog
 - [~] GPS / map display (⌘G)
 
 ## Persistence (`settings.json` and related)
@@ -449,16 +449,14 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
 - [x] ⌘N rename prefix (done), ⌘M convert, ⌘⇧Z resize (full dialog)
 
-## Suggested implementation order (M9+)
+## Suggested implementation order (M10+)
 
-1. **Context menus — thumbnails** (highest user-visible gap; reuse existing services)
-2. **View menu completeness** (T/O/P/B/J/F12/F9/, status bar toggle, dynamic labels)
-3. **Pane titlebar tools menus** (tree, information, jobs, chat)
-4. **File tree directory context menu**
-5. **Status bar context menus** (filter, sort)
-6. **List view row context menu** (delegate to shared thumbnail menu builder)
-7. **Remaining File/Edit/Search/Tools menu entries** + `aboutToShow` refresh
-8. **Image gen menu expansion** (edit/expand/infill, downloads)
+1. **Gate testing** — profile round-trip, `--min` build, PySide6 UI removal
+2. **Slideshow3 full parity** (floating frames)
+3. **Rename-prefix CNN/CLIP/face MD5 cache hand-off** after bulk rename
+4. **PF Keys / Hidden Gems help** dialogs
+5. **Image-gen voice input / favorite prompts** (stubs remain in `ImageGenActionButtons`)
+6. **Top-level Move/Copy menu** (optional; destinations folded under File → Move to)
 
 ## Build variants
 
@@ -488,14 +486,14 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 | Python menu | Swift status | Notes |
 |---|---|---|
 | File: Open, Recent, Favorites, Back/Forward | done | Dynamic favorite/destination labels via `MenuStateHelpers` |
-| File: Settings, Last Image, Delete, Trash view | partial | Settings via scene; Last Image ⌘; done; Trash view deferred (bundled app limit) |
+| File: Settings, Last Image, Delete, Trash view | done | View Copy of Trash when readable trash has images |
 | Edit: copy path/image, lock, rename prefix, convert, resize | done | Resize: CG vs Pillow filters (functional, not bit-identical) |
 | View: pane toggles, sort (checkmarks), theme, chrome | done | Hide/Show dynamic labels |
-| Search: similar, CLIP, person, duplicates, show in dir | done | Quick person search partial |
+| Search: similar, CLIP, person, duplicates, show in dir | done | Quick Person Search (⌃⌘P) |
 | Move/Copy top-level menu | partial | Folded into File → Move to |
-| Image: create/edit/expand/infill, job queue | partial | Fast-create presets, model download deferred (Python backend) |
+| Image: create/edit/expand/infill, job queue | partial | Fast-open ⇧⌥/; Check LoRAs + Downloading Models help added |
 | Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting |
-| Tools: Debug | partial | Browser debug done; imagegen debug stays Python |
+| Tools: Debug | partial | Check LoRAs headless runner; full Qt probe UI stays Python |
 | Help: shortcuts, about, docs | partial | About complete; PF Keys / Hidden Gems placeholders |
 
 ## Intentional Swift differences (documented)
@@ -510,4 +508,4 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 - Profile round-trip: open settings.json in Python after Swift session
 - `--min` build hides imagegen/chat/faces UI end-to-end
 - Remove PySide6 `ImageBrowserWindow` launch (keep `prowser.py` workers only)
-- Chat named system prompt library; tree rename status checker; imagegen favorite prompts (acceptable Python-bridge deferrals)
+- Chat named system prompt library; imagegen favorite prompts (acceptable Python-bridge deferrals)

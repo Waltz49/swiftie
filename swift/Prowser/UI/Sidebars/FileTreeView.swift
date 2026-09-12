@@ -489,7 +489,12 @@ struct FileTreeView: NSViewRepresentable {
 
             if let node = item as? FileTreeNode {
                 cell.imageView?.image = NSWorkspace.shared.icon(forFile: node.path)
-                cell.textField?.stringValue = node.name
+                var label = node.name
+                if appState.renameStatusManager.isEnabled,
+                   appState.renameStatusManager.directoryStatus(node.path) == true {
+                    label += " ✓"
+                }
+                cell.textField?.stringValue = label
                 cell.textField?.textColor = NSColor(appState.theme.colors.sidebarText)
             }
             return cell
@@ -498,6 +503,12 @@ struct FileTreeView: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
             if let node = item as? FileTreeNode {
                 node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                if appState.renameStatusManager.isEnabled {
+                    appState.renameStatusManager.scanVisibleDirectories(
+                        [node.path],
+                        config: appState.config
+                    )
+                }
                 outlineView.reloadItem(node, reloadChildren: true)
             }
             return true

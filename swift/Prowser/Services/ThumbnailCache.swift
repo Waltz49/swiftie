@@ -137,6 +137,59 @@ actor ThumbnailCache {
         return (memoryCache.count, diskCount)
     }
 
+    /// Warm thumbnail disk cache for images in subdirectories (Python `cache_prepopulator.prepopulate_cache`).
+    func prepopulateSubdirectories(rootDirectory: String, extensions: [String], maxDepth: Int = 4, size: Int = 256) async -> Int {
+        let paths = Self.collectImagePathsRecursively(
+            root: rootDirectory,
+            extensions: extensions,
+            maxDepth: maxDepth
+        )
+        var count = 0
+        for path in paths {
+            if await generateThumbnail(for: path, size: size) != nil {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    private static func collectImagePathsRecursively(
+        root: String,
+        extensions: [String],
+        maxDepth: Int,
+        depth: Int = 0
+    ) -> [String] {
+        guard depth <= maxDepth else { return [] }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        let extSet = Set(
+            extensions.map {
+                let e = $0.lowercased()
+                return e.hasPrefix(".") ? String(e.dropFirst()) : e
+            }
+        )
+        var results: [String] = []
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
+        for entry in entries where !entry.hasPrefix(".") {
+            let path = (root as NSString).appendingPathComponent(entry)
+            var entryIsDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &entryIsDir) else { continue }
+            if entryIsDir.boolValue {
+                results.append(contentsOf: collectImagePathsRecursively(
+                    root: path,
+                    extensions: extensions,
+                    maxDepth: maxDepth,
+                    depth: depth + 1
+                ))
+            } else if extSet.contains((entry as NSString).pathExtension.lowercased()) {
+                results.append(path)
+            }
+        }
+        return results
+    }
+
     private func storeInMemory(key: String, image: NSImage, imagePath: String) {
         if memoryCache.count >= memoryLimit {
             memoryCache.removeValue(forKey: memoryCache.keys.first!)

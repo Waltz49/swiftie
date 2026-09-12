@@ -127,12 +127,45 @@ enum DirectoryRefreshService {
         activePath: String?
     ) {
         guard !removed.isEmpty else { return }
+        if appState.isFormattedListMode() {
+            let placeholders = removed.filter { displayed.contains($0) }
+            if !placeholders.isEmpty {
+                appState.addDeletedPlaceholders(Set(placeholders))
+            }
+            advanceActiveAfterDeletion(
+                appState: appState,
+                original: displayed,
+                removed: removed,
+                activePath: activePath
+            )
+            return
+        }
         removeDisplayedFiles(
             appState: appState,
             removed: removed,
             displayed: displayed,
             activePath: activePath
         )
+    }
+
+    private static func advanceActiveAfterDeletion(
+        appState: AppState,
+        original: [String],
+        removed: Set<String>,
+        activePath: String?
+    ) {
+        let priorActivePath = activePath ?? appState.fileData.currentImagePath
+        if let priorActivePath, !removed.contains(priorActivePath) {
+            appState.fileData.setCurrentImagePath(priorActivePath)
+        } else if let next = nextImageAfterDeletion(
+            original: original,
+            removed: removed,
+            activePath: priorActivePath
+        ) {
+            appState.fileData.setCurrentImagePath(next)
+        } else if let first = original.first {
+            appState.fileData.setCurrentImagePath(first)
+        }
     }
 
     private static func removeDisplayedFiles(

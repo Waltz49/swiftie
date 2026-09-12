@@ -301,6 +301,45 @@ enum ExifService {
         )
     }
 
+    static func deleteExifDate(path: String) throws {
+        guard canWriteExif(path: path) else { throw ExifError.unsupportedFormat }
+        guard exifTimestamp(path: path) != nil else { throw ExifError.noExifDate }
+
+        let url = URL(fileURLWithPath: path)
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        let mtime = attrs[.modificationDate] as? Date
+
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let uti = CGImageSourceGetType(source),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ExifError.readFailed
+        }
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        if var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            exif.removeValue(forKey: kCGImagePropertyExifDateTimeOriginal)
+            exif.removeValue(forKey: kCGImagePropertyExifDateTimeDigitized)
+            exif.removeValue(forKey: exifDateTimeKey)
+            properties[kCGImagePropertyExifDictionary] = exif.isEmpty ? nil : exif
+        }
+        if var tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            tiff.removeValue(forKey: kCGImagePropertyTIFFDateTime)
+            properties[kCGImagePropertyTIFFDictionary] = tiff.isEmpty ? nil : tiff
+        }
+
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
+            throw ExifError.writeFailed
+        }
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ExifError.writeFailed }
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+        if let mtime {
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: path)
+        }
+    }
+
     static func resetExifDateToFileDate(path: String) throws {
         guard canWriteExif(path: path) else { throw ExifError.unsupportedFormat }
         let attrs = try FileManager.default.attributesOfItem(atPath: path)

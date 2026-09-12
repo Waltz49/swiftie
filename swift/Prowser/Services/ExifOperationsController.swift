@@ -176,6 +176,78 @@ final class ExifOperationsController {
         )
     }
 
+    func deleteExifDateFromSelection() {
+        guard let appState else { return }
+        guard appState.fileData.currentViewMode == .thumbnail else {
+            appState.status.show("This feature is only available in thumbnail mode")
+            return
+        }
+        guard !appState.specificFilesActive else {
+            appState.status.show("This feature is not available in specific files mode")
+            return
+        }
+
+        let paths = selectedPaths(appState: appState)
+        guard !paths.isEmpty else {
+            appState.status.show("No files selected")
+            return
+        }
+
+        var rows: [ExifBatchRow] = []
+        var targets: [String] = []
+        let formatter = Self.displayFormatter
+        for path in paths {
+            guard FileManager.default.fileExists(atPath: path),
+                  let exifDate = ExifService.exifTimestamp(path: path) else { continue }
+            targets.append(path)
+            rows.append(
+                ExifBatchRow(
+                    id: path,
+                    path: path,
+                    filename: (path as NSString).lastPathComponent,
+                    detailLines: [
+                        "Path: \(truncatePath(path))",
+                        "EXIF: \(formatter.string(from: exifDate))",
+                    ]
+                )
+            )
+        }
+
+        guard !targets.isEmpty else {
+            showAlert("No files have EXIF date/time data to delete")
+            return
+        }
+
+        let count = targets.count
+        appState.exifBatchConfirmation = ExifBatchConfirmationState(
+            title: count > 1 ? "Delete EXIF Dates from Files" : "Delete EXIF Date from File",
+            infoText: "The following \(count) file(s) will have EXIF date/time data removed:",
+            warningText: "This cannot be undone automatically.",
+            rows: rows,
+            confirmLabel: "Delete EXIF Date",
+            onConfirm: { [weak appState] in
+                guard let appState else { return }
+                var changed = 0
+                for path in targets {
+                    do {
+                        try ExifService.deleteExifDate(path: path)
+                        appState.metadataCache.invalidate(path: path)
+                        changed += 1
+                    } catch {
+                        continue
+                    }
+                }
+                if changed > 0 {
+                    appState.status.show("Deleted EXIF date from \(changed) file(s)")
+                    appState.refreshDirectory()
+                } else {
+                    appState.status.show("No files were updated")
+                }
+                appState.refreshMenuState()
+            }
+        )
+    }
+
     func deleteUserCommentForSelection() {
         guard let appState else { return }
         let paths = selectedPaths(appState: appState).filter { ExifService.canWriteExif(path: $0) }

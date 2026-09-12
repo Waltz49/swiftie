@@ -138,6 +138,22 @@ private struct MainWindowSheetsModifier: ViewModifier {
                 FilterDialogSheet()
                     .environment(appState)
             }
+            .sheet(isPresented: $appState.showMoveWorkFilesSheet) {
+                MoveWorkFilesSheet()
+                    .environment(appState)
+            }
+            .sheet(isPresented: $appState.showDownloadingModelsHelp) {
+                DownloadingModelsHelpView()
+                    .environment(appState)
+            }
+            .sheet(item: $appState.quickPersonFacePick) { state in
+                QuickPersonFacePickSheet(state: state)
+                    .environment(appState)
+            }
+            .sheet(item: $appState.faceAssignState) { state in
+                FaceAssignSheet(state: state)
+                    .environment(appState)
+            }
             .sheet(isPresented: Binding(
                 get: { appState.showEditUserCommentSheet },
                 set: { presented in

@@ -15,6 +15,8 @@ final class WorkerServices {
     let similaritySearch: SimilaritySearchBridge
     let personSearch: PersonSearchBridge
     let whisper: WhisperBridge
+    let quickPerson: QuickPersonBridge
+    let knownFaces: KnownFacesBridge
 
     private(set) var pythonAvailable = false
 
@@ -30,6 +32,8 @@ final class WorkerServices {
         similaritySearch = SimilaritySearchBridge(profilePath: profilePath)
         personSearch = PersonSearchBridge(profilePath: profilePath)
         whisper = WhisperBridge(profilePath: profilePath)
+        quickPerson = QuickPersonBridge(profilePath: profilePath)
+        knownFaces = KnownFacesBridge(profilePath: profilePath)
         pythonAvailable = modelTasks.isAvailable
         if let environment = PythonLocator.resolve(profilePath: profilePath) {
             PythonLocator.reapOrphanWorkers(environment: environment)
@@ -57,5 +61,7 @@ final class WorkerServices {
         similaritySearch.shutdown()
         personSearch.shutdown()
         whisper.shutdown()
+        quickPerson.shutdown()
+        knownFaces.shutdown()
     }
 }

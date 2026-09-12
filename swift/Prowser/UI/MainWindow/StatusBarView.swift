@@ -124,7 +124,7 @@ struct StatusBarView: View {
                 ),
                 sectionID: sectionID,
                 enabled: true,
-                action: nil
+                action: { StatusBarMenus.showFileCountMenu(appState: appState, relativeTo: $0) }
             )
         }
     }

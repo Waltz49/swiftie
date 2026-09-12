@@ -4,8 +4,22 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any, Callable, Dict, Iterable, Optional
+
+
+def configure_profile_from_env() -> None:
+    """Apply PROWSER_PROFILE for Swift-spawned headless workers."""
+    profile = os.environ.get("PROWSER_PROFILE", "").strip()
+    if not profile:
+        return
+    from config import get_config
+
+    get_config(profile_dir=profile)
+
+
+configure_profile_from_env()
 
 
 def emit_message(msg: Dict[str, Any], *, stream=None) -> None:

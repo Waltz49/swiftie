@@ -424,7 +424,7 @@ final class KeyboardHandlerController {
             switch event.keyCode {
             case 120: // F2 rename
                 if let path = appState.fileData.currentImagePath {
-                    appState.fileOperations.beginRename(path: path)
+                    appState.beginRename(path: path)
                     return true
                 }
             default:

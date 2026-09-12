@@ -5,6 +5,7 @@ enum PythonLocator {
     struct Environment: Sendable {
         let executable: String
         let repoRoot: URL
+        let profilePath: String?
     }
 
     static func resolve(profilePath: String?) -> Environment? {
@@ -12,7 +13,7 @@ enum PythonLocator {
         guard let repoRoot else { return nil }
 
         if let executable = locatePythonExecutable(repoRoot: repoRoot) {
-            return Environment(executable: executable, repoRoot: repoRoot)
+            return Environment(executable: executable, repoRoot: repoRoot, profilePath: profilePath)
         }
         return nil
     }

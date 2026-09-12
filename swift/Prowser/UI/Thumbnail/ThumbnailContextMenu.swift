@@ -267,7 +267,7 @@ private final class MenuActions: NSObject {
 
     @objc func rename(_ sender: NSMenuItem) {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
-        appState.fileOperations.beginRename(path: path)
+        appState.beginRename(path: path)
     }
 
     @objc func deleteFiles(_ sender: NSMenuItem) {
@@ -342,17 +342,7 @@ private final class MenuActions: NSObject {
 
     @objc func extractFaces(_ sender: NSMenuItem) {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
-        guard appState.workers.face.isAvailable else {
-            appState.status.show("Face extraction unavailable")
-            return
-        }
-        let directory = (path as NSString).deletingLastPathComponent
-        do {
-            appState.status.show("Extracting faces…")
-            try appState.workers.face.scanDirectory(directory, maxDepth: 0, imagePaths: [path])
-        } catch {
-            appState.status.show("Face scan failed: \(error.localizedDescription)")
-        }
+        KnownFacesService.openExtractFaces(appState: appState, imagePath: path)
     }
 
     @objc func revealInFinder(_ sender: NSMenuItem) {

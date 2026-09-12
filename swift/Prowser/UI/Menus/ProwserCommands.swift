@@ -110,7 +110,7 @@ struct ProwserCommands: Commands {
                 }
             }
 
-            MoveDestinationsMenu(appState: appState)
+            DestinationsMenuVisibility(appState: appState)
 
             Divider()
 
@@ -147,6 +147,8 @@ struct ProwserCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
 
+            TrashViewCopyMenuButton(appState: appState)
+
             Button("Image History") {
                 Task { @MainActor in appState.openBrowseImageHistory() }
             }
@@ -176,6 +178,14 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.openImageGenDialog(function: "create") }
             }
             .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Button("Fast Open Image Generation") {
+                Task { @MainActor in appState.openFastImageGenDialog() }
+            }
+            .keyboardShortcut("/", modifiers: [.shift, .option])
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Divider()
 
             Button("Edit this image with AI…") {
                 Task { @MainActor in appState.openImageGenDialog(function: "edit") }
@@ -219,10 +229,9 @@ struct ProwserCommands: Commands {
             }
             .keyboardShortcut("k", modifiers: .command)
 
-            Button("Search by Person…") {
-                Task { @MainActor in appState.searchOperations.presentPersonSearch() }
-            }
-            .disabled(!BundleCapabilities.facesUIEnabled)
+            SearchByPersonMenuButton(appState: appState)
+
+            QuickPersonSearchMenuButton(appState: appState)
 
             Divider()
 
@@ -242,10 +251,7 @@ struct ProwserCommands: Commands {
 
             Divider()
 
-            Button("Extract Faces") {
-                Task { @MainActor in extractFaces() }
-            }
-            .disabled(!BundleCapabilities.facesUIEnabled)
+            ExtractFacesMenuButton(appState: appState)
         }
 
         CommandMenu(MenuBarTitles.view) {
@@ -374,14 +380,18 @@ struct ProwserCommands: Commands {
             }
             .keyboardShortcut("h", modifiers: .control)
 
+            Button("Cache Subdirectories' Faces") {
+                Task { @MainActor in appState.cacheSubdirectoryFaces() }
+            }
+            .keyboardShortcut("=", modifiers: .command)
+            .disabled(!BundleCapabilities.facesUIEnabled)
+
             Button("Cache Subdirectories' Thumbnails") {
                 Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
 
-            Button("Delete EXIF Date from File…") {
-                Task { @MainActor in appState.deleteExifDateFromSelection() }
-            }
+            DeleteExifDateMenuButton(appState: appState)
 
             Button("Speak Comment") {
                 Task { @MainActor in appState.speakUserComment() }
@@ -470,6 +480,10 @@ struct ProwserCommands: Commands {
                     Button("See Timings") {
                         Task { @MainActor in appState.showGenerationTimingDialog() }
                     }
+
+                    Button("Check LoRAs") {
+                        Task { @MainActor in appState.runCheckLoras() }
+                    }
                 }
 
                 Divider()
@@ -530,6 +544,12 @@ struct ProwserCommands: Commands {
 
             Button("Hidden Gems…") {
                 Task { @MainActor in appState.showHiddenGemsHelp() }
+            }
+
+            if BundleCapabilities.imageGenUIEnabled {
+                Button("Downloading AI Models…") {
+                    Task { @MainActor in appState.showDownloadingModelsHelp = true }
+                }
             }
 
             Button("About Prowser") {
@@ -620,33 +640,6 @@ struct ProwserCommands: Commands {
     @MainActor
     private func applySortMode(_ mode: SortMode, reversed: Bool = false) {
         appState.applySortMode(mode, reversed: reversed)
-    }
-
-    @MainActor
-    private func extractFaces() {
-        guard let directory = appState.fileData.currentDirectory else { return }
-        guard appState.workers.face.isAvailable else {
-            StyledMessageDialog.showWarning(
-                title: "Face extraction unavailable",
-                message: "Python face worker is not available."
-            )
-            return
-        }
-        appState.workers.face.onFinished = { count in
-            Task { @MainActor in appState.status.show("Face extraction complete (\(count) cached)") }
-        }
-        appState.workers.face.onError = { message in
-            Task { @MainActor in appState.status.show(message) }
-        }
-        do {
-            appState.status.show("Extracting faces…")
-            try appState.workers.face.scanDirectory(directory, maxDepth: 99)
-        } catch {
-            StyledMessageDialog.showWarning(
-                title: "Face scan failed",
-                message: error.localizedDescription
-            )
-        }
     }
 
     @MainActor
@@ -809,6 +802,96 @@ private struct ChromeToggleMenuButton: View {
     }
 }
 
+@MainActor
+private struct DestinationsMenuVisibility: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        if appState.menuRefresh.destinationsMenuVisible {
+            MoveDestinationsMenu(appState: appState)
+        }
+    }
+}
+
+@MainActor
+private struct TrashViewCopyMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        if appState.menuRefresh.canViewTrash {
+            Button("View Copy of Trash…") {
+                appState.browseTrashImages()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+        }
+    }
+}
+
+@MainActor
+private struct SearchByPersonMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Search by Person…") {
+            appState.searchOperations.presentPersonSearch()
+        }
+        .keyboardShortcut("p", modifiers: .command)
+        .disabled(!BundleCapabilities.facesUIEnabled || !appState.menuRefresh.searchByPersonEnabled)
+    }
+}
+
+@MainActor
+private struct ExtractFacesMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Extract Faces") {
+            appState.extractFacesFromSelection()
+        }
+        .keyboardShortcut("p", modifiers: [.command, .shift])
+        .disabled(!BundleCapabilities.facesUIEnabled || !appState.menuRefresh.extractFacesEnabled)
+    }
+}
+
+@MainActor
+private struct QuickPersonSearchMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Quick Person Search") {
+            appState.runQuickPersonSearch()
+        }
+        .keyboardShortcut("p", modifiers: [.command, .control])
+        .disabled(!appState.menuRefresh.quickPersonSearchEnabled)
+    }
+}
+
+@MainActor
+private struct DeleteExifDateMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button(appState.menuRefresh.deleteExifDateTitle) {
+            appState.deleteExifDateFromSelection()
+        }
+        .disabled(!appState.menuRefresh.deleteExifDateEnabled)
+    }
+}
+
+@MainActor
+private struct MoveWorkFilesMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        if appState.menuRefresh.moveWorkFilesVisible {
+            Divider()
+            Button("Move Work Files…") {
+                appState.showMoveWorkFilesSheet = true
+            }
+        }
+    }
+}
+
 private struct MoveDestinationsMenu: View {
     @Bindable var appState: AppState
 
@@ -822,6 +905,11 @@ private struct MoveDestinationsMenu: View {
             Divider()
             Button("Last Drop Location") {
                 Task { @MainActor in appState.fileOperations.moveToLastDropLocation(copyOnly: false) }
+            }
+            MoveWorkFilesMenuButton(appState: appState)
+            Divider()
+            Button("Edit Destinations…") {
+                Task { @MainActor in appState.openSettingsWindow(tab: .destinations) }
             }
         }
     }

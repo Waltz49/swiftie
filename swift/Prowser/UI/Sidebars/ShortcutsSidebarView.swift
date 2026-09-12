@@ -379,5 +379,6 @@ private struct OrganizeLinkButton: View {
         .foregroundStyle(isHovering && actionEnabled ? hoverColor : normalColor)
         .opacity(actionEnabled ? 1 : 0.85)
         .onHover { isHovering = $0 }
+        .contextMenu { }
     }
 }

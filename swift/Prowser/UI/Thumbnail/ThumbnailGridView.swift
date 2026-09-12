@@ -19,8 +19,25 @@ struct ThumbnailGridView: NSViewRepresentable {
         let gridView = ThumbnailGridNSView(frame: .zero)
         gridView.gridDelegate = context.coordinator
         gridView.configSource = appState.config
+        gridView.onInlineRenameCommitted = { [weak appState] originalPath, newName in
+            guard let appState else { return }
+            Task { @MainActor in
+                do {
+                    let newPath = try appState.fileOperations.rename(path: originalPath, to: newName)
+                    appState.fileData.setCurrentImagePath(newPath)
+                    appState.selection.selectedFiles = [newPath]
+                    appState.status.show("Renamed to \(newName)")
+                } catch {
+                    StyledMessageDialog.showInformation(
+                        title: "Rename Failed",
+                        message: error.localizedDescription
+                    )
+                }
+            }
+        }
         scrollView.documentView = gridView
         context.coordinator.gridView = gridView
+        appState.thumbnailGridHost = gridView
         context.coordinator.scrollView = scrollView
         context.coordinator.observeScrollView(scrollView)
         context.coordinator.startObserving(appState: appState)
@@ -48,6 +65,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var settingsObserver: UUID?
         private var thumbnailsInvalidatedObserver: UUID?
         private var fileOperationObserver: UUID?
+        private var deletedPlaceholdersObserver: UUID?
         private var selectionObserver: NSObjectProtocol?
         private var lastSyncedIndex = -1
 
@@ -126,7 +144,15 @@ struct ThumbnailGridView: NSViewRepresentable {
                     queue: .main
                 ) { [weak self] _ in
                     let coordinator = self
-                    Task { @MainActor in coordinator?.syncSelectionVisuals() }
+                    Task { @MainActor in
+                        coordinator?.syncSelectionVisuals()
+                        coordinator?.appState.refreshMenuState()
+                    }
+                }
+            }
+            if deletedPlaceholdersObserver == nil {
+                deletedPlaceholdersObserver = appState.eventBus.subscribe(.deletedPlaceholdersChanged) { [weak self] _ in
+                    Task { @MainActor in self?.syncDeletedPlaceholders() }
                 }
             }
         }
@@ -225,6 +251,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 lastSyncedIndex = -1
             }
             gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
+            gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
             gridView.updateEmptyStateContext()
             let index = resolvedHighlightIndex(in: paths)
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
@@ -247,6 +274,12 @@ struct ThumbnailGridView: NSViewRepresentable {
             if inThumbnailMode {
                 gridView.claimKeyboardFocus()
             }
+        }
+
+        private func syncDeletedPlaceholders() {
+            guard let gridView else { return }
+            gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
+            gridView.needsDisplay = true
         }
 
         private func syncSelectionVisuals(to gridView: ThumbnailGridNSView? = nil) {

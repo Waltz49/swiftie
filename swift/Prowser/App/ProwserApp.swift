@@ -141,6 +141,10 @@ final class AppState {
             || showImageGenCreateSheet
             || showKeyboardHelp
             || isAboutDialogVisible
+            || showMoveWorkFilesSheet
+            || showDownloadingModelsHelp
+            || quickPersonFacePick != nil
+            || faceAssignState != nil
     }
     var editUserCommentText = ""
     var editUserCommentOriginalText = ""
@@ -171,6 +175,17 @@ final class AppState {
     var personSearchPrefillDirectory: String?
     var clipSearchPrefillDirectory: String?
     var fileOpsTargetPaths: [String] = []
+    /// Paths deleted in formatted-list mode; slot preserved with red-X overlay (Python `deleted_file_placeholders`).
+    var deletedFilePlaceholders: Set<String> = []
+    let menuRefresh = MenuRefreshState()
+    let renameStatusManager: RenameStatusManager
+    weak var thumbnailGridHost: ThumbnailGridNSView?
+    var showMoveWorkFilesSheet = false
+    var quickPersonFacePick: QuickPersonFacePickState?
+    var quickPersonFacePickContinuation: (([Double]?) -> Void)?
+    var faceAssignState: FaceAssignState?
+    var knownFacesChangedToken = 0
+    var showDownloadingModelsHelp = false
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
     private(set) var sidebarLayoutRevision = 0
@@ -214,6 +229,7 @@ final class AppState {
             ignoreExifRotation: config.ignoreExifRotation
         )
         metadataCache = MetadataCacheService(paths: profilePaths)
+        renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
         workers = WorkerServices(profilePath: launchOptions.profilePath)
@@ -246,6 +262,7 @@ final class AppState {
         searchOperations.bind(self)
         fileTreeOperations.bind(self)
         renamePrefixService.bind(self)
+        menuRefresh.bind(self)
         keyboardHandler.bind(self)
         statusBarPeekMonitor.bind(self)
         browseImageHistory.bind(self)
@@ -305,6 +322,7 @@ final class AppState {
         }
 
         startNamedPipeListener()
+        refreshMenuState()
     }
 
     var spaceKeyMode: String {
@@ -465,11 +483,156 @@ final class AppState {
     }
 
     func prepopulateSubdirectoryThumbnails() {
-        status.show("Cache subdirectories' thumbnails — coming soon")
+        guard let directory = fileData.currentDirectory else {
+            status.show("No directory loaded")
+            return
+        }
+        Task {
+            let depth = config.int(forKey: "search_depth", default: 4)
+            let size = config.int(forKey: "thumbnail_cell_size", default: 256)
+            let count = await thumbnailCache.prepopulateSubdirectories(
+                rootDirectory: directory,
+                extensions: config.imageExtensions,
+                maxDepth: depth,
+                size: size
+            )
+            status.show("Cached thumbnails for \(count) subdirectory image(s)")
+        }
     }
 
     func deleteExifDateFromSelection() {
-        status.show("Delete EXIF date — coming soon")
+        exifOperations.deleteExifDateFromSelection()
+    }
+
+    func browseTrashImages() {
+        let images = TrashDirectoryService.collectTrashImagePaths(extensions: config.imageExtensions)
+        guard !images.isEmpty else {
+            status.show("No image files found in Trash")
+            return
+        }
+        directoryHistory.saveCurrent(fileData: fileData, config: config, selection: selection)
+        setSpecificFilesActive(true)
+        fileData.setDisplayedImages(images)
+        fileData.setCurrentIndex(0)
+        fileData.setCurrentImagePath(images[0])
+        fileData.setViewMode(.thumbnail)
+        status.show("Viewing \(images.count) image(s) from Trash")
+        menuRefresh.refreshAll()
+    }
+
+    func beginRename(path: String) {
+        if fileData.currentViewMode == .thumbnail, let grid = thumbnailGridHost {
+            grid.beginInlineRename(path: path)
+        } else {
+            fileOperations.beginRename(path: path)
+        }
+    }
+
+    func refreshMenuState() {
+        menuRefresh.refreshAll()
+    }
+
+    func isFormattedListMode() -> Bool {
+        let mode = SortMode(rawValue: config.string(forKey: "sort_mode", default: "date")) ?? .date
+        return mode == .exifDate || mode == .exifYear || mode == .duplicates
+    }
+
+    func addDeletedPlaceholders(_ paths: Set<String>) {
+        guard !paths.isEmpty else { return }
+        deletedFilePlaceholders.formUnion(paths)
+        eventBus.emit(.deletedPlaceholdersChanged)
+    }
+
+    func clearDeletedPlaceholders() {
+        guard !deletedFilePlaceholders.isEmpty else { return }
+        deletedFilePlaceholders.removeAll()
+        eventBus.emit(.deletedPlaceholdersChanged)
+    }
+
+    func clearDeletedPlaceholders(for paths: [String]) {
+        guard !paths.isEmpty else { return }
+        var changed = false
+        for path in paths {
+            if deletedFilePlaceholders.remove(path) != nil {
+                changed = true
+            }
+        }
+        if changed {
+            eventBus.emit(.deletedPlaceholdersChanged)
+        }
+    }
+
+    func isDeletedPlaceholder(path: String) -> Bool {
+        deletedFilePlaceholders.contains(path) && !FileManager.default.fileExists(atPath: path)
+    }
+
+    func runQuickPersonSearch() {
+        Task { await QuickPersonSearchService.run(appState: self) }
+    }
+
+    func runCheckLoras() {
+        guard BundleCapabilities.imageGenUIEnabled else { return }
+        guard let environment = PythonLocator.resolve(profilePath: launchOptions.profilePath) else {
+            status.show("Python worker environment not found")
+            return
+        }
+        status.show("Checking LoRAs…")
+        Task.detached(priority: .userInitiated) {
+            let script = environment.repoRoot
+                .appendingPathComponent("swift/Scripts/run_check_loras.py")
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: environment.executable)
+            process.arguments = ["-u", script.path]
+            process.currentDirectoryURL = environment.repoRoot
+            var env = ProcessInfo.processInfo.environment
+            env["PROWSER_PYTHON_ROOT"] = environment.repoRoot.path
+            env["PYTHONUNBUFFERED"] = "1"
+            process.environment = env
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                await MainActor.run {
+                    if text.isEmpty {
+                        self.status.show("Check LoRAs finished")
+                    } else {
+                        self.status.show("Check LoRAs: \(text)")
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.status.show("Check LoRAs failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func toggleRenameStatusChecking() {
+        renameStatusManager.toggle()
+        if renameStatusManager.isEnabled {
+            let visible = rootDirectoryPaths()
+            renameStatusManager.scanVisibleDirectories(visible, config: config)
+            fileTreeReloadToken += 1
+            status.show("Rename status checking enabled")
+        } else {
+            fileTreeReloadToken += 1
+            status.show("Rename status checking disabled")
+        }
+    }
+
+    private func rootDirectoryPaths() -> [String] {
+        config.rootDirectories().compactMap { path in
+            let expanded = (path as NSString).expandingTildeInPath
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue else {
+                return nil
+            }
+            return expanded
+        }
     }
 
     func speakUserComment() {
@@ -888,6 +1051,7 @@ final class AppState {
     }
 
     private func handleViewModeTransition(to newMode: ViewMode) {
+        refreshMenuState()
         let previous = lastViewMode
         if previous != .browse && newMode == .browse {
             prepareBrowseReturnStateIfNeeded()
@@ -1043,7 +1207,9 @@ final class AppState {
 
     func loadDirectory(_ path: String, saveHistory: Bool = true) {
         setSpecificFilesActive(false)
+        clearDeletedPlaceholders()
         directoryLoader.loadDirectory(path, saveHistory: saveHistory)
+        menuRefresh.refreshAll()
     }
 
     func goBack() {
@@ -2333,8 +2499,12 @@ final class AppState {
 
         config.updateSetting("sort_mode", value: mode.rawValue)
         config.updateSetting("sort_reversed", value: reversed)
+        if mode != .exifDate && mode != .exifYear && mode != .duplicates {
+            clearDeletedPlaceholders()
+        }
         applyCurrentSort()
         status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
+        menuRefresh.refreshAll()
     }
 
     /// Re-sort the current displayed list in place (Python `apply_current_sort`).

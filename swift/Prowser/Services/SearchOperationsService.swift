@@ -25,14 +25,6 @@ final class SearchOperationsService {
 
     func presentPersonSearch() {
         guard let appState else { return }
-        let subjects = KnownFacesStore.loadSubjects(dataDirectory: appState.config.dataDirectory)
-        guard !subjects.isEmpty else {
-            showAlert(
-                "Search by Person",
-                informative: "No known people with face samples. Add people in Settings → Face Recognition, or run Extract Faces first."
-            )
-            return
-        }
         appState.showPersonSearchSheet = true
     }
 

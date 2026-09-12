@@ -23,11 +23,15 @@ struct FileTreeToolbarView: View {
                     + "Check if files matching filter pattern also match rename pattern "
                     + "and are sequentially numbered"
                 ),
-                enabled: false,
                 imageProvider: { hover in
-                    PenDrawnIcons.renameStatusCheckmarkIcon(active: false, hover: hover)
+                    PenDrawnIcons.renameStatusCheckmarkIcon(
+                        active: appState.renameStatusManager.isEnabled,
+                        hover: hover
+                    )
                 }
-            ) { }
+            ) {
+                appState.toggleRenameStatusChecking()
+            }
             SidebarToolbarIconButton(
                 tooltip: "Open Settings\nConfigure application preferences",
                 imageProvider: { hover in

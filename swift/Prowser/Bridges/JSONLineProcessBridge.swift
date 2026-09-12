@@ -40,6 +40,9 @@ final class JSONLineProcessBridge {
         var env = ProcessInfo.processInfo.environment
         env["PROWSER_PYTHON_ROOT"] = environment.repoRoot.path
         env["PYTHONUNBUFFERED"] = "1"
+        if let profilePath = environment.profilePath, !profilePath.isEmpty {
+            env["PROWSER_PROFILE"] = profilePath
+        }
         process.environment = env
 
         let stdin = Pipe()

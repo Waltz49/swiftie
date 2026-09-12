@@ -104,6 +104,7 @@ final class FileOperationsService {
             )
             appState.selection.clearPreservingCurrentImage()
             appState.eventBus.emit(.fileOperationComplete)
+            appState.refreshMenuState()
         }
         return trashed
     }
@@ -480,8 +481,10 @@ final class FileOperationsService {
             }
         }
         if restored > 0 {
+            appState.clearDeletedPlaceholders(for: ordered.map(\.originalPath))
             appState.status.showFileOperation("Restored \(restored) file(s) from Trash")
             refreshAfterChange()
+            appState.refreshMenuState()
         } else {
             appState.status.showFileOperation("Could not restore deleted files")
         }
