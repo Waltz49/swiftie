@@ -6,6 +6,8 @@ struct ProwserCommands: Commands {
     @Bindable var appState: AppState
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) { }
+
         CommandGroup(replacing: .appInfo) {
             Button("About Prowser") {
                 Task { @MainActor in appState.showAboutDialog() }

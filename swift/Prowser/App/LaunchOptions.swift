@@ -51,12 +51,19 @@ struct LaunchMessage: Codable {
     var paths: [String]?
     var filter: String?
 
-    static func from(launchOptions: LaunchOptions) -> [String: Any] {
-        if !launchOptions.paths.isEmpty {
+    static func from(launchOptions: LaunchOptions, extraPaths: [String] = []) -> [String: Any] {
+        var paths = extraPaths.filter { !$0.isEmpty }
+        if paths.isEmpty {
+            paths = launchOptions.paths
+        } else if !launchOptions.paths.isEmpty {
+            let seen = Set(paths)
+            paths.append(contentsOf: launchOptions.paths.filter { !seen.contains($0) })
+        }
+        if !paths.isEmpty {
             return [
                 "type": "open",
-                "files": launchOptions.paths,
-                "paths": launchOptions.paths,
+                "files": paths,
+                "paths": paths,
             ]
         }
         return ["type": "activate"]

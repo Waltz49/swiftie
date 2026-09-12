@@ -30,6 +30,28 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.image</string>
+				<string>public.camera-raw-image</string>
+			</array>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>jpg</string>
+				<string>jpeg</string>
+				<string>png</string>
+				<string>gif</string>
+				<string>bmp</string>
+				<string>tiff</string>
+				<string>tif</string>
+				<string>webp</string>
+				<string>heic</string>
+				<string>heif</string>
+				<string>cr2</string>
+				<string>nef</string>
+				<string>arw</string>
+				<string>dng</string>
+				<string>orf</string>
+				<string>rw2</string>
+				<string>pef</string>
+				<string>srw</string>
 			</array>
 		</dict>
 		<dict>
@@ -45,6 +67,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>LSMultipleInstancesProhibited</key>
+	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

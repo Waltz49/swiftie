@@ -1,57 +1,105 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var appState: AppState?
+    private(set) var appState: AppState!
+    let isPrimary: Bool
+
     private var instanceLock: InstanceLock?
+    private let launchOptions: LaunchOptions
+    private let pipePath: String
     private var pendingOpenPaths: [String] = []
+    private var didBecomePrimary = false
+    private var launchCompleted = false
+    private var pendingOpenFlush: DispatchWorkItem?
+
+    override init() {
+        launchOptions = LaunchOptions.parse()
+        let config = AppConfig(profilePath: launchOptions.profilePath)
+        config.loadSettings()
+        pipePath = config.namedPipePath
+
+        let lockURL = config.dataDirectory.appendingPathComponent("instance.lock")
+        let lock = InstanceLock(lockURL: lockURL)
+        if lock.tryAcquire() {
+            isPrimary = true
+            instanceLock = lock
+            appState = AppState(launchOptions: launchOptions)
+        } else {
+            isPrimary = false
+        }
+        super.init()
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard isPrimary else {
+            NSApp.setActivationPolicy(.accessory)
+            hideAllWindows()
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willDisplayNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                (note.object as? NSWindow)?.orderOut(nil)
+                self?.hideAllWindows()
+            }
+            return
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard let appState else { return }
-
-        let lockPath = appState.config.dataDirectory
-            .appendingPathComponent("instance.lock")
-
-        let lock = InstanceLock(lockURL: lockPath)
-        if lock.tryAcquire() {
-            instanceLock = lock
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            scheduleMenuBarDeduplication()
-            applyLaunchOptions(appState)
-            appState.imageGen.setDeferredQuitAppState(appState)
-            appState.imageGen.onDeferredQuitComplete = {
-                NSApp.terminate(nil)
+        guard isPrimary else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.forwardToRunningInstanceAndQuit()
             }
-        } else {
-            let message = LaunchMessage.from(launchOptions: appState.launchOptions)
-            if InstanceLock.forwardToRunningInstance(
-                message: message,
-                pipePath: appState.config.namedPipePath
-            ) {
-                NSApp.terminate(nil)
-                return
-            }
-            StyledMessageDialog.showWarning(
-                title: "Prowser is already running",
-                message: "Could not forward the open request to the running instance."
-            )
+            return
+        }
+
+        didBecomePrimary = true
+        launchCompleted = true
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        scheduleMenuBarDeduplication()
+        installMainWindowGuard()
+        applyLaunchOptions()
+        appState.imageGen.setDeferredQuitAppState(appState)
+        appState.imageGen.onDeferredQuitComplete = {
             NSApp.terminate(nil)
         }
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        enqueueOpenedURLs(urls)
+    }
+
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        enqueueOpenedPaths(filenames)
+        sender.reply(toOpenOrPrint: .success)
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func enqueueOpenedURLs(_ urls: [URL]) {
+        enqueueOpenedPaths(urls.filter(\.isFileURL).map(\.path))
+    }
+
+    func enqueueOpenedPaths(_ paths: [String]) {
+        let cleaned = paths.filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return }
+        pendingOpenPaths.append(contentsOf: cleaned)
+        guard isPrimary else { return }
         NSApp.activate(ignoringOtherApps: true)
-        if let appState {
-            appState.openPaths(filenames)
-        } else {
-            pendingOpenPaths.append(contentsOf: filenames)
-        }
+        guard didBecomePrimary else { return }
+        schedulePendingOpenFlush()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag, let appState, let lastDir = appState.config.lastDirectory,
+        guard isPrimary else { return false }
+        if !flag, let lastDir = appState.config.lastDirectory,
            FileManager.default.fileExists(atPath: lastDir) {
             appState.loadDirectory(lastDir)
         }
@@ -60,11 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        isPrimary
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let appState else { return .terminateNow }
+        if !isPrimary {
+            return .terminateNow
+        }
         if appState.confirmQuitIfRunning() {
             return .terminateNow
         }
@@ -72,26 +122,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let appState {
-            let path = appState.fileData.currentImagePath
-            let directory = appState.fileData.currentDirectory
-            if path != nil || directory != nil {
-                appState.config.saveRestoreState(
-                    filePath: path,
-                    directory: directory,
-                    viewMode: appState.fileData.currentViewMode.rawValue,
-                    macosSpaceMode: WindowFullscreen.isInMacOSSpace
-                )
-            }
+        guard isPrimary else { return }
+        let path = appState.fileData.currentImagePath
+        let directory = appState.fileData.currentDirectory
+        if path != nil || directory != nil {
+            appState.config.saveRestoreState(
+                filePath: path,
+                directory: directory,
+                viewMode: appState.fileData.currentViewMode.rawValue,
+                macosSpaceMode: WindowFullscreen.isInMacOSSpace
+            )
         }
-        appState?.prepareForApplicationExit()
-        appState?.theme.commitPreview()
-        appState?.config.saveSettings()
-        appState?.persistAllSidebarLayout()
+        appState.prepareForApplicationExit()
+        appState.theme.commitPreview()
+        appState.config.saveSettings()
+        appState.persistAllSidebarLayout()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard isPrimary else {
+            hideAllWindows()
+            return
+        }
         scheduleMenuBarDeduplication()
+        closeDuplicateMainWindows()
+    }
+
+    private func forwardToRunningInstanceAndQuit() {
+        guard !launchCompleted else { return }
+        launchCompleted = true
+        hideAllWindows()
+        let message = LaunchMessage.from(
+            launchOptions: launchOptions,
+            extraPaths: pendingOpenPaths
+        )
+        if InstanceLock.forwardToRunningInstance(
+            message: message,
+            pipePath: pipePath
+        ) {
+            NSApp.terminate(nil)
+            return
+        }
+        StyledMessageDialog.showWarning(
+            title: "Prowser is already running",
+            message: "Could not forward the open request to the running instance."
+        )
+        NSApp.terminate(nil)
+    }
+
+    private func hideAllWindows() {
+        for window in NSApp.windows {
+            window.orderOut(nil)
+        }
+    }
+
+    private func schedulePendingOpenFlush() {
+        pendingOpenFlush?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.flushPendingOpens()
+        }
+        pendingOpenFlush = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+    }
+
+    private func flushPendingOpens() {
+        let paths = Self.uniqued(pendingOpenPaths)
+        pendingOpenPaths.removeAll()
+        guard !paths.isEmpty else { return }
+        appState.openPaths(paths)
+    }
+
+    /// SwiftUI can still create a transient duplicate main window for Finder Open With.
+    private func installMainWindowGuard() {
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeVisibleNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.closeDuplicateMainWindows()
+        }
+    }
+
+    private func closeDuplicateMainWindows() {
+        guard isPrimary else { return }
+        let mainWindows = NSApp.windows.filter(isMainBrowserWindow)
+        guard mainWindows.count > 1 else { return }
+        let keeper = NSApp.keyWindow.flatMap { isMainBrowserWindow($0) ? $0 : nil }
+            ?? mainWindows.first
+        for window in mainWindows where window !== keeper {
+            window.close()
+        }
+    }
+
+    private func isMainBrowserWindow(_ window: NSWindow) -> Bool {
+        guard window.isVisible else { return false }
+        let title = window.title
+        if title == "Job Control" || title == "Image Generation" || title == "Settings" {
+            return false
+        }
+        return window.canBecomeKey
     }
 
     private func scheduleMenuBarDeduplication() {
@@ -117,15 +246,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showCustomAboutPanel(_ sender: Any?) {
-        appState?.showAboutDialog()
+        appState.showAboutDialog()
     }
 
-    private func applyLaunchOptions(_ appState: AppState) {
-        if !pendingOpenPaths.isEmpty {
-            appState.openPaths(pendingOpenPaths)
-            pendingOpenPaths.removeAll()
-        } else if !appState.launchOptions.paths.isEmpty {
-            appState.openPaths(appState.launchOptions.paths)
+    private func applyLaunchOptions() {
+        let finderPaths = Self.uniqued(pendingOpenPaths)
+        pendingOpenPaths.removeAll()
+        if !finderPaths.isEmpty {
+            appState.openPaths(finderPaths)
+        } else if !launchOptions.paths.isEmpty {
+            appState.openPaths(launchOptions.paths)
         } else if appState.config.restoreState, let snapshot = appState.config.getRestoreState() {
             if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
                 appState.openPaths([file])
@@ -140,14 +270,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        if appState.launchOptions.debug {
+        if !pendingOpenPaths.isEmpty {
+            flushPendingOpens()
+        }
+
+        if launchOptions.debug {
             appState.config.setValue(true, forKey: "debug_mode")
         }
 
         let restore = appState.config.rawSettings()["restore_state"] as? [String: Any]
         let savedSpace = restore?["last_macos_space_mode"] as? Bool
         WindowFullscreen.applyLaunchPreference(
-            noFullscreen: appState.launchOptions.noFullscreen,
+            noFullscreen: launchOptions.noFullscreen,
             restoreState: appState.config.restoreState,
             savedMacOSSpace: savedSpace
         )
@@ -164,5 +298,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    private static func uniqued(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for path in paths {
+            let expanded = (path as NSString).expandingTildeInPath
+            let normalized = URL(fileURLWithPath: expanded).standardizedFileURL.path
+            if seen.insert(normalized).inserted {
+                result.append(normalized)
+            }
+        }
+        return result
+    }
+}
+
+private struct SecondaryLaunchView: View {
+    var body: some View {
+        Color.clear.frame(width: 1, height: 1)
     }
 }

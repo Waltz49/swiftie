@@ -6,39 +6,43 @@ import UniformTypeIdentifiers
 struct ProwserApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    @State private var appState = AppState()
-
     var body: some Scene {
-        WindowGroup {
-            MainWindowView()
-                .environment(appState)
-                .onAppear {
-                    appDelegate.appState = appState
-                }
+        Window("Prowser", id: "main") {
+            if appDelegate.isPrimary {
+                MainWindowView()
+                    .environment(appDelegate.appState)
+            } else {
+                SecondaryLaunchView()
+            }
         }
+        .defaultSize(width: 1280, height: 840)
         .commands {
-            ProwserCommands(appState: appState)
+            if appDelegate.isPrimary {
+                ProwserCommands(appState: appDelegate.appState)
+            }
         }
 
-        Window("Job Control", id: "jobs-panel") {
-            FloatingJobQueuePanelView()
-                .environment(appState)
-                .frame(minWidth: 280, minHeight: 220)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 320, height: 420)
+        if appDelegate.isPrimary {
+            Window("Job Control", id: "jobs-panel") {
+                FloatingJobQueuePanelView()
+                    .environment(appDelegate.appState)
+                    .frame(minWidth: 280, minHeight: 220)
+            }
+            .windowStyle(.hiddenTitleBar)
+            .defaultSize(width: 320, height: 420)
 
-        Window("Image Generation", id: "imagegen-unified") {
-            ImageGenUnifiedDialog()
-                .environment(appState)
-        }
-        .defaultSize(width: 720, height: 560)
+            Window("Image Generation", id: "imagegen-unified") {
+                ImageGenUnifiedDialog()
+                    .environment(appDelegate.appState)
+            }
+            .defaultSize(width: 720, height: 560)
 
-        Window("Settings", id: "settings") {
-            SettingsWindowView()
-                .environment(appState)
+            Window("Settings", id: "settings") {
+                SettingsWindowView()
+                    .environment(appDelegate.appState)
+            }
+            .defaultSize(width: 920, height: 680)
         }
-        .defaultSize(width: 920, height: 680)
     }
 }
 
@@ -2509,23 +2513,30 @@ final class DirectoryLoadCoordinator {
     }
 
     func open(paths: [String]) {
-        guard let first = paths.first else { return }
-        let expanded = (first as NSString).expandingTildeInPath
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue {
-            loadDirectory(expanded, saveHistory: true)
-        } else {
-            let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
-            guard !normalized.isEmpty else { return }
-            let dir = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
+        var files: [String] = []
+        var directories: [String] = []
+        for path in paths {
+            guard let normalized = FileDataModel.normalizePath(path) else { continue }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: normalized, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
+                directories.append(normalized)
+            } else {
+                files.append(normalized)
+            }
+        }
+        if !files.isEmpty {
+            let dir = URL(fileURLWithPath: files[0]).deletingLastPathComponent().path
             appState.fileData.setCurrentDirectory(dir)
             appState.setSpecificFilesActive(true)
-            appState.fileData.setDisplayedImages(normalized)
-            appState.fileData.setCurrentImagePath(normalized[0])
+            appState.fileData.setDisplayedImages(files)
+            appState.fileData.setCurrentImagePath(files[0])
             appState.config.updateSetting("last_directory", value: dir)
             appState.eventBus.emit(.directoryLoaded, payload: .string(dir))
             appState.watchCurrentDirectory()
             appState.workers.onDirectoryLoaded(dir)
+        } else if let directory = directories.first {
+            loadDirectory(directory, saveHistory: true)
         }
     }
 
