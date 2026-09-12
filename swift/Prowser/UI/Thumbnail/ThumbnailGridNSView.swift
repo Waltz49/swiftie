@@ -22,7 +22,7 @@ protocol ThumbnailGridDelegate: AnyObject {
 
 /// Custom-painted thumbnail grid. Port of `thumbnails/thumbnail_canvas.py` (phase 1).
 @MainActor
-final class ThumbnailGridNSView: NSView {
+final class ThumbnailGridNSView: NSView, NSDraggingSource {
     weak var gridDelegate: ThumbnailGridDelegate?
     weak var configSource: AppConfig?
 
@@ -82,6 +82,8 @@ final class ThumbnailGridNSView: NSView {
     private var dragStartPoint: NSPoint?
     private var dropInsertionIndex: Int?
     private var dropIndicatorRect: NSRect?
+    private var externalDragStarted = false
+    private var draggingPaths: [String] = []
     private let dragThreshold: CGFloat = 6
 
     override var isFlipped: Bool { true }
@@ -89,11 +91,13 @@ final class ThumbnailGridNSView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        registerForDraggedTypes([.fileURL])
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
+        registerForDraggedTypes([.fileURL])
     }
 
     func applyTheme(_ colors: ThemeColors) {
@@ -367,6 +371,8 @@ final class ThumbnailGridNSView: NSView {
         guard let index = indexAt(point: point) else { return }
         dragSourceIndex = index
         dragStartPoint = point
+        externalDragStarted = false
+        draggingPaths = []
         dropInsertionIndex = nil
         dropIndicatorRect = nil
         let path = imagePaths[index]
@@ -390,22 +396,12 @@ final class ThumbnailGridNSView: NSView {
             return
         }
         let point = convert(event.locationInWindow, from: nil)
-        if let start = dragStartPoint,
-           hypot(point.x - start.x, point.y - start.y) >= dragThreshold,
-           let sourceIndex = dragSourceIndex,
-           let insertion = dropInsertionIndex,
-           insertion != sourceIndex,
-           sourceIndex < imagePaths.count {
-            let path = imagePaths[sourceIndex]
-            gridDelegate?.thumbnailGridDidReorder(path: path, insertionIndex: insertion)
-        } else if let index = indexAt(point: point), event.clickCount >= 2 {
+        if !externalDragStarted,
+           let index = indexAt(point: point),
+           event.clickCount >= 2 {
             gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
         }
-        dragSourceIndex = nil
-        dragStartPoint = nil
-        dropInsertionIndex = nil
-        dropIndicatorRect = nil
-        needsDisplay = true
+        resetDragState()
     }
 
     private func handleEmptyStateClick(at point: NSPoint) {
@@ -418,10 +414,109 @@ final class ThumbnailGridNSView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard let start = dragStartPoint, dragSourceIndex != nil else { return }
+        guard let start = dragStartPoint, let sourceIndex = dragSourceIndex else { return }
         let distance = hypot(point.x - start.x, point.y - start.y)
         guard distance >= dragThreshold else { return }
+        guard !externalDragStarted else { return }
+        beginExternalDrag(from: sourceIndex, event: event)
+    }
 
+    // MARK: - External drag (Python ``_start_internal_drag`` file URL export)
+
+    private func beginExternalDrag(from sourceIndex: Int, event: NSEvent) {
+        let paths = dragPathsForIndex(sourceIndex)
+        guard !paths.isEmpty else { return }
+        draggingPaths = paths
+        externalDragStarted = true
+
+        var items: [NSDraggingItem] = []
+        for (offset, path) in paths.enumerated() {
+            let writer = URL(fileURLWithPath: path) as NSURL
+            let item = NSDraggingItem(pasteboardWriter: writer)
+            if let image = thumbnails[path] {
+                let preview = scaledDragPreview(image)
+                let origin = NSPoint(x: CGFloat(offset) * 4, y: CGFloat(offset) * 4)
+                item.setDraggingFrame(NSRect(origin: origin, size: preview.size), contents: preview)
+            } else {
+                item.setDraggingFrame(NSRect(x: 0, y: 0, width: 64, height: 64), contents: nil)
+            }
+            items.append(item)
+        }
+        beginDraggingSession(with: items, event: event, source: self)
+    }
+
+    private func dragPathsForIndex(_ index: Int) -> [String] {
+        guard imagePaths.indices.contains(index) else { return [] }
+        if multiSelectMode, selectedIndices.contains(index) {
+            return imagePaths.enumerated().compactMap { idx, path in
+                selectedIndices.contains(idx) ? path : nil
+            }
+        }
+        return [imagePaths[index]]
+    }
+
+    private func scaledDragPreview(_ image: NSImage) -> NSImage {
+        let maxSide: CGFloat = 64
+        let size = image.size
+        guard size.width > 0, size.height > 0 else {
+            return NSImage(size: NSSize(width: maxSide, height: maxSide))
+        }
+        let scale = min(maxSide / size.width, maxSide / size.height, 1)
+        let drawSize = NSSize(width: size.width * scale, height: size.height * scale)
+        let preview = NSImage(size: drawSize)
+        preview.lockFocus()
+        ImageDisplayLoader.draw(image, in: NSRect(origin: .zero, size: drawSize))
+        preview.unlockFocus()
+        return preview
+    }
+
+    private func resetDragState() {
+        dragSourceIndex = nil
+        dragStartPoint = nil
+        externalDragStarted = false
+        draggingPaths = []
+        dropInsertionIndex = nil
+        dropIndicatorRect = nil
+        needsDisplay = true
+    }
+
+    private func localFilePaths(from draggingInfo: NSDraggingInfo) -> [String] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let urls = draggingInfo.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL]
+        return urls?.map(\.path) ?? []
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        switch context {
+        case .outsideApplication:
+            return .copy
+        default:
+            return [.copy, .move]
+        }
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        resetDragState()
+    }
+
+    // MARK: - Internal reorder via drop (Python ``dropEvent``)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !localFilePaths(from: sender).isEmpty else { return [] }
+        return sender.draggingSourceOperationMask.intersection([.copy, .move])
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let paths = localFilePaths(from: sender)
+        guard !paths.isEmpty else { return [] }
+        let point = convert(sender.draggingLocation, from: nil)
         let insertion = ThumbnailReorderService.insertionIndex(
             at: CGPoint(x: point.x, y: point.y),
             metrics: metrics,
@@ -430,6 +525,30 @@ final class ThumbnailGridNSView: NSView {
         dropInsertionIndex = insertion
         dropIndicatorRect = dropIndicatorRect(for: insertion)
         needsDisplay = true
+        return sender.draggingSourceOperationMask.intersection([.copy, .move])
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dropInsertionIndex = nil
+        dropIndicatorRect = nil
+        needsDisplay = true
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let paths = localFilePaths(from: sender)
+        guard let insertion = dropInsertionIndex else { return false }
+        let known = Set(imagePaths)
+        guard paths.allSatisfy({ known.contains($0) }) else { return false }
+        defer { resetDragState() }
+        guard let path = paths.first else { return false }
+        if paths.count == 1 {
+            gridDelegate?.thumbnailGridDidReorder(path: path, insertionIndex: insertion)
+            return true
+        }
+        for draggedPath in paths {
+            gridDelegate?.thumbnailGridDidReorder(path: draggedPath, insertionIndex: insertion)
+        }
+        return true
     }
 
     override func keyDown(with event: NSEvent) {

@@ -10,8 +10,10 @@ struct ImageGenPromptSection: View {
     @Binding var selectedPluginID: String
     let plugins: [[String: Any]]
     let sourcePath: String?
+    var existingSourcePaths: [String] = []
     var showNegativePrompt: Bool = false
     var onValuesChanged: (() -> Void)?
+    var onSourcePathsImported: (([String]) -> Void)?
 
     @State private var showImportButtons = true
 
@@ -138,7 +140,8 @@ struct ImageGenPromptSection: View {
             values: values,
             selectedPluginID: selectedPluginID,
             plugins: plugins,
-            appState: appState
+            appState: appState,
+            existingSourcePaths: existingSourcePaths
         ) else {
             if ImageGenExifImport.imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) == nil {
                 ImageGenExifImport.showWarning(title: "Import Rest", message: "No image selected.")
@@ -150,6 +153,9 @@ struct ImageGenPromptSection: View {
         values = result.values
         if let pluginID = result.selectedPluginID {
             selectedPluginID = pluginID
+        }
+        if let sourcePaths = result.sourcePaths {
+            onSourcePathsImported?(sourcePaths)
         }
         onValuesChanged?()
         appState.status.show("Settings imported from EXIF.")

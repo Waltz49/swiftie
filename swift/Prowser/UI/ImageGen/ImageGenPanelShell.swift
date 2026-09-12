@@ -9,6 +9,7 @@ struct ImageGenPanelShell: View {
     var sourcePaths: [String] = []
     var sourcePath: String? = nil
     var onValuesChanged: (() -> Void)?
+    var onEditSourcePathsChanged: (([String]) -> Void)?
 
     @State private var localSourcePath: String?
     @State private var localSourcePaths: [String] = []
@@ -29,64 +30,141 @@ struct ImageGenPanelShell: View {
         ImageGenFieldLayoutFilter.layoutExcludingDimensionsAndPrompt(fieldLayout)
     }
 
+    /// Edit: the leftmost source image is the single source of truth for imports and
+    /// ``source_image_path`` (Python ``_edit_first_source_path`` / ``job_values_snapshot``).
     private var effectiveSourcePath: String? {
-        localSourcePath ?? sourcePath
+        if function == "edit" {
+            return effectiveSourcePaths.first
+        }
+        return localSourcePath ?? sourcePath
     }
 
     private var effectiveSourcePaths: [String] {
         if !localSourcePaths.isEmpty { return localSourcePaths }
         if !sourcePaths.isEmpty { return sourcePaths }
-        if let effectiveSourcePath { return [effectiveSourcePath] }
+        if let path = localSourcePath ?? sourcePath { return [path] }
         return []
     }
 
     var body: some View {
+        Group {
+            if function == "edit" {
+                ImageGenPreviewSplitter {
+                    editPreviewPane
+                } controls: {
+                    editControlsColumn
+                }
+                .frame(minHeight: 420)
+            } else {
+                standardPanelColumn
+            }
+        }
+        .onAppear { syncSources() }
+        .onChange(of: sourcePath) { _, _ in
+            guard function != "edit" else { return }
+            syncSources()
+        }
+        .onChange(of: sourcePaths) { _, newPaths in
+            if function == "edit" {
+                adoptEditSourcePathsIfNeeded(newPaths)
+            } else {
+                syncSources()
+            }
+        }
+    }
+
+    private var standardPanelColumn: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let intro = introText(for: function), !intro.isEmpty {
-                Text(intro)
+            panelIntro
+            controlsContent(includeFunctionHeader: true)
+        }
+    }
+
+    private var editPreviewPane: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if effectiveSourcePaths.isEmpty {
+                Text("Select source images from the active browse image.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Divider()
-            }
-
-            ImageGenModelSelector(plugins: plugins, selectedPluginID: $selectedPluginID)
-                .onChange(of: selectedPluginID) { _, _ in onValuesChanged?() }
-
-            if let plugin = selectedPlugin {
-                ImageGenLoraSection(
-                    values: $values,
-                    plugin: plugin,
-                    onValuesChanged: onValuesChanged
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                ImageGenEditSourcePreview(
+                    sourcePaths: editSourcePathsBinding,
+                    onPathsChanged: { syncEditSourceValues() }
                 )
             }
+        }
+        .padding(4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
-            if let comment = selectedPlugin?["model_comment"] as? String, !comment.isEmpty {
-                Text(comment).font(.caption).foregroundStyle(.secondary)
-            }
+    private var editControlsColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            panelIntro
+            controlsContent(includeFunctionHeader: false)
+        }
+        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
 
+    @ViewBuilder
+    private var panelIntro: some View {
+        if let intro = introText(for: function), !intro.isEmpty {
+            Text(intro)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+        }
+    }
+
+    @ViewBuilder
+    private func controlsContent(includeFunctionHeader: Bool) -> some View {
+        ImageGenModelSelector(plugins: plugins, selectedPluginID: $selectedPluginID)
+            .onChange(of: selectedPluginID) { _, _ in onValuesChanged?() }
+
+        if let plugin = selectedPlugin {
+            ImageGenLoraSection(
+                values: $values,
+                plugin: plugin,
+                onValuesChanged: onValuesChanged
+            )
+        }
+
+        if let comment = selectedPlugin?["model_comment"] as? String, !comment.isEmpty {
+            Text(comment).font(.caption).foregroundStyle(.secondary)
+        }
+
+        if includeFunctionHeader {
             functionSpecificHeader
+        }
 
-            ImageGenPromptSection(
-                function: function,
-                values: $values,
-                selectedPluginID: $selectedPluginID,
-                plugins: plugins,
-                sourcePath: effectiveSourcePath,
-                showNegativePrompt: hasNegativePrompt,
-                onValuesChanged: onValuesChanged
-            )
+        ImageGenPromptSection(
+            function: function,
+            values: $values,
+            selectedPluginID: $selectedPluginID,
+            plugins: plugins,
+            sourcePath: effectiveSourcePath,
+            existingSourcePaths: effectiveSourcePaths,
+            showNegativePrompt: hasNegativePrompt,
+            onValuesChanged: onValuesChanged,
+            onSourcePathsImported: function == "edit" ? { paths in
+                let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)
+                guard !normalized.isEmpty else { return }
+                localSourcePaths = normalized
+                syncEditSourceValues()
+            } : nil
+        )
 
-            ImageGenFluxPromptSection(
-                values: $values,
-                function: function,
-                sourcePaths: effectiveSourcePaths,
-                onValuesChanged: onValuesChanged
-            )
+        ImageGenFluxPromptSection(
+            values: $values,
+            function: function,
+            sourcePaths: effectiveSourcePaths,
+            onValuesChanged: onValuesChanged
+        )
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
-                       let plugin = selectedPlugin {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
+                   let plugin = selectedPlugin {
                         ImageGenCustomSizeSection(
                             values: $values,
                             widthSpec: width,
@@ -97,16 +175,12 @@ struct ImageGenPanelShell: View {
                             usesOptionalCustomSize: function == "edit",
                             onValuesChanged: onValuesChanged
                         )
-                    }
-                    ImageGenFieldRenderer(layout: filteredLayout, values: $values)
                 }
-                .padding(.vertical, 2)
+                ImageGenFieldRenderer(layout: filteredLayout, values: $values)
             }
-            .frame(maxHeight: 360)
+            .padding(.vertical, 2)
         }
-        .onAppear { syncSources() }
-        .onChange(of: sourcePath) { _, _ in syncSources() }
-        .onChange(of: sourcePaths) { _, _ in syncSources() }
+        .frame(maxHeight: function == "edit" ? .infinity : 360)
     }
 
     @ViewBuilder
@@ -125,35 +199,36 @@ struct ImageGenPanelShell: View {
 
     @ViewBuilder
     private var editHeader: some View {
-        if effectiveSourcePaths.isEmpty {
-            Text("Select source images from the active browse image.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else {
-            HStack {
-                Text("Sources: \(effectiveSourcePaths.count) image(s)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                ImageGenSourceNavBar(
-                    currentPath: effectiveSourcePaths.first,
-                    onSelectPath: { path in
-                        localSourcePaths = [path]
-                        localSourcePath = path
-                        values["source_image_paths"] = [path]
-                        values["source_image_path"] = path
-                        onValuesChanged?()
-                    }
-                )
+        EmptyView()
+    }
+
+    private var editSourcePathsBinding: Binding<[String]> {
+        Binding(
+            get: { effectiveSourcePaths },
+            set: { newPaths in
+                let normalized = ImageGenEditSourcePaths.normalizedPaths(newPaths)
+                guard !normalized.isEmpty else { return }
+                localSourcePaths = normalized
+                syncEditSourceValues()
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(effectiveSourcePaths, id: \.self) { path in
-                        sourceThumbnail(path: path, size: 72)
-                    }
-                }
-            }
-        }
+        )
+    }
+
+    private func syncEditSourceValues() {
+        let paths = effectiveSourcePaths
+        guard !paths.isEmpty else { return }
+        values["source_image_paths"] = paths
+        values["source_image_path"] = paths[0]
+        onEditSourcePathsChanged?(paths)
+        onValuesChanged?()
+    }
+
+    private func adoptEditSourcePathsIfNeeded(_ paths: [String]) {
+        let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)
+        guard !normalized.isEmpty else { return }
+        guard normalized != localSourcePaths else { return }
+        localSourcePaths = normalized
+        syncEditSourceValues()
     }
 
     @ViewBuilder
@@ -209,9 +284,19 @@ struct ImageGenPanelShell: View {
     }
 
     private func syncSources() {
+        if function == "edit" {
+            if localSourcePaths.isEmpty, !sourcePaths.isEmpty {
+                localSourcePaths = sourcePaths
+            }
+            if !effectiveSourcePaths.isEmpty {
+                syncEditSourceValues()
+            }
+            return
+        }
+
         localSourcePath = sourcePath
         localSourcePaths = sourcePaths
-        guard function == "edit" || function == "expand" || function == "infill" else { return }
+        guard function == "expand" || function == "infill" else { return }
         if !effectiveSourcePaths.isEmpty {
             values["source_image_paths"] = effectiveSourcePaths
             values["source_image_path"] = effectiveSourcePaths[0]

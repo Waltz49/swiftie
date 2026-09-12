@@ -1199,6 +1199,11 @@ final class AppState {
 
     func applyJobsQueueSizeMode(_ mode: JobsQueueSizeMode, forceRefit: Bool) {
         if jobsQueueSizeMode == mode, !forceRefit { return }
+        if jobsQueueSizeMode != mode {
+            // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
+            // card); size from the fallback estimate until the new panel reports.
+            measuredJobsCardStackHeight = 0
+        }
         jobsQueueSizeMode = mode
         JobsQueueSizePersistence.save(mode, config: config)
         config.updateSetting("jobs_pane_compact", value: mode == .strip)

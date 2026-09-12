@@ -47,7 +47,8 @@ enum ImageGenExifImport {
         values: [String: Any],
         selectedPluginID: String,
         plugins: [[String: Any]],
-        appState: AppState
+        appState: AppState,
+        existingSourcePaths: [String] = []
     ) async -> ImportResult? {
         guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
             return nil
@@ -114,7 +115,11 @@ enum ImageGenExifImport {
 
         var sourcePaths: [String]?
         if function == "edit", let sourcePath {
-            sourcePaths = [sourcePath]
+            let references = await ReferenceGraphService.validExifReferencePathsForImage(sourcePath)
+            sourcePaths = ImageGenEditSourcePaths.mergeImportedPaths(
+                existing: existingSourcePaths,
+                imported: references
+            )
         }
 
         return ImportResult(values: updated, selectedPluginID: pluginID, sourcePaths: sourcePaths)

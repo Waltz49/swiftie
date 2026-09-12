@@ -185,12 +185,8 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private func sourcePixelSize() -> (width: Int, height: Int)? {
-        guard let sourcePath, let image = NSImage(contentsOfFile: sourcePath) else { return nil }
-        let size = image.size
-        let width = Int(size.width.rounded())
-        let height = Int(size.height.rounded())
-        guard width > 0, height > 0 else { return nil }
-        return (width, height)
+        guard let sourcePath else { return nil }
+        return ResizeImagesService.dimensions(for: sourcePath)
     }
 
     private func captureAspectRatio() {
@@ -350,7 +346,17 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private func applyImportDims() {
-        guard let size = sourcePixelSize() else { return }
+        guard sourcePath != nil else {
+            StyledMessageDialog.showWarning(title: "Import Size", message: "No image selected.")
+            return
+        }
+        guard let size = sourcePixelSize() else {
+            StyledMessageDialog.showWarning(
+                title: "Import Size",
+                message: "Could not read image dimensions."
+            )
+            return
+        }
         let srcW = size.width
         let srcH = size.height
         let aligned = ImageGenDimMath.alignDimsForPipeline(
@@ -411,7 +417,7 @@ struct ImageGenCustomSizeSection: View {
 enum ImageGenDimHelperTooltips {
     static let importSize =
         "Import size from the\n"
-        + "dimensions of the selected image."
+        + "dimensions of the first source image."
     static let screenSize =
         "Set size to fit your screen.\n"
         + "Limited by aspect ratio lock and\n"

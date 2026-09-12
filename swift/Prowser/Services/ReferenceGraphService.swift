@@ -16,6 +16,40 @@ enum ReferenceGraphService {
     private static let fileDateLine = try? NSRegularExpression(pattern: "^\\d+(?:\\.\\d+)?$")
     private static let imageExtensions = [".png", ".jpg", ".webp", ".jpeg"]
 
+    /// Ordered unique paths: image first, then direct EXIF references that resolve.
+    @MainActor
+    static func validExifReferencePathsForImage(
+        _ imagePath: String,
+        maxCount: Int = ImageGenEditSourcePaths.maxSourceImages
+    ) async -> [String] {
+        guard FileManager.default.isReadableFile(atPath: imagePath) else { return [] }
+        let normalized = normalizePath(imagePath)
+        let entries = await referenceEntries(for: normalized)
+        if entries.isEmpty { return [normalized] }
+
+        let imageDir = (normalized as NSString).deletingLastPathComponent
+        let resolved = resolveReferenceEntries(imageDir: imageDir, entries: entries)
+        var out: [String] = []
+        var seen = Set<String>()
+
+        func append(_ raw: String) {
+            let abs = normalizePath(raw)
+            guard FileManager.default.isReadableFile(atPath: abs), !seen.contains(abs) else { return }
+            seen.insert(abs)
+            out.append(abs)
+        }
+
+        append(normalized)
+        for (label, _) in entries {
+            let key = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let refPath = resolved[key] {
+                append(refPath)
+                if out.count >= maxCount { break }
+            }
+        }
+        return out.isEmpty ? [normalized] : out
+    }
+
     @MainActor
     static func imagesReferencing(targetPath: String, in candidates: [String]) async -> [String] {
         let targetNorm = normalizePath(targetPath)

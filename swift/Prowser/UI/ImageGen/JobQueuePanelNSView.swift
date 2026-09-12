@@ -4,12 +4,21 @@ import SwiftUI
 // AppKit requires a reverse-DNS UTI (Qt MIME "application/x-prowser-job-queue-id" is invalid here).
 private let jobQueueDragType = NSPasteboard.PasteboardType("com.prowser.job-queue-id")
 
+let jobsPaneDebugEnabled = ProcessInfo.processInfo.environment["PROWSER_JOBS_PANE_DEBUG"] == "1"
+func jobsPaneDebug(_ message: @autoclosure () -> String) {
+    guard jobsPaneDebugEnabled else { return }
+    print("[jobs-pane] \(message())")
+}
+
 @MainActor
 final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onReorder: ((String, String?) -> Void)?
     var onEdit: ((String) -> Void)?
     var onCancel: ((String, Bool) -> Void)?
     var onSelect: ((String?) -> Void)?
+    var onOpenReferences: (([String]) -> Void)?
+    /// Card heights changed after a width reflow; the measured pane geometry must be re-reported.
+    var onCardGeometryChanged: (() -> Void)?
     var onAddSeries: ((Int, Bool) -> Void)?
     var onSubtractSeries: ((Int, Bool) -> Void)?
     var onToggleImageRefinement: ((String, Bool) -> Void)?
@@ -246,6 +255,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         card.onEdit = { [weak self] in self?.onEdit?(row.jobID) }
         card.onCancel = { [weak self] cascade in self?.onCancel?(row.jobID, cascade) }
         card.onSelect = { [weak self] in self?.onSelect?(row.jobID) }
+        card.onOpenReferences = { [weak self] paths in self?.onOpenReferences?(paths) }
     }
 
     private func takePooledCard() -> JobCardNSView {
@@ -316,6 +326,20 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         return max(stackView.fittingSize.height + 8, 40)
     }
 
+    var documentFrameForDebug: NSRect { documentView.frame }
+    var lastConfiguredScrollWidthForDebug: CGFloat { lastConfiguredScrollWidth }
+    var cardLayoutHeightsForDebug: [CGFloat] {
+        cardViews.prefix(rows.count).map { $0.layoutHeight }
+    }
+
+    var displayedRowCount: Int { rows.count }
+
+    /// Cards laid out before the panel had real bounds (80px text width): heights are inflated
+    /// and must not drive pane sizing; ``layout()`` reflows them once the width is known.
+    var isLaidOutAtPlaceholderWidth: Bool {
+        !rows.isEmpty && lastConfiguredScrollWidth <= 1
+    }
+
     func measuredCardStackHeight() -> CGFloat {
         guard !rows.isEmpty else { return 0 }
         let visibleCount = min(cardViews.count, rows.count)
@@ -356,6 +380,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     private func reconfigureRowsForScrollWidth(_ scrollWidth: CGFloat) {
         guard abs(lastConfiguredScrollWidth - scrollWidth) > 0.5, !rows.isEmpty else { return }
+        jobsPaneDebug("reconfigure width \(lastConfiguredScrollWidth) -> \(scrollWidth) cardsBefore=\(cardLayoutHeightsForDebug)")
         preserveScrollPosition {
             for (index, row) in rows.enumerated() {
                 let card = cardViews[index]
@@ -372,6 +397,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             lastConfiguredScrollWidth = scrollWidth
             updateDocumentHeight()
         }
+        onCardGeometryChanged?()
     }
 
     private func updateDocumentHeight() {
@@ -388,6 +414,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     override func layout() {
         super.layout()
         let width = effectiveScrollWidth()
+        jobsPaneDebug(
+            "layout bounds=\(bounds) inWindow=\(window == nil ? "nil" : "\(convert(bounds, to: nil))") "
+            + "visible=\(scrollView.documentVisibleRect) doc=\(documentView.frame) stack=\(stackView.frame) "
+            + "firstCard=\(cardViews.first.map { "\($0.frame) hidden=\($0.isHiddenOrHasHiddenAncestor)" } ?? "none") "
+            + "windowH=\(window?.frame.height ?? -1)"
+        )
         if abs(lastConfiguredScrollWidth - width) > 0.5, !rows.isEmpty {
             scheduleReconfigureForScrollWidth(width)
             return
@@ -582,11 +614,14 @@ final class JobCardNSView: NSView {
     var onEdit: (() -> Void)?
     var onCancel: ((Bool) -> Void)?
     var onSelect: (() -> Void)?
+    var onOpenReferences: (([String]) -> Void)?
 
     private let backgroundView = NSView()
     private let contentView = NSView()
     private let statusWidget = JobCardStatusNSView()
-    private let thumbStack = NSStackView()
+    private let refsView = JobReferenceThumbsNSView()
+    private var refsWidthConstraint: NSLayoutConstraint?
+    private var refsHeightConstraint: NSLayoutConstraint?
     private let mainRow = NSStackView()
     private let column = NSStackView()
     private(set) var boundJobID = ""
@@ -622,21 +657,20 @@ final class JobCardNSView: NSView {
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
         statusWidget.translatesAutoresizingMaskIntoConstraints = false
-        thumbStack.orientation = .horizontal
-        thumbStack.spacing = JobQueueLayout.thumbGap
-        thumbStack.translatesAutoresizingMaskIntoConstraints = false
+        refsView.onOpenPaths = { [weak self] paths in self?.onOpenReferences?(paths) }
 
+        // Python inline layout: HBox margins (0, 0, 2, 0), spacing 4; refs top-right.
         mainRow.orientation = .horizontal
         mainRow.alignment = .top
-        mainRow.spacing = JobQueueLayout.cardInnerSpacing
+        mainRow.spacing = JobQueueLayout.inlineTextRefsSpacing
+        mainRow.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: JobQueueLayout.inlineRefsRightPadding)
         mainRow.distribution = .fill
         mainRow.translatesAutoresizingMaskIntoConstraints = false
         mainRow.addArrangedSubview(statusWidget)
-        mainRow.addArrangedSubview(thumbStack)
         statusWidget.setContentHuggingPriority(.defaultLow, for: .horizontal)
         statusWidget.setContentCompressionResistancePriority(.required, for: .horizontal)
-        thumbStack.setContentHuggingPriority(.required, for: .horizontal)
-        thumbStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        refsView.setContentHuggingPriority(.required, for: .horizontal)
+        refsView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         column.orientation = .vertical
         column.alignment = .leading
@@ -679,6 +713,7 @@ final class JobCardNSView: NSView {
     func applyTheme(_ colors: ThemeColors) {
         self.colors = colors
         statusWidget.applyTheme(colors)
+        refsView.applyTheme(colors)
     }
 
     func attachStackWidthConstraint(_ stackWidthAnchor: NSLayoutDimension) {
@@ -701,8 +736,11 @@ final class JobCardNSView: NSView {
     ) {
         let contentWidth = max(80, scrollWidth - JobQueueLayout.cardContentMargin)
         let refs = row.thumbnailPaths
-        let useInline = scrollWidth > JobQueueLayout.inlineRefsMinScrollWidth
-            && refs.count >= 1 && refs.count <= 2
+        let useInline = Self.useInlineRefs(
+            scrollWidth: scrollWidth,
+            paths: refs,
+            referencesInvalid: row.referencesInvalid
+        )
         if useInline != lastInlineRefs
             || refs != lastThumbnailPaths
             || row.referencesInvalid != lastReferencesInvalid {
@@ -732,8 +770,14 @@ final class JobCardNSView: NSView {
             )
         }
         let fingerprint = "\(textWidth)|\(statusView.fingerprint())"
+        let widthChanged = scrollWidth != lastScrollWidth
         lastScrollWidth = scrollWidth
         if fingerprint == lastViewFingerprint {
+            if widthChanged, lastHasBelowRefs {
+                // Below-status thumbs re-wrap to the new width (Python ``_reflow_visible_refs``).
+                layoutRefs(contentWidth: contentWidth, inline: useInline)
+                syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
+            }
             updateChrome(selected: selected, running: row.isActive)
             return
         }
@@ -744,9 +788,51 @@ final class JobCardNSView: NSView {
         statusWidthConstraint?.isActive = true
         statusWidget.setStatusView(statusView, contentWidth: textWidth)
         lastViewFingerprint = fingerprint
+        layoutRefs(contentWidth: contentWidth, inline: useInline)
         syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
         updateChrome(selected: selected, running: row.isActive)
         invalidateIntrinsicContentSize()
+    }
+
+    /// Python ``JobCard._use_inline_refs_layout``: wide pane and 1–2 (valid) references.
+    private static func useInlineRefs(scrollWidth: CGFloat, paths: [String], referencesInvalid: Bool) -> Bool {
+        let count = JobReferenceThumbsNSView.cellCount(paths: paths, referencesInvalid: referencesInvalid)
+        return scrollWidth > JobQueueLayout.inlineRefsMinScrollWidth && count >= 1 && count <= 2
+    }
+
+    /// Place the reference thumbs beside (single column) or below (wrapping rows) the status.
+    private func layoutRefs(contentWidth: CGFloat, inline: Bool) {
+        refsWidthConstraint?.isActive = false
+        refsHeightConstraint?.isActive = false
+        guard refsView.cellCount > 0 else {
+            refsView.removeFromSuperview()
+            refsView.isHidden = true
+            return
+        }
+        refsView.isHidden = false
+        let width: CGFloat
+        if inline {
+            refsView.setForcedColumns(1)
+            width = JobQueueLayout.thumbSize
+            if refsView.superview !== mainRow {
+                refsView.removeFromSuperview()
+                mainRow.addArrangedSubview(refsView)
+            }
+        } else {
+            refsView.setForcedColumns(nil)
+            width = max(JobQueueLayout.thumbSize, contentWidth)
+            if refsView.superview !== column {
+                refsView.removeFromSuperview()
+                column.addArrangedSubview(refsView)
+            }
+        }
+        refsWidthConstraint = refsView.widthAnchor.constraint(equalToConstant: width)
+        refsHeightConstraint = refsView.heightAnchor.constraint(
+            equalToConstant: refsView.contentHeight(forWidth: width)
+        )
+        refsWidthConstraint?.isActive = true
+        refsHeightConstraint?.isActive = true
+        refsView.needsLayout = true
     }
 
     func configure(
@@ -767,34 +853,15 @@ final class JobCardNSView: NSView {
 
         applyTheme(colors)
 
-        while column.arrangedSubviews.count > 1 {
-            column.arrangedSubviews.last?.removeFromSuperview()
-        }
         let contentWidth = max(80, scrollWidth - JobQueueLayout.cardContentMargin)
-        thumbStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let refs = row.thumbnailPaths
-        let useInline = scrollWidth > JobQueueLayout.inlineRefsMinScrollWidth && refs.count >= 1 && refs.count <= 2
-        if useInline {
-            if thumbStack.superview == nil {
-                mainRow.addArrangedSubview(thumbStack)
-            }
-            thumbStack.isHidden = false
-            for path in refs.prefix(2) {
-                thumbStack.addArrangedSubview(makeThumb(path: path, invalid: row.referencesInvalid))
-            }
-        } else {
-            thumbStack.removeFromSuperview()
-            if !refs.isEmpty {
-                let wrap = NSStackView()
-                wrap.orientation = .horizontal
-                wrap.alignment = .trailing
-                wrap.spacing = JobQueueLayout.thumbGap
-                for path in refs.prefix(3) {
-                    wrap.addArrangedSubview(makeThumb(path: path, invalid: row.referencesInvalid))
-                }
-                column.addArrangedSubview(wrap)
-            }
-        }
+        refsView.configure(paths: refs, referencesInvalid: row.referencesInvalid, colors: colors)
+        let useInline = Self.useInlineRefs(
+            scrollWidth: scrollWidth,
+            paths: refs,
+            referencesInvalid: row.referencesInvalid
+        )
+        layoutRefs(contentWidth: contentWidth, inline: useInline)
         let textWidth = Self.statusTextWidth(
             contentWidth: contentWidth,
             scrollWidth: scrollWidth,
@@ -814,7 +881,7 @@ final class JobCardNSView: NSView {
         statusWidthConstraint?.priority = .required
         statusWidthConstraint?.isActive = true
         statusWidget.setStatusView(statusView, contentWidth: textWidth)
-        lastHasBelowRefs = !useInline && !refs.isEmpty
+        lastHasBelowRefs = !useInline && refsView.cellCount > 0
         syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
 
         lastViewFingerprint = "\(textWidth)|\(statusView.fingerprint())"
@@ -836,8 +903,11 @@ final class JobCardNSView: NSView {
         guard boundJobID == row.jobID else { return false }
         let contentWidth = max(80, scrollWidth - JobQueueLayout.cardContentMargin)
         let refs = row.thumbnailPaths
-        let useInline = scrollWidth > JobQueueLayout.inlineRefsMinScrollWidth
-            && refs.count >= 1 && refs.count <= 2
+        let useInline = Self.useInlineRefs(
+            scrollWidth: scrollWidth,
+            paths: refs,
+            referencesInvalid: row.referencesInvalid
+        )
         let statusView: QueueJobStatusView
         if let view = row.statusView, !view.isEmpty {
             statusView = view
@@ -963,9 +1033,13 @@ final class JobCardNSView: NSView {
         statusWidget.layoutSubtreeIfNeeded()
         column.layoutSubtreeIfNeeded()
         let statusH = statusWidget.intrinsicContentSize.height
-        let refsH: CGFloat = (inlineRefs && !thumbStack.arrangedSubviews.isEmpty) || hasBelowRefs
-            ? JobQueueLayout.thumbSize
-            : 0
+        let refsH: CGFloat
+        if refsView.cellCount > 0, inlineRefs || hasBelowRefs {
+            refsH = refsHeightConstraint?.constant ?? JobQueueLayout.thumbSize
+        } else {
+            refsH = 0
+        }
+        // Python ``_sync_card_height``: inline → max(status, refs) + 2; below → status + refs + 2.
         let estimatedContentH = inlineRefs ? max(statusH, refsH) + 2 : statusH + refsH + 2
         let contentH = max(ceil(column.fittingSize.height), estimatedContentH, 1)
 
@@ -982,20 +1056,6 @@ final class JobCardNSView: NSView {
         cardHeightConstraint?.isActive = true
         updateActionBarLayoutConstraints()
         invalidateIntrinsicContentSize()
-    }
-
-    private func makeThumb(path: String, invalid: Bool) -> NSImageView {
-        let imageView = NSImageView()
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.image = NSImage(contentsOfFile: path)
-        imageView.wantsLayer = true
-        imageView.layer?.cornerRadius = 2
-        imageView.layer?.borderWidth = invalid ? 2 : 1
-        imageView.layer?.borderColor = (invalid ? NSColor.systemRed : NSColor(colors.defaultBorder)).cgColor
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.widthAnchor.constraint(equalToConstant: JobQueueLayout.thumbSize).isActive = true
-        imageView.heightAnchor.constraint(equalToConstant: JobQueueLayout.thumbSize).isActive = true
-        return imageView
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1107,6 +1167,9 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         let height: CGFloat
         if fillsAvailableHeight {
             height = max(proposal.height ?? nsView.bounds.height, 40)
+        } else if nsView.isLaidOutAtPlaceholderWidth {
+            // Inflated placeholder-width layout; use the last real measurement until the reflow lands.
+            height = max(appState.measuredJobsCardStackHeight, 40)
         } else {
             height = max(measuredQueueHeight(panel: nsView, mode: appState.jobsQueueSizeMode), 40)
         }
@@ -1162,6 +1225,18 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         panel.onSelect = { jobID in
             appState.imageGen.selectJob(id: jobID)
         }
+        panel.onOpenReferences = { paths in
+            // Python ``open_reference_thumbnail_paths``: one image → browse; several → custom-sort level.
+            if paths.count == 1 {
+                appState.openImageInBrowse(path: paths[0])
+            } else {
+                appState.openReferencePaths(paths, focusPath: nil)
+            }
+        }
+        panel.onCardGeometryChanged = { [weak panel] in
+            guard let panel else { return }
+            scheduleMeasuredGeometryReport(panel: panel, appState: appState, mode: appState.jobsQueueSizeMode)
+        }
         panel.onAddSeries = { delta, option in
             appState.imageGen.addActiveSeriesCycle(delta: option ? 50 : delta)
         }
@@ -1198,6 +1273,20 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         appState: AppState,
         mode: JobsQueueSizeMode
     ) {
+        // Python measures after ``card.reflow_layout(info_w, width)`` at the live viewport width;
+        // skip snapshots taken before the panel has real bounds (``layout()`` reflows and re-reports).
+        if mode != .strip, panel.isLaidOutAtPlaceholderWidth {
+            jobsPaneDebug("report skipped (placeholder width) mode=\(mode) cards=\(panel.cardLayoutHeightsForDebug)")
+            return
+        }
+        // A panel that still shows the previous mode's rows (e.g. ONE → ALL before the new
+        // hierarchy is built) would report the wrong stack.
+        let snapshotCount = appState.imageGen.queueSnapshot().count
+        let expectedRows = mode == .one ? min(1, snapshotCount) : snapshotCount
+        if mode != .strip, panel.displayedRowCount != expectedRows {
+            jobsPaneDebug("report skipped (rows \(panel.displayedRowCount) != \(expectedRows)) mode=\(mode)")
+            return
+        }
         let cardHeight: CGFloat
         switch mode {
         case .strip:
@@ -1207,6 +1296,11 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         case .all:
             cardHeight = panel.measuredCardStackHeight()
         }
+        jobsPaneDebug(
+            "report mode=\(mode) cardHeight=\(cardHeight) panelBounds=\(panel.bounds.size) "
+            + "doc=\(panel.documentFrameForDebug) cards=\(panel.cardLayoutHeightsForDebug) "
+            + "configuredWidth=\(panel.lastConfiguredScrollWidthForDebug)"
+        )
         appState.updateMeasuredJobsQueueGeometry(cardStackHeight: cardHeight)
     }
 

@@ -49,6 +49,12 @@ final class ImageGenController {
     private var activePluginID = ""
     private var activeFunction = "create"
     private var pendingValues: [String: Any] = [:]
+    /// Settings frozen for the in-flight copy so EXIF survives a mid-run Update
+    /// (Python ``_copy_cycle_values`` / ``_copy_cycle_plugin``).
+    private var copyCycleValues: [String: Any] = [:]
+    private var copyCyclePluginID = ""
+    /// Klein-edit aspect/screen-size pad temps from ``build_payload`` (Python ``_aspect_pad_temp_paths``).
+    private var aspectPadTempPaths: [String] = []
     private var stepRunning: [String: Any]?
     private var stepPendingDoc: [String: Any]?
     private var jobAIStageActive = false
@@ -857,11 +863,32 @@ final class ImageGenController {
         activeOutputPath = outputPath
         progressiveBrowseOpened = false
         do {
-            let payload = try await registry.buildPayload(
+            var payload = try await registry.buildPayload(
                 pluginID: activePluginID,
                 values: values,
                 outputPath: outputPath
             )
+            // Python ``_launch_generation_job``: pop pad temps / canonical originals from the payload,
+            // stamp canonical sources back into the job values, then freeze the copy-cycle EXIF snapshot.
+            if let padTemps = payload.removeValue(forKey: "_aspect_pad_temp_paths") as? [String], !padTemps.isEmpty {
+                aspectPadTempPaths.append(contentsOf: padTemps)
+            }
+            let canonicalFromPayload = payload.removeValue(forKey: "_canonical_source_image_paths") as? [String]
+            var cycleValues = values
+            if let canonical = canonicalFromPayload?.filter({ FileManager.default.isReadableFile(atPath: $0) }),
+               !canonical.isEmpty {
+                cycleValues["_canonical_source_image_paths"] = canonical
+                cycleValues["source_image_path"] = canonical[0]
+                cycleValues["source_image_paths"] = canonical
+                pendingValues = cycleValues
+            }
+            if let steps = payload["steps"] as? Int {
+                cycleValues["steps"] = steps
+            } else if let steps = payload["steps"] as? NSNumber {
+                cycleValues["steps"] = steps.intValue
+            }
+            copyCycleValues = cycleValues
+            copyCyclePluginID = activePluginID
             if let step = stepRunning {
                 let runningDoc = JobStepQueue.buildRunningJobDoc(
                     jobID: activeJobID ?? "",
@@ -913,8 +940,8 @@ final class ImageGenController {
             if copyBatchCancelled {
                 return
             }
-            let exifPluginID = activePluginID
-            let exifValues = pendingValues
+            let exifPluginID = copyCycleExifPluginID
+            let exifValues = copyCycleExifValues
             let workerResult = modelTasks.lastGenerateResult
             let exifElapsed = liveGenerationElapsedSeconds()
                 ?? stepProgressStartTime.map { Date().timeIntervalSince($0) }
@@ -936,6 +963,7 @@ final class ImageGenController {
                     elapsedSeconds: exifElapsed,
                     fallbackSourcePaths: fallbackSourcePaths
                 )
+                removeAspectPadTemps()
                 guard !copyBatchCancelled else { return }
                 await completeSuccessfulGenerationUnit()
             }
@@ -1027,6 +1055,8 @@ final class ImageGenController {
         if cancelled, !cancelledJobID.isEmpty {
             removeCancelledJobFromQueue(jobID: cancelledJobID)
         }
+        removeAspectPadTemps()
+        clearCopyCycleExifSnapshot()
         activeJobID = nil
         isProcessing = false
         progressMessage = ""
@@ -1107,6 +1137,8 @@ final class ImageGenController {
     /// Reset after a queued job failed to start; queue row stays in place (Python ``_abort_queued_job_start``).
     private func abortQueuedJobStart() {
         stopLiveStatusTimer()
+        removeAspectPadTemps()
+        clearCopyCycleExifSnapshot()
         activeJobID = nil
         isProcessing = false
         progressMessage = ""
@@ -1725,6 +1757,32 @@ final class ImageGenController {
         _ = stepsLabel
     }
 
+    /// Python ``_copy_cycle_exif_values`` / ``_copy_cycle_exif_plugin``.
+    private var copyCycleExifValues: [String: Any] {
+        copyCycleValues.isEmpty ? pendingValues : copyCycleValues
+    }
+
+    private var copyCycleExifPluginID: String {
+        copyCyclePluginID.isEmpty ? activePluginID : copyCyclePluginID
+    }
+
+    private func clearCopyCycleExifSnapshot() {
+        copyCycleValues = [:]
+        copyCyclePluginID = ""
+    }
+
+    /// Python ``remove_edit_aspect_pad_temps``.
+    private func removeAspectPadTemps() {
+        guard !aspectPadTempPaths.isEmpty else { return }
+        for path in aspectPadTempPaths where !path.isEmpty {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+        }
+        aspectPadTempPaths = []
+    }
+
     private func exifFallbackSourcePaths(from values: [String: Any]) -> [String] {
         if let canonical = values["_canonical_source_image_paths"] as? [String], !canonical.isEmpty {
             return canonical.filter { FileManager.default.isReadableFile(atPath: $0) }
@@ -1744,11 +1802,11 @@ final class ImageGenController {
         guard !outputPath.isEmpty,
               FileManager.default.fileExists(atPath: outputPath),
               isEnabled,
-              !activePluginID.isEmpty else { return }
-        let values = pendingValues
+              !copyCycleExifPluginID.isEmpty else { return }
+        let values = copyCycleExifValues
         let fallback = exifFallbackSourcePaths(from: values)
         _ = try? await registry.repairCancelledOutputExifReferences(
-            pluginID: activePluginID,
+            pluginID: copyCycleExifPluginID,
             outputPath: outputPath,
             values: values,
             fallbackSourcePaths: fallback
@@ -1761,15 +1819,15 @@ final class ImageGenController {
               !path.isEmpty,
               FileManager.default.fileExists(atPath: path),
               isEnabled,
-              !activePluginID.isEmpty else { return }
+              !copyCycleExifPluginID.isEmpty else { return }
         let step = liveStep
         let total = liveStepTotal
         guard step > 0, total > 0, step < total else { return }
-        let values = pendingValues
+        let values = copyCycleExifValues
         let elapsed = liveGenerationElapsedSeconds()
         let fallback = exifFallbackSourcePaths(from: values)
         _ = try? await registry.makeReadableUserCommentBeforeBrowse(
-            pluginID: activePluginID,
+            pluginID: copyCycleExifPluginID,
             outputPath: path,
             values: values,
             elapsedSeconds: elapsed,
@@ -1807,7 +1865,8 @@ final class ImageGenController {
                 pluginID: pluginID,
                 values: values,
                 workerResult: workerResult,
-                elapsedSeconds: elapsedSeconds
+                elapsedSeconds: elapsedSeconds,
+                fallbackSourcePaths: fallbackSourcePaths
             )
         } catch {
             print(
@@ -1821,7 +1880,8 @@ final class ImageGenController {
                         pluginID: pluginID,
                         values: values,
                         workerResult: workerResult,
-                        elapsedSeconds: elapsedSeconds
+                        elapsedSeconds: elapsedSeconds,
+                        fallbackSourcePaths: fallbackSourcePaths
                     )
                 } catch {
                     print(
@@ -1837,9 +1897,10 @@ final class ImageGenController {
         pluginID: String,
         values: [String: Any],
         workerResult: [String: Any],
-        elapsedSeconds: Double?
+        elapsedSeconds: Double?,
+        fallbackSourcePaths: [String] = []
     ) async throws {
-        let comment: String
+        var comment: String
         if isEnabled, !pluginID.isEmpty {
             comment = try await registry.formatGenerationExifComment(
                 pluginID: pluginID,
@@ -1851,6 +1912,28 @@ final class ImageGenController {
             comment = prompt
         } else {
             comment = ""
+        }
+        // Python ``write_exif_user_comment(..., reference_entries=...)``: the fallback write must
+        // still carry the References block (source images for edit/expand, AI reference images).
+        let tempRoot = config.temporaryFilesDirectory.path
+        let sourcePaths = ImageGenExifReferences.sourcePathsForGenerationExif(
+            values: values,
+            extraPaths: fallbackSourcePaths,
+            tempRoot: tempRoot
+        )
+        let entries = ImageGenExifReferences.referenceEntries(
+            sourcePaths: sourcePaths,
+            outputPath: outputPath,
+            tempRoot: tempRoot
+        )
+        if !entries.isEmpty {
+            comment = ImageGenExifReferences.inject(
+                baseComment: comment,
+                outputPath: outputPath,
+                entries: entries,
+                allowCrossDirectory: true,
+                tempRoot: tempRoot
+            )
         }
         try await ExifService.writeUserComment(path: outputPath, text: comment)
     }

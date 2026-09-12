@@ -26,6 +26,8 @@ struct ImageGenUnifiedDialog: View {
     @State private var pluginSwitchGuard = false
     @State private var suppressCloseOnGeneratePersist = false
     @State private var loadGeneration = 0
+    /// Frozen edit sources while the dialog is open (Python ``_edit_source_paths_override``).
+    @State private var lockedEditSourcePaths: [String] = []
     private let functions = ["edit", "create", "expand", "infill"]
     private let session = ImageGenSessionState()
 
@@ -41,9 +43,13 @@ struct ImageGenUnifiedDialog: View {
                     values: $values,
                     plugins: pluginsByFunction[selectedFunction] ?? [],
                     selectedPluginID: $selectedPluginID,
-                    sourcePaths: editSourcePaths,
-                    sourcePath: activeImagePath,
-                    onValuesChanged: { markDirtyIfNeeded() }
+                    sourcePaths: selectedFunction == "edit" ? lockedEditSourcePaths : [],
+                    sourcePath: panelSourcePath,
+                    onValuesChanged: { markDirtyIfNeeded() },
+                    onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
+                        lockedEditSourcePaths = paths
+                        appState.imageGenDialogRequest.editSourcePaths = paths
+                    } : nil
                 )
                 .onChange(of: selectedPluginID) { oldValue, newValue in
                     guard !pluginSwitchGuard, !isLoading, !oldValue.isEmpty, oldValue != newValue else { return }
@@ -59,7 +65,7 @@ struct ImageGenUnifiedDialog: View {
             footer
         }
         .padding(16)
-        .frame(minWidth: 720, minHeight: 560)
+        .frame(minWidth: 880, minHeight: 560)
         .background(
             ImageGenDialogKeyHandler(
                 onCommandLeft: { cycleFunction(delta: -1) },
@@ -72,9 +78,9 @@ struct ImageGenUnifiedDialog: View {
         )
         .persistedDialogGeometry(
             DialogGeometryKey.imageGenDialog,
-            defaultWidth: 720,
+            defaultWidth: 880,
             defaultHeight: 560,
-            minWidth: 560,
+            minWidth: 720,
             minHeight: 420,
             nestedInImageGen: true,
             windowIdentifier: ImageGenUnifiedDialog.windowIdentifier,
@@ -214,10 +220,42 @@ struct ImageGenUnifiedDialog: View {
         appState.fileData.currentImagePath
     }
 
-    private var editSourcePaths: [String] {
-        if !request.editSourcePaths.isEmpty { return request.editSourcePaths }
-        if let path = activeImagePath { return [path] }
+    private var panelSourcePath: String? {
+        if selectedFunction == "edit" {
+            return values["source_image_path"] as? String ?? lockedEditSourcePaths.first
+        }
+        return activeImagePath
+    }
+
+    private func resolveInitialEditSourcePaths(from request: ImageGenDialogRequest) -> [String] {
+        if !request.editSourcePaths.isEmpty {
+            return ImageGenEditSourcePaths.normalizedPaths(request.editSourcePaths)
+        }
+        let active = ImageGenEditSourcePaths.activeImagePathsForEdit(appState: appState)
+        if !active.isEmpty { return active }
+        if let path = activeImagePath {
+            return ImageGenEditSourcePaths.normalizedPaths([path])
+        }
         return []
+    }
+
+    /// Snapshot edit sources when opening or switching to edit; ignore live thumbnail selection afterward.
+    /// Python ``_resolve_edit_source_paths``: explicit override, else the active image(s). Persisted
+    /// ``source_image_paths`` from an earlier session are never used as sources.
+    private func bootstrapEditSourcePaths(from request: ImageGenDialogRequest, force: Bool = false) {
+        guard selectedFunction == "edit" else { return }
+        if force || lockedEditSourcePaths.isEmpty {
+            if !request.editSourcePaths.isEmpty {
+                lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(request.editSourcePaths)
+            } else {
+                lockedEditSourcePaths = resolveInitialEditSourcePaths(from: request)
+            }
+        }
+
+        guard !lockedEditSourcePaths.isEmpty else { return }
+        appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
+        values["source_image_paths"] = lockedEditSourcePaths
+        values["source_image_path"] = lockedEditSourcePaths[0]
     }
 
     private func loadDialog() async {
@@ -253,10 +291,20 @@ struct ImageGenUnifiedDialog: View {
                 values = job.values
                 baselineValues = job.values
                 visitedFunctions.insert(selectedFunction)
+                if selectedFunction == "edit",
+                   let paths = job.values["source_image_paths"] as? [String] {
+                    lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(paths)
+                    appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
+                }
             } else {
+                // Each open request re-resolves edit sources (Python builds a fresh dialog per open):
+                // explicit paths from the caller, else the active image(s).
+                lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
                 await switchFunction(from: "", to: selectedFunction)
-                if let prompt = pendingRequest.initialPrompt, !prompt.isEmpty {
-                    values["prompt"] = ExifService.initialPromptFromUserComment(prompt) ?? prompt
+                bootstrapEditSourcePaths(from: pendingRequest, force: true)
+                if let prompt = pendingRequest.initialPrompt {
+                    // Python ``_dialog_initial_prompt_from_user_comment``: an empty comment clears the prompt.
+                    values["prompt"] = prompt.isEmpty ? "" : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
                 }
                 if pendingRequest.autoImportEXIF {
                     await applyAutoImportEXIF()
@@ -342,6 +390,13 @@ struct ImageGenUnifiedDialog: View {
             values["prompt"] = ExifService.initialPromptFromUserComment(prompt) ?? prompt
         }
 
+        if newFunction == "edit" {
+            bootstrapEditSourcePaths(from: request)
+        } else if oldFunction == "edit", !lockedEditSourcePaths.isEmpty {
+            values["source_image_paths"] = lockedEditSourcePaths
+            values["source_image_path"] = values["source_image_path"] as? String ?? lockedEditSourcePaths[0]
+        }
+
         baselineValues = values
         isDirty = false
     }
@@ -357,6 +412,11 @@ struct ImageGenUnifiedDialog: View {
             editingQueueJob: replaceJobID != nil,
             config: appState.config
         )
+        if selectedFunction == "edit", !lockedEditSourcePaths.isEmpty {
+            // Sources belong to the dialog session, not to the incoming plugin's saved settings.
+            values["source_image_paths"] = lockedEditSourcePaths
+            values["source_image_path"] = lockedEditSourcePaths[0]
+        }
         session.setValues(values, for: selectedFunction)
         session.setPluginID(newPluginID, for: selectedFunction)
         baselineValues = values
@@ -367,17 +427,24 @@ struct ImageGenUnifiedDialog: View {
     private func applyAutoImportEXIF() async {
         guard let result = await ImageGenExifImport.applyImportRest(
             function: selectedFunction,
-            sourcePath: editSourcePaths.first,
+            sourcePath: lockedEditSourcePaths.first,
             values: values,
             selectedPluginID: selectedPluginID,
             plugins: pluginsByFunction[selectedFunction] ?? [],
-            appState: appState
+            appState: appState,
+            existingSourcePaths: lockedEditSourcePaths
         ) else {
             return
         }
         values = result.values
         if let pluginID = result.selectedPluginID {
             selectedPluginID = pluginID
+        }
+        if let sourcePaths = result.sourcePaths, !sourcePaths.isEmpty {
+            lockedEditSourcePaths = sourcePaths
+            appState.imageGenDialogRequest.editSourcePaths = sourcePaths
+            values["source_image_paths"] = sourcePaths
+            values["source_image_path"] = sourcePaths[0]
         }
         baselineValues = values
         isDirty = false
@@ -475,6 +542,13 @@ struct ImageGenUnifiedDialog: View {
             out.removeValue(forKey: "use_custom_size")
         case "expand", "infill":
             out.removeValue(forKey: "use_custom_size")
+        case "edit":
+            // Python ``ImageGenEditDialog.collect_values``: the panel's source list is authoritative
+            // (a plugin switch reloads that plugin's saved settings, which carry no sources).
+            if !lockedEditSourcePaths.isEmpty {
+                out["source_image_paths"] = lockedEditSourcePaths
+                out["source_image_path"] = lockedEditSourcePaths[0]
+            }
         default:
             break
         }
