@@ -59,6 +59,18 @@ final class ThemeColorPanelController: NSObject {
         finishSession(revert: false)
     }
 
+    /// Dismiss the panel and restore the swatch that was active when the panel opened (Escape / settings Cancel).
+    func cancelIfOpen() {
+        guard onThemeChange != nil else { return }
+        finishSession(revert: true)
+    }
+
+    /// Hide the panel without invoking change handlers (after settings OK when draft is already committed).
+    func dismissWithoutApplying() {
+        guard onThemeChange != nil else { return }
+        tearDownPanelObservers()
+    }
+
     private func handleColorChanged() {
         let hex = currentPanelHex()
         onSwatchChange?(hex)
@@ -80,6 +92,14 @@ final class ThemeColorPanelController: NSObject {
         debounceTask?.cancel()
         debounceTask = nil
 
+        let finalHex = revert ? originalHex : currentPanelHex()
+        onSwatchChange?(finalHex)
+        onThemeChange?(finalHex)
+
+        tearDownPanelObservers()
+    }
+
+    private func tearDownPanelObservers() {
         if let colorObserver {
             NotificationCenter.default.removeObserver(colorObserver)
             self.colorObserver = nil
@@ -88,10 +108,6 @@ final class ThemeColorPanelController: NSObject {
             NSEvent.removeMonitor(escapeMonitor)
             self.escapeMonitor = nil
         }
-
-        let finalHex = revert ? originalHex : currentPanelHex()
-        onSwatchChange?(finalHex)
-        onThemeChange?(finalHex)
 
         NSColorPanel.shared.orderOut(nil)
         onSwatchChange = nil

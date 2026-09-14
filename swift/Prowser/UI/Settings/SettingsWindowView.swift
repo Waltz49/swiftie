@@ -1,11 +1,20 @@
 import SwiftUI
 
+enum SettingsWindowDismissOutcome {
+    case committed
+    case cancelled
+}
+
 @MainActor
 struct SettingsWindowView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
+    private let onClose: (SettingsWindowDismissOutcome) -> Void
     @State private var selectedTab: SettingsTab = .general
     @State private var dismissAction: SettingsDismissAction?
+
+    init(onClose: @escaping (SettingsWindowDismissOutcome) -> Void = { _ in }) {
+        self.onClose = onClose
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,10 +23,12 @@ struct SettingsWindowView: View {
                     Label(tab.title, systemImage: tab.systemImage)
                         .tag(tab)
                 }
+                .focusable(false)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
             } detail: {
                 settingsDetail(for: selectedTab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(SettingsDetailKeyboardFocusView())
             }
             Divider()
             settingsFooter
@@ -32,6 +43,7 @@ struct SettingsWindowView: View {
                 dismissAction: $dismissAction,
                 onWindowAttached: { startSettingsSessionIfNeeded() },
                 onCloseWithoutOK: {
+                    ThemeColorPanelController.shared.cancelIfOpen()
                     rememberSettingsTab()
                     revertSettingsUnlessCommitted()
                 }
@@ -43,7 +55,9 @@ struct SettingsWindowView: View {
             defaultHeight: 680,
             minWidth: 760,
             minHeight: 520,
-            sizeFallbackKey: DialogGeometryKey.settingsSizeFallback
+            sizeFallbackKey: DialogGeometryKey.settingsSizeFallback,
+            windowIdentifier: "prowser.settings",
+            windowTitle: "Prowser Preferences"
         )
         .onAppear {
             selectedTab = appState.requestedSettingsTab
@@ -70,7 +84,7 @@ struct SettingsWindowView: View {
                 DialogButton("Cancel", isCancel: true) { settingsCancel() },
                 DialogButton("OK", isDefault: true) { settingsOK() },
             ],
-            focusDefaultOnAppear: true
+            focusDefaultOnAppear: false
         )
     }
 
@@ -85,19 +99,33 @@ struct SettingsWindowView: View {
         SettingsTab.rememberSessionTab(selectedTab)
     }
 
+    private func closeDialog(_ outcome: SettingsWindowDismissOutcome) {
+        onClose(outcome)
+    }
+
+    private func dismissOpenThemeColorPanel(commit: Bool) {
+        if commit {
+            ThemeColorPanelController.shared.dismissWithoutApplying()
+        } else {
+            ThemeColorPanelController.shared.cancelIfOpen()
+        }
+    }
+
     private func settingsOK() {
         rememberSettingsTab()
         appState.theme.commitSettingsOK()
         appState.eventBus.emit(.settingsChanged)
         dismissAction = .committed
-        dismiss()
+        dismissOpenThemeColorPanel(commit: true)
+        closeDialog(.committed)
     }
 
     private func settingsCancel() {
         rememberSettingsTab()
+        dismissOpenThemeColorPanel(commit: false)
         revertSettingsUnlessCommitted()
         dismissAction = .cancelled
-        dismiss()
+        closeDialog(.cancelled)
     }
 
     private func revertSettingsUnlessCommitted() {
@@ -144,6 +172,23 @@ struct SettingsWindowView: View {
 private enum SettingsDismissAction {
     case committed
     case cancelled
+}
+
+/// Click in the detail column moves key focus out of the sidebar outline list.
+private struct SettingsDetailKeyboardFocusView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = SettingsDetailMouseFocusView()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class SettingsDetailMouseFocusView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(nil)
+        super.mouseDown(with: event)
+    }
 }
 
 /// Settings window lifecycle: start draft session when shown; revert on close without OK.

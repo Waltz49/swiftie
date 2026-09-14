@@ -26,6 +26,7 @@ protocol ThumbnailGridDelegate: AnyObject {
 final class ThumbnailGridNSView: NSView, NSDraggingSource {
     weak var gridDelegate: ThumbnailGridDelegate?
     weak var configSource: AppConfig?
+    weak var appState: AppState?
 
     var imagePaths: [String] = [] {
         didSet {
@@ -664,6 +665,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     override func keyDown(with event: NSEvent) {
         logKey("ThumbnailGridNSView.keyDown keyCode=\(event.keyCode) index=\(currentIndex)")
+        if let appState,
+           KeyboardHandlerController.settingsPreferencesShouldReceiveKeyboard(appState: appState, event: event) {
+            super.keyDown(with: event)
+            return
+        }
         guard !imagePaths.isEmpty else {
             super.keyDown(with: event)
             return

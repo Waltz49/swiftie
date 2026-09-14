@@ -19,6 +19,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         let gridView = ThumbnailGridNSView(frame: .zero)
         gridView.gridDelegate = context.coordinator
         gridView.configSource = appState.config
+        gridView.appState = appState
         gridView.onInlineRenameCommitted = { [weak appState] originalPath, newName in
             guard let appState else { return }
             Task { @MainActor in
@@ -168,6 +169,9 @@ struct ThumbnailGridView: NSViewRepresentable {
         }
 
         func handleNavigate(_ direction: ThumbnailNavigateDirection) {
+            if KeyboardHandlerController.preferencesPanelOwnsKeyboardFocus(appState: appState) {
+                return
+            }
             KeyboardInputTracer.log(
                 "ThumbnailGrid.Coordinator.handleNavigate \(direction)",
                 config: appState.config

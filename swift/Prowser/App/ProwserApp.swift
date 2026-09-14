@@ -16,15 +16,6 @@ struct ProwserApp: App {
                 ProwserCommands(appState: appState)
             }
         }
-
-        Window("Settings", id: "settings") {
-            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
-                SettingsWindowView()
-                    .environment(appState)
-                    .environment(\.themeColors, appState.theme.colors)
-            }
-        }
-        .defaultSize(width: 920, height: 680)
     }
 }
 
@@ -65,6 +56,7 @@ final class AppState {
     private let keyboardHandler = KeyboardHandlerController()
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
     private let aboutDialog = AboutDialogController()
+    private let settingsDialog = SettingsDialogController()
     let chat: ChatController
     let theme: ThemeService
     let workers: WorkerServices
@@ -78,6 +70,7 @@ final class AppState {
     var requestedSettingsTab: SettingsTab = .general
     var showKeyboardHelp = false
     var isAboutDialogVisible: Bool { aboutDialog.isVisible }
+    var isSettingsDialogVisible: Bool { settingsDialog.isVisible }
     var showSimilaritySearchSheet = false
     var showPersonSearchSheet = false
     var showFindReferencesSheet = false
@@ -1350,6 +1343,7 @@ final class AppState {
             userInfo: info
         )
         settingsOpenRequestToken += 1
+        settingsDialog.show(appState: self)
     }
 
     func openImageGenDialog(

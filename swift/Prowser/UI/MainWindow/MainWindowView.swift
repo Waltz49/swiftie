@@ -3,7 +3,6 @@ import SwiftUI
 
 struct MainWindowView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +64,6 @@ struct MainWindowView: View {
         }
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "settings")
         }
     }
 }

@@ -247,14 +247,82 @@ final class KeyboardHandlerController {
         if appState.showKeyboardHelp || appState.isAboutDialogVisible {
             return false
         }
+        if Self.settingsPreferencesShouldReceiveKeyboard(appState: appState, event: event) {
+            return false
+        }
         if appState.hasModalSheetPresented { return false }
-        if isTextInputFocused() { return false }
+        if isTextInputFocused(in: event.window) { return false }
         if NSApp.keyWindow == nil { return false }
         return true
     }
 
-    private func isTextInputFocused() -> Bool {
-        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+    /// Preferences are non-modal, but browser shortcuts must not run while the user is working in Preferences.
+    static func settingsPreferencesShouldReceiveKeyboard(appState: AppState, event: NSEvent) -> Bool {
+        preferencesPanelOwnsKeyboardFocus(appState: appState, event: event)
+    }
+
+    /// Shared gate for menu shortcuts, the keyboard handler, and the thumbnail grid.
+    static func preferencesPanelOwnsKeyboardFocus(appState: AppState, event: NSEvent? = nil) -> Bool {
+        guard appState.isSettingsDialogVisible else { return false }
+        guard let prefs = visiblePreferencesWindow() else { return false }
+
+        let keyIsPrefs = isPreferencesWindow(NSApp.keyWindow)
+        let eventInPrefs = event.map { $0.window === prefs } ?? false
+        let frInPrefs = firstResponderIsInWindow(prefs)
+        let mouseIn = mouseIsInWindow(prefs)
+        let mainKey = isLikelyMainBrowserWindow(NSApp.keyWindow)
+
+        let owns: Bool
+        if keyIsPrefs { owns = true }
+        else if eventInPrefs { owns = true }
+        else if frInPrefs { owns = true }
+        else if mouseIn { owns = true }
+        else if mainKey { owns = false }
+        else { owns = true }
+
+        return owns
+    }
+
+    private static func isArrowKey(_ keyCode: UInt16) -> Bool {
+        keyCode == 123 || keyCode == 124 || keyCode == 125 || keyCode == 126
+    }
+
+    static func isArrowKeyPublic(_ keyCode: UInt16) -> Bool {
+        isArrowKey(keyCode)
+    }
+
+    static func firstResponderIsInWindow(_ window: NSWindow) -> Bool {
+        guard let responder = window.firstResponder else { return false }
+        if responder === window { return false }
+        if let view = responder as? NSView {
+            return view.window === window
+        }
+        return false
+    }
+
+    static func mouseIsInWindow(_ window: NSWindow) -> Bool {
+        window.frame.contains(NSEvent.mouseLocation)
+    }
+
+    static func isLikelyMainBrowserWindow(_ window: NSWindow?) -> Bool {
+        guard let window, window.isVisible else { return false }
+        if isPreferencesWindow(window) { return false }
+        return window.canBecomeKey
+    }
+
+    static func visiblePreferencesWindow() -> NSWindow? {
+        NSApp.windows.first { isPreferencesWindow($0) && $0.isVisible }
+    }
+
+    static func isPreferencesWindow(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        if window.identifier?.rawValue == "prowser.settings" { return true }
+        return window.title == "Prowser Preferences"
+    }
+
+    private func isTextInputFocused(in eventWindow: NSWindow?) -> Bool {
+        let window = eventWindow ?? NSApp.keyWindow
+        guard let responder = window?.firstResponder else { return false }
         return Self.isTextEditingResponder(responder)
     }
 
@@ -816,6 +884,9 @@ final class KeyboardHandlerController {
         direction: ThumbnailNavigateDirection,
         rangeSelect: Bool
     ) -> Bool {
+        if Self.preferencesPanelOwnsKeyboardFocus(appState: appState) {
+            return false
+        }
         let images = appState.fileData.displayedImages
         guard !images.isEmpty else { return false }
 

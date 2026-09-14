@@ -125,6 +125,9 @@ struct DialogButtonRow<Leading: View>: View {
     @MainActor
     private func handle(_ event: NSEvent) -> Bool {
         let textFocused = (event.window?.firstResponder).map(KeyboardHandlerController.isTextEditingResponder) ?? false
+        if let responder = event.window?.firstResponder, Self.isAdjustableControlResponder(responder) {
+            focusedID = nil
+        }
         switch event.keyCode {
         case 53: // Esc
             guard let cancel = enabledButtons.first(where: \.isCancel) else { return false }
@@ -132,11 +135,13 @@ struct DialogButtonRow<Leading: View>: View {
             return true
         case 123, 124: // ← →
             guard !textFocused else { return false }
+            if let responder = event.window?.firstResponder, Self.isAdjustableControlResponder(responder) {
+                return false
+            }
             let enabled = enabledButtons
             guard !enabled.isEmpty else { return false }
             guard let current = focusedID, let index = enabled.firstIndex(where: { $0.id == current }) else {
-                focusedID = initialButtonID
-                return true
+                return false
             }
             let step = event.keyCode == 124 ? 1 : -1
             focusedID = enabled[(index + step + enabled.count) % enabled.count].id
@@ -145,6 +150,9 @@ struct DialogButtonRow<Leading: View>: View {
             // Text input focused: leave Return to SwiftUI (`.defaultAction` shortcut) so field
             // values commit first, and multi-line editors keep newlines.
             guard !textFocused else { return false }
+            if let responder = event.window?.firstResponder, Self.isAdjustableControlResponder(responder) {
+                return false
+            }
             if let current = focusedID, let button = enabledButtons.first(where: { $0.id == current }) {
                 button.action()
                 return true
@@ -157,6 +165,33 @@ struct DialogButtonRow<Leading: View>: View {
         default:
             return false
         }
+    }
+
+    /// Sliders, steppers, pickers, etc. — arrow keys adjust values, not footer button focus.
+    private static func isAdjustableControlResponder(_ responder: NSResponder) -> Bool {
+        if responder is NSSlider || responder is NSStepper || responder is NSPopUpButton {
+            return true
+        }
+        let typeName = String(describing: type(of: responder))
+        if typeName.contains("Slider") || typeName.contains("Stepper") { return true }
+        if typeName.contains("Picker") || typeName.contains("PopUpButton") || typeName.contains("ComboBox") {
+            return true
+        }
+        if typeName.contains("Toggle") || typeName.contains("Switch") { return true }
+        if let view = responder as? NSView {
+            var current: NSView? = view
+            while let candidate = current {
+                if candidate is NSSlider || candidate is NSStepper || candidate is NSPopUpButton {
+                    return true
+                }
+                let name = String(describing: type(of: candidate))
+                if name.contains("Slider") || name.contains("Stepper") || name.contains("Picker") {
+                    return true
+                }
+                current = candidate.superview
+            }
+        }
+        return false
     }
 }
 

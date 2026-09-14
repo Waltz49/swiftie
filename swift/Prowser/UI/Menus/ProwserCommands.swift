@@ -299,11 +299,9 @@ struct ProwserCommands: Commands {
             Button("Previous Image") {
                 Task { @MainActor in navigate(.left) }
             }
-            .keyboardShortcut(.leftArrow, modifiers: [])
             Button("Next Image") {
                 Task { @MainActor in navigate(.right) }
             }
-            .keyboardShortcut(.rightArrow, modifiers: [])
 
             Divider()
 
@@ -501,6 +499,9 @@ struct ProwserCommands: Commands {
 
     @MainActor
     private func navigate(_ direction: ThumbnailNavigateDirection) {
+        if KeyboardHandlerController.preferencesPanelOwnsKeyboardFocus(appState: appState) {
+            return
+        }
         let images = appState.fileData.displayedImages
         guard !images.isEmpty else { return }
         KeyboardInputTracer.log(
