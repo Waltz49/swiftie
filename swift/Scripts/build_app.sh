@@ -225,6 +225,13 @@ if [[ "$NERB_PROFILE" -eq 1 ]]; then
     /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PROWSER_PROFILE string ${NERB_PROFILE_PATH}" "$PLIST"
 fi
 
+ENTITLEMENTS="$SWIFT_ROOT/Prowser/Resources/Prowser.entitlements"
+if [[ -f "$ENTITLEMENTS" ]]; then
+    echo "Signing with Photos library entitlement..."
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_MACOS/Prowser" 2>/dev/null \
+        || echo "warning: codesign failed (Photos privacy prompt may not appear for unsigned runs)" >&2
+fi
+
 # Register with Launch Services so Finder Open With sees this bundle.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [[ -x "$LSREGISTER" ]]; then

@@ -28,6 +28,8 @@ final class BrowseImageNSView: NSView {
     private var isFlippedHorizontally = false
     private var isFlippedVertically = false
     private var themeColors = ThemeColors.dark
+    private var loadTask: Task<Void, Never>?
+    private var emptyStateMessage = "No image selected"
 
     override var isFlipped: Bool { true }
 
@@ -147,16 +149,73 @@ final class BrowseImageNSView: NSView {
     }
 
     private func loadImage() {
+        loadTask?.cancel()
         resetTransforms()
         guard let imagePath else {
             sourceImage = nil
             needsDisplay = true
             return
         }
-        if let image = NSImage(contentsOfFile: imagePath) {
+        let ignoreExif = appState?.config.ignoreExifRotation ?? false
+        if let image = BrowseImageLoader.loadImage(from: imagePath, ignoreExifRotation: ignoreExif) {
+            emptyStateMessage = "No image selected"
             sourceImage = image
             applyCurrentDisplayMode()
+            return
         }
+        loadImageFromCacheOrAsync(path: imagePath)
+    }
+
+    private func loadImageFromCacheOrAsync(path: String) {
+        guard let appState else {
+            sourceImage = nil
+            needsDisplay = true
+            return
+        }
+        if let preview = appState.previewPaneCache.cachedImage(for: path) {
+            sourceImage = preview
+            applyCurrentDisplayMode()
+            return
+        }
+
+        loadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+            for size in [8192, 4096, 2048, 1024, 512] {
+                if Task.isCancelled { return }
+                if let cached = await appState.thumbnailCache.cachedThumbnail(for: normalized, size: size),
+                   let cg = cached.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                    guard self.imagePath == path else { return }
+                    self.sourceImage = NSImage(
+                        cgImage: cg,
+                        size: NSSize(width: cg.width, height: cg.height)
+                    )
+                    self.applyCurrentDisplayMode()
+                    return
+                }
+            }
+            if let cg = await appState.thumbnailCache.generateThumbnail(for: normalized, size: 8192) {
+                guard !Task.isCancelled, self.imagePath == path else { return }
+                self.sourceImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                self.applyCurrentDisplayMode()
+                return
+            }
+            guard !Task.isCancelled, self.imagePath == path else { return }
+            self.applyEmptyBrowseState(for: path)
+        }
+    }
+
+    private func applyEmptyBrowseState(for path: String) {
+        if PhotosLibraryBrowseLoader.isAccessBlocked(for: path) {
+            emptyStateMessage = PhotosLibraryBrowseLoader.blockedUserMessage()
+            appState?.status.show(
+                "Photos access required — enable Prowser in System Settings → Privacy & Security → Photos"
+            )
+        } else {
+            emptyStateMessage = "No image selected"
+        }
+        sourceImage = nil
+        needsDisplay = true
     }
 
     private func fitToWindow() {
@@ -488,19 +547,19 @@ final class BrowseImageNSView: NSView {
     }
 
     private func drawEmptyState() {
-        let text = "No image selected"
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16),
+            .font: NSFont.systemFont(ofSize: 14),
             .foregroundColor: NSColor(themeColors.text),
+            .paragraphStyle: paragraph,
         ]
-        let size = (text as NSString).size(withAttributes: attrs)
-        let rect = NSRect(
-            x: (bounds.width - size.width) / 2,
-            y: (bounds.height - size.height) / 2,
-            width: size.width,
-            height: size.height
+        let rect = bounds.insetBy(dx: 28, dy: 28)
+        (emptyStateMessage as NSString).draw(
+            with: rect,
+            options: [.usesLineFragmentOrigin],
+            attributes: attrs
         )
-        (text as NSString).draw(in: rect, withAttributes: attrs)
     }
 }
 

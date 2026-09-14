@@ -202,6 +202,7 @@ enum SelectionService {
             return
         }
         guard appState.fileData.currentImagePath != nil else { return }
+        DisplayedImagesSync.ensureActiveImageListed(fileData: appState.fileData)
         appState.fileData.setViewMode(.browse)
     }
 

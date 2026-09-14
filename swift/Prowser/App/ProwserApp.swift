@@ -1431,7 +1431,9 @@ final class AppState {
             loadDirectory(directory, saveHistory: saveHistory)
         }
         fileData.setCurrentImagePath(path)
-        if let index = fileData.displayedImages.firstIndex(of: path) {
+        DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+        if let normalized = FileDataModel.normalizePath(path),
+           let index = fileData.displayedImages.firstIndex(of: normalized) {
             fileData.setCurrentIndex(index)
         }
         fileData.setViewMode(.browse)
@@ -1657,9 +1659,8 @@ final class AppState {
         config.updateSetting("sort_mode", value: SortMode.name.rawValue)
         config.updateSetting("sort_reversed", value: false)
         loadDirectory(directory, saveHistory: false)
-        if fileData.displayedImages.contains(filePath) {
-            fileData.setCurrentImagePath(filePath)
-        }
+        fileData.setCurrentImagePath(filePath)
+        DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
         fileData.setViewMode(.thumbnail)
         status.show(hadFilter ? "Opened file, filter cleared" : "Opened file")
     }
@@ -2243,18 +2244,14 @@ final class DirectoryLoadCoordinator {
         }
         appState.clearBrowseReturnState()
 
+        let normalizedTarget = FileDataModel.normalizePath(targetFile) ?? targetFile
         // Pin the opened file before the directory scan so browse does not flash image 0.
-        appState.fileData.setCurrentImagePath(targetFile)
+        appState.fileData.setCurrentImagePath(normalizedTarget)
 
         let directory = URL(fileURLWithPath: targetFile).deletingLastPathComponent().path
         appState.loadDirectory(directory, saveHistory: false)
 
-        var images = appState.fileData.displayedImages
-        if !images.contains(targetFile) {
-            images.insert(targetFile, at: 0)
-            appState.fileData.setDisplayedImages(images)
-        }
-        appState.fileData.setCurrentImagePath(targetFile)
+        appState.fileData.setCurrentImagePath(normalizedTarget)
         appState.fileData.setViewMode(.browse)
         appState.clearBrowseReturnState()
         appState.menuRefresh.refreshAll()
@@ -2277,12 +2274,20 @@ final class DirectoryLoadCoordinator {
         let images = SortingService.sorted(scanned, options: options, metadataCache: appState.metadataCache)
         appState.metadataCache.saveIfNeeded()
         appState.fileData.setCurrentDirectory(path)
+        let pinnedPath = appState.fileData.currentImagePath
         appState.fileData.setDisplayedImages(images)
-        if let current = appState.fileData.currentImagePath, images.contains(current) {
-            appState.fileData.setCurrentImagePath(current)
+        if let pinnedPath, let normalized = FileDataModel.normalizePath(pinnedPath) {
+            if images.contains(normalized) {
+                appState.fileData.setCurrentImagePath(normalized)
+            } else if FileManager.default.fileExists(atPath: normalized) {
+                appState.fileData.setCurrentImagePath(normalized)
+            } else if let first = images.first {
+                appState.fileData.setCurrentImagePath(first)
+            }
         } else if let first = images.first {
             appState.fileData.setCurrentImagePath(first)
         }
+        DisplayedImagesSync.ensureActiveImageListed(fileData: appState.fileData)
         appState.config.updateSetting("last_directory", value: path)
         appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))

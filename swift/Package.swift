@@ -19,11 +19,12 @@ let package = Package(
                 .product(name: "libwebp", package: "libwebp-Xcode"),
             ],
             path: "Prowser",
-            exclude: ["Resources/Info.plist"],
+            exclude: ["Resources/Info.plist", "Resources/Prowser.entitlements"],
             resources: [
                 .process("Resources/Assets"),
             ],
             linkerSettings: [
+                .linkedFramework("Photos"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",

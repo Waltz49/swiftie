@@ -280,6 +280,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
                 appState.fileData.setCurrentImagePath(file)
+                DisplayedImagesSync.ensureActiveImageListed(fileData: appState.fileData)
+                if PhotosLibraryBrowseLoader.isPhotosLibraryPath(file) {
+                    _ = PhotosLibraryBrowseLoader.requestAccessIfNeeded(for: file)
+                }
             }
         }
 

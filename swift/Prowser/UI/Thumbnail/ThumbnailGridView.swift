@@ -364,12 +364,13 @@ struct ThumbnailGridView: NSViewRepresentable {
                 shiftPressed: shiftPressed,
                 ctrlPressed: ctrlPressed
             )
-            if !shiftPressed, !cmdPressed, !ctrlPressed {
-                SelectionService.openBrowseFromThumbnailActivation(
-                    appState: appState,
-                    isDoubleClick: false
-                )
-            }
+        }
+
+        func thumbnailGridDidActivateBrowse() {
+            SelectionService.openBrowseFromThumbnailActivation(
+                appState: appState,
+                isDoubleClick: false
+            )
         }
 
         func thumbnailGridDidOpenBrowse(index: Int, path: String) {

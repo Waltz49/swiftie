@@ -93,6 +93,8 @@
 	</array>
 	<key>LSMultipleInstancesProhibited</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Prowser displays images that live inside your Photos library when you browse them.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

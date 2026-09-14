@@ -33,7 +33,10 @@ final class PreviewPaneSessionCache {
     private var image: NSImage?
 
     func cachedImage(for path: String) -> NSImage? {
-        guard path == imagePath else { return nil }
+        guard let imagePath else { return nil }
+        let requested = URL(fileURLWithPath: path).standardizedFileURL.path
+        let stored = URL(fileURLWithPath: imagePath).standardizedFileURL.path
+        guard requested == stored else { return nil }
         return image
     }
 

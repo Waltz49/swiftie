@@ -14,6 +14,8 @@ protocol ThumbnailGridDelegate: AnyObject {
         ctrlPressed: Bool
     )
     func thumbnailGridDidOpenBrowse(index: Int, path: String)
+    /// Single-click browse activation (preview hidden). Fired on mouse up when the press was not a drag.
+    func thumbnailGridDidActivateBrowse()
     func thumbnailGridDidReorder(path: String, insertionIndex: Int)
     func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void)
     func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
@@ -105,6 +107,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var dropInsertionIndex: Int?
     private var dropIndicatorRect: NSRect?
     private var externalDragStarted = false
+    /// Set when the pointer moves past the drag threshold (Python ``_dragging``); survives ``resetDragState`` until mouse up.
+    private var suppressBrowseActivation = false
     private var draggingPaths: [String] = []
     private let dragThreshold: CGFloat = 6
 
@@ -489,6 +493,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         dragSourceIndex = index
         dragStartPoint = point
         externalDragStarted = false
+        suppressBrowseActivation = false
         draggingPaths = []
         dropInsertionIndex = nil
         dropIndicatorRect = nil
@@ -513,10 +518,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             return
         }
         let point = convert(event.locationInWindow, from: nil)
-        if !externalDragStarted,
-           let index = indexAt(point: point),
-           event.clickCount >= 2 {
-            gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let shiftPressed = flags.contains(.shift)
+        let cmdPressed = flags.contains(.command)
+        let ctrlPressed = flags.contains(.control)
+        if !suppressBrowseActivation, let index = indexAt(point: point) {
+            if event.clickCount >= 2 {
+                gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
+            } else if !shiftPressed, !cmdPressed, !ctrlPressed {
+                gridDelegate?.thumbnailGridDidActivateBrowse()
+            }
         }
         resetDragState()
     }
@@ -534,6 +545,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard let start = dragStartPoint, let sourceIndex = dragSourceIndex else { return }
         let distance = hypot(point.x - start.x, point.y - start.y)
         guard distance >= dragThreshold else { return }
+        suppressBrowseActivation = true
         guard !externalDragStarted else { return }
         beginExternalDrag(from: sourceIndex, event: event)
     }

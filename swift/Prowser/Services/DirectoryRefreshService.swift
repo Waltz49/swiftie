@@ -29,7 +29,8 @@ enum DirectoryRefreshService {
         let displayed = appState.fileData.displayedImages
         let displayedSet = Set(displayed)
         let rawAdded = diskSet.subtracting(displayedSet)
-        let removed = displayedSet.subtracting(diskSet)
+        var removed = displayedSet.subtracting(diskSet)
+        removed.subtract(filterOnlyRemovals(from: removed, appState: appState))
         let added = rawAdded
 
         if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
@@ -63,6 +64,17 @@ enum DirectoryRefreshService {
             added: added,
             removed: removed
         )
+    }
+
+    /// Paths still on disk but absent from a filtered scan (inserted for the active image).
+    private static func filterOnlyRemovals(from removed: Set<String>, appState: AppState) -> Set<String> {
+        guard !removed.isEmpty,
+              let active = appState.fileData.currentImagePath else { return [] }
+        let activeNorm = URL(fileURLWithPath: active).standardizedFileURL.path
+        return removed.filter { path in
+            guard FileManager.default.fileExists(atPath: path) else { return false }
+            return URL(fileURLWithPath: path).standardizedFileURL.path == activeNorm
+        }
     }
 
     private static func scannedDiskFiles(appState: AppState) -> [String] {
