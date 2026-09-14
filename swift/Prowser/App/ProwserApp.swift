@@ -130,6 +130,8 @@ final class AppState {
     var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
     var fileOpsTargetPaths: [String] = []
+    /// Session-only last file-tree drop destination for ⌘0 / ⌥⌘0 (Python `_last_drop_location`).
+    var lastDropLocation: String?
     /// Paths deleted in formatted-list mode; slot preserved with red-X overlay (Python `deleted_file_placeholders`).
     var deletedFilePlaceholders: Set<String> = []
     let menuRefresh = MenuRefreshState()
@@ -164,6 +166,7 @@ final class AppState {
 
         config.loadSettings()
         migrateSwiftSidebarDefaults(config: config)
+        discardPersistedLastDropLocation(config: config)
         leftSidebarSplit = SidebarPaneSplitModel(side: .left, config: config)
         rightSidebarSplit = SidebarPaneSplitModel(side: .right, config: config)
         leftSidebarWidth = SidebarWidthLimits.clampLeft(config.sidebarWidth)
@@ -2165,6 +2168,13 @@ final class AppState {
         if wrap { return ((raw % count) + count) % count }
         return min(max(0, raw), count - 1)
     }
+}
+
+/// Last drop is session-only (Python `FileTree._last_drop_location`); strip any saved copy.
+@MainActor
+private func discardPersistedLastDropLocation(config: AppConfig) {
+    guard config.rawSettings()["last_drop_location"] != nil else { return }
+    config.updateSetting("last_drop_location", value: nil)
 }
 
 /// One-time fixes when moving from Python profile settings to Swift UI.

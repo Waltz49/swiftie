@@ -294,7 +294,7 @@ struct ShortcutsSidebarView: View {
     }
 
     private func validLastDropLabel() -> ShortcutSlot? {
-        let path = appState.config.string(forKey: "last_drop_location")
+        let path = appState.lastDropLocation
         guard let expanded = validExpandedPath(path),
               let label = displayName(for: expanded) else { return nil }
         return ShortcutSlot(number: 0, label: label, fullPath: expanded)

@@ -344,7 +344,7 @@ final class FileOperationsService {
             }
         }
 
-        appState.config.updateSetting("last_drop_location", value: targetDirectory)
+        appState.lastDropLocation = targetDirectory
         appState.refreshMenuState()
 
         do {
@@ -414,8 +414,7 @@ final class FileOperationsService {
 
     func moveToLastDropLocation(copyOnly: Bool = false) {
         guard let appState else { return }
-        let lastDrop = appState.config.string(forKey: "last_drop_location")
-        guard !lastDrop.isEmpty else {
+        guard let lastDrop = appState.lastDropLocation, !lastDrop.isEmpty else {
             appState.status.show("No last drop location")
             return
         }
