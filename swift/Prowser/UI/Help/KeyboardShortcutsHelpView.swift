@@ -51,14 +51,9 @@ struct KeyboardShortcutsHelpView: View {
                         ("I", "Toggle information pane"),
                         ("O", "Toggle shortcuts sidebar"),
                         ("T", "Toggle file tree"),
-                        ("J", "Toggle jobs pane"),
-                        ("⌘J", "Toggle floating job queue panel"),
-                        ("⌃J", "Cycle jobs pane/panel size (strip → one → all)"),
-                        ("⌥[ / ⌥] / ⌥\\", "Jobs size: strip / one job / all jobs"),
                         ("B", "Toggle status bar"),
-                        ("F9 / ,", "Toggle chat pane"),
-                        ("Double-click titlebar", "Expand pane to fit content (jobs: cycle size)"),
-                        ("Drag titlebar", "Resize pane (preview, chat, info, jobs)"),
+                        ("Double-click titlebar", "Expand pane to fit content"),
+                        ("Drag titlebar", "Resize pane (preview, info)"),
                         ("⌘I", "Cycle thumbnail overlay (none → name → size → both)"),
                         ("⌘⇧I", "Toggle number overlay (browse)"),
                     ])
@@ -76,7 +71,8 @@ struct KeyboardShortcutsHelpView: View {
                         ("Space", "Next image (or exit when space mode is exit)"),
                         ("⇧Space", "Toggle space key mode (exit vs advance)"),
                         ("Esc / Return / Q / F", "Return to thumbnails"),
-                        ("F5", "Show reference graph for active image"),
+                        ("Right-click", "Return to thumbnails"),
+                        ("F5", "Find references to current image"),
                     ])
                     shortcutSection("Thumbnail grid", rows: [
                         ("+ / − / 0", "Larger / smaller / reset cell size (list: row height)"),
@@ -92,7 +88,6 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘Delete", "Move to Trash"),
                         ("⌘C", "Copy path"),
                         ("^C", "Copy image"),
-                        ("⌘K", "Find similar images"),
                         ("⌘⇧H", "Show image in directory"),
                         ("⌘Z", "Undo delete (restore from Trash)"),
                         ("⌘⇧Z", "Resize images"),
@@ -105,16 +100,6 @@ struct KeyboardShortcutsHelpView: View {
                     shortcutSection("Tools", rows: [
                         ("⌘G", "Show GPS location on map"),
                         ("⇧⌘E", "Edit EXIF user comment"),
-                    ])
-                    if BundleCapabilities.imageGenUIEnabled {
-                        shortcutSection("Image Generation", rows: [
-                            ("⌥/", "Open last-used image function dialog"),
-                            ("⇧⌥/", "Open image-gen dialog from current image EXIF"),
-                            ("⌘J", "Toggle floating job queue panel"),
-                        ])
-                    }
-                    shortcutSection("Help", rows: [
-                        ("/ or F1", "This dialog"),
                     ])
                 }
             }

@@ -11,6 +11,7 @@ final class SearchOperationsService {
     }
 
     func presentSimilaritySearch() {
+        guard BundleCapabilities.similaritySearchUIEnabled else { return }
         guard let appState else { return }
         guard referencePaths(appState: appState).isEmpty == false else {
             showAlert("No reference image", informative: "Select an image first.")
@@ -24,6 +25,7 @@ final class SearchOperationsService {
     }
 
     func presentPersonSearch() {
+        guard BundleCapabilities.personSearchUIEnabled else { return }
         guard let appState else { return }
         appState.showPersonSearchSheet = true
     }
@@ -143,6 +145,7 @@ final class SearchOperationsService {
     }
 
     func presentClipSearch() {
+        guard BundleCapabilities.clipSearchUIEnabled else { return }
         guard let appState else { return }
         appState.showClipSearchSheet = true
     }

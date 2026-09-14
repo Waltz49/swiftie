@@ -4,11 +4,10 @@ import SwiftUI
 enum SidebarPaneContextMenuKind: Equatable {
     case fileTree
     case information
-    case jobs(floating: Bool)
     case chat
 }
 
-/// Control-click / right-click menus for sidebar panes and the floating job panel.
+/// Control-click / right-click menus for sidebar panes.
 @MainActor
 enum SidebarPaneContextMenus {
     static func show(
@@ -39,8 +38,6 @@ enum SidebarPaneContextMenus {
             return fileTreeMenu(appState: appState)
         case .information:
             return informationMenu(appState: appState)
-        case .jobs(let floating):
-            return jobsMenu(appState: appState, floating: floating)
         case .chat:
             return chatMenu(appState: appState)
         }
@@ -82,9 +79,6 @@ enum SidebarPaneContextMenus {
 
         addAction(menu, title: "Edit User Comment", action: #selector(PaneMenuActions.infoEdit(_:)))
         addAction(menu, title: "Copy to Clipboard", enabled: hasComment, action: #selector(PaneMenuActions.infoCopy(_:)))
-        if BundleCapabilities.voiceInputUIEnabled {
-            addAction(menu, title: "Read User Comment Aloud", enabled: hasComment, action: #selector(PaneMenuActions.infoSpeak(_:)))
-        }
         if BundleCapabilities.imageGenUIEnabled {
             addAction(menu, title: "Create Image from this prompt", action: #selector(PaneMenuActions.infoCreate(_:)))
             addAction(menu, title: "Edit this image with AI", action: #selector(PaneMenuActions.infoEditAI(_:)))
@@ -96,51 +90,6 @@ enum SidebarPaneContextMenus {
             title: toolbarToggleTitle(visible: appState.informationMenuBarVisible, noun: "Menu Bar"),
             checked: appState.informationMenuBarVisible,
             action: #selector(PaneMenuActions.infoShowMenuBar(_:))
-        )
-        stripMenuIcons(menu)
-        return menu
-    }
-
-    private static func jobsMenu(appState: AppState, floating: Bool) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let controller = appState.imageGen
-
-        addCheckable(
-            menu,
-            title: "Intermediate Images",
-            checked: controller.showProgressiveImages,
-            enabled: controller.isEnabled,
-            action: #selector(PaneMenuActions.jobsIntermediate(_:))
-        )
-        addCheckable(
-            menu,
-            title: "Hold Job Queue",
-            checked: controller.holdJobQueue,
-            enabled: controller.isEnabled,
-            action: #selector(PaneMenuActions.jobsHoldQueue(_:))
-        )
-        addAction(
-            menu,
-            title: "Skip This Copy",
-            enabled: controller.canSkipActiveSeriesCopy,
-            action: #selector(PaneMenuActions.jobsSkipCopy(_:))
-        )
-        if floating {
-            menu.addItem(.separator())
-            addCheckable(
-                menu,
-                title: "Always on Top",
-                checked: appState.jobsPanelAlwaysOnTop,
-                action: #selector(PaneMenuActions.jobsAlwaysOnTop(_:))
-            )
-        }
-        menu.addItem(.separator())
-        addCheckable(
-            menu,
-            title: toolbarToggleTitle(visible: appState.jobsToolbarVisible),
-            checked: appState.jobsToolbarVisible,
-            action: #selector(PaneMenuActions.jobsShowToolbar(_:))
         )
         stripMenuIcons(menu)
         return menu
@@ -250,7 +199,7 @@ final class PaneMenuActions: NSObject {
     }
 
     @objc func treeOpenSettings(_ sender: NSMenuItem) {
-        appState?.openSettingsWindow(tab: .general)
+        appState?.openSettingsWindow()
     }
 
     @objc func treeFilter(_ sender: NSMenuItem) {
@@ -272,10 +221,6 @@ final class PaneMenuActions: NSObject {
         appState?.copyInformationComment(full: NSEvent.modifierFlags.contains(.option))
     }
 
-    @objc func infoSpeak(_ sender: NSMenuItem) {
-        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "speak"])
-    }
-
     @objc func infoCreate(_ sender: NSMenuItem) {
         NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "create"])
     }
@@ -290,28 +235,6 @@ final class PaneMenuActions: NSObject {
 
     @objc func infoShowMenuBar(_ sender: NSMenuItem) {
         appState?.setInformationMenuBarVisible(toggledValue(sender))
-    }
-
-    @objc func jobsIntermediate(_ sender: NSMenuItem) {
-        guard let appState else { return }
-        appState.imageGen.setShowProgressiveImages(toggledValue(sender))
-    }
-
-    @objc func jobsHoldQueue(_ sender: NSMenuItem) {
-        guard let appState else { return }
-        appState.imageGen.setHoldJobQueue(toggledValue(sender))
-    }
-
-    @objc func jobsSkipCopy(_ sender: NSMenuItem) {
-        appState?.imageGen.skipActiveSeriesCopy()
-    }
-
-    @objc func jobsAlwaysOnTop(_ sender: NSMenuItem) {
-        appState?.setJobsPanelAlwaysOnTop(toggledValue(sender))
-    }
-
-    @objc func jobsShowToolbar(_ sender: NSMenuItem) {
-        appState?.setJobsToolbarVisible(toggledValue(sender))
     }
 
     @objc func chatSystemPrompt(_ sender: NSMenuItem) {
@@ -566,7 +489,6 @@ final class PaneToolsButtonView: NSView {
         switch kind {
         case .fileTree: return "File tree tools"
         case .information: return "File information tools"
-        case .jobs: return "Job control tools"
         case .chat: return "Chat tools"
         }
     }

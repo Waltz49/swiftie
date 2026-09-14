@@ -1,16 +1,22 @@
 import Foundation
 
-/// Mirrors Python `bundle_capabilities.py` for `--min` builds.
+/// Feature flags for the Swift-only image browser.
+///
+/// Python ML/AI workers (image generation, chat, CLIP, faces, Whisper) are not used.
+/// Native browser features (thumbnails, EXIF via ImageIO, duplicates) stay enabled.
 enum BundleCapabilities {
-    static var isMinBundle: Bool {
-        LaunchOptions.parse().minBundle
-            || ProcessInfo.processInfo.environment["PROWSER_MIN_BUNDLE"] == "1"
-    }
+    /// Python ML/AI workers and their UI. Always off in the Swift-only browser.
+    static var pythonMLEnabled: Bool { false }
 
-    static var imageGenUIEnabled: Bool { !isMinBundle }
-    static var lmStudioUIEnabled: Bool { !isMinBundle }
-    static var voiceInputUIEnabled: Bool { !isMinBundle }
-    static var chatUIEnabled: Bool { !isMinBundle }
-    static var facesUIEnabled: Bool { !isMinBundle }
-    static var modelJobsUIEnabled: Bool { !isMinBundle }
+    static var isMinBundle: Bool { !pythonMLEnabled }
+
+    static var imageGenUIEnabled: Bool { pythonMLEnabled }
+    static var lmStudioUIEnabled: Bool { pythonMLEnabled }
+    static var voiceInputUIEnabled: Bool { pythonMLEnabled }
+    static var chatUIEnabled: Bool { pythonMLEnabled }
+    static var facesUIEnabled: Bool { pythonMLEnabled }
+    static var modelJobsUIEnabled: Bool { pythonMLEnabled }
+    static var clipSearchUIEnabled: Bool { pythonMLEnabled }
+    static var similaritySearchUIEnabled: Bool { pythonMLEnabled }
+    static var personSearchUIEnabled: Bool { pythonMLEnabled }
 }

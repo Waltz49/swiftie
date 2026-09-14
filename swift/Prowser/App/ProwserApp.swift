@@ -17,28 +17,11 @@ struct ProwserApp: App {
             }
         }
 
-        Window("Job Control", id: "jobs-panel") {
-            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
-                FloatingJobQueuePanelView()
-                    .environment(appState)
-                    .frame(minWidth: 280, minHeight: 220)
-            }
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 320, height: 420)
-
-        Window("Image Generation", id: "imagegen-unified") {
-            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
-                ImageGenUnifiedDialog()
-                    .environment(appState)
-            }
-        }
-        .defaultSize(width: 720, height: 560)
-
         Window("Settings", id: "settings") {
             OptionalAppStateWindow(appState: appDelegate.appState) { appState in
                 SettingsWindowView()
                     .environment(appState)
+                    .environment(\.themeColors, appState.theme.colors)
             }
         }
         .defaultSize(width: 920, height: 680)
@@ -53,7 +36,6 @@ struct ChromeSavedLayout: Equatable {
     var chatVisible: Bool
     var shortcutsVisible: Bool
     var informationVisible: Bool
-    var jobsVisible: Bool
     var leftSidebarVisible: Bool
     var rightSidebarVisible: Bool
     var leftSidebarWidth: CGFloat
@@ -82,29 +64,18 @@ final class AppState {
     let status = StatusNotificationService()
     private let keyboardHandler = KeyboardHandlerController()
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
-    private let generationTimingDialog = GenerationTimingDialogController()
     private let aboutDialog = AboutDialogController()
     let chat: ChatController
     let theme: ThemeService
     let workers: WorkerServices
-    let imageGen: ImageGenController
     let informationSectionState: InformationSectionState
-    let commentSpeaker = UserCommentSpeaker()
     let leftSidebarSplit: SidebarPaneSplitModel
     let rightSidebarSplit: SidebarPaneSplitModel
     let directoryHistory = DirectoryHistory()
     let browseImageHistory = BrowseImageHistoryController()
-    var jobsDisplayMode: JobsDisplayMode = .pane
-    var jobsQueueSizeMode: JobsQueueSizeMode = .all
-    var showFloatingJobsPanel = false
     var fileTreeFocusToken = 0
-    var showImageGenCreateSheet = false
-    var showImageGenUnifiedDialog = false
-    var imageGenDialogReloadToken = 0
-    /// Bumped when the image-gen queue or active job display changes (replaces ``ImageGenController`` Observation).
-    var imageGenUIRevision = 0
     var settingsOpenRequestToken = 0
-    var imageGenDialogRequest = ImageGenDialogRequest.empty
+    var requestedSettingsTab: SettingsTab = .general
     var showKeyboardHelp = false
     var isAboutDialogVisible: Bool { aboutDialog.isVisible }
     var showSimilaritySearchSheet = false
@@ -138,11 +109,9 @@ final class AppState {
             || showSimilaritySearchSheet
             || showPersonSearchSheet
             || showReferenceGraphSheet
-            || showImageGenCreateSheet
             || showKeyboardHelp
             || isAboutDialogVisible
             || showMoveWorkFilesSheet
-            || showDownloadingModelsHelp
             || quickPersonFacePick != nil
             || faceAssignState != nil
     }
@@ -158,11 +127,11 @@ final class AppState {
     var chromeSuppressed = false
     var fileTreeToolbarVisible = true
     var informationMenuBarVisible = true
-    var jobsToolbarVisible = true
     var chatToolbarVisible = true
-    var jobsPanelAlwaysOnTop = false
     /// True when viewing a custom file list (opened files, search results, etc.) — disables directory watcher refresh.
     var specificFilesActive = false
+    /// Set when ⌘Q already confirmed quit so `applicationShouldTerminate` does not prompt twice.
+    private var quitConfirmedViaClose = false
     /// Live column count from the thumbnail grid layout (source of truth for keyboard navigation).
     var thumbnailGridColumns = 1
     /// Bumped when on-disk image content changes so list/thumbnail views reload affected thumbs.
@@ -185,21 +154,13 @@ final class AppState {
     var quickPersonFacePickContinuation: (([Double]?) -> Void)?
     var faceAssignState: FaceAssignState?
     var knownFacesChangedToken = 0
-    var showDownloadingModelsHelp = false
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
     private(set) var sidebarLayoutRevision = 0
-    private(set) var measuredActiveJobStripHeight: CGFloat = 0
-    private(set) var measuredJobsCardStackHeight: CGFloat = 0
-    private var isAdjustingJobsPaneGeometry = false
     private var chromeSavedLayout: ChromeSavedLayout?
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
     private var suppressDirectoryRefreshUntil: Date?
-    private var progressiveRefreshTask: Task<Void, Never>?
-    private var pendingProgressivePath: String?
-    private var pendingProgressiveForceEnterBrowse = false
-    private var prowserGeneratedImageOpenTask: Task<Void, Never>?
 
     let launchOptions: LaunchOptions
     private(set) var directoryLoader: DirectoryLoadCoordinator!
@@ -220,8 +181,6 @@ final class AppState {
         rightSidebarSplit = SidebarPaneSplitModel(side: .right, config: config)
         leftSidebarWidth = SidebarWidthLimits.clampLeft(config.sidebarWidth)
         rightSidebarWidth = SidebarWidthLimits.clampRight(config.rightSidebarWidth)
-        jobsDisplayMode = JobsDisplayMode.normalize(config.string(forKey: "jobs_display_mode", default: "pane"))
-        jobsQueueSizeMode = JobsQueueSizePersistence.load(config: config)
         filterSettings.loadFromConfig()
         let profilePaths = ProfilePaths(profilePath: launchOptions.profilePath)
         thumbnailCache = ThumbnailCache(
@@ -233,28 +192,14 @@ final class AppState {
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
         workers = WorkerServices(profilePath: launchOptions.profilePath)
-        workers.reloadSettings(config: config)
-        ExifBridgeSupport.registry = workers.imageGenRegistry
+        if BundleCapabilities.pythonMLEnabled {
+            workers.reloadSettings(config: config)
+            ExifBridgeSupport.registry = workers.imageGenRegistry
+        }
         chat = ChatController(chatBridge: workers.chat, dataDirectory: config.dataDirectory)
-        imageGen = ImageGenController(
-            config: config,
-            modelTasks: workers.modelTasks,
-            foregroundTasks: workers.foregroundModelTasks,
-            registry: workers.imageGenRegistry
-        )
         informationSectionState = InformationSectionState(config: config)
         loadSidebarToolbarSettings()
-        imageGen.scheduleStartupQueueRelease()
         observeViewModeChanges()
-        imageGen.onImageGenerated = { [weak self] path in
-            self?.showProwserGeneratedImage(at: path)
-        }
-        imageGen.onProgressivePreview = { [weak self] path, forceEnterBrowse in
-            self?.scheduleProgressiveBrowseRefresh(path, forceEnterBrowse: forceEnterBrowse)
-        }
-        imageGen.onQueueChanged = { [weak self] in
-            self?.bumpImageGenUI()
-        }
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
         chat.bind(self)
@@ -344,6 +289,7 @@ final class AppState {
     }
 
     func presentClipSearchSheet() {
+        guard BundleCapabilities.clipSearchUIEnabled else { return }
         showClipSearchSheet = true
     }
 
@@ -570,47 +516,6 @@ final class AppState {
         Task { await QuickPersonSearchService.run(appState: self) }
     }
 
-    func runCheckLoras() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        guard let environment = PythonLocator.resolve(profilePath: launchOptions.profilePath) else {
-            status.show("Python worker environment not found")
-            return
-        }
-        status.show("Checking LoRAs…")
-        Task.detached(priority: .userInitiated) {
-            let script = environment.repoRoot
-                .appendingPathComponent("swift/Scripts/run_check_loras.py")
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: environment.executable)
-            process.arguments = ["-u", script.path]
-            process.currentDirectoryURL = environment.repoRoot
-            var env = ProcessInfo.processInfo.environment
-            env["PROWSER_PYTHON_ROOT"] = environment.repoRoot.path
-            env["PYTHONUNBUFFERED"] = "1"
-            process.environment = env
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                await MainActor.run {
-                    if text.isEmpty {
-                        self.status.show("Check LoRAs finished")
-                    } else {
-                        self.status.show("Check LoRAs: \(text)")
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.status.show("Check LoRAs failed: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
     func toggleRenameStatusChecking() {
         renameStatusManager.toggle()
         if renameStatusManager.isEnabled {
@@ -633,24 +538,6 @@ final class AppState {
             }
             return expanded
         }
-    }
-
-    func speakUserComment() {
-        Task {
-            guard let text = await userCommentForActiveImageAsync(), !text.isEmpty else {
-                status.show("No user comment to speak")
-                return
-            }
-            commentSpeaker.speakOrStop(text, settings: config.rawSettings())
-        }
-    }
-
-    func showPFKeysHelp() {
-        status.show("PF Keys help — coming soon")
-    }
-
-    func showHiddenGemsHelp() {
-        status.show("Hidden Gems help — coming soon")
     }
 
     func showImageInDirectory() {
@@ -1003,11 +890,6 @@ final class AppState {
         }
     }
 
-    func showGenerationTimingDialog() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        generationTimingDialog.show(appState: self)
-    }
-
     func showAboutDialog() {
         aboutDialog.show(appState: self)
     }
@@ -1060,6 +942,11 @@ final class AppState {
             restoreBrowseReturnStateIfNeeded()
         }
         lastViewMode = newMode
+    }
+
+    /// Drop stashed thumbnail context so exiting browse uses the current directory listing.
+    func clearBrowseReturnState() {
+        browseReturnThumbnailState = nil
     }
 
     private func prepareBrowseReturnStateIfNeeded() {
@@ -1251,133 +1138,12 @@ final class AppState {
             == URL(fileURLWithPath: right).standardizedFileURL.path
     }
 
-    /// Debounced browse refresh for progressive image-gen previews (port of Python 750ms coalescing).
-    func scheduleProgressiveBrowseRefresh(_ path: String, forceEnterBrowse: Bool) {
-        pendingProgressivePath = path
-        pendingProgressiveForceEnterBrowse = pendingProgressiveForceEnterBrowse || forceEnterBrowse
-        if forceEnterBrowse {
-            flushProgressiveBrowseRefresh()
-            return
-        }
-        if progressiveRefreshTask != nil { return }
-        progressiveRefreshTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 750_000_000)
-            guard !Task.isCancelled else { return }
-            flushProgressiveBrowseRefresh()
-        }
-    }
-
-    private func cancelProgressiveBrowseRefresh() {
-        progressiveRefreshTask?.cancel()
-        progressiveRefreshTask = nil
-        pendingProgressivePath = nil
-        pendingProgressiveForceEnterBrowse = false
-    }
-
-    private func flushProgressiveBrowseRefresh() {
-        progressiveRefreshTask?.cancel()
-        progressiveRefreshTask = nil
-        guard let path = pendingProgressivePath else { return }
-        let forceEnterBrowse = pendingProgressiveForceEnterBrowse
-        pendingProgressivePath = nil
-        pendingProgressiveForceEnterBrowse = false
-        Task { @MainActor in
-            await flushProgressiveBrowseRefreshAsync(path: path, forceEnterBrowse: forceEnterBrowse)
-        }
-    }
-
-    private func flushProgressiveBrowseRefreshAsync(path: String, forceEnterBrowse: Bool) async {
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        await imageGen.writeProgressivePreviewExifIfNeeded(at: path)
-        refreshProgressiveImageInBrowse(at: path, forceEnterBrowse: forceEnterBrowse)
-    }
-
-    /// Show a Prowser-generated output in browse immediately (port of Python ``_open_in_browse``).
-    func showProwserGeneratedImage(at path: String) {
-        guard !path.isEmpty else { return }
-        guard imageGen.showProgressiveImages else {
-            ensureImageListedForBrowse(path: path)
-            return
-        }
-        prowserGeneratedImageOpenTask?.cancel()
-        prowserGeneratedImageOpenTask = Task { @MainActor in
-            cancelProgressiveBrowseRefresh()
-            imageGen.resetProgressiveBrowseOpened()
-            // Defer one tick (Python QTimer.singleShot(0)) then retry until the file exists.
-            await Task.yield()
-            for _ in 0..<40 {
-                if Task.isCancelled { return }
-                if FileManager.default.fileExists(atPath: path) {
-                    ensureImageListedForBrowse(path: path)
-                    openImageInBrowse(path: path, saveHistory: false)
-                    reloadBrowseImageIfCurrent(path: path)
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
-        }
-    }
-
-    private func refreshProgressiveImageInBrowse(at path: String, forceEnterBrowse: Bool) {
-        guard imageGen.showProgressiveImages else { return }
-        guard !isSlideshowActive else { return }
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        let parent = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
-        guard let current = fileData.currentDirectory,
-              parent == URL(fileURLWithPath: current).standardizedFileURL.path else { return }
-        guard !specificFilesActive else { return }
-
-        if config.string(forKey: "sort_mode", default: "date") == SortMode.date.rawValue {
-            config.updateSetting("sort_reversed", value: false)
-        }
-
-        beginSuppressDirectoryRefresh()
-        ensureImageListedForBrowse(path: path)
-        fileData.setCurrentImagePath(path)
-        if let index = fileData.displayedImages.firstIndex(of: path) {
-            fileData.setCurrentIndex(index)
-        }
-        DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [path])
-        reloadBrowseImageIfCurrent(path: path)
-
-        if forceEnterBrowse {
-            fileData.setViewMode(.browse)
-        }
-        imageGen.noteProgressiveBrowseOpened()
-    }
-
     /// Force the browse canvas to reload when a file is overwritten at the same path.
     func reloadBrowseImageIfCurrent(path: String) {
         guard fileData.currentViewMode == .browse else { return }
         guard let normalized = FileDataModel.normalizePath(path) else { return }
         guard normalized == fileData.currentImagePath else { return }
         browseImageContentRevision += 1
-    }
-
-    private func ensureImageListedForBrowse(path: String) {
-        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
-        if directory != fileData.currentDirectory {
-            loadDirectory(directory, saveHistory: false)
-        } else if !fileData.displayedImages.contains(path) {
-            DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
-        }
-        if !fileData.displayedImages.contains(path) {
-            var images = fileData.displayedImages
-            images.append(path)
-            let options = SortingService.Options.from(config: config)
-            fileData.setDisplayedImages(
-                SortingService.sorted(images, options: options, metadataCache: metadataCache)
-            )
-        }
-    }
-
-    private var isSlideshowActive: Bool {
-        switch fileData.currentViewMode {
-        case .slideshow, .slideshow2, .slideshow3:
-            return true
-        default:
-            return false
-        }
     }
 
     /// Python `toggle_thumbnail_filename_overlay`: None → Name → Size → Both → None.
@@ -1432,147 +1198,6 @@ final class AppState {
     func showFileTree() {
         guard !config.bool(forKey: "file_tree_visible", default: true) else { return }
         setLeftSidebarPaneVisible(configKey: "file_tree_visible", visible: true)
-    }
-
-    func toggleJobsPane() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        if jobsDisplayMode == .pane,
-           config.bool(forKey: "jobs_visible", default: true) {
-            config.updateSetting("jobs_visible", value: false)
-            noteSidebarLayoutChanged()
-            return
-        }
-        showJobsPane()
-    }
-
-    func showJobsPane() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        showFloatingJobsPanel = false
-        jobsDisplayMode = .pane
-        config.updateSetting("jobs_display_mode", value: JobsDisplayMode.pane.rawValue)
-        config.updateSetting("jobs_visible", value: true)
-        revealSidebarColumn(.right)
-        noteSidebarLayoutChanged()
-        syncJobsPaneGeometry()
-    }
-
-    func showJobsPanel() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        config.updateSetting("jobs_visible", value: false)
-        jobsDisplayMode = .panel
-        config.updateSetting("jobs_display_mode", value: JobsDisplayMode.panel.rawValue)
-        showFloatingJobsPanel = true
-        noteSidebarLayoutChanged()
-    }
-
-    func hideJobsPanel() {
-        showFloatingJobsPanel = false
-    }
-
-    func toggleJobsPanel() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        if showFloatingJobsPanel {
-            hideJobsPanel()
-            return
-        }
-        showJobsPanel()
-    }
-
-    func cycleActiveJobsSurfaceSize() {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        if showFloatingJobsPanel {
-            cycleJobsQueueSizeMode()
-            return
-        }
-        if jobsDisplayMode == .pane {
-            rightSidebarSplit.cycleJobsPaneSize(appState: self)
-        }
-    }
-
-    func setJobsQueueSizeMode(_ mode: JobsQueueSizeMode, requireActive: Bool = false) {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        if requireActive, !imageGen.isProcessing, imageGen.queue.jobs.isEmpty { return }
-        applyJobsQueueSizeMode(mode, forceRefit: true)
-    }
-
-    func applyJobsQueueSizeMode(_ mode: JobsQueueSizeMode, forceRefit: Bool) {
-        if jobsQueueSizeMode == mode, !forceRefit { return }
-        if jobsQueueSizeMode != mode {
-            // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
-            // card); size from the fallback estimate until the new panel reports.
-            measuredJobsCardStackHeight = 0
-        }
-        jobsQueueSizeMode = mode
-        JobsQueueSizePersistence.save(mode, config: config)
-        config.updateSetting("jobs_pane_compact", value: mode == .strip)
-        syncJobsPaneGeometry()
-    }
-
-    func cycleJobsQueueSizeMode() {
-        applyJobsQueueSizeMode(jobsQueueSizeMode.next(), forceRefit: true)
-    }
-
-    func bumpImageGenUI() {
-        imageGenUIRevision += 1
-    }
-
-    /// Port of `JobQueuePanelWidget.should_shrink_wrap_client()`.
-    func shouldShrinkWrapJobsClient() -> Bool {
-        if imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0 {
-            return false
-        }
-        if !imageGen.queue.jobs.isEmpty {
-            return false
-        }
-        return imageGen.queueSnapshot().isEmpty
-    }
-
-    func syncJobsPaneGeometry() {
-        guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
-        rightSidebarSplit.resizeJobsPaneToMode(appState: self)
-    }
-
-    func growJobsPaneForActionBar(extra: CGFloat) {
-        guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
-        rightSidebarSplit.growJobsPaneForActionBar(extraContentHeight: extra, appState: self)
-    }
-
-    func jobsQueuePaneContentHeight(for mode: JobsQueueSizeMode? = nil) -> CGFloat {
-        let mode = mode ?? jobsQueueSizeMode
-        let jobCount = imageGen.queue.jobs.count
-        let showsActiveStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
-        return JobQueuePaneMetrics.contentHeight(
-            mode: mode,
-            cardStackHeight: measuredJobsCardStackHeight,
-            activeStripHeight: measuredActiveJobStripHeight,
-            jobCount: jobCount,
-            isProcessing: imageGen.isProcessing,
-            showsActiveStrip: showsActiveStrip,
-            hasMeasuredCards: measuredJobsCardStackHeight > 0,
-            includesToolbar: jobsToolbarVisible && jobsDisplayMode == .pane
-        )
-    }
-
-    func updateMeasuredActiveJobStripHeight(_ height: CGFloat) {
-        let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: height)
-        guard abs(measuredActiveJobStripHeight - height) > tolerance else { return }
-        measuredActiveJobStripHeight = height
-        syncJobsPaneGeometry()
-    }
-
-    func updateMeasuredJobsQueueGeometry(cardStackHeight: CGFloat) {
-        let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: cardStackHeight)
-        guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
-        measuredJobsCardStackHeight = cardStackHeight
-        syncJobsPaneGeometry()
-    }
-
-    func beginJobsPaneGeometryAdjustment() {
-        isAdjustingJobsPaneGeometry = true
-    }
-
-    func endJobsPaneGeometryAdjustment() {
-        isAdjustingJobsPaneGeometry = false
     }
 
     func requestFileTreeFocus() {
@@ -1714,7 +1339,9 @@ final class AppState {
         return !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func openSettingsWindow(tab: SettingsTab = .general, userInfo: [String: Any] = [:]) {
+    func openSettingsWindow(tab explicitTab: SettingsTab? = nil, userInfo: [String: Any] = [:]) {
+        let tab = SettingsTab.resolvedOpenTab(explicit: explicitTab)
+        requestedSettingsTab = tab
         var info = userInfo
         info["tab"] = tab.rawValue
         NotificationCenter.default.post(
@@ -1732,74 +1359,7 @@ final class AppState {
         autoImportEXIF: Bool = false,
         autoGenerate: Bool = false,
         editSourcePaths: [String] = []
-    ) {
-        guard imageGen.isEnabled else { return }
-        let session = ImageGenSessionState()
-        let resolvedFunction = function ?? session.lastFunction(config: config)
-        let prompt = initialPrompt
-        if autoImportEXIF, prompt == nil {
-            Task {
-                let imported = await importPromptForActiveImageAsync()
-                openImageGenDialog(
-                    function: resolvedFunction,
-                    replaceJobID: replaceJobID,
-                    initialPrompt: imported,
-                    autoImportEXIF: true,
-                    autoGenerate: autoGenerate,
-                    editSourcePaths: editSourcePaths
-                )
-            }
-            return
-        }
-        imageGenDialogRequest = ImageGenDialogRequest(
-            function: resolvedFunction,
-            replaceJobID: replaceJobID,
-            initialPrompt: prompt,
-            autoImportEXIF: autoImportEXIF,
-            autoGenerate: autoGenerate,
-            editSourcePaths: editSourcePaths
-        )
-        let wasAlreadyOpen = showImageGenUnifiedDialog
-        if wasAlreadyOpen {
-            NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
-        } else {
-            showImageGenUnifiedDialog = true
-        }
-        // Always bump so a closed-then-reopened dialog reloads (SwiftUI Window view may persist).
-        imageGenDialogReloadToken += 1
-    }
-
-    func closeImageGenUnifiedDialog() {
-        showImageGenUnifiedDialog = false
-    }
-
-    func openFastImageGenDialog() {
-        let action = config.string(forKey: "imagegen_fast_open_action", default: "from_text")
-        Task {
-            let prompt = await importPromptForActiveImageAsync()
-            if action == "edit_image" {
-                openImageGenDialog(function: "edit", initialPrompt: prompt, autoImportEXIF: true)
-            } else {
-                openImageGenDialog(function: "create", initialPrompt: prompt, autoImportEXIF: true)
-            }
-        }
-    }
-
-    func editActiveQueueJob() {
-        let rows = imageGen.queueSnapshot()
-        guard let active = rows.first(where: { $0.isActive }) ?? rows.first else { return }
-        openImageGenDialog(function: nil, replaceJobID: active.jobID)
-    }
-
-    func openGeneratedImageInBrowse(path: String) {
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
-        if directory != fileData.currentDirectory {
-            loadDirectory(directory, saveHistory: true)
-        }
-        fileData.setCurrentImagePath(path)
-        fileData.setViewMode(.browse)
-    }
+    ) {}
 
     func userCommentForActiveImage() -> String? {
         guard let path = fileData.currentImagePath else { return nil }
@@ -1898,78 +1458,33 @@ final class AppState {
         }
     }
 
-    func confirmCancelGeneration() {
-        guard imageGen.isRunning() else { return }
-        if StyledMessageDialog.showConfirm(
-            title: "Cancel job?",
-            message: "Cancel the running job?",
-            confirmTitle: "Cancel Job",
-            cancelTitle: "Keep Running",
-            defaultCancel: true
-        ) {
-            imageGen.cancelActiveJob()
+    /// Python File → Exit (⌘Q / `QAction.QuitRole`) is connected to `main_window.close`.
+    func closeMainWindow() {
+        quitConfirmedViaClose = true
+        let mainWindows = NSApp.windows.filter(Self.isPrimaryBrowserWindow)
+        if let window = mainWindows.first(where: { $0 === NSApp.keyWindow }) ?? mainWindows.first {
+            window.performClose(nil)
         }
+        // Extra SwiftUI scenes (Settings) can keep the process alive after the
+        // browser window closes; terminate so Exit/⌘Q still quits.
+        NSApp.terminate(nil)
     }
 
-    func confirmCancelJob(id: String, cascade: Bool) {
-        if cascade {
-            imageGen.cancelJob(id: id, cascade: true)
-            return
-        }
-        let rows = imageGen.queueSnapshot()
-        guard let row = rows.first(where: { $0.jobID == id }) else { return }
-        let prompt = row.isActive ? "Cancel the running job?" : "Remove this job from the queue?"
-        let confirmTitle = row.isActive ? "Cancel Job" : "Remove"
-        let keepTitle = row.isActive ? "Keep Running" : "Keep"
-        if StyledMessageDialog.showConfirm(
-            title: "Cancel job?",
-            message: prompt,
-            confirmTitle: confirmTitle,
-            cancelTitle: keepTitle,
-            defaultCancel: true
-        ) {
-            imageGen.cancelJob(id: id)
+    private static func isPrimaryBrowserWindow(_ window: NSWindow) -> Bool {
+        guard window.isVisible, window.canBecomeKey else { return false }
+        switch window.title {
+        case "Settings":
+            return false
+        default:
+            return true
         }
     }
 
     func confirmQuitIfRunning() -> Bool {
-        if imageGen.quitGateAllowsImmediateTerminate() {
-            return true
-        }
-        let stripHost = NSHostingController(
-            rootView: ActiveJobStripView().environment(self)
-        )
-        stripHost.view.frame = NSRect(x: 0, y: 0, width: 360, height: 80)
-        Task { await imageGen.refreshActiveStripView() }
-
-        let choice = StyledMessageDialog.present(
-            title: "AI task running",
-            message: "Image generation or an AI caption is in progress.\nQuit anyway?",
-            style: .warning,
-            buttons: [
-                StyledMessageDialog.Button("No", role: .dismissive),
-                StyledMessageDialog.Button("Quit anyway"),
-                StyledMessageDialog.Button("Wait and quit"),
-            ],
-            defaultButtonIndex: 0,
-            escapeButtonIndex: 0,
-            accessoryView: stripHost.view
-        )
-        switch choice {
-        case 1:
-            imageGen.prepareForShutdown()
-            return true
-        case 2:
-            imageGen.setDeferredQuitAppState(self)
-            imageGen.beginQuitAfterCurrentWorker()
-            return false
-        default:
-            return false
-        }
+        true
     }
 
     func prepareForApplicationExit() {
-        imageGen.cleanup()
         workers.shutdown()
     }
 
@@ -1987,17 +1502,6 @@ final class AppState {
         config.applySettingsChange(emit: eventBus)
     }
 
-    func setJobsToolbarVisible(_ visible: Bool) {
-        guard jobsToolbarVisible != visible else { return }
-        jobsToolbarVisible = visible
-        config.updateSetting("jobs_show_toolbar", value: visible)
-        config.applySettingsChange(emit: eventBus)
-        // Python: QTimer.singleShot(0, _refit_after_toolbar_visibility_change)
-        DispatchQueue.main.async { [weak self] in
-            self?.syncJobsPaneGeometry()
-        }
-    }
-
     func setChatToolbarVisible(_ visible: Bool) {
         guard chatToolbarVisible != visible else { return }
         chatToolbarVisible = visible
@@ -2005,23 +1509,10 @@ final class AppState {
         config.applySettingsChange(emit: eventBus)
     }
 
-    func setJobsPanelAlwaysOnTop(_ enabled: Bool) {
-        guard jobsPanelAlwaysOnTop != enabled else { return }
-        jobsPanelAlwaysOnTop = enabled
-        var imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
-        imagegen["job_queue_always_on_top"] = enabled
-        config.updateSetting("imagegen", value: imagegen)
-        config.applySettingsChange(emit: eventBus)
-    }
-
     private func loadSidebarToolbarSettings() {
         fileTreeToolbarVisible = config.bool(forKey: "file_tree_show_toolbar", default: true)
         informationMenuBarVisible = config.bool(forKey: "information_show_menu_bar", default: true)
-        jobsToolbarVisible = config.bool(forKey: "jobs_show_toolbar", default: true)
         chatToolbarVisible = config.bool(forKey: "chat_show_toolbar", default: true)
-        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
-        jobsPanelAlwaysOnTop = imagegen["job_queue_always_on_top"] as? Bool ?? false
-        imageGen.reloadToolbarSettings(from: imagegen)
     }
 
     func reloadSidebarWidthsFromConfig() {
@@ -2236,11 +1727,6 @@ final class AppState {
     var rightSidebarPaneActive: Bool {
         if config.bool(forKey: "shortcuts_sidebar_visible", default: true) { return true }
         if config.bool(forKey: "information_sidebar_visible", default: true) { return true }
-        if BundleCapabilities.imageGenUIEnabled,
-           jobsDisplayMode == .pane,
-           config.bool(forKey: "jobs_visible", default: true) {
-            return true
-        }
         return false
     }
 
@@ -2344,7 +1830,6 @@ final class AppState {
             chatVisible: config.bool(forKey: "chat_visible", default: false),
             shortcutsVisible: config.bool(forKey: "shortcuts_sidebar_visible", default: true),
             informationVisible: config.bool(forKey: "information_sidebar_visible", default: true),
-            jobsVisible: config.bool(forKey: "jobs_visible", default: true),
             leftSidebarVisible: config.bool(forKey: "left_sidebar_visible", default: true),
             rightSidebarVisible: config.bool(forKey: "right_sidebar_visible", default: true),
             leftSidebarWidth: leftSidebarWidth,
@@ -2369,7 +1854,6 @@ final class AppState {
         config.updateSetting("chat_visible", value: layout.chatVisible)
         config.updateSetting("shortcuts_sidebar_visible", value: layout.shortcutsVisible)
         config.updateSetting("information_sidebar_visible", value: layout.informationVisible)
-        config.updateSetting("jobs_visible", value: layout.jobsVisible)
         config.updateSetting("left_sidebar_visible", value: layout.leftSidebarVisible)
         config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
         persistSidebarWidth(side: .left, width: leftSidebarWidth)
@@ -2383,7 +1867,6 @@ final class AppState {
         config.updateSetting("chat_visible", value: true)
         config.updateSetting("shortcuts_sidebar_visible", value: true)
         config.updateSetting("information_sidebar_visible", value: true)
-        config.updateSetting("jobs_visible", value: true)
         config.updateSetting("left_sidebar_visible", value: true)
         config.updateSetting("right_sidebar_visible", value: true)
     }
@@ -2396,7 +1879,6 @@ final class AppState {
             config.updateSetting("chat_visible", value: false)
             config.updateSetting("shortcuts_sidebar_visible", value: false)
             config.updateSetting("information_sidebar_visible", value: false)
-            config.updateSetting("jobs_visible", value: false)
             config.updateSetting("right_sidebar_visible", value: false)
             return
         }
@@ -2407,7 +1889,6 @@ final class AppState {
         config.updateSetting("chat_visible", value: layout.chatVisible)
         config.updateSetting("shortcuts_sidebar_visible", value: layout.shortcutsVisible)
         config.updateSetting("information_sidebar_visible", value: layout.informationVisible)
-        config.updateSetting("jobs_visible", value: layout.jobsVisible)
         config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
     }
 
@@ -2743,7 +2224,11 @@ final class DirectoryLoadCoordinator {
                 files.append(normalized)
             }
         }
-        if !files.isEmpty {
+        if files.count == 1 {
+            // Python `load_specific_files`: a single file is browse + parent-directory thumbnails,
+            // not a one-item specific-files grid.
+            loadFileWithDirectoryThumbnails(files[0])
+        } else if !files.isEmpty {
             let dir = URL(fileURLWithPath: files[0]).deletingLastPathComponent().path
             appState.fileData.setCurrentDirectory(dir)
             appState.setSpecificFilesActive(true)
@@ -2756,6 +2241,47 @@ final class DirectoryLoadCoordinator {
         } else if let directory = directories.first {
             loadDirectory(directory, saveHistory: true)
         }
+    }
+
+    /// Port of Python `load_file_with_directory_thumbnails`: open the file in browse and
+    /// populate `displayedImages` from its parent directory so exiting browse shows the full dir.
+    func loadFileWithDirectoryThumbnails(_ targetFile: String) {
+        guard FileManager.default.fileExists(atPath: targetFile) else { return }
+
+        appState.clearBrowseReturnState()
+        appState.setSpecificFilesActive(false)
+        appState.directoryHistory.saveCurrent(
+            fileData: appState.fileData,
+            config: appState.config,
+            selection: appState.selection
+        )
+
+        if appState.config.string(forKey: "sort_mode", default: "date") == SortMode.duplicates.rawValue {
+            appState.config.updateSetting("sort_mode", value: SortMode.date.rawValue)
+            appState.config.updateSetting("sort_reversed", value: false)
+        }
+
+        // Switch to browse before scanning so the thumbnail grid is not shown first.
+        if appState.fileData.currentViewMode != .browse {
+            appState.fileData.setViewMode(.browse)
+        }
+        appState.clearBrowseReturnState()
+
+        // Pin the opened file before the directory scan so browse does not flash image 0.
+        appState.fileData.setCurrentImagePath(targetFile)
+
+        let directory = URL(fileURLWithPath: targetFile).deletingLastPathComponent().path
+        appState.loadDirectory(directory, saveHistory: false)
+
+        var images = appState.fileData.displayedImages
+        if !images.contains(targetFile) {
+            images.insert(targetFile, at: 0)
+            appState.fileData.setDisplayedImages(images)
+        }
+        appState.fileData.setCurrentImagePath(targetFile)
+        appState.fileData.setViewMode(.browse)
+        appState.clearBrowseReturnState()
+        appState.menuRefresh.refreshAll()
     }
 
     func loadDirectory(_ path: String, saveHistory: Bool) {

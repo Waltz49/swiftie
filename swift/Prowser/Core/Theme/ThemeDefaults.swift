@@ -150,9 +150,10 @@ enum ThemeDefaults {
         }
     }
 
+    /// Image extensions decodable via ImageIO (thumbnails, browse, EXIF). Excludes SVG — no raster decode path.
     static let knownExtensionList = [
         "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif",
-        "cr2", "nef", "arw", "dng", "orf", "rw2", "pef", "srw", "psd", "svg",
+        "cr2", "nef", "arw", "dng", "orf", "rw2", "pef", "srw", "psd",
     ]
 
     static let defaultRootDirectories = ["/Users", "/Volumes", "/tmp"]

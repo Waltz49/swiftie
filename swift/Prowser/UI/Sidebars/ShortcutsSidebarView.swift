@@ -164,12 +164,7 @@ struct ShortcutsSidebarView: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(palette.heading)
             Button {
-                NotificationCenter.default.post(
-                    name: .prowserOpenSettingsTab,
-                    object: nil,
-                    userInfo: ["tab": settingsTab.rawValue]
-                )
-                appState.openSettingsWindow()
+                appState.openSettingsWindow(tab: settingsTab)
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))

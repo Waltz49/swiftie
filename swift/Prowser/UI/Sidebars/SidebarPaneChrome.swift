@@ -16,8 +16,6 @@ struct SidebarPaneTitlebar: View {
     var onTitlebarDragEnded: (() -> Void)? = nil
     var status: String? = nil
     var omitLeftBorder: Bool = false
-    var showsFlyoutButton: Bool = false
-    var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
 
     @State private var dragStartY: CGFloat?
@@ -44,16 +42,6 @@ struct SidebarPaneTitlebar: View {
             if let contextMenuKind {
                 SidebarPaneToolsMenuButton(kind: contextMenuKind)
                     .foregroundStyle(colors.sidebarHeaderText)
-            }
-
-            if showsFlyoutButton, let onFlyout {
-                SidebarTitlebarChipButton(
-                    tooltip: "Open floating job control panel",
-                    image: { colors, hover in
-                        TitlebarIcons.flyoutIcon(paneMode: true, colors: colors, hover: hover)
-                    },
-                    action: onFlyout
-                )
             }
 
             SidebarTitlebarChipButton(
@@ -140,8 +128,6 @@ struct SidebarPaneSection<Content: View>: View {
     var onTitlebarDragEnded: (() -> Void)? = nil
     var status: String? = nil
     var omitLeftBorder: Bool = false
-    var showsFlyoutButton: Bool = false
-    var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
     @ViewBuilder let content: () -> Content
 
@@ -160,8 +146,6 @@ struct SidebarPaneSection<Content: View>: View {
                 onTitlebarDragEnded: onTitlebarDragEnded,
                 status: status,
                 omitLeftBorder: omitLeftBorder,
-                showsFlyoutButton: showsFlyoutButton,
-                onFlyout: onFlyout,
                 contextMenuKind: contextMenuKind
             )
 
@@ -223,8 +207,6 @@ struct SidebarPaneBody<Content: View>: View {
             FileTreeToolbarView()
         case .information:
             InformationActionBarView()
-        case .jobs:
-            JobsToolbarView()
         case .chat:
             ChatToolbarView()
         }
@@ -232,7 +214,7 @@ struct SidebarPaneBody<Content: View>: View {
 
     private func usesInternalContextMenu(_ kind: SidebarPaneContextMenuKind) -> Bool {
         switch kind {
-        case .fileTree, .chat, .jobs:
+        case .fileTree, .chat:
             return true
         default:
             return false
@@ -245,8 +227,6 @@ struct SidebarPaneBody<Content: View>: View {
             return appState.fileTreeToolbarVisible
         case .information:
             return appState.informationMenuBarVisible
-        case .jobs:
-            return appState.jobsToolbarVisible
         case .chat:
             return appState.chatToolbarVisible
         }

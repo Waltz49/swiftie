@@ -32,8 +32,15 @@ struct ExtensionsSettingsTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
-            enabledExtensions = Set(appState.config.imageExtensions)
+            reloadFromConfig()
         }
+        .onChange(of: appState.settingsOpenRequestToken) { _, _ in
+            reloadFromConfig()
+        }
+    }
+
+    private func reloadFromConfig() {
+        enabledExtensions = Set(appState.config.imageExtensions)
     }
 
     private func persist() {

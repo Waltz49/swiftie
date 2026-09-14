@@ -52,12 +52,6 @@ struct MainWindowView: View {
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
             appState.refreshSidebarLayout()
-            if appState.jobsDisplayMode == .panel {
-                appState.showFloatingJobsPanel = true
-            }
-            if appState.showImageGenUnifiedDialog {
-                openWindow(id: "imagegen-unified")
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -67,16 +61,6 @@ struct MainWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 appState.refreshSidebarLayout()
-            }
-        }
-        .onChange(of: appState.showFloatingJobsPanel) { _, show in
-            if show {
-                openWindow(id: "jobs-panel")
-            }
-        }
-        .onChange(of: appState.showImageGenUnifiedDialog) { _, show in
-            if show {
-                openWindow(id: "imagegen-unified")
             }
         }
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
@@ -140,10 +124,6 @@ private struct MainWindowSheetsModifier: ViewModifier {
             }
             .sheet(isPresented: $appState.showMoveWorkFilesSheet) {
                 MoveWorkFilesSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showDownloadingModelsHelp) {
-                DownloadingModelsHelpView()
                     .environment(appState)
             }
             .sheet(item: $appState.quickPersonFacePick) { state in

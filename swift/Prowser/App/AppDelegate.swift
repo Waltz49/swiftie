@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        applyApplicationIcon()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -60,14 +61,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didBecomePrimary = true
         launchCompleted = true
         NSApp.setActivationPolicy(.regular)
+        applyApplicationIcon()
         NSApp.activate(ignoringOtherApps: true)
         scheduleMenuBarDeduplication()
         installMainWindowGuard()
         applyLaunchOptions()
-        appState.imageGen.setDeferredQuitAppState(appState)
-        appState.imageGen.onDeferredQuitComplete = {
-            NSApp.terminate(nil)
-        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -134,7 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         appState.prepareForApplicationExit()
-        appState.theme.commitPreview()
+        if appState.config.isSettingsSessionActive {
+            appState.config.cancelSettingsSession()
+            appState.theme.reload()
+        }
         appState.config.saveSettings()
         appState.persistAllSidebarLayout()
     }
@@ -168,6 +169,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "Could not forward the open request to the running instance."
         )
         NSApp.terminate(nil)
+    }
+
+    private func applyApplicationIcon() {
+        if let icon = AppAssets.applicationIcon {
+            NSApp.applicationIconImage = icon
+        }
     }
 
     private func hideAllWindows() {
@@ -217,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func isMainBrowserWindow(_ window: NSWindow) -> Bool {
         guard window.isVisible else { return false }
         let title = window.title
-        if title == "Job Control" || title == "Image Generation" || title == "Settings" {
+        if title == "Settings" {
             return false
         }
         return window.canBecomeKey

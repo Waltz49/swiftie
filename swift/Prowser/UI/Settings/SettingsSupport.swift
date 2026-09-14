@@ -61,10 +61,32 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         SettingsTab.allCases.filter { tab in
             switch tab {
             case .faces: return BundleCapabilities.facesUIEnabled
-            case .captioning, .lora, .similarity: return BundleCapabilities.imageGenUIEnabled
+            case .captioning, .lora: return BundleCapabilities.imageGenUIEnabled
+            case .similarity:
+                return BundleCapabilities.similaritySearchUIEnabled
+                    || BundleCapabilities.clipSearchUIEnabled
             default: return true
             }
         }
+    }
+
+    /// Session-only; updated when Settings closes with OK or Cancel (Python `_last_tab_id`).
+    private(set) static var lastSessionTab: SettingsTab = .general
+
+    static func rememberSessionTab(_ tab: SettingsTab) {
+        let visible = visibleTabs()
+        lastSessionTab = visible.contains(tab) ? tab : (visible.first ?? .general)
+    }
+
+    static func resolvedOpenTab(explicit: SettingsTab?) -> SettingsTab {
+        if let explicit {
+            return visibleTabs().contains(explicit) ? explicit : .general
+        }
+        let visible = visibleTabs()
+        if visible.contains(lastSessionTab) {
+            return lastSessionTab
+        }
+        return visible.first ?? .general
     }
 }
 
@@ -203,7 +225,7 @@ struct DeferredSettingsTabView: View {
             Text(title).font(.title2)
             Text(detail)
                 .foregroundStyle(.secondary)
-            Text("This tab will be completed in a later milestone (Python bridge or ImageGen UI).")
+            Text("This tab is not available in the Swift-only image browser.")
                 .foregroundStyle(.secondary)
             Spacer()
         }

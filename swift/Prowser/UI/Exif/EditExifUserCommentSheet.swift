@@ -15,7 +15,6 @@ struct EditExifUserCommentSheet: View {
     @State private var dotPhase = 0
     @State private var streamingStarted = false
     @State private var captionError: String?
-    @State private var speechController = SpeechController()
     @State private var createAvailable = false
     @State private var editAIAvailable = false
     @State private var dotTimer: Timer?
@@ -65,7 +64,6 @@ struct EditExifUserCommentSheet: View {
         }
         .onDisappear {
             stopDotAnimation()
-            speechController.stop()
             cancelCaptionIfNeeded()
             savePersistedInstructions()
         }
@@ -128,19 +126,6 @@ struct EditExifUserCommentSheet: View {
                 enabled: hasComment
             ) {
                 copyComment(full: NSEvent.modifierFlags.contains(.option))
-            }
-            if !BundleCapabilities.isMinBundle {
-                assetActionButton(
-                    "speak",
-                    normal: "bullhorn",
-                    hover: "bullhorn_hover",
-                    tooltip: "Read aloud (click again to stop)",
-                    enabled: hasComment,
-                    highlighted: speechController.isSpeaking
-                ) {
-                    let text = ExifService.truncateUserCommentBeforePrompt(trimmedComment)
-                    speechController.toggleSpeaking(text)
-                }
             }
             if createAvailable {
                 assetActionButton(
@@ -275,7 +260,7 @@ struct EditExifUserCommentSheet: View {
             DialogButton("Cancel", isCancel: true) { appState.cancelEditUserComment() },
             DialogButton("Save (⌘↩)", isDefault: true) { appState.saveEditUserComment() },
         ], leadingButtons: [
-            DialogButton("Reset", help: "Reset text to original value\n(stops AI captioning if in progress)") {
+            DialogButton("Reset", help: "Reset text to original value") {
                 resetToOriginal()
             },
         ])
@@ -333,8 +318,8 @@ struct EditExifUserCommentSheet: View {
             captionError = "LMStudio captioning is not available."
             return
         }
-        if bridge.isBusy || appState.imageGen.isProcessing {
-            captionError = "Wait for the job queue to finish or cancel queued jobs before starting AI caption."
+        if bridge.isBusy {
+            captionError = "Wait for captioning to finish before starting AI caption."
             return
         }
 
@@ -464,22 +449,8 @@ struct EditExifUserCommentSheet: View {
     }
 
     private func refreshImageGenAvailability() {
-        guard BundleCapabilities.imageGenUIEnabled, appState.imageGen.isEnabled else {
-            createAvailable = false
-            editAIAvailable = false
-            return
-        }
-        Task {
-            do {
-                let createPlugins = try await appState.workers.imageGenRegistry.listPlugins(function: "create")
-                let editPlugins = try await appState.workers.imageGenRegistry.listPlugins(function: "edit")
-                createAvailable = createPlugins.contains { ($0["available"] as? Bool) == true }
-                editAIAvailable = editPlugins.contains { ($0["available"] as? Bool) == true }
-            } catch {
-                createAvailable = appState.imageGen.isEnabled
-                editAIAvailable = appState.imageGen.isEnabled
-            }
-        }
+        createAvailable = false
+        editAIAvailable = false
     }
 
     // MARK: - UI helpers
@@ -502,35 +473,6 @@ struct EditExifUserCommentSheet: View {
             action: action
         )
         .accessibilityIdentifier(id)
-    }
-}
-
-@MainActor
-@Observable
-final class SpeechController {
-    private var speechHelper: AVSpeechHelper?
-    private(set) var isSpeaking = false
-
-    func toggleSpeaking(_ text: String) {
-        if isSpeaking {
-            stop()
-            return
-        }
-        guard !text.isEmpty else { return }
-        let helper = AVSpeechHelper()
-        helper.onFinish = { [weak self] in
-            self?.speechHelper = nil
-            self?.isSpeaking = false
-        }
-        speechHelper = helper
-        helper.speak(text)
-        isSpeaking = true
-    }
-
-    func stop() {
-        speechHelper?.stop()
-        speechHelper = nil
-        isSpeaking = false
     }
 }
 

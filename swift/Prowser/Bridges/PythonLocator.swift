@@ -9,6 +9,7 @@ enum PythonLocator {
     }
 
     static func resolve(profilePath: String?) -> Environment? {
+        guard BundleCapabilities.pythonMLEnabled else { return nil }
         let repoRoot = locateRepoRoot()
         guard let repoRoot else { return nil }
 

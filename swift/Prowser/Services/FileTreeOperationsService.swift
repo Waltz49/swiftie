@@ -96,6 +96,7 @@ final class FileTreeOperationsService {
     }
 
     func findSimilarImages(in directory: String) {
+        guard BundleCapabilities.similaritySearchUIEnabled else { return }
         guard let appState else { return }
         if FileTreePathRestrictions.isRootOrSystemVolume(directory) {
             showRestrictedAlert(directory: directory)

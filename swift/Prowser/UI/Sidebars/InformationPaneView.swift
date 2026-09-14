@@ -66,8 +66,6 @@ struct InformationPaneView: View {
             case "copy":
                 let full = notification.userInfo?["full"] as? Bool ?? false
                 appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
-            case "speak":
-                speakComment()
             case "delete":
                 deleteComment()
             case "create":
@@ -123,13 +121,11 @@ struct InformationPaneView: View {
             html = ""
             return
         }
-        html = InformationPaneHTMLBuilder.buildHTML(
+            html = InformationPaneHTMLBuilder.buildHTML(
             data: overlayData,
             colors: appState.theme.colors,
             sectionState: sectionState,
-            activeJobHeading: appState.fileData.currentImagePath.map {
-                appState.imageGen.activeJobRelationHeading(for: $0)
-            } ?? nil,
+            activeJobHeading: nil,
             contentWidth: max(160, Int(appState.rightSidebarWidth) - 36)
         )
     }
@@ -146,8 +142,6 @@ struct InformationPaneView: View {
             rebuildHTML()
         case .refLevel(let optionHeld):
             appState.handleInformationReferenceLevelClick(optionHeld: optionHeld)
-        case .speak:
-            speakComment()
         case .copy(let full):
             appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
         case .edit:
@@ -162,7 +156,7 @@ struct InformationPaneView: View {
         case .delete:
             deleteComment()
         case .cancelGeneration:
-            appState.confirmCancelGeneration()
+            break
         }
     }
 
@@ -182,13 +176,6 @@ struct InformationPaneView: View {
             autoImportEXIF: true,
             editSourcePaths: [path]
         )
-    }
-
-    @MainActor
-    private func speakComment() {
-        let text = overlayData.speakablePlainText ?? ""
-        let spoken = ExifService.truncateUserCommentBeforePrompt(text)
-        appState.commentSpeaker.speakOrStop(spoken, settings: appState.config.rawSettings())
     }
 
     @MainActor

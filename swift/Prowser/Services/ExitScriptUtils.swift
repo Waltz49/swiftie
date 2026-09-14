@@ -4,7 +4,6 @@ import Foundation
 enum ExitScriptUtils {
     static let settingTextAIExit = "text_ai_exit"
     static let settingImageAIExit = "image_ai_exit"
-    static let settingSayExit = "say_exit"
 
     static let exitScriptPrefixes = ["python", "python3", "pypy"]
 
@@ -68,21 +67,6 @@ enum ExitScriptUtils {
 
     static func normalizeExitScriptPath(_ path: String) -> String {
         (path as NSString).expandingTildeInPath
-    }
-
-    /// Build argv for the configured say-exit command (port of ``speech_exit.say_exit_argv``).
-    static func sayExitArgv(text: String, settings: [String: Any]) -> [String]? {
-        let raw = settings[settingSayExit] as? String ?? ""
-        var argv = resolveExitScriptArgv(raw: raw)
-        guard !argv.isEmpty else { return nil }
-        if let voice = ProcessInfo.processInfo.environment["PROWSER_SAY_VOICE"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !voice.isEmpty,
-           !argv.contains("-v"),
-           !argv.contains("--voice") {
-            argv.append(contentsOf: ["-v", voice])
-        }
-        argv.append(contentsOf: ["-p", text])
-        return argv
     }
 
     static func resolveExitScriptArgv(raw: String) -> [String] {

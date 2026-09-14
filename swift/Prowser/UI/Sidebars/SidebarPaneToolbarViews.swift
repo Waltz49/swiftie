@@ -39,7 +39,7 @@ struct FileTreeToolbarView: View {
                         ?? PenDrawnIcons.squeezeIcon(color: navIconColor(hover: hover), size: 20)
                 }
             ) {
-                appState.openSettingsWindow(tab: .general)
+                appState.openSettingsWindow()
             }
             Spacer(minLength: 0)
             filterButtons
@@ -118,16 +118,6 @@ struct InformationActionBarView: View {
                 tooltip: "Copy prompt to clipboard.\n⌥+click to copy full user comment.",
                 enabled: hasComment
             )
-            if BundleCapabilities.voiceInputUIEnabled {
-                assetActionButton(
-                    "speak",
-                    normal: "bullhorn",
-                    hover: "bullhorn_hover",
-                    tooltip: "Read aloud (click again to stop)",
-                    enabled: hasComment,
-                    highlighted: appState.commentSpeaker.isSpeaking
-                )
-            }
             if BundleCapabilities.imageGenUIEnabled {
                 assetActionButton(
                     "create",
@@ -182,58 +172,6 @@ struct InformationActionBarView: View {
                 userInfo: ["action": action]
             )
         }
-    }
-}
-
-@MainActor
-struct JobsToolbarView: View {
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        let _ = appState.imageGenUIRevision
-        let controller = appState.imageGen
-        ZStack {
-            HStack(spacing: 4) {
-                SidebarAssetIconButton(
-                    normalName: "jobs_intermediate",
-                    hoverName: "jobs_intermediate_hover",
-                    tooltip: "Intermediate Images\nShow progressive images during generation",
-                    selected: controller.showProgressiveImages,
-                    enabled: controller.isEnabled
-                ) {
-                    controller.setShowProgressiveImages(!controller.showProgressiveImages)
-                }
-                SidebarAssetIconButton(
-                    normalName: "jobs_hold",
-                    hoverName: "jobs_hold_hover",
-                    tooltip: "Hold Job Queue\nPause starting new jobs until released",
-                    selected: controller.holdJobQueue,
-                    enabled: controller.isEnabled
-                ) {
-                    controller.setHoldJobQueue(!controller.holdJobQueue)
-                }
-                SidebarAssetIconButton(
-                    normalName: "jobs_skip_copy",
-                    hoverName: "jobs_skip_copy_hover",
-                    tooltip: "Skip This Copy\nEnd the current copy and start the next one in this series",
-                    enabled: controller.canSkipActiveSeriesCopy
-                ) {
-                    controller.skipActiveSeriesCopy()
-                }
-                Spacer(minLength: 0)
-            }
-            .opacity(controller.skipSeriesCopyInFlight ? 0 : 1)
-
-            if controller.skipSeriesCopyInFlight {
-                Text("Skipping copy...")
-                    .font(.system(size: 12))
-                    .foregroundStyle(appState.theme.colors.sidebarText)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 0)
-        .padding(.bottom, 5)
-        .background(appState.theme.colors.sidebarHeaderBackground.opacity(0.35))
     }
 }
 

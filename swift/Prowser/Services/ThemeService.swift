@@ -12,8 +12,8 @@ final class ThemeService {
     private(set) var resolvedThemeID: String = "dark"
     private(set) var colors: ThemeColors = .dark
 
-    private var previewSettings: [String: Any]?
-    private var snapshotSettings: [String: Any]?
+    /// Theme tab combo: palette being edited (`settings_dialog.py` `theme_preset_combo`).
+    private(set) var settingsEditPresetID: String = "dark"
 
     init(config: AppConfig) {
         self.config = config
@@ -35,8 +35,10 @@ final class ThemeService {
     }
 
     var customThemes: [String: [String: Any]] {
-        Self.mergeCustomThemes(config.rawSettings()["custom_themes"] as? [String: Any])
+        Self.mergeCustomThemes(effectiveSettings()["custom_themes"] as? [String: Any])
     }
+
+    var isSettingsDraftActive: Bool { config.isSettingsSessionActive }
 
     var customThemeIDs: [String] {
         customThemes.keys.sorted()
@@ -53,16 +55,8 @@ final class ThemeService {
 
     func setThemeID(_ id: String, persist: Bool = true) {
         let normalized = id.lowercased()
-        if persist {
-            config.setValue(normalized, forKey: "ui_theme")
-            if previewSettings != nil {
-                previewSettings?["ui_theme"] = normalized
-            }
-        } else {
-            var settings = effectiveSettings()
-            settings["ui_theme"] = normalized
-            previewSettings = settings
-        }
+        _ = persist
+        config.setValue(normalized, forKey: "ui_theme")
         reload()
     }
 
@@ -173,7 +167,8 @@ final class ThemeService {
         ]
         settings["custom_themes"] = custom
         settings["ui_theme"] = finalSlug
-        applySettings(settings, persist: true)
+        applySettings(settings, persist: !isSettingsDraftActive)
+        settingsEditPresetID = finalSlug
         reload()
         return finalSlug
     }
@@ -183,11 +178,17 @@ final class ThemeService {
         var custom = settings["custom_themes"] as? [String: Any] ?? [:]
         custom.removeValue(forKey: themeID)
         settings["custom_themes"] = custom
+        let fallback = "dark"
         if (settings["ui_theme"] as? String)?.lowercased() == themeID.lowercased() {
-            settings["ui_theme"] = "dark"
+            settings["ui_theme"] = fallback
         }
-        applySettings(settings, persist: true)
-        reload()
+        applySettings(settings, persist: !isSettingsDraftActive)
+        if settingsEditPresetID == themeID.lowercased() {
+            settingsEditPresetID = fallback
+            setThemeID(fallback, persist: false)
+        } else {
+            reload()
+        }
     }
 
     func customThemeDisplayName(_ themeID: String) -> String {
@@ -210,52 +211,67 @@ final class ThemeService {
         return resolvedThemeID
     }
 
-    func captureSnapshot() {
-        let raw = config.rawSettings()
-        snapshotSettings = Self.themePersistKeys.reduce(into: [String: Any]()) { result, key in
-            if let value = raw[key] {
-                result[key] = value
-            }
+    func beginSettingsSession() {
+        settingsEditPresetID = Self.initialEditPresetID(from: config.rawSettings())
+        reload()
+    }
+
+    func selectEditPreset(_ newID: String) {
+        let normalized = newID.lowercased()
+        guard normalized != settingsEditPresetID else { return }
+        settingsEditPresetID = normalized
+        setThemeID(normalized, persist: false)
+    }
+
+    func commitSettingsOK() {
+        guard config.isSettingsSessionActive else { return }
+        let stored = (config.uiThemeAtSettingsOpen() ?? "dark").lowercased()
+        let combo = settingsEditPresetID
+        let uiForSave: String
+        if stored == "system", !uiThemeUserExplicitlyChanged(comboTid: combo) {
+            uiForSave = "system"
+        } else {
+            uiForSave = combo
         }
+        config.setValue(uiForSave, forKey: "ui_theme")
+        config.commitSettingsSession()
+        reload()
+    }
+
+    func cancelSettingsSession() {
+        config.cancelSettingsSession()
+        settingsEditPresetID = Self.initialEditPresetID(from: config.rawSettings())
+        reload()
     }
 
     func restoreSnapshot() {
-        guard let saved = snapshotSettings else { return }
-        previewSettings = nil
-        for key in Self.themePersistKeys {
-            if let value = saved[key] {
-                config.setValue(value, forKey: key)
-            }
-        }
-        config.saveSettings()
-        reload()
-        snapshotSettings = nil
+        cancelSettingsSession()
     }
 
     func commitPreview() {
-        if let preview = previewSettings {
-            for key in Self.themePersistKeys {
-                if let value = preview[key] {
-                    config.setValue(value, forKey: key)
-                }
-            }
-            config.saveSettings()
-            previewSettings = nil
+        if config.isSettingsSessionActive {
+            commitSettingsOK()
         }
-        snapshotSettings = nil
     }
 
     func discardPreview() {
-        previewSettings = nil
-        reload()
+        cancelSettingsSession()
     }
 
     func collapseGroupExpanded(_ key: String) -> Bool {
-        let groups = config.rawSettings()["theme_settings_groups_expanded"] as? [String: Bool] ?? [:]
+        let groups = effectiveSettings()["theme_settings_groups_expanded"] as? [String: Bool] ?? [:]
         return groups[key] ?? true
     }
 
     func setCollapseGroupExpanded(_ key: String, expanded: Bool) {
+        if isSettingsDraftActive {
+            var settings = effectiveSettings()
+            var groups = settings["theme_settings_groups_expanded"] as? [String: Bool] ?? [:]
+            groups[key] = expanded
+            settings["theme_settings_groups_expanded"] = groups
+            applySettings(settings, persist: false)
+            return
+        }
         var groups = config.rawSettings()["theme_settings_groups_expanded"] as? [String: Bool] ?? [:]
         groups[key] = expanded
         config.setValue(groups, forKey: "theme_settings_groups_expanded")
@@ -263,22 +279,40 @@ final class ThemeService {
 
     // MARK: - Private
 
+    private func uiThemeUserExplicitlyChanged(comboTid: String) -> Bool {
+        let combo = comboTid.lowercased()
+        let stored = (config.uiThemeAtSettingsOpen() ?? "dark").lowercased()
+        if stored != "system" {
+            return stored != combo
+        }
+        var snap = config.rawSettings()
+        if config.isSettingsSessionActive {
+            snap["ui_theme"] = stored
+        }
+        return Self.resolveThemeID("system", settings: snap) != combo
+    }
+
+    static func initialEditPresetID(from settings: [String: Any]) -> String {
+        let custom = mergeCustomThemes(settings["custom_themes"] as? [String: Any])
+        var tid = (settings["ui_theme"] as? String ?? "dark").lowercased()
+        if tid == "system" {
+            tid = resolveThemeID("system", settings: settings)
+        }
+        if ThemeKeys.editableBuiltinThemeIDs.contains(tid) || custom[tid] != nil {
+            return tid
+        }
+        return "dark"
+    }
+
     private func effectiveSettings() -> [String: Any] {
-        previewSettings ?? config.rawSettings()
+        config.rawSettings()
     }
 
     private func applySettings(_ settings: [String: Any], persist: Bool) {
-        if persist {
-            for key in Self.themePersistKeys {
-                if let value = settings[key] {
-                    config.setValue(value, forKey: key)
-                }
-            }
-            config.saveSettings()
-            previewSettings = nil
-        } else {
-            previewSettings = settings
-        }
+        _ = persist
+        let slice = Self.deepCopySettingsSlice(Self.themeSettingsSlice(from: settings))
+        config.replaceSettingsValues(slice, keys: Self.themePersistKeys)
+        reload()
     }
 
     private func setCustomThemeOverride(themeID: String, key: String, value: Any, persist: Bool) {
@@ -508,5 +542,22 @@ final class ThemeService {
         while slug.contains("__") { slug = slug.replacingOccurrences(of: "__", with: "_") }
         slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
         return slug
+    }
+
+    private static func themeSettingsSlice(from settings: [String: Any]) -> [String: Any] {
+        themePersistKeys.reduce(into: [String: Any]()) { result, key in
+            if let value = settings[key] {
+                result[key] = value
+            }
+        }
+    }
+
+    private static func deepCopySettingsSlice(_ slice: [String: Any]) -> [String: Any] {
+        guard JSONSerialization.isValidJSONObject(slice),
+              let data = try? JSONSerialization.data(withJSONObject: slice),
+              let copy = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return slice
+        }
+        return copy
     }
 }

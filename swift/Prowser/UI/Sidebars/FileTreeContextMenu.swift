@@ -23,22 +23,26 @@ enum FileTreeContextMenu {
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.renameDirectory(_:))
         )
-        addAction(
-            menu,
-            title: "Search by Description...",
-            shortcut: "⌘F",
-            enabled: !restricted,
-            representedObject: directoryPath,
-            action: #selector(FileTreeMenuActions.searchByDescription(_:))
-        )
-        addAction(
-            menu,
-            title: "Search by Person...",
-            shortcut: "⌘P",
-            enabled: !restricted,
-            representedObject: directoryPath,
-            action: #selector(FileTreeMenuActions.searchByPerson(_:))
-        )
+        if BundleCapabilities.clipSearchUIEnabled {
+            addAction(
+                menu,
+                title: "Search by Description...",
+                shortcut: "⌘F",
+                enabled: !restricted,
+                representedObject: directoryPath,
+                action: #selector(FileTreeMenuActions.searchByDescription(_:))
+            )
+        }
+        if BundleCapabilities.personSearchUIEnabled {
+            addAction(
+                menu,
+                title: "Search by Person...",
+                shortcut: "⌘P",
+                enabled: !restricted,
+                representedObject: directoryPath,
+                action: #selector(FileTreeMenuActions.searchByPerson(_:))
+            )
+        }
         addAction(
             menu,
             title: "Copy Directory Path",
@@ -68,13 +72,15 @@ enum FileTreeContextMenu {
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.findDuplicates(_:))
         )
-        addAction(
-            menu,
-            title: "Find VisuallySimilar Image Files",
-            enabled: !restricted,
-            representedObject: directoryPath,
-            action: #selector(FileTreeMenuActions.findSimilarImages(_:))
-        )
+        if BundleCapabilities.similaritySearchUIEnabled {
+            addAction(
+                menu,
+                title: "Find VisuallySimilar Image Files",
+                enabled: !restricted,
+                representedObject: directoryPath,
+                action: #selector(FileTreeMenuActions.findSimilarImages(_:))
+            )
+        }
         addAction(
             menu,
             title: "Clear Cache",

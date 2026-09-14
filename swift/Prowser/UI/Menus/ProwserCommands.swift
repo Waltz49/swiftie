@@ -14,6 +14,15 @@ struct ProwserCommands: Commands {
             }
         }
 
+        // Python File → Exit uses QuitRole and `main_window.close`. Putting Quit in the
+        // custom File menu steals ⌘Q from the app menu and does not close the window.
+        CommandGroup(replacing: .appTermination) {
+            Button("Quit Prowser") {
+                Task { @MainActor in appState.closeMainWindow() }
+            }
+            .keyboardShortcut("q", modifiers: .command)
+        }
+
         CommandMenu(MenuBarTitles.edit) {
             ExternalEditorButton(appState: appState)
 
@@ -157,7 +166,7 @@ struct ProwserCommands: Commands {
             Divider()
 
             Button("Close Window") {
-                Task { @MainActor in NSApp.keyWindow?.close() }
+                Task { @MainActor in NSApp.keyWindow?.performClose(nil) }
             }
             .keyboardShortcut("w", modifiers: .command)
 
@@ -166,74 +175,33 @@ struct ProwserCommands: Commands {
             Button("About…") {
                 Task { @MainActor in appState.showAboutDialog() }
             }
-
-            Button("Quit Prowser") {
-                Task { @MainActor in NSApp.terminate(nil) }
-            }
-            .keyboardShortcut("q", modifiers: .command)
-        }
-
-        CommandMenu("Image") {
-            Button("Create an image from text…") {
-                Task { @MainActor in appState.openImageGenDialog(function: "create") }
-            }
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
-
-            Button("Fast Open Image Generation") {
-                Task { @MainActor in appState.openFastImageGenDialog() }
-            }
-            .keyboardShortcut("/", modifiers: [.shift, .option])
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
-
-            Divider()
-
-            Button("Edit this image with AI…") {
-                Task { @MainActor in appState.openImageGenDialog(function: "edit") }
-            }
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
-
-            Button("Expand this image…") {
-                Task { @MainActor in appState.openImageGenDialog(function: "expand") }
-            }
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
-
-            Button("Infill / paint this image…") {
-                Task { @MainActor in appState.openImageGenDialog(function: "infill") }
-            }
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
-
-            Divider()
-
-            Button("Cancel Generation") {
-                Task { @MainActor in appState.confirmCancelGeneration() }
-            }
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
-
-            Divider()
-
-            Button("Show Job Queue") {
-                Task { @MainActor in appState.toggleJobsPanel() }
-            }
-            .keyboardShortcut("j", modifiers: .command)
-            .disabled(!BundleCapabilities.imageGenUIEnabled)
         }
 
         CommandMenu("Search") {
-            Button("Search by Text…") {
-                Task { @MainActor in appState.presentClipSearchSheet() }
+            if BundleCapabilities.clipSearchUIEnabled {
+                Button("Search by Text…") {
+                    Task { @MainActor in appState.presentClipSearchSheet() }
+                }
+                .keyboardShortcut("f", modifiers: .command)
             }
-            .keyboardShortcut("f", modifiers: .command)
 
-            Button("Find Similar Image Files…") {
-                Task { @MainActor in appState.searchOperations.findSimilarImages() }
+            if BundleCapabilities.similaritySearchUIEnabled {
+                Button("Find Similar Image Files…") {
+                    Task { @MainActor in appState.searchOperations.findSimilarImages() }
+                }
+                .keyboardShortcut("k", modifiers: .command)
             }
-            .keyboardShortcut("k", modifiers: .command)
 
-            SearchByPersonMenuButton(appState: appState)
+            if BundleCapabilities.personSearchUIEnabled {
+                SearchByPersonMenuButton(appState: appState)
+                QuickPersonSearchMenuButton(appState: appState)
+            }
 
-            QuickPersonSearchMenuButton(appState: appState)
-
-            Divider()
+            if BundleCapabilities.clipSearchUIEnabled
+                || BundleCapabilities.similaritySearchUIEnabled
+                || BundleCapabilities.personSearchUIEnabled {
+                Divider()
+            }
 
             Button("Find Duplicate Image Files in Directory") {
                 Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
@@ -249,9 +217,10 @@ struct ProwserCommands: Commands {
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
 
-            Divider()
-
-            ExtractFacesMenuButton(appState: appState)
+            if BundleCapabilities.facesUIEnabled {
+                Divider()
+                ExtractFacesMenuButton(appState: appState)
+            }
         }
 
         CommandMenu(MenuBarTitles.view) {
@@ -282,14 +251,13 @@ struct ProwserCommands: Commands {
             PaneToggleButton(appState: appState, pane: .informationSidebar)
                 .keyboardShortcut("i", modifiers: [])
 
-            JobsPaneToggleButton(appState: appState)
-                .keyboardShortcut("j", modifiers: [])
-
             PaneToggleButton(appState: appState, pane: .statusBar)
                 .keyboardShortcut("b", modifiers: [])
 
-            ChatPaneToggleButton(appState: appState)
-                .keyboardShortcut(",", modifiers: [])
+            if BundleCapabilities.chatUIEnabled {
+                ChatPaneToggleButton(appState: appState)
+                    .keyboardShortcut(",", modifiers: [])
+            }
 
             Divider()
 
@@ -380,11 +348,12 @@ struct ProwserCommands: Commands {
             }
             .keyboardShortcut("h", modifiers: .control)
 
-            Button("Cache Subdirectories' Faces") {
-                Task { @MainActor in appState.cacheSubdirectoryFaces() }
+            if BundleCapabilities.facesUIEnabled {
+                Button("Cache Subdirectories' Faces") {
+                    Task { @MainActor in appState.cacheSubdirectoryFaces() }
+                }
+                .keyboardShortcut("=", modifiers: .command)
             }
-            .keyboardShortcut("=", modifiers: .command)
-            .disabled(!BundleCapabilities.facesUIEnabled)
 
             Button("Cache Subdirectories' Thumbnails") {
                 Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
@@ -392,10 +361,6 @@ struct ProwserCommands: Commands {
             .keyboardShortcut("c", modifiers: [.command, .shift])
 
             DeleteExifDateMenuButton(appState: appState)
-
-            Button("Speak Comment") {
-                Task { @MainActor in appState.speakUserComment() }
-            }
 
             Divider()
 
@@ -476,16 +441,6 @@ struct ProwserCommands: Commands {
                 }
                 .keyboardShortcut("l", modifiers: .control)
 
-                if BundleCapabilities.imageGenUIEnabled {
-                    Button("See Timings") {
-                        Task { @MainActor in appState.showGenerationTimingDialog() }
-                    }
-
-                    Button("Check LoRAs") {
-                        Task { @MainActor in appState.runCheckLoras() }
-                    }
-                }
-
                 Divider()
 
                 Button("Toggle Debug Mode") {
@@ -537,20 +492,6 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.showKeyboardHelp = true }
             }
             .keyboardShortcut("/", modifiers: [])
-
-            Button("PF Keys…") {
-                Task { @MainActor in appState.showPFKeysHelp() }
-            }
-
-            Button("Hidden Gems…") {
-                Task { @MainActor in appState.showHiddenGemsHelp() }
-            }
-
-            if BundleCapabilities.imageGenUIEnabled {
-                Button("Downloading AI Models…") {
-                    Task { @MainActor in appState.showDownloadingModelsHelp = true }
-                }
-            }
 
             Button("About Prowser") {
                 Task { @MainActor in appState.showAboutDialog() }
@@ -640,12 +581,6 @@ struct ProwserCommands: Commands {
     @MainActor
     private func applySortMode(_ mode: SortMode, reversed: Bool = false) {
         appState.applySortMode(mode, reversed: reversed)
-    }
-
-    @MainActor
-    private func setJobsVisible(_ visible: Bool) {
-        appState.config.updateSetting("jobs_visible", value: visible)
-        appState.config.applySettingsChange(emit: appState.eventBus)
     }
 
     @MainActor
@@ -1027,19 +962,6 @@ private struct PaneToggleButton: View {
         case .informationSidebar: appState.toggleInformationSidebar()
         case .statusBar: appState.toggleStatusBar()
         }
-    }
-}
-
-private struct JobsPaneToggleButton: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        let visible = appState.jobsDisplayMode == .pane
-            && appState.config.bool(forKey: "jobs_visible", default: true)
-        Button(MenuStateHelpers.paneToggleLabel("Jobs Pane", visible: visible)) {
-            Task { @MainActor in appState.toggleJobsPane() }
-        }
-        .disabled(!BundleCapabilities.imageGenUIEnabled)
     }
 }
 

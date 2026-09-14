@@ -7,9 +7,7 @@ enum SidebarPaneLayout {
     static let minPaneContent: CGFloat = 20
     static let minPreviewContentHeight: CGFloat = 64
     static let minInformationContentHeight: CGFloat = 20
-    static let minJobsQueueContentHeight: CGFloat = 20
     static let paneFitHeightToleranceMin: CGFloat = 8
-    static let jobsPaneSizeChangeTolerance: CGFloat = 4
 
     /// Height of one inter-pane splitter grip (matches Qt `setHandleWidth`).
     static func splitterHandleHeight(viewBorderWidthPx: Int) -> CGFloat {

@@ -69,9 +69,6 @@ final class SidebarPaneSplitModel {
             if paneIndex == 1, !headerOnly {
                 return header + SidebarPaneLayout.minInformationContentHeight
             }
-            if paneIndex == 2, !headerOnly {
-                return jobsPaneMinHeight(appState: appState)
-            }
         }
         return SidebarPaneLayout.paneMinHeight(headerHeight: header, headerOnly: headerOnly)
     }
@@ -99,15 +96,13 @@ final class SidebarPaneSplitModel {
         case .left:
             return Self.leftDisplayPaneVisibility(appState: appState)
         case .right:
-            // Python `_pane_visibility`: [shortcuts_visible, information_visible, jobs_visible].
-            // A hidden pane gets 0 splitter height (not a header slot), so it must be
-            // excluded here or `scaledSizes` leaves an empty gap at the bottom of the column.
+            // Right column is Organize + File Information. A hidden pane gets 0 splitter
+            // height (not a header slot), so it must be excluded here or `scaledSizes`
+            // leaves an empty gap at the bottom of the column.
             return [
                 paneExpanded(configKey: "shortcuts_sidebar_visible", default: true),
                 paneExpanded(configKey: "information_sidebar_visible", default: true),
-                BundleCapabilities.imageGenUIEnabled
-                    && appState.jobsDisplayMode == .pane
-                    && paneExpanded(configKey: "jobs_visible", default: true),
+                false,
             ]
         }
     }
@@ -124,8 +119,7 @@ final class SidebarPaneSplitModel {
             return [
                 paneExpanded(configKey: "shortcuts_sidebar_visible", default: true),
                 paneExpanded(configKey: "information_sidebar_visible", default: true),
-                paneExpanded(configKey: "jobs_visible", default: true)
-                    && appState.jobsDisplayMode == .pane,
+                false,
             ]
         }
     }
@@ -213,11 +207,6 @@ final class SidebarPaneSplitModel {
         appState: AppState,
         contentHeight: CGFloat
     ) {
-        if paneIndex == 2, side == .right {
-            cycleJobsPaneSize(appState: appState)
-            return
-        }
-
         let expandedFlags = expanded(appState: appState)
         if !expandedFlags[paneIndex] {
             setPaneExpanded(true, configKey: side == .left
@@ -236,114 +225,6 @@ final class SidebarPaneSplitModel {
 
         expandPaneToFit(paneIndex: paneIndex, needed: needed, appState: appState)
         fitTargets[paneIndex] = sizes[paneIndex]
-    }
-
-    func cycleJobsPaneSize(appState: AppState) {
-        guard side == .right, appState.jobsDisplayMode == .pane else { return }
-        if !paneExpanded(configKey: "jobs_visible", default: true) {
-            setPaneExpanded(true, configKey: "jobs_visible")
-        }
-
-        let startHeight = sizes[2]
-        let startMode = appState.jobsQueueSizeMode
-        appState.applyJobsQueueSizeMode(startMode, forceRefit: true)
-        if abs(sizes[2] - startHeight) > SidebarPaneLayout.jobsPaneSizeChangeTolerance {
-            mergePersistedSizes(appState: appState)
-            return
-        }
-
-        var mode = startMode.next()
-        while mode != startMode {
-            appState.applyJobsQueueSizeMode(mode, forceRefit: false)
-            if abs(sizes[2] - startHeight) > SidebarPaneLayout.jobsPaneSizeChangeTolerance {
-                mergePersistedSizes(appState: appState)
-                return
-            }
-            mode = mode.next()
-        }
-        mergePersistedSizes(appState: appState)
-    }
-
-    func growJobsPaneForActionBar(extraContentHeight: CGFloat, appState: AppState) {
-        guard side == .right, extraContentHeight > 0 else { return }
-        guard appState.jobsDisplayMode == .pane else { return }
-        guard paneExpanded(configKey: "jobs_visible", default: true) else { return }
-
-        appState.beginJobsPaneGeometryAdjustment()
-        defer { appState.endJobsPaneGeometryAdjustment() }
-
-        let mode = appState.jobsQueueSizeMode
-        let jobCount = appState.imageGen.queue.jobs.count
-        if mode == .all, jobCount > 1 {
-            resizePaneToHeight(paneIndex: 2, targetHeight: sizes[2] + extraContentHeight, appState: appState)
-        } else {
-            resizeJobsPaneToMode(appState: appState)
-        }
-    }
-
-    func resizeJobsPaneToMode(appState: AppState) {
-        guard side == .right else { return }
-        appState.beginJobsPaneGeometryAdjustment()
-        defer { appState.endJobsPaneGeometryAdjustment() }
-
-        let mode = appState.jobsQueueSizeMode
-        let jobCount = appState.imageGen.queue.jobs.count
-        let shrinkWrap = appState.shouldShrinkWrapJobsClient()
-
-        // ALL + multiple jobs: keep user-expanded height; only grow when still too small.
-        if mode == .all, !shrinkWrap, jobCount > 1 {
-            let needed = jobsPaneHeight(appState: appState, headerOnly: false)
-            jobsPaneDebug(
-                "resizeToMode all/multi needed=\(needed) sizes=\(sizes) total=\(sizes.reduce(0, +)) "
-                + "content=\(appState.jobsQueuePaneContentHeight()) measuredStack=\(appState.measuredJobsCardStackHeight) "
-                + "strip=\(appState.measuredActiveJobStripHeight)"
-            )
-            if sizes[2] < needed {
-                resizePaneToHeight(paneIndex: 2, targetHeight: needed, appState: appState)
-            }
-            return
-        }
-
-        var previousNeeded: CGFloat = -1
-        var previousCurrent: CGFloat = -1
-        for _ in 0..<3 {
-            let needed = jobsPaneHeight(appState: appState, headerOnly: false)
-            let current = sizes[2]
-            jobsPaneDebug(
-                "resizeToMode \(mode) needed=\(needed) sizes=\(sizes) total=\(sizes.reduce(0, +)) "
-                + "measuredStack=\(appState.measuredJobsCardStackHeight) strip=\(appState.measuredActiveJobStripHeight)"
-            )
-            if previousNeeded >= 0,
-               abs(needed - previousNeeded) <= 1,
-               abs(current - previousCurrent) <= 1 {
-                break
-            }
-            resizePaneToHeight(paneIndex: 2, targetHeight: needed, appState: appState)
-            previousNeeded = needed
-            previousCurrent = sizes[2]
-        }
-    }
-
-    private func jobsPaneMinHeight(appState: AppState) -> CGFloat {
-        let header = headerHeight(for: 2)
-        let mode = appState.jobsQueueSizeMode
-        if mode == .strip {
-            return jobsPaneHeight(appState: appState, headerOnly: false)
-        }
-        if mode == .one {
-            return jobsPaneHeight(appState: appState, headerOnly: false)
-        }
-        if appState.shouldShrinkWrapJobsClient() {
-            return jobsPaneHeight(appState: appState, headerOnly: false)
-        }
-        return header + SidebarPaneLayout.minJobsQueueContentHeight
-    }
-
-    private func jobsPaneHeight(appState: AppState, headerOnly: Bool) -> CGFloat {
-        let header = headerHeight(for: 2)
-        if headerOnly { return header }
-        let content = appState.jobsQueuePaneContentHeight()
-        return header + max(content, SidebarPaneLayout.minJobsQueueContentHeight)
     }
 
     private func expandPaneToFit(paneIndex: Int, needed: CGFloat, appState: AppState) {
@@ -395,8 +276,7 @@ final class SidebarPaneSplitModel {
     private func rightExpandedKey(_ paneIndex: Int) -> String {
         switch paneIndex {
         case 0: return "shortcuts_sidebar_visible"
-        case 1: return "information_sidebar_visible"
-        default: return "jobs_visible"
+        default: return "information_sidebar_visible"
         }
     }
 

@@ -77,14 +77,16 @@ enum ThumbnailContextMenu {
         duplicate.target = MenuActions.shared
         duplicate.representedObject = paths
 
-        let findSimilar = menu.addItem(
-            withTitle: "Find Similar Images…",
-            action: #selector(MenuActions.findSimilar(_:)),
-            keyEquivalent: ""
-        )
-        NSMenuShortcutSupport.apply(display: "⌘K", to: findSimilar)
-        findSimilar.target = MenuActions.shared
-        findSimilar.representedObject = paths
+        if BundleCapabilities.similaritySearchUIEnabled {
+            let findSimilar = menu.addItem(
+                withTitle: "Find Similar Images…",
+                action: #selector(MenuActions.findSimilar(_:)),
+                keyEquivalent: ""
+            )
+            NSMenuShortcutSupport.apply(display: "⌘K", to: findSimilar)
+            findSimilar.target = MenuActions.shared
+            findSimilar.representedObject = paths
+        }
 
         let showInDirectory = menu.addItem(
             withTitle: "Show in Directory",

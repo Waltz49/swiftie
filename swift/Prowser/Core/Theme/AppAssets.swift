@@ -21,6 +21,13 @@ enum AppAssets {
         return NSImage(contentsOf: url)
     }
 
+    /// Dock / About / empty-state icon. Prefers bundled icns, then PNG, then the system app icon.
+    static var applicationIcon: NSImage? {
+        nsImage(name: "Prowser", fileExtension: "icns")
+            ?? nsImage(name: "Prowser", fileExtension: "png")
+            ?? NSImage(named: NSImage.applicationIconName)
+    }
+
     static func image(name: String, fileExtension: String = "png") -> Image? {
         guard let nsImage = nsImage(name: name, fileExtension: fileExtension) else { return nil }
         return Image(nsImage: nsImage)

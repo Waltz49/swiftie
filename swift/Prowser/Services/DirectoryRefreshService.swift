@@ -30,20 +30,12 @@ enum DirectoryRefreshService {
         let displayedSet = Set(displayed)
         let rawAdded = diskSet.subtracting(displayedSet)
         let removed = displayedSet.subtracting(diskSet)
-        let added = rawAdded.filter {
-            !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: $0)
-        }
-
-        // In-progress step writes land on the job output path before the job finishes.
-        if !rawAdded.isEmpty, added.isEmpty, removed.isEmpty {
-            return
-        }
+        let added = rawAdded
 
         if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
             if appState.fileData.currentViewMode == .browse {
                 if let current = appState.fileData.currentImagePath,
-                   appState.metadataCache.fileChangedOnDisk(path: current),
-                   !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: current) {
+                   appState.metadataCache.fileChangedOnDisk(path: current) {
                     invalidateThumbnails(appState: appState, paths: [current])
                     appState.reloadBrowseImageIfCurrent(path: current)
                 }
@@ -51,7 +43,6 @@ enum DirectoryRefreshService {
             }
             guard displayedSet.count < 500 else { return }
             let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
-                .filter { !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: $0) }
             if !modified.isEmpty {
                 invalidateThumbnails(appState: appState, paths: modified)
             }

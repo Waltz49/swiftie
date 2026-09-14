@@ -1,12 +1,22 @@
+import CoreGraphics
 import Foundation
 
-/// Reads and writes `~/.prowser/data/settings.json` (compatible with Python `ImageBrowserConfig`).
+/// Reads and writes `~/.swift-prowser/data/settings.json`.
 @Observable
 @MainActor
 final class AppConfig {
     private let paths: ProfilePaths
     private var settings: [String: Any] = [:]
+    private var settingsSnapshot: [String: Any]?
+    private var settingsDraft: [String: Any]?
     private let encoder = JSONSerialization.self
+
+    /// True while the settings window is open (edits stay in memory until OK).
+    var isSettingsSessionActive: Bool { settingsDraft != nil }
+
+    func uiThemeAtSettingsOpen() -> String? {
+        settingsSnapshot?["ui_theme"] as? String
+    }
 
     init(profilePath: String?) {
         paths = ProfilePaths(profilePath: profilePath)
@@ -26,7 +36,7 @@ final class AppConfig {
     /// Resolved temp work directory (settings override or profile `tmp/`).
     var temporaryFilesDirectory: URL {
         let path = ProwserTempFiles.resolveTemporaryFilesDirectory(
-            settings: settings,
+            settings: readSettings(),
             prowserHome: paths.prowserHome
         )
         let url = URL(fileURLWithPath: path, isDirectory: true)
@@ -86,7 +96,7 @@ final class AppConfig {
         restore["last_macos_space_mode"] = macosSpaceMode
         updateSetting("restore_state", value: restore)
         if let directory {
-            settings["last_directory"] = directory
+            mutateSettings { $0["last_directory"] = directory }
         }
     }
 
@@ -113,12 +123,16 @@ final class AppConfig {
     }
     var imageExtensions: [String] {
         let raw: [String]
-        if let list = settings["image_extensions"] as? [String], !list.isEmpty {
+        let stored = readSettings()
+        if let list = stored["image_extensions"] as? [String], !list.isEmpty {
             raw = list
         } else {
             raw = Self.defaultImageExtensions
         }
-        return raw.map { Self.normalizeExtension($0) }
+        let normalized = raw.map { Self.normalizeExtension($0) }
+        let supported = Set(ThemeDefaults.knownExtensionList)
+        let filtered = normalized.filter { supported.contains($0) }
+        return filtered.isEmpty ? Self.defaultImageExtensions : filtered
     }
 
     /// Settings store extensions with a leading dot (e.g. `.webp`); paths use `pathExtension` without it.
@@ -143,8 +157,34 @@ final class AppConfig {
             return
         }
         settings = json
+        settingsDraft = nil
+        settingsSnapshot = nil
         migrateRestoreStateIfNeeded()
         mergeMissingDefaults()
+    }
+
+    func beginSettingsSession() {
+        guard settingsDraft == nil else { return }
+        settingsSnapshot = Self.deepCopySettings(settings)
+        settingsDraft = Self.deepCopySettings(settings)
+    }
+
+    func commitSettingsSession() {
+        guard let draft = settingsDraft else { return }
+        settings = Self.deepCopySettings(draft)
+        settingsDraft = nil
+        settingsSnapshot = nil
+        saveSettings()
+    }
+
+    func cancelSettingsSession() {
+        defer {
+            settingsDraft = nil
+            settingsSnapshot = nil
+        }
+        guard let snap = settingsSnapshot else { return }
+        settings = Self.deepCopySettings(snap)
+        saveSettings()
     }
 
     func saveSettings() {
@@ -157,23 +197,36 @@ final class AppConfig {
     }
 
     func updateSetting(_ key: String, value: Any?) {
-        if let value {
-            settings[key] = value
-        } else {
-            settings.removeValue(forKey: key)
+        mutateSettings { storage in
+            if let value {
+                storage[key] = value
+            } else {
+                storage.removeValue(forKey: key)
+            }
         }
-        saveSettings()
     }
 
     func setValue(_ value: Any, forKey key: String) {
-        settings[key] = value
-        saveSettings()
+        mutateSettings { storage in
+            storage[key] = value
+        }
     }
 
-    func rawSettings() -> [String: Any] { settings }
+    /// Writes multiple keys then saves once when not in a settings session.
+    func replaceSettingsValues(_ values: [String: Any], keys: [String]) {
+        mutateSettings { storage in
+            for key in keys {
+                if let value = values[key] {
+                    storage[key] = value
+                }
+            }
+        }
+    }
+
+    func rawSettings() -> [String: Any] { readSettings() }
 
     func getSavedFilters() -> [String] {
-        let filters = settings["saved_filters"] as? [String] ?? []
+        let filters = readSettings()["saved_filters"] as? [String] ?? []
         return filters.filter { filter in
             let trimmed = filter.trimmingCharacters(in: .whitespacesAndNewlines)
             return !trimmed.isEmpty && trimmed != "*"
@@ -219,11 +272,11 @@ final class AppConfig {
     }
 
     func stringArray(forKey key: String) -> [String] {
-        (settings[key] as? [String]) ?? []
+        (readSettings()[key] as? [String]) ?? []
     }
 
     func optionalStringArray(forKey key: String, count: Int) -> [String?] {
-        let raw = settings[key] as? [Any] ?? []
+        let raw = readSettings()[key] as? [Any] ?? []
         return (0..<count).map { index in
             guard index < raw.count else { return nil }
             if raw[index] is NSNull { return nil }
@@ -232,12 +285,13 @@ final class AppConfig {
     }
 
     func setOptionalStringArray(_ key: String, values: [String?]) {
-        settings[key] = values.map { $0 as Any? ?? NSNull() }
-        saveSettings()
+        mutateSettings { storage in
+            storage[key] = values.map { $0 as Any? ?? NSNull() }
+        }
     }
 
     func rootDirectories() -> [String] {
-        let raw = settings["root_directories"] as? [String]
+        let raw = readSettings()["root_directories"] as? [String]
         return raw?.isEmpty == false ? raw! : ThemeDefaults.defaultRootDirectories
     }
 
@@ -251,14 +305,14 @@ final class AppConfig {
 
     /// Recent directories for File → Recent (most recent last in storage; returned newest-first).
     func recentDirectories(limit: Int = 15) -> [String] {
-        let raw = settings["directory_menu_history"] as? [String] ?? []
+        let raw = readSettings()["directory_menu_history"] as? [String] ?? []
         return Array(raw.reversed().prefix(limit))
     }
 
     func recordRecentDirectory(_ path: String) {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var history = settings["directory_menu_history"] as? [String] ?? []
+        var history = readSettings()["directory_menu_history"] as? [String] ?? []
         history.removeAll { $0 == trimmed }
         history.append(trimmed)
         let maxSize = 20
@@ -269,17 +323,16 @@ final class AppConfig {
     }
 
     func excludeDirectories() -> [[String: Any]] {
-        settings["exclude_directories"] as? [[String: Any]] ?? []
+        readSettings()["exclude_directories"] as? [[String: Any]] ?? []
     }
 
     func setExcludeDirectories(_ entries: [[String: Any]]) {
-        settings["exclude_directories"] = entries
-        saveSettings()
+        mutateSettings { $0["exclude_directories"] = entries }
     }
 
     func sectionExpanded(_ key: String) -> Bool {
         let defaults = Self.defaultInformationSectionExpanded
-        guard let saved = settings["information_section_expanded"] as? [String: Bool] else {
+        guard let saved = readSettings()["information_section_expanded"] as? [String: Bool] else {
             return defaults[key] ?? true
         }
         return saved[key] ?? defaults[key] ?? true
@@ -287,7 +340,7 @@ final class AppConfig {
 
     func setSectionExpanded(_ key: String, expanded: Bool) {
         guard Self.defaultInformationSectionExpanded.keys.contains(key) else { return }
-        var state = (settings["information_section_expanded"] as? [String: Bool]) ?? Self.defaultInformationSectionExpanded
+        var state = (readSettings()["information_section_expanded"] as? [String: Bool]) ?? Self.defaultInformationSectionExpanded
         guard state[key] != expanded else { return }
         state[key] = expanded
         updateSetting("information_section_expanded", value: state)
@@ -341,28 +394,52 @@ final class AppConfig {
     }
 
     private func restoreStateDict() -> [String: Any] {
-        if let dict = settings["restore_state"] as? [String: Any] {
+        let stored = readSettings()
+        if let dict = stored["restore_state"] as? [String: Any] {
             return dict
         }
-        if let enabled = settings["restore_state"] as? Bool {
+        if let enabled = stored["restore_state"] as? Bool {
             return ["enabled": enabled]
         }
         return ["enabled": true]
     }
 
     private func stringValue(_ key: String) -> String? {
-        settings[key] as? String
+        readSettings()[key] as? String
     }
 
     private func boolValue(_ key: String, default defaultValue: Bool) -> Bool {
-        if let value = settings[key] as? Bool { return value }
+        if let value = readSettings()[key] as? Bool { return value }
         return defaultValue
     }
 
     private func numberValue(_ key: String, default defaultValue: Double) -> Double {
-        if let value = settings[key] as? Double { return value }
-        if let value = settings[key] as? Int { return Double(value) }
+        if let value = readSettings()[key] as? Double { return value }
+        if let value = readSettings()[key] as? Int { return Double(value) }
         return defaultValue
+    }
+
+    private func readSettings() -> [String: Any] {
+        settingsDraft ?? settings
+    }
+
+    private func mutateSettings(_ mutate: (inout [String: Any]) -> Void) {
+        if var draft = settingsDraft {
+            mutate(&draft)
+            settingsDraft = draft
+            return
+        }
+        mutate(&settings)
+        saveSettings()
+    }
+
+    private static func deepCopySettings(_ source: [String: Any]) -> [String: Any] {
+        guard JSONSerialization.isValidJSONObject(source),
+              let data = try? JSONSerialization.data(withJSONObject: source),
+              let copy = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return source
+        }
+        return copy
     }
 
     static let defaultImageExtensions = [
@@ -498,7 +575,6 @@ final class AppConfig {
             "use_prompt_filter_exits": false,
             "text_ai_exit": "",
             "image_ai_exit": "",
-            "say_exit": "",
             "general_settings_groups_expanded": [
                 "general": true,
                 "thumbnails": true,
@@ -516,7 +592,7 @@ final class AppConfig {
     }
 
     func ignoreDirectories() -> [[String: Any]] {
-        let raw = settings["ignore_directories"] as? [[String: Any]] ?? []
+        let raw = readSettings()["ignore_directories"] as? [[String: Any]] ?? []
         if raw.count >= 3 { return Array(raw.prefix(3)) }
         var padded = raw
         while padded.count < 3 {
@@ -526,12 +602,11 @@ final class AppConfig {
     }
 
     func setIgnoreDirectories(_ entries: [[String: Any]]) {
-        settings["ignore_directories"] = entries
-        saveSettings()
+        mutateSettings { $0["ignore_directories"] = entries }
     }
 
     func imageCreationDirectory() -> (path: String?, enabled: Bool) {
-        guard let dict = settings["image_creation_directory"] as? [String: Any] else {
+        guard let dict = readSettings()["image_creation_directory"] as? [String: Any] else {
             return (nil, false)
         }
         let path = dict["path"] as? String
@@ -540,35 +615,55 @@ final class AppConfig {
     }
 
     func setImageCreationDirectory(path: String?, enabled: Bool) {
-        settings["image_creation_directory"] = [
-            "path": path as Any? ?? NSNull(),
-            "enabled": enabled,
-        ]
-        saveSettings()
+        mutateSettings {
+            $0["image_creation_directory"] = [
+                "path": path as Any? ?? NSNull(),
+                "enabled": enabled,
+            ]
+        }
     }
 
     func temporaryFilesDirectoryRaw() -> String? {
-        if settings["temporary_files_directory"] is NSNull { return nil }
-        let value = settings["temporary_files_directory"] as? String
+        let stored = readSettings()
+        if stored["temporary_files_directory"] is NSNull { return nil }
+        let value = stored["temporary_files_directory"] as? String
         return value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? value : nil
     }
 
     func setTemporaryFilesDirectory(_ path: String?) {
         let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        settings["temporary_files_directory"] = trimmed.isEmpty ? NSNull() : trimmed
-        saveSettings()
+        mutateSettings {
+            $0["temporary_files_directory"] = trimmed.isEmpty ? NSNull() : trimmed
+        }
         ProwserTempFiles.invalidateCache()
     }
 
     func settingsGroupExpanded(storageKey: String, groupKey: String, default defaultValue: Bool = true) -> Bool {
-        guard let dict = settings[storageKey] as? [String: Bool] else { return defaultValue }
+        guard let dict = readSettings()[storageKey] as? [String: Bool] else { return defaultValue }
         return dict[groupKey] ?? defaultValue
     }
 
     func setSettingsGroupExpanded(storageKey: String, groupKey: String, expanded: Bool) {
-        var dict = settings[storageKey] as? [String: Bool] ?? [:]
-        dict[groupKey] = expanded
-        settings[storageKey] = dict
-        saveSettings()
+        mutateSettings { storage in
+            var dict = storage[storageKey] as? [String: Bool] ?? [:]
+            dict[groupKey] = expanded
+            storage[storageKey] = dict
+        }
+    }
+
+    func splitterSizes(forKey key: String, default defaultValue: [CGFloat]) -> [CGFloat] {
+        guard let raw = rawSettings()[key] as? [Any], raw.count == 3 else { return defaultValue }
+        let sizes = raw.compactMap { value -> CGFloat? in
+            if let intValue = value as? Int { return CGFloat(intValue) }
+            if let doubleValue = value as? Double { return CGFloat(doubleValue) }
+            return nil
+        }
+        guard sizes.count == 3, sizes.reduce(0, +) > 0 else { return defaultValue }
+        return sizes
+    }
+
+    func saveSplitterSizes(_ key: String, sizes: [CGFloat]) {
+        let ints = sizes.map { Int(round($0)) }
+        updateSetting(key, value: ints)
     }
 }

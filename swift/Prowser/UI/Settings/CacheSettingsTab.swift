@@ -28,7 +28,9 @@ struct CacheSettingsTab: View {
 
                     HStack(spacing: 8) {
                         cacheButton("Clear Thumbs") { clearThumbnails() }
-                        cacheButton("Clear Image Rec") { clearImageRec() }
+                        if BundleCapabilities.similaritySearchUIEnabled || BundleCapabilities.clipSearchUIEnabled {
+                            cacheButton("Clear Image Rec") { clearImageRec() }
+                        }
                         if BundleCapabilities.facesUIEnabled {
                             cacheButton("Clear Face") { clearFace() }
                         }
@@ -40,19 +42,21 @@ struct CacheSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
 
-                SettingsSection(title: "Background Processing") {
-                    Toggle("Enable idle search-data collection", isOn: boolBinding("background_clip_enabled"))
-                    Toggle(
-                        "Gather thumbnails for uncached images",
-                        isOn: boolBinding("background_clip_gather_thumbnails", default: true)
-                    )
-                    .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
-                    if BundleCapabilities.facesUIEnabled {
+                if BundleCapabilities.clipSearchUIEnabled {
+                    SettingsSection(title: "Background Processing") {
+                        Toggle("Enable idle search-data collection", isOn: boolBinding("background_clip_enabled"))
                         Toggle(
-                            "Extract face encodings in background",
-                            isOn: boolBinding("background_clip_extract_faces")
+                            "Gather thumbnails for uncached images",
+                            isOn: boolBinding("background_clip_gather_thumbnails", default: true)
                         )
                         .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
+                        if BundleCapabilities.facesUIEnabled {
+                            Toggle(
+                                "Extract face encodings in background",
+                                isOn: boolBinding("background_clip_extract_faces")
+                            )
+                            .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
+                        }
                     }
                 }
 
@@ -85,11 +89,14 @@ struct CacheSettingsTab: View {
     private var totalsLabel: String {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
-        let total = formatter.string(fromByteCount: totals.total)
         let thumbs = formatter.string(fromByteCount: totals.thumbnails)
-        let sim = formatter.string(fromByteCount: totals.similarity)
-        let search = formatter.string(fromByteCount: totals.search)
-        return "Total \(total): \(thumbs) Thumbs, \(sim) Similarity, \(search) Search"
+        if BundleCapabilities.pythonMLEnabled {
+            let total = formatter.string(fromByteCount: totals.total)
+            let sim = formatter.string(fromByteCount: totals.similarity)
+            let search = formatter.string(fromByteCount: totals.search)
+            return "Total \(total): \(thumbs) Thumbs, \(sim) Similarity, \(search) Search"
+        }
+        return "Thumbnails \(thumbs)"
     }
 
     private func cacheButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -135,7 +142,10 @@ struct CacheSettingsTab: View {
     }
 
     private func clearAll() {
-        guard confirm("Clear All Caches", "This will clear all thumbnail, metadata, and recognition caches.") else { return }
+        let message = BundleCapabilities.pythonMLEnabled
+            ? "This will clear all thumbnail, metadata, and recognition caches."
+            : "This will clear all thumbnail and metadata caches."
+        guard confirm("Clear All Caches", message) else { return }
         let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths, dataDirectory: appState.config.dataDirectory)
         statusMessage = "Cleared \(removed) cache entries."
         appState.workers.reloadSettings(config: appState.config)

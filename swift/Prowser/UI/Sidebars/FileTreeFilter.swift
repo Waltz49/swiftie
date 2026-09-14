@@ -26,6 +26,9 @@ enum FileTreeFilter {
         onUpdateHandler = handler
     }
 
+    /// Directories that must stay visible while navigating (Python `priority_paths`).
+    private static var priorityPaths: Set<String> = []
+
     /// Drop shallow visibility cache only (keep background discovery results).
     static func clearShallowCache() {
         cache.removeAll()
@@ -34,9 +37,36 @@ enum FileTreeFilter {
     static func invalidateCache() {
         clearShallowCache()
         cacheKey = ""
+        priorityPaths.removeAll()
         debounceTask?.cancel()
         debounceTask = nil
         FileTreeImageDiscovery.shared.invalidate()
+    }
+
+    static func standardizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    /// Directory the tree should highlight: parent of the current image, else `currentDirectory`.
+    /// Matches Python `highlight_current_file` using `os.path.dirname(current_image_path)`.
+    static func highlightDirectory(appState: AppState) -> String? {
+        if let path = appState.fileData.currentImagePath {
+            let dir = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+            if !dir.isEmpty { return dir }
+        }
+        guard let current = appState.fileData.currentDirectory else { return nil }
+        return standardizedPath(current)
+    }
+
+    /// Keep a directory and its ancestors visible in filtered tree modes.
+    static func addPriorityPath(_ path: String) {
+        var current = standardizedPath(path)
+        while true {
+            priorityPaths.insert(current)
+            let parent = URL(fileURLWithPath: current).deletingLastPathComponent().standardizedFileURL.path
+            if parent == current { break }
+            current = parent
+        }
     }
 
     static func scheduleDebouncedUpdate(discoveredPath: String) {
@@ -64,7 +94,7 @@ enum FileTreeFilter {
         let mode = appState.filterSettings.filteredTree
         if mode == "all" { return true }
 
-        // Keep ancestors of the current directory visible for navigation (Python priority_paths).
+        // Keep ancestors of the highlighted image directory visible (Python priority_paths).
         if isOnNavigationPath(normalized, appState: appState) {
             return true
         }
@@ -111,8 +141,29 @@ enum FileTreeFilter {
     }
 
     private static func isOnNavigationPath(_ path: String, appState: AppState) -> Bool {
-        guard let current = appState.fileData.currentDirectory else { return false }
-        let currentNorm = URL(fileURLWithPath: current).standardizedFileURL.path
-        return currentNorm == path || currentNorm.hasPrefix(path + "/")
+        let pathNorm = standardizedPath(path)
+        if priorityPaths.contains(pathNorm) {
+            return true
+        }
+        for directory in navigationDirectories(appState: appState) {
+            if directory == pathNorm || directory.hasPrefix(pathNorm + "/") {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func navigationDirectories(appState: AppState) -> [String] {
+        var directories: [String] = []
+        if let highlight = highlightDirectory(appState: appState) {
+            directories.append(highlight)
+        }
+        if let current = appState.fileData.currentDirectory {
+            let normalized = standardizedPath(current)
+            if !directories.contains(normalized) {
+                directories.append(normalized)
+            }
+        }
+        return directories
     }
 }

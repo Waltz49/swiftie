@@ -1,7 +1,9 @@
 import Foundation
 
-/// Paths under a Prowser profile root (default `~/.prowser`).
+/// Paths under a Prowser profile root (default `~/.swift-prowser`).
 struct ProfilePaths: Sendable {
+    static let defaultProfileDirectoryName = ".swift-prowser"
+
     let prowserHome: URL
 
     init(profilePath: String?) {
@@ -10,7 +12,7 @@ struct ProfilePaths: Sendable {
                 .standardizedFileURL
         } else {
             prowserHome = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".prowser", isDirectory: true)
+                .appendingPathComponent(Self.defaultProfileDirectoryName, isDirectory: true)
         }
         try? FileManager.default.createDirectory(at: prowserHome, withIntermediateDirectories: true)
     }

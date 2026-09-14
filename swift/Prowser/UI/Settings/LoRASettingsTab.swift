@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    static let prowserLoraCatalogChanged = Notification.Name("prowser.loraCatalogChanged")
+}
+
 @MainActor
 struct LoRASettingsTab: View {
     @Environment(AppState.self) private var appState

@@ -220,7 +220,7 @@ struct ThemeColors: Equatable {
             progressBarBackground: Color(hex: progressBgHex) ?? Color(white: 0.1),
             progressBarBorder: Color(hex: progressBorderHex) ?? Color(hex: borderHex) ?? .gray,
             progressBarText: Color(hex: progressTextHex) ?? resolvedColor("sidebar_text_color_hex", "#b6b6b6"),
-            progressBarFill: Color(hex: JobQueueLayout.progressBarFillHex) ?? Color(red: 0.20, green: 0.47, blue: 0.96),
+            progressBarFill: Color(hex: "#3478F6") ?? Color(red: 0.20, green: 0.47, blue: 0.96),
             dialogMutedBlendPercent: dialogBlend,
             sidebarMutedBlendPercent: sidebarBlend,
             statusBarMutedBlendPercent: statusBlend

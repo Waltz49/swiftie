@@ -10,11 +10,10 @@ struct ThemeSettingsTab: View {
     @State private var showAddTheme = false
     @State private var addThemeBase = "dark"
 
-    private let builtinPresets: [(String, String)] = [
+    private let editableBuiltinPresets: [(String, String)] = [
         ("Dark", "dark"),
         ("Light", "light"),
         ("User", "user"),
-        ("System", "system"),
     ]
 
     var body: some View {
@@ -40,9 +39,8 @@ struct ThemeSettingsTab: View {
             Button("Create") {
                 let name = newThemeName.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !name.isEmpty {
-                    if let slug = appState.theme.createCustomTheme(displayName: name, base: addThemeBase) {
-                        appState.theme.setThemeID(slug)
-                        appState.config.applySettingsChange(emit: appState.eventBus)
+                    if appState.theme.createCustomTheme(displayName: name, base: addThemeBase) != nil {
+                        notifyThemeChanged()
                     }
                 }
                 newThemeName = ""
@@ -59,8 +57,8 @@ struct ThemeSettingsTab: View {
                 .foregroundStyle(SettingsDialogChrome.text)
 
             HStack(spacing: 8) {
-                Picker("Active theme", selection: themeBinding) {
-                    ForEach(builtinPresets, id: \.1) { label, id in
+                Picker("Use palette from:", selection: editPresetBinding) {
+                    ForEach(editableBuiltinPresets, id: \.1) { label, id in
                         Text(label).tag(id)
                     }
                     ForEach(appState.theme.customThemeIDs, id: \.self) { id in
@@ -321,19 +319,19 @@ struct ThemeSettingsTab: View {
         }
     }
 
-    private var themeBinding: Binding<String> {
+    private var editPresetBinding: Binding<String> {
         Binding(
-            get: { appState.theme.themeID },
+            get: { appState.theme.settingsEditPresetID },
             set: { newValue in
-                appState.theme.setThemeID(newValue, persist: false)
+                appState.theme.selectEditPreset(newValue)
                 notifyThemeChanged()
             }
         )
     }
 
-    private var editThemeID: String { appState.theme.editableThemeID() }
+    private var editThemeID: String { appState.theme.settingsEditPresetID }
     private var isCustomTheme: Bool {
-        ThemeService.isCustomThemeID(appState.theme.themeID, settings: appState.config.rawSettings())
+        appState.theme.customThemes[appState.theme.settingsEditPresetID] != nil
     }
 
     private func groupBinding(_ key: String) -> Binding<Bool> {
@@ -362,10 +360,10 @@ struct ThemeSettingsTab: View {
     }
 
     private func deleteCurrentCustomTheme() {
-        let id = appState.theme.themeID
-        guard ThemeService.isCustomThemeID(id, settings: appState.config.rawSettings()) else { return }
+        let id = appState.theme.settingsEditPresetID
+        guard appState.theme.customThemes[id] != nil else { return }
         appState.theme.deleteCustomTheme(id)
-        appState.config.applySettingsChange(emit: appState.eventBus)
+        notifyThemeChanged()
     }
 
     private func stringValue(_ dict: [String: Any], _ key: String) -> String {

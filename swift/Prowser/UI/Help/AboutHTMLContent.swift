@@ -34,30 +34,11 @@ enum AboutHTMLContent {
     <p>All intellectual property included in this work is owned by the original authors and contributors. If any work remains uncredited, it is an omission due to error.</p>
     <h2>Libraries &amp; frameworks</h2>
     <ul>
-    <li><b>PySide6</b> (Qt for Python) — <a href="https://www.qt.io/qt-for-python">qt.io/qt-for-python</a></li>
-    <li><b>Pillow</b> (PIL) — <a href="https://python-pillow.org/">python-pillow.org</a></li>
-    <li><b>pillow-heif</b> (HEIF/HEIC) — <a href="https://github.com/bigcat88/pillow_heif">GitHub: bigcat88/pillow_heif</a></li>
-    <li><b>NumPy</b> — <a href="https://numpy.org/">numpy.org</a></li>
-    <li><b>piexif</b> — <a href="https://github.com/hMatoba/Piexif">GitHub: hMatoba/Piexif</a></li>
-    <li><b>PyTorch</b> &amp; <b>torchvision</b> (CNN similarity, pretrained ResNet weights) — <a href="https://pytorch.org/">pytorch.org</a></li>
-    <li><b>Hugging Face Transformers</b> (CLIP text/image models) — <a href="https://github.com/huggingface/transformers">GitHub: huggingface/transformers</a></li>
-    <li><b>face_recognition</b> — <a href="https://github.com/ageitgey/face_recognition">GitHub: ageitgey/face_recognition</a>
-      (uses <b>dlib</b> — <a href="http://dlib.net/">dlib.net</a>)</li>
-    <li>Pretrained dlib shape predictor / face recognition models bundled via the
-      <b>face_recognition_models</b> package — <a href="https://github.com/ageitgey/face_recognition_models">GitHub: ageitgey/face_recognition_models</a></li>
+    <li><b>Swift</b> / <b>SwiftUI</b> / <b>AppKit</b> — <a href="https://developer.apple.com/swift/">developer.apple.com/swift</a></li>
+    <li><b>ImageIO</b> (thumbnails, EXIF, image decode) — <a href="https://developer.apple.com/documentation/imageio">developer.apple.com/documentation/imageio</a></li>
+    <li><b>Core Graphics</b> (resize, display) — <a href="https://developer.apple.com/documentation/coregraphics">developer.apple.com/documentation/coregraphics</a></li>
+    <li><b>libwebp</b> / <b>Swift-WebP</b> — <a href="https://developers.google.com/speed/webp">developers.google.com/speed/webp</a></li>
     </ul>
-    <h2>Models (may download on first use)</h2>
-    <p class="note">CLIP weights are fetched via Hugging Face Hub (cache: typically <code>~/.cache/huggingface</code>).<br>
-    ResNet ImageNet checkpoints are typically cached under <code>~/.cache/torch</code>.</p>
-    <h3>Hugging Face — CLIP (settings may use either)</h3>
-    <ul>
-    <li><a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a> (default)</li>
-    <li><a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a></li>
-    </ul>
-    <h3>Face recognition (dlib / face_recognition)</h3>
-    <p>Detector and 128-D embedding weights are provided by the
-    <a href="https://github.com/ageitgey/face_recognition_models">face_recognition_models</a> distribution
-    (not hosted on Hugging Face). Credit: Davis King (dlib) and Adam Geitgey (face_recognition ecosystem).</p>
     </body>
     </html>
     """

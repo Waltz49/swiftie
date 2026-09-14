@@ -22,7 +22,7 @@ enum ReferenceGraphService {
     @MainActor
     static func validExifReferencePathsForImage(
         _ imagePath: String,
-        maxCount: Int = ImageGenEditSourcePaths.maxSourceImages
+        maxCount: Int = 4
     ) async -> [String] {
         guard FileManager.default.isReadableFile(atPath: imagePath) else { return [] }
         let normalized = normalizePath(imagePath)

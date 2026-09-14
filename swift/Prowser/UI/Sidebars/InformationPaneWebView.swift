@@ -6,7 +6,6 @@ enum InformationPaneLinkAction: Equatable {
     case copySeed(String)
     case toggleSection(String, expandAll: Bool)
     case refLevel(optionHeld: Bool)
-    case speak
     case edit
     case copy(fullComment: Bool)
     case create
@@ -94,9 +93,6 @@ struct InformationPaneWebView: NSViewRepresentable {
             }
 
             switch url.absoluteString {
-            case "speak://":
-                onLink(.speak, modifiers)
-                return true
             case "copy://":
                 onLink(.copy(fullComment: optionHeld), modifiers)
                 return true

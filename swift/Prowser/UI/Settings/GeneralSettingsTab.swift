@@ -7,7 +7,6 @@ struct GeneralSettingsTab: View {
     @State private var generalExpanded = true
     @State private var thumbnailsExpanded = true
     @State private var imageViewingExpanded = true
-    @State private var imageGenExpanded = true
 
     var body: some View {
         ScrollView {
@@ -82,12 +81,6 @@ struct GeneralSettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                if BundleCapabilities.imageGenUIEnabled {
-                    CollapsibleSettingsSection(title: "Image Generation", stateKey: "image_generation", isExpanded: $imageGenExpanded) {
-                        ImageGenerationSettingsSection()
-                    }
-                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +90,6 @@ struct GeneralSettingsTab: View {
             generalExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "general")
             thumbnailsExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "thumbnails")
             imageViewingExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_viewing")
-            imageGenExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_generation")
         }
         .onChange(of: generalExpanded) { _, value in
             appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "general", expanded: value)
@@ -107,9 +99,6 @@ struct GeneralSettingsTab: View {
         }
         .onChange(of: imageViewingExpanded) { _, value in
             appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_viewing", expanded: value)
-        }
-        .onChange(of: imageGenExpanded) { _, value in
-            appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_generation", expanded: value)
         }
     }
 

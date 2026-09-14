@@ -92,23 +92,6 @@ final class KeyboardHandlerController {
             return true
         }
 
-        // ⌘J — floating job queue panel (Python Control+J in Qt).
-        if hasCommand, !hasShift, !hasOption,
-           event.charactersIgnoringModifiers?.lowercased() == "j" {
-            appState.toggleJobsPanel()
-            return true
-        }
-
-        // ⌘⌥/ — edit active queue job.
-        if hasCommand, hasOption, !hasShift, !hasControl {
-            if event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
-                if BundleCapabilities.imageGenUIEnabled {
-                    appState.editActiveQueueJob()
-                    return true
-                }
-            }
-        }
-
         // ⌘; — swap browse image history first two (Last Image).
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers == ";" {
@@ -121,15 +104,19 @@ final class KeyboardHandlerController {
         // ⌘F — CLIP text search sheet.
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "f" {
-            appState.presentClipSearchSheet()
-            return true
+            if BundleCapabilities.clipSearchUIEnabled {
+                appState.presentClipSearchSheet()
+                return true
+            }
         }
 
         // ⌘K — find similar images (Python menu shortcut).
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "k" {
-            appState.searchOperations.findSimilarImages()
-            return true
+            if BundleCapabilities.similaritySearchUIEnabled {
+                appState.searchOperations.findSimilarImages()
+                return true
+            }
         }
 
         // ⌘⇧H — show image in directory.
@@ -208,13 +195,6 @@ final class KeyboardHandlerController {
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
-        // ⌃J — cycle jobs pane/panel size (Python Meta+J in Qt).
-        if hasControl, !hasCommand, !hasShift, !hasOption,
-           event.charactersIgnoringModifiers?.lowercased() == "j" {
-            appState.cycleActiveJobsSurfaceSize()
-            return true
-        }
-
         // F4, ., ^. — hide/show all panes (Python toggle_chrome).
         if hasControl, !hasCommand, !hasShift, !hasOption,
            event.charactersIgnoringModifiers == "." {
@@ -229,39 +209,6 @@ final class KeyboardHandlerController {
             if event.charactersIgnoringModifiers == "." {
                 appState.toggleChrome()
                 return true
-            }
-        }
-
-        // ⌥[ / ⌥] / ⌥\ — jobs queue size modes; ⌥/ — open image gen dialog.
-        if hasOption, !hasCommand, !hasControl, !hasShift {
-            switch event.charactersIgnoringModifiers {
-            case "[":
-                appState.setJobsQueueSizeMode(.strip)
-                return true
-            case "]":
-                appState.setJobsQueueSizeMode(.one, requireActive: true)
-                return true
-            case "\\":
-                appState.setJobsQueueSizeMode(.all, requireActive: true)
-                return true
-            default:
-                if isSlashKey(event) {
-                    if BundleCapabilities.imageGenUIEnabled {
-                        appState.openImageGenDialog()
-                        return true
-                    }
-                }
-                break
-            }
-        }
-
-        // ⇧⌥/ — fast open image generation from active image EXIF.
-        if hasOption, hasShift, !hasCommand, !hasControl {
-            if isSlashKey(event) {
-                if BundleCapabilities.imageGenUIEnabled {
-                    appState.openFastImageGenDialog()
-                    return true
-                }
             }
         }
 
@@ -297,17 +244,13 @@ final class KeyboardHandlerController {
     private func shouldHandle(_ event: NSEvent) -> Bool {
         guard let appState else { return false }
         if NSApp.modalWindow != nil { return false }
-        if isImageGenUnifiedDialogKeyWindow() || appState.showKeyboardHelp || appState.isAboutDialogVisible {
+        if appState.showKeyboardHelp || appState.isAboutDialogVisible {
             return false
         }
         if appState.hasModalSheetPresented { return false }
         if isTextInputFocused() { return false }
         if NSApp.keyWindow == nil { return false }
         return true
-    }
-
-    private func isImageGenUnifiedDialogKeyWindow() -> Bool {
-        NSApp.keyWindow?.identifier?.rawValue == "imagegen-unified"
     }
 
     private func isTextInputFocused() -> Bool {
@@ -436,7 +379,8 @@ final class KeyboardHandlerController {
             appState.toggleChatPane()
             return true
         }
-        if event.keyCode == 43, !hasShift, !hasControl,
+        if BundleCapabilities.chatUIEnabled,
+           event.keyCode == 43, !hasShift, !hasControl,
            !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
             appState.toggleChatPane()
             return true
@@ -571,12 +515,6 @@ final class KeyboardHandlerController {
                     appState.showFileTree()
                 }
             )
-        case "j":
-            if BundleCapabilities.imageGenUIEnabled {
-                appState.toggleJobsPane()
-                return true
-            }
-            return false
         case "p":
             return handleBrowseDoubleTap(
                 event,
@@ -811,12 +749,6 @@ final class KeyboardHandlerController {
         case "t":
             appState.toggleFileTree()
             return true
-        case "j":
-            if BundleCapabilities.imageGenUIEnabled {
-                appState.toggleJobsPane()
-                return true
-            }
-            return false
         case "p":
             appState.togglePreviewPane()
             return true
@@ -1394,17 +1326,6 @@ final class KeyboardHandlerController {
     /// Forward delete (117) and backspace/delete (51) both map to trash shortcuts on macOS.
     private func isDeleteKey(_ event: NSEvent) -> Bool {
         event.keyCode == 51 || event.keyCode == 117
-    }
-
-    /// US keyboard `/` is keyCode 44; Shift+/ yields `?` in charactersIgnoringModifiers.
-    private func isSlashKey(_ event: NSEvent) -> Bool {
-        if event.keyCode == 44 { return true }
-        switch event.charactersIgnoringModifiers {
-        case "/", "÷", "?":
-            return true
-        default:
-            return false
-        }
     }
 
 }

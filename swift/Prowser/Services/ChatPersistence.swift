@@ -1,6 +1,6 @@
 import Foundation
 
-/// Read/write `~/.prowser/data/chat_session_*.json`. Port of `chat_persistence.py`.
+/// Read/write `~/.swift-prowser/data/chat_session_*.json`. Port of `chat_persistence.py`.
 enum ChatPersistence {
     private static let settingsFileName = "chat_session_settings.json"
     private static let dataFileName = "chat_session_data.json"

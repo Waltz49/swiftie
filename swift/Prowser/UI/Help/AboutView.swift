@@ -8,15 +8,9 @@ struct AboutView: View {
     var onShowLicense: () -> Void = {}
     var onShowCredits: () -> Void = {}
 
-    @State private var pythonVersion = "Loading…"
-
-    private var buildDate: String {
-        AboutBuildInfo.latestPythonSourceDate(repoRoot: PythonLocator.locateRepoRoot())
-    }
-
     var body: some View {
         VStack(spacing: 10) {
-            if let icon = appIcon {
+            if let icon = AppAssets.applicationIcon {
                 Image(nsImage: icon)
                     .resizable()
                     .scaledToFit()
@@ -29,19 +23,13 @@ struct AboutView: View {
             Text("Version: \(AboutBuildInfo.packageVersion())")
                 .font(.system(size: 12))
 
-            Text("Python Version: \(pythonVersion)")
-                .font(.system(size: 12))
-
-            Text("Build Date: \(buildDate)")
-                .font(.system(size: 12))
-
-            Text("Background jobs: \(AboutBuildInfo.backgroundJobMode())")
+            Text("Build Date: \(AboutBuildInfo.buildDate())")
                 .font(.system(size: 12))
 
             Text("A native image browser for macOS")
                 .multilineTextAlignment(.center)
 
-            Text("Built with Python and PySide6")
+            Text("Built with Swift, SwiftUI, and AppKit")
                 .font(.system(size: 12))
                 .foregroundStyle(colors.dialogMutedText)
 
@@ -65,15 +53,7 @@ struct AboutView: View {
             )
         }
         .padding(20)
-        .frame(minWidth: 400, minHeight: 360)
+        .frame(minWidth: 400, minHeight: 320)
         .themeDialogStyle()
-        .task {
-            pythonVersion = await AboutBuildInfo.pythonRuntimeVersion()
-        }
-    }
-
-    private var appIcon: NSImage? {
-        AppAssets.nsImage(name: "Prowser", fileExtension: "icns")
-            ?? NSImage(named: NSImage.applicationIconName)
     }
 }

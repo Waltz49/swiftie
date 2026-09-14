@@ -34,17 +34,20 @@ final class WorkerServices {
         whisper = WhisperBridge(profilePath: profilePath)
         quickPerson = QuickPersonBridge(profilePath: profilePath)
         knownFaces = KnownFacesBridge(profilePath: profilePath)
-        pythonAvailable = modelTasks.isAvailable
-        if let environment = PythonLocator.resolve(profilePath: profilePath) {
+        pythonAvailable = BundleCapabilities.pythonMLEnabled && modelTasks.isAvailable
+        if BundleCapabilities.pythonMLEnabled,
+           let environment = PythonLocator.resolve(profilePath: profilePath) {
             PythonLocator.reapOrphanWorkers(environment: environment)
         }
     }
 
     func reloadSettings(config: AppConfig) {
+        guard BundleCapabilities.pythonMLEnabled else { return }
         clip.reloadSettings(from: config)
     }
 
     func onDirectoryLoaded(_ directory: String?) {
+        guard BundleCapabilities.pythonMLEnabled else { return }
         guard let directory else { return }
         clip.restartWithPriorityDirectory(directory)
     }

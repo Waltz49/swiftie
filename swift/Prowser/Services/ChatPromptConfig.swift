@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persist chat system prompt library in `~/.prowser/data/chat_system_prompts.json`.
+/// Persist chat system prompt library in `~/.swift-prowser/data/chat_system_prompts.json`.
 /// Port of `chat_plugins/chat_prompt_config.py` and `chat_named_system_prompts.py`.
 enum ChatPromptConfig {
     static let systemDefaultID = "__system_default__"

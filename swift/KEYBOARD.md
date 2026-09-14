@@ -1,8 +1,8 @@
 # Keyboard Shortcuts
 
-This document lists keyboard shortcuts available in Prowser. On macOS, **Cmd** refers to the Command key (⌘). In Qt source code, `Ctrl+` in `QKeySequence` strings maps to ⌘ on macOS.
+This document lists keyboard shortcuts available in the Swift **Prowser** app. On macOS, **Cmd** refers to the Command key (⌘). In the Python/Qt app, `Ctrl+` in `QKeySequence` strings maps to ⌘ on macOS; this file uses macOS conventions throughout.
 
-Physical **Control** (⌃) appears in shortcuts as `Meta+` in Qt (for example ⌃1–9 for favorites, ⌃W to fit image width).
+Physical **Control** (⌃) appears in shortcuts as `Meta+` in Qt source code (for example ⌃1–9 for favorites, ⌃W to fit image width).
 
 Press **F1** or **/** in the app for context-sensitive help. Menu items also show their shortcuts.
 
@@ -14,7 +14,6 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 - [Slideshow Mode](#slideshow-mode)
 - [Slideshow2 Mode (Panning Image)](#slideshow2-mode-panning-image)
 - [Slideshow3 Mode (Floating Frames)](#slideshow3-mode-floating-frames)
-- [Image Menu (AI Generation)](#image-menu-ai-generation)
 - [Global Menu Shortcuts](#global-menu-shortcuts)
 - [Notes](#notes)
 
@@ -24,19 +23,20 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Key | Action |
 |-----|--------|
 | ← → ↑ ↓ | Navigate thumbnails |
-| H | Go to first image |
-| E | Go to last image |
+| H / Home | Go to first image |
+| E / End | Go to last image |
 | Page Up/Down | Page up/down through thumbnails |
 | Shift+← → ↑ ↓ | Range selection |
 | Cmd+← → ↑ ↓ | Add to multi-selection |
-| Shift+H | Select to first image |
-| Shift+E | Select to last image |
+| Shift+H / Shift+Home | Select to first image |
+| Shift+E / Shift+End | Select to last image |
+| Cmd+[ / Cmd+] | Directory history back / forward (menu) |
 
 ### Actions
 | Key | Action |
 |-----|--------|
-| Enter/Space | Open in fullscreen (image viewer) |
-| F | Enter image viewer (menu) |
+| Enter/Space | Open in browse view (image viewer) |
+| F | Enter browse view (menu) |
 | Esc | Clear selection, or navigate backward in directory history |
 | Shift+Esc | Navigate forward in directory history |
 | F10 | Clear forward and backward history stacks |
@@ -54,49 +54,44 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Shift+N | Sort by name (Z–A) |
 | Z | Sort by size (largest first) |
 | Shift+Z | Sort by size (smallest first) |
-| X / Shift+X | Sort by EXIF date |
-| Y / Shift+Y | Sort by EXIF year |
 | C | Custom sort |
 | Cmd+T | Reverse sort order |
-| Cmd+K | Sort by similarity |
-| Cmd+F / Cmd+Shift+K | Search images by description |
+
+EXIF date/year sorts are available from the **View → Sort By** menu (no letter keys in the Swift port yet).
 
 ### Thumbnail Size
 | Key | Action |
 |-----|--------|
 | +/- | Resize thumbnails |
 | 0 | Reset thumbnail size to dynamic default |
-| A | Toggle preview fit mode (thumbnail); Actual Size in browse |
 
 ### File Operations
 | Key | Action |
 |-----|--------|
 | Cmd+C | Copy image path to clipboard |
 | ⌃C | Copy image pixels to clipboard |
-| Cmd+E | Edit in external editor |
-| Cmd+Backspace | Delete current file (move to Trash) |
-| Cmd+Delete | Delete selected files |
+| ⌃E | Edit in external editor |
+| Cmd+Backspace / Cmd+Delete | Delete selected files (move to Trash) |
 | Cmd+Z | Undo file deletion |
 | Cmd+N | Rename with custom prefix |
 | Cmd+M | Convert selected images |
 | Cmd+Shift+Z | Resize images |
 | Cmd+L | Lock files (when locking enabled) |
 | Cmd+Shift+L | Unlock files |
-| Cmd+X | Exclude selected thumbs from the current view |
+| F2 | Rename selected file |
 
 ### View Options
 | Key | Action |
 |-----|--------|
 | B | Toggle status bar |
 | I | Toggle information sidebar |
-| O | Toggle organize sidebar (favorites / move lists) |
-| Cmd+I | Toggle filename overlay |
+| O | Toggle shortcuts sidebar (favorites / move lists) |
+| Cmd+I | Cycle thumbnail overlay (none → name → size → both) |
 | Cmd+Shift+I | Toggle number overlay |
 | T | Toggle file tree |
 | P | Toggle preview widget |
-| J | Toggle jobs pane (when enabled) |
-| F9 or , | Toggle chat pane (when enabled) |
-| F4, ., Cmd+. | Toggle chrome (menu bar, etc.) |
+| , | Toggle chat pane (when chat UI is enabled) |
+| F4, ., ⌃. | Toggle chrome (menu bar, etc.) |
 | F12 | Toggle list view |
 | Cmd+Return | Collapse file tree |
 | Cmd+Shift+Return | Expand file tree |
@@ -112,7 +107,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 |-----|--------|
 | S | Start slideshow |
 | Shift+S | Start slideshow 2 (panning) |
-| Shift+Cmd+S | Start slideshow 3 (floating frames) |
+| Shift+⌃+S | Start slideshow 3 (floating frames) |
 
 ### Help & Settings
 | Key | Action |
@@ -122,8 +117,9 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Cmd+O | Open directory |
 | Cmd+Shift+O | Open file |
 | Cmd+R | Refresh directory |
+| Cmd+Shift+R | Reveal in Finder |
 | Cmd+Shift+T | View copy of Trash (if available) |
-| F3 | Image history (browse mode) |
+| F3 | Image history |
 
 ### Quick File Move
 | Key | Action |
@@ -148,17 +144,14 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Cmd+Shift+C | Cache subdirectories' thumbnails |
 | Cmd+Shift+H | Show image in directory |
 | Shift+F | Find duplicate images (recursive) |
-| Cmd+P | Search by person |
-| ⌃⌘P | Quick person search |
-| Cmd+Shift+P | Extract faces |
-| Cmd+= | Cache subdirectory faces |
-| Cmd+Shift+N | Toggle naming-consistency marks in the file tree |
 | ⌃L | View log (Tools → Debug) |
 | F5 | Show reference graph for active image |
 
+Optional search features (when enabled in build): **Cmd+F** (CLIP text search), **Cmd+K** (find similar images).
+
 ## List View
 
-Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** adjust row height; **0** resets row height to the default; **Q** closes list view. Most thumbnail shortcuts (navigation, sorting, file ops) also apply in list view.
+Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** adjust row height; **0** resets row height to the default; **Q** returns to thumbnail view. Most thumbnail shortcuts (navigation, sorting, file ops) also apply in list view.
 
 ## Browse View (Fullscreen)
 
@@ -166,7 +159,7 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Key | Action |
 |-----|--------|
 | ← → ↑ ↓ | Previous/next image |
-| H / E | First/last image |
+| H / E / Home / End | First/last image |
 | Cmd+← → ↑ ↓ | Pan image when zoomed |
 
 ### Image Transformations
@@ -185,6 +178,7 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | A | Actual size (1:1 pixels) |
 | ⌃W | Fit image to canvas width |
 | Mouse wheel | Zoom in/out |
+| Right-click | Return to thumbnails |
 
 ### Actions
 | Key | Action |
@@ -192,9 +186,8 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Space | Next image / return to thumbnails (configurable) |
 | Shift+Space | Toggle space bar behavior |
 | Enter/Return/Esc/Q/F | Return to thumbnails |
-| Click | Exit fullscreen |
+| T / P (double-tap) | Return to thumbnails and show file tree / preview |
 | F10 | Clear history stacks |
-| Esc / Shift+Esc | Directory history back/forward |
 | ⌃⌘F | macOS Space vs windowed display |
 
 ### File Operations
@@ -202,8 +195,8 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 |-----|--------|
 | Cmd+C | Copy image path |
 | ⌃C | Copy image pixels |
-| Cmd+E | Edit in external editor |
-| Cmd+Backspace | Delete current file |
+| ⌃E | Edit in external editor |
+| Cmd+Backspace / Cmd+Delete | Delete current file |
 | Cmd+Z | Undo deletion |
 | Cmd+L | Lock files (when locking enabled) |
 | Cmd+Shift+L | Unlock files |
@@ -213,14 +206,13 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Key | Action |
 |-----|--------|
 | I | Toggle information sidebar |
-| O | Toggle organize sidebar |
+| O | Toggle shortcuts sidebar |
 | B | Toggle status bar |
-| Cmd+I | Toggle filename/number overlay |
-| J | Toggle jobs pane (when enabled) |
-| F9 or , | Toggle chat pane (when enabled) |
+| Cmd+I | Cycle filename/number overlay |
+| Cmd+Shift+I | Toggle number overlay |
 | F3 | Image history |
-| F5 | Show reference graph for active image |
-| F4, ., Cmd+. | Toggle chrome |
+| F5 | Find references to current image |
+| F4, ., ⌃. | Toggle chrome |
 | Cmd+Return / Cmd+Shift+Return | Collapse/expand file tree |
 
 ### Desktop & Maps
@@ -233,15 +225,13 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Key | Action |
 |-----|--------|
 | R, D, N, Z, C, Cmd+T | Same as thumbnail view |
-| Cmd+K | Sort by similarity |
-| Cmd+F / Cmd+Shift+K | Search by description |
 
 ### Slideshow
 | Key | Action |
 |-----|--------|
 | S | Start slideshow |
 | Shift+S | Start slideshow 2 |
-| Shift+Cmd+S | Start slideshow 3 |
+| Shift+⌃+S | Start slideshow 3 |
 
 ## Slideshow Mode
 
@@ -250,7 +240,6 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 |-----|--------|
 | N | Next slide immediately |
 | ← → ↑ ↓ | Set slide direction (or advance if already set) |
-| Click | Advance to next slide |
 
 ### Speed Controls
 | Key | Action |
@@ -276,8 +265,7 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Key | Action |
 |-----|--------|
 | Space/Enter/F | Pause and enter browse mode |
-| Shift+Space | Toggle space bar behavior |
-| Esc / S | Exit slideshow |
+| Esc | Exit slideshow |
 
 ## Slideshow2 Mode (Panning Image)
 
@@ -303,32 +291,21 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 ### Actions
 | Key | Action |
 |-----|--------|
-| Space/Enter/F | Enter browse mode |
+| Space/Enter | Enter browse mode |
 | Esc | Exit slideshow2 |
 
 ## Slideshow3 Mode (Floating Frames)
 
-Start with **Shift+Cmd+S** (Tools → Slideshows → Floating Frames).
+Start with **Shift+⌃+S** (Tools → Slideshows → Floating Frames).
 
 | Key | Action |
 |-----|--------|
 | Esc / Space / Return | Exit to thumbnails |
 | 1 / 2 | Slower / faster movement |
-| 3 / 4 | Fewer / more images on screen |
-| 5 / 6 | Smaller / larger average image size |
-| 9 / 0 | Presets |
 | F1, /, ? | Show help |
 | Cmd+Return | Collapse file tree |
 
-## Image Menu (AI Generation)
-
-| Key | Action |
-|-----|--------|
-| Option+/ (⌥/) | Open last-used image function dialog |
-| Shift+Option+/ (⇧⌥/) | Open image-gen dialog primed from current image (From Text or Edit Image per Settings) |
-| Cmd+J | Job queue |
-
-Infill paint canvas (when open): **[** / **]** brush size; **Cmd+Z** / **Cmd+Shift+Z** undo/redo strokes.
+Additional floating-frame tuning keys from the Python app (3–6, 9, 0) are not wired in the Swift port yet.
 
 ## Global Menu Shortcuts
 
@@ -336,15 +313,16 @@ These work from most views via the menu bar:
 
 - **Cmd+Shift+M** — Quick mass rename (when enabled)
 - **Cmd+Shift+E** — Edit EXIF user comment
-- **Cmd+Shift+U** — Create screen-size copy
 - **⌃H** — Open home directory
-- **Shift+W** — Wallpaper → resize window
+- **Cmd+Shift+W** — Wallpaper → resize window (last used scaling)
+
+Screen-size copy actions are in **Tools → Create Screen Size Copy…** (no default keyboard shortcut).
 
 ## Notes
 
-- **Cmd** in this document is ⌘ (Command). Qt `Ctrl+` shortcuts in code map to ⌘ on macOS.
+- **Cmd** in this document is ⌘ (Command). Qt `Ctrl+` shortcuts in the Python app map to ⌘ on macOS.
 - **⌃** is the physical Control key (`Meta+` in Qt).
 - Some shortcuts are context-sensitive (view mode, settings, or feature flags).
 - **Cmd+L** locks files (when locking is enabled). **Cmd+;** is Last Image in browse view.
+- **⌃E** opens the external editor; **E** alone jumps to the last image in browse view.
 - The in-app help dialog (F1) is built from runtime bindings and may differ slightly from this file.
-- Modifier+click and drag actions are listed in **Help → Hidden Gems**.

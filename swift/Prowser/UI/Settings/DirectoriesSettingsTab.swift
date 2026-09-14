@@ -111,21 +111,29 @@ struct DirectoriesSettingsTab: View {
                     depthStepper(title: "Search depth", key: "search_depth", defaultValue: 4)
                 }
 
-                CollapsibleSettingsSection(title: "Image Creation & Temporary Files", stateKey: "image_creation_temp_files", isExpanded: $filesExpanded) {
-                    Text("When enabled, newly generated images are saved in the folder below. When disabled, images are saved to ~/Downloads.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                CollapsibleSettingsSection(
+                    title: BundleCapabilities.imageGenUIEnabled
+                        ? "Image Creation & Temporary Files"
+                        : "Temporary Files",
+                    stateKey: "image_creation_temp_files",
+                    isExpanded: $filesExpanded
+                ) {
+                    if BundleCapabilities.imageGenUIEnabled {
+                        Text("When enabled, newly generated images are saved in the folder below. When disabled, images are saved to ~/Downloads.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-                    HStack {
-                        Toggle("", isOn: $imageCreationEnabled)
-                            .labelsHidden()
-                            .onChange(of: imageCreationEnabled) { _, _ in persistImageCreation() }
-                        TextField("Generated images folder", text: $imageCreationPath)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { persistImageCreation() }
-                        Button("Choose…") {
-                            SettingsSupport.pickDirectory(into: $imageCreationPath)
-                            persistImageCreation()
+                        HStack {
+                            Toggle("", isOn: $imageCreationEnabled)
+                                .labelsHidden()
+                                .onChange(of: imageCreationEnabled) { _, _ in persistImageCreation() }
+                            TextField("Generated images folder", text: $imageCreationPath)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { persistImageCreation() }
+                            Button("Choose…") {
+                                SettingsSupport.pickDirectory(into: $imageCreationPath)
+                                persistImageCreation()
+                            }
                         }
                     }
 
@@ -138,7 +146,7 @@ struct DirectoriesSettingsTab: View {
                             persistTemporaryFiles()
                         }
                     }
-                    Text("Work files for infill, masking, image generation, wallpaper, and similar operations.")
+                    Text("Work files for wallpaper, convert, resize, and similar operations.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

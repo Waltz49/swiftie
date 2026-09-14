@@ -42,6 +42,8 @@ struct FileTreeView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        // Access image path so SwiftUI retriggers sync when thumbnail highlight moves.
+        _ = appState.fileData.currentImagePath
         context.coordinator.syncSelectionIfNeeded()
         context.coordinator.focusTreeIfRequested()
         context.coordinator.collapseUIIfRequested()
@@ -68,7 +70,11 @@ struct FileTreeView: NSViewRepresentable {
         private var lastSyncedDirectory: String?
         private var lastThemeID: String?
         private var pendingSingleClick: DispatchWorkItem?
+        private var pendingHighlightSync: DispatchWorkItem?
+        private var currentImageObserver: NSObjectProtocol?
         private var expandedDirectoryPaths: Set<String> = []
+        fileprivate var userIsNavigatingTree = false
+        private var userNavigationReset: DispatchWorkItem?
 
         init(appState: AppState) {
             self.appState = appState
@@ -138,11 +144,35 @@ struct FileTreeView: NSViewRepresentable {
             outlineView?.needsDisplay = true
         }
 
+        func markUserNavigatingTree() {
+            userIsNavigatingTree = true
+            userNavigationReset?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.userIsNavigatingTree = false
+            }
+            userNavigationReset = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+        }
+
         func syncSelectionIfNeeded() {
-            let current = appState.fileData.currentDirectory
+            switch appState.fileData.currentViewMode {
+            case .slideshow, .slideshow2, .slideshow3:
+                return
+            default:
+                break
+            }
+            let current = FileTreeFilter.highlightDirectory(appState: appState)
             guard current != lastSyncedDirectory else { return }
-            lastSyncedDirectory = current
-            syncSelection()
+            scheduleDebouncedHighlightSync()
+        }
+
+        private func scheduleDebouncedHighlightSync() {
+            pendingHighlightSync?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.syncSelection()
+            }
+            pendingHighlightSync = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13, execute: work)
         }
 
         func cancelPendingSingleClick() {
@@ -253,6 +283,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func startObservingSettings() {
             guard settingsObserver == nil else { return }
+            settingsObserver = UUID()
             FileTreeFilter.setUpdateHandler { [weak self] discoveredPaths in
                 self?.refreshAfterDiscovery(discoveredPaths)
             }
@@ -261,6 +292,16 @@ struct FileTreeView: NSViewRepresentable {
             }
             _ = appState.eventBus.subscribe(.filterPatternChanged) { [weak self] _ in
                 Task { @MainActor in self?.reloadFilterResults(preserveExpansion: true) }
+            }
+            if currentImageObserver == nil {
+                currentImageObserver = NotificationCenter.default.addObserver(
+                    forName: .prowserCurrentImageChanged,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    let coordinator = self
+                    Task { @MainActor in coordinator?.syncSelectionIfNeeded() }
+                }
             }
         }
 
@@ -278,6 +319,7 @@ struct FileTreeView: NSViewRepresentable {
                 outlineView.reloadItem(parent, reloadChildren: true)
             }
             restoreTrackedExpansion(outlineView: outlineView)
+            syncSelectionIfNeeded()
         }
 
         /// Re-filter visible branches without collapsing the tree.
@@ -307,12 +349,12 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         private func ancestorPaths(of path: String) -> [String] {
-            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+            let normalized = FileTreeFilter.standardizedPath(path)
             var result: [String] = []
             var current = normalized
             while true {
                 result.append(current)
-                if roots.contains(where: { $0.path == current }) { break }
+                if isRootPath(current) { break }
                 let parent = URL(fileURLWithPath: current).deletingLastPathComponent().standardizedFileURL.path
                 if parent == current { break }
                 current = parent
@@ -351,13 +393,23 @@ struct FileTreeView: NSViewRepresentable {
                 expandedDirectoryPaths.insert(first.path)
             }
             lastSyncedDirectory = nil
-            syncSelectionIfNeeded()
+            pendingHighlightSync?.cancel()
+            syncSelection()
         }
 
         func syncSelection() {
-            guard let outlineView, let current = appState.fileData.currentDirectory else { return }
+            switch appState.fileData.currentViewMode {
+            case .slideshow, .slideshow2, .slideshow3:
+                return
+            default:
+                break
+            }
+            guard let outlineView, let current = FileTreeFilter.highlightDirectory(appState: appState) else { return }
+            FileTreeFilter.addPriorityPath(current)
             guard let match = findNodeByPath(current) else { return }
             expandPath(to: match, outlineView: outlineView)
+            lastSyncedDirectory = current
+            if userIsNavigatingTree { return }
             let row = outlineView.row(forItem: match)
             if row >= 0 {
                 outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -365,29 +417,40 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
+        private func standardizedPath(_ path: String) -> String {
+            FileTreeFilter.standardizedPath(path)
+        }
+
+        private func isRootPath(_ normalized: String) -> Bool {
+            roots.contains { standardizedPath($0.path) == normalized }
+        }
+
+        private func rootContaining(normalized: String) -> FileTreeNode? {
+            roots.first { root in
+                let rootNorm = standardizedPath(root.path)
+                return normalized == rootNorm || normalized.hasPrefix(rootNorm + "/")
+            }
+        }
+
         /// Walk path components from the containing root — O(depth), not O(tree size).
         private func findNodeByPath(_ targetPath: String) -> FileTreeNode? {
-            let normalized = URL(fileURLWithPath: targetPath).standardizedFileURL.path
-            guard let root = roots.first(where: {
-                normalized == $0.path || normalized.hasPrefix($0.path + "/")
-            }) else {
-                return nil
-            }
-            if root.path == normalized { return root }
+            let normalized = standardizedPath(targetPath)
+            guard let root = rootContaining(normalized: normalized) else { return nil }
+            let rootNorm = standardizedPath(root.path)
+            if rootNorm == normalized { return root }
 
             var current = root
-            let rootPath = URL(fileURLWithPath: root.path).standardizedFileURL.path
-            var remainder = normalized
-            if remainder.hasPrefix(rootPath) {
-                remainder = String(remainder.dropFirst(rootPath.count))
-            }
-            if remainder.hasPrefix("/") {
-                remainder.removeFirst()
-            }
+            var remainder = String(normalized.dropFirst(rootNorm.count))
+            if remainder.hasPrefix("/") { remainder.removeFirst() }
             guard !remainder.isEmpty else { return root }
 
             for component in remainder.split(separator: "/").map(String.init) {
                 current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                if current.children?.contains(where: { $0.name == component }) != true {
+                    current.invalidateChildren()
+                    current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                    outlineView?.reloadItem(current, reloadChildren: true)
+                }
                 guard let next = current.children?.first(where: { $0.name == component }) else {
                     return nil
                 }
@@ -397,21 +460,21 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         private func expandPath(to node: FileTreeNode, outlineView: NSOutlineView) {
-            let normalized = URL(fileURLWithPath: node.path).standardizedFileURL.path
-            guard let root = roots.first(where: {
-                normalized == $0.path || normalized.hasPrefix($0.path + "/")
-            }) else {
-                return
-            }
+            let normalized = standardizedPath(node.path)
+            guard let root = rootContaining(normalized: normalized) else { return }
+            let rootNorm = standardizedPath(root.path)
 
             var chain: [FileTreeNode] = [root]
-            if normalized != root.path {
-                let rootPath = URL(fileURLWithPath: root.path).standardizedFileURL.path
-                var remainder = String(normalized.dropFirst(rootPath.count))
+            if normalized != rootNorm {
+                var remainder = String(normalized.dropFirst(rootNorm.count))
                 if remainder.hasPrefix("/") { remainder.removeFirst() }
                 var current = root
                 for component in remainder.split(separator: "/").map(String.init) {
                     current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                    if current.children?.contains(where: { $0.name == component }) != true {
+                        current.invalidateChildren()
+                        current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                    }
                     outlineView.reloadItem(current, reloadChildren: true)
                     guard let next = current.children?.first(where: { $0.name == component }) else { return }
                     chain.append(next)
@@ -525,6 +588,7 @@ final class FileTreeOutlineView: NSOutlineView {
     weak var coordinator: FileTreeView.Coordinator?
 
     override func mouseDown(with event: NSEvent) {
+        coordinator?.markUserNavigatingTree()
         let point = convert(event.locationInWindow, from: nil)
         let row = row(at: point)
 
@@ -556,10 +620,12 @@ final class FileTreeOutlineView: NSOutlineView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        coordinator?.markUserNavigatingTree()
         coordinator?.handleContextMenu(for: event)
     }
 
     override func keyDown(with event: NSEvent) {
+        coordinator?.markUserNavigatingTree()
         if event.keyCode == 120 {
             coordinator?.renameSelectedDirectory()
             return

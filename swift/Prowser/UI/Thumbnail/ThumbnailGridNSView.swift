@@ -156,7 +156,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             showImageSize: showImageSize,
             cellSize: cellSize
         )
-        applyDocumentSize(metrics.contentSize)
+        // Match Python: canvas is at least viewport-sized so grid background fills the visible area.
+        let viewport = viewportSizeForLayout()
+        applyDocumentSize(
+            NSSize(
+                width: max(metrics.contentSize.width, viewport.width),
+                height: max(metrics.contentSize.height, viewport.height)
+            )
+        )
         needsDisplay = true
         loadVisibleThumbnails()
         gridDelegate?.thumbnailGridDidUpdateLayout(columns: gridColumnCount)
