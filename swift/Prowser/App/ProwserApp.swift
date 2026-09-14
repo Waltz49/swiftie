@@ -1496,6 +1496,7 @@ final class AppState {
 
     /// Python File → Exit (⌘Q / `QAction.QuitRole`) is connected to `main_window.close`.
     func closeMainWindow() {
+        WindowFullscreen.noteMainWindowClosing()
         quitConfirmedViaClose = true
         let mainWindows = NSApp.windows.filter(Self.isPrimaryBrowserWindow)
         if let window = mainWindows.first(where: { $0 === NSApp.keyWindow }) ?? mainWindows.first {

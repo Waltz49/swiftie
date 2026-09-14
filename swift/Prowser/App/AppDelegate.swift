@@ -113,9 +113,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !isPrimary {
+            WindowFullscreen.noteApplicationTerminating()
             return .terminateNow
         }
         if appState.confirmQuitIfRunning() {
+            WindowFullscreen.noteApplicationTerminating()
             return .terminateNow
         }
         return .terminateCancel
@@ -130,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 filePath: path,
                 directory: directory,
                 viewMode: appState.fileData.currentViewMode.rawValue,
-                macosSpaceMode: WindowFullscreen.isInMacOSSpace
+                macosSpaceMode: WindowFullscreen.macOSSpaceModeForRestore()
             )
         }
         appState.prepareForApplicationExit()
@@ -297,18 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             savedMacOSSpace: savedSpace
         )
 
-        let capturedState = appState!
-        for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
-            NotificationCenter.default.addObserver(
-                forName: name,
-                object: nil,
-                queue: .main
-            ) { _ in
-                MainActor.assumeIsolated {
-                    WindowFullscreen.persistMacOSSpaceMode(config: capturedState.config)
-                }
-            }
-        }
+        WindowFullscreen.installRestoreTracking(config: appState.config)
     }
 
     private static func uniqued(_ paths: [String]) -> [String] {
