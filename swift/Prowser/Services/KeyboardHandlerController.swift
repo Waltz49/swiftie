@@ -31,10 +31,23 @@ final class KeyboardHandlerController {
         }
     }
 
+    /// Tree forwards unhandled keys here (Python `keyboard_handler_manager.handle_key_event` from the tree view).
+    func handleKeyEventFromTree(_ event: NSEvent) -> Bool {
+        handleKeyDown(event, fromTreeFocus: true)
+    }
+
+    static func fileTreeKeyboardTargetIsFocused(in window: NSWindow?) -> Bool {
+        guard let responder = window?.firstResponder else { return false }
+        if responder is FileTreeOutlineView { return true }
+        if let stop = responder as? MainWindowTabFocusStopView, stop.role == .tree { return true }
+        return false
+    }
+
     /// Returns true when the event was handled (and should be consumed).
-    private func handleKeyDown(_ event: NSEvent) -> Bool {
+    private func handleKeyDown(_ event: NSEvent, fromTreeFocus: Bool = false) -> Bool {
+        guard appState != nil else { return false }
+        guard shouldHandle(event, fromTreeFocus: fromTreeFocus) else { return false }
         guard let appState else { return false }
-        guard shouldHandle(event) else { return false }
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let hasCommand = flags.contains(.command)
@@ -241,7 +254,7 @@ final class KeyboardHandlerController {
         }
     }
 
-    private func shouldHandle(_ event: NSEvent) -> Bool {
+    private func shouldHandle(_ event: NSEvent, fromTreeFocus: Bool = false) -> Bool {
         guard let appState else { return false }
         if NSApp.modalWindow != nil { return false }
         if appState.showKeyboardHelp || appState.isAboutDialogVisible {
@@ -251,6 +264,7 @@ final class KeyboardHandlerController {
             return false
         }
         if appState.hasModalSheetPresented { return false }
+        if !fromTreeFocus, Self.fileTreeKeyboardTargetIsFocused(in: event.window) { return false }
         if isTextInputFocused(in: event.window) { return false }
         if NSApp.keyWindow == nil { return false }
         return true

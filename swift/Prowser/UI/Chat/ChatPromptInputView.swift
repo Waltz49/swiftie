@@ -32,6 +32,7 @@ struct ChatPromptInputView: View {
             HStack {
                 Spacer(minLength: 0)
                 Button("Send") { chat.send() }
+                    .focusable(false)
                     .disabled(
                         !chat.isEnabled
                             || chat.isStreaming
@@ -44,6 +45,7 @@ struct ChatPromptInputView: View {
                 get: { chat.automaticCreate },
                 set: { chat.setAutomaticCreate($0) }
             ))
+            .focusable(false)
             .font(.caption)
             .disabled(!chat.isEnabled)
         }
@@ -78,6 +80,7 @@ struct ChatPromptInputView: View {
 
 /// Scrollable multi-line chat prompt using `NSTextView` for reliable paste and Enter-to-send.
 private struct ChatPromptTextView: NSViewRepresentable {
+    @Environment(AppState.self) private var appState
     @Binding var text: String
     let isEnabled: Bool
     let minVisibleLines: CGFloat
@@ -93,6 +96,7 @@ private struct ChatPromptTextView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ChatPromptNSTextView()
+        textView.appState = appState
         textView.onSubmit = onSubmit
         textView.isRichText = false
         textView.importsGraphics = false
@@ -121,6 +125,7 @@ private struct ChatPromptTextView: NSViewRepresentable {
         scrollView.drawsBackground = true
 
         context.coordinator.textView = textView
+        appState.chatPromptTextView = textView
         return scrollView
     }
 
@@ -159,6 +164,9 @@ private struct ChatPromptTextView: NSViewRepresentable {
 
 private final class ChatPromptNSTextView: NSTextView {
     var onSubmit: (() -> Void)?
+    weak var appState: AppState?
+
+    override var canBecomeKeyView: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
@@ -193,6 +201,13 @@ private final class ChatPromptNSTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 48, !event.modifierFlags.contains(.command) {
+            let forward = !event.modifierFlags.contains(.shift)
+            if let appState {
+                MainWindowKeyViewLoop.moveFromChatPrompt(forward: forward, appState: appState)
+            }
+            return
+        }
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if isReturn, !event.modifierFlags.contains(.shift) {
             onSubmit?()

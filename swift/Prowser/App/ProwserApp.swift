@@ -66,6 +66,9 @@ final class AppState {
     let directoryHistory = DirectoryHistory()
     let browseImageHistory = BrowseImageHistoryController()
     var fileTreeFocusToken = 0
+    /// While set, tree highlight follows this directory until the active image catches up (Python `user_requested_directory`).
+    var userRequestedTreeDirectory: String?
+    private var userRequestedTreeClearWork: DispatchWorkItem?
     var settingsOpenRequestToken = 0
     var requestedSettingsTab: SettingsTab = .general
     var showKeyboardHelp = false
@@ -142,6 +145,13 @@ final class AppState {
     let menuRefresh = MenuRefreshState()
     let renameStatusManager: RenameStatusManager
     weak var thumbnailGridHost: ThumbnailGridNSView?
+    weak var fileTreeOutlineView: FileTreeOutlineView?
+    weak var browseImageHost: BrowseImageNSView?
+    weak var listViewHost: ImageListNSView?
+    weak var chatPromptTextView: NSTextView?
+    weak var mainWindowTreeTabStop: MainWindowTabFocusStopView?
+    weak var mainWindowChatTabStop: MainWindowTabFocusStopView?
+    weak var mainWindowCanvasTabStop: MainWindowTabFocusStopView?
     var showMoveWorkFilesSheet = false
     var quickPersonFacePick: QuickPersonFacePickState?
     var quickPersonFacePickContinuation: (([Double]?) -> Void)?
@@ -1197,6 +1207,22 @@ final class AppState {
         fileTreeFocusToken += 1
     }
 
+    func noteUserRequestedTreeDirectory(_ path: String) {
+        userRequestedTreeDirectory = FileTreeFilter.standardizedPath(path)
+        userRequestedTreeClearWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.userRequestedTreeDirectory = nil
+        }
+        userRequestedTreeClearWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+    }
+
+    func clearUserRequestedTreeDirectory() {
+        userRequestedTreeDirectory = nil
+        userRequestedTreeClearWork?.cancel()
+        userRequestedTreeClearWork = nil
+    }
+
     func collapseFileTreeToHome() {
         fileTreeCollapseUIToken += 1
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -1914,6 +1940,11 @@ final class AppState {
 
     func notifyMainContentLayoutChanged() {
         eventBus.emit(.mainContentLayoutChanged)
+        MainWindowKeyViewLoop.sync(appState: self)
+    }
+
+    func handleTreeForwardedKeyboard(_ event: NSEvent) -> Bool {
+        keyboardHandler.handleKeyEventFromTree(event)
     }
 
     private func setLeftSidebarPaneVisible(configKey: String, visible: Bool) {

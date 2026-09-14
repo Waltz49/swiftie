@@ -29,6 +29,7 @@ struct MainWindowView: View {
                     ZStack(alignment: .bottomLeading) {
                         ContentStackView()
                             .frame(minWidth: 400, maxHeight: .infinity)
+                            .background(MainWindowCanvasTabStopView())
                         NotificationBubbleOverlay()
                     }
                 },

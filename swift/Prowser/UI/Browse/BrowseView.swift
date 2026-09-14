@@ -10,6 +10,7 @@ struct BrowseView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> BrowseImageNSView {
         let view = BrowseImageNSView(frame: .zero)
+        view.appState = appState
         view.onActualSizeModeChanged = { [weak appState] enabled in
             guard let appState else { return }
             if appState.browseActualSizeEnabled != enabled {
@@ -20,6 +21,7 @@ struct BrowseView: NSViewRepresentable {
             appState?.closeBrowseView()
         }
         context.coordinator.view = view
+        appState.browseImageHost = view
         context.coordinator.startObserving()
         return view
     }

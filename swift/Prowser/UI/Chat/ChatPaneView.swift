@@ -51,6 +51,7 @@ struct ChatPaneView: View {
             ChatPromptInputView(chat: chat)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
+                .background(MainWindowChatTabStopView())
 
             Text("System prompt: \(chat.systemPromptLabel)")
                 .font(.caption2)

@@ -665,6 +665,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     override func keyDown(with event: NSEvent) {
         logKey("ThumbnailGridNSView.keyDown keyCode=\(event.keyCode) index=\(currentIndex)")
+        if event.keyCode == 48, !event.modifierFlags.contains(.command), let appState {
+            MainWindowKeyViewLoop.moveFromMainCanvas(appState: appState)
+            return
+        }
         if let appState,
            KeyboardHandlerController.settingsPreferencesShouldReceiveKeyboard(appState: appState, event: event) {
             super.keyDown(with: event)

@@ -275,7 +275,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                 }
             }
             syncSelectionVisuals(to: gridView)
-            if inThumbnailMode {
+            if inThumbnailMode,
+               !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: gridView.window) {
                 gridView.claimKeyboardFocus()
             }
         }
@@ -312,7 +313,9 @@ struct ThumbnailGridView: NSViewRepresentable {
             lastSyncedIndex = index
             gridView.selectIndex(index, scroll: false, notifyDelegate: false)
             gridView.scrollToSelectionAfterLayout()
-            gridView.claimKeyboardFocus()
+            if !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: gridView.window) {
+                gridView.claimKeyboardFocus()
+            }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak gridView] in
                 gridView?.scrollToSelectionAfterLayout()

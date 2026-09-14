@@ -9,7 +9,12 @@ struct FileTreeView: NSViewRepresentable {
         Coordinator(appState: appState)
     }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> NSView {
+        let tabStop = MainWindowTabFocusStopView(frame: .zero)
+        tabStop.role = .tree
+        tabStop.appState = appState
+        appState.mainWindowTreeTabStop = tabStop
+
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.borderType = .noBorder
@@ -21,6 +26,7 @@ struct FileTreeView: NSViewRepresentable {
         outline.delegate = context.coordinator
         outline.dataSource = context.coordinator
         outline.coordinator = context.coordinator
+        outline.appState = appState
         outline.rowHeight = 18
         outline.indentationPerLevel = 10
         outline.intercellSpacing = NSSize(width: 0, height: 1)
@@ -35,13 +41,25 @@ struct FileTreeView: NSViewRepresentable {
         outline.outlineTableColumn = column
 
         scrollView.documentView = outline
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        tabStop.addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: tabStop.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: tabStop.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: tabStop.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: tabStop.bottomAnchor),
+        ])
+
         context.coordinator.outlineView = outline
+        context.coordinator.tabStopView = tabStop
+        appState.fileTreeOutlineView = outline
         context.coordinator.startObservingSettings()
         context.coordinator.reloadRoots()
-        return scrollView
+        MainWindowKeyViewLoop.sync(appState: appState)
+        return tabStop
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+    func updateNSView(_ tabStop: NSView, context: Context) {
         // Access image path so SwiftUI retriggers sync when thumbnail highlight moves.
         _ = appState.fileData.currentImagePath
         context.coordinator.syncSelectionIfNeeded()
@@ -52,12 +70,14 @@ struct FileTreeView: NSViewRepresentable {
             context.coordinator.reloadRoots()
         }
         context.coordinator.applyThemeIfNeeded()
+        MainWindowKeyViewLoop.sync(appState: appState)
     }
 
     @MainActor
     final class Coordinator: NSObject, NSOutlineViewDelegate, NSOutlineViewDataSource {
         let appState: AppState
         weak var outlineView: FileTreeOutlineView?
+        weak var tabStopView: MainWindowTabFocusStopView?
         private var roots: [FileTreeNode] = []
         private var excludedPaths: [String] = []
         fileprivate var rootPaths: [String] = []
@@ -68,6 +88,8 @@ struct FileTreeView: NSViewRepresentable {
         private var lastExpandToken = 0
         private var lastReloadToken = 0
         private var lastSyncedDirectory: String?
+        private var lastSyncedImagePath: String?
+        private var highlightSyncRetryCount = 0
         private var lastThemeID: String?
         private var pendingSingleClick: DispatchWorkItem?
         private var pendingHighlightSync: DispatchWorkItem?
@@ -93,7 +115,7 @@ struct FileTreeView: NSViewRepresentable {
         func focusTreeIfRequested() {
             guard appState.fileTreeFocusToken != lastFocusToken else { return }
             lastFocusToken = appState.fileTreeFocusToken
-            outlineView?.window?.makeFirstResponder(outlineView)
+            appState.focusFileTreeKeyboardTarget()
         }
 
         func collapseUIIfRequested() {
@@ -144,14 +166,15 @@ struct FileTreeView: NSViewRepresentable {
             outlineView?.needsDisplay = true
         }
 
-        func markUserNavigatingTree() {
+        func markUserNavigatingTree(extended: Bool = false) {
             userIsNavigatingTree = true
             userNavigationReset?.cancel()
+            let delay: TimeInterval = extended ? 1.0 : 0.2
             let work = DispatchWorkItem { [weak self] in
                 self?.userIsNavigatingTree = false
             }
             userNavigationReset = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
 
         func syncSelectionIfNeeded() {
@@ -161,15 +184,20 @@ struct FileTreeView: NSViewRepresentable {
             default:
                 break
             }
-            let current = FileTreeFilter.highlightDirectory(appState: appState)
-            guard current != lastSyncedDirectory else { return }
-            scheduleDebouncedHighlightSync()
+            let currentDir = FileTreeFilter.highlightDirectory(appState: appState)
+            let currentImage = appState.fileData.currentImagePath
+            if currentDir == lastSyncedDirectory, currentImage == lastSyncedImagePath {
+                return
+            }
+            scheduleDebouncedHighlightSync(retryCount: 0)
         }
 
-        private func scheduleDebouncedHighlightSync() {
+        private func scheduleDebouncedHighlightSync(retryCount: Int = 0) {
+            highlightSyncRetryCount = retryCount
             pendingHighlightSync?.cancel()
             let work = DispatchWorkItem { [weak self] in
-                self?.syncSelection()
+                guard let self else { return }
+                self.syncSelection(retryCount: self.highlightSyncRetryCount)
             }
             pendingHighlightSync = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.13, execute: work)
@@ -202,7 +230,7 @@ struct FileTreeView: NSViewRepresentable {
             cancelPendingSingleClick()
             guard let outlineView, row >= 0,
                   let node = outlineView.item(atRow: row) as? FileTreeNode else { return }
-            appState.loadDirectory(node.path, saveHistory: true)
+            openDirectoryFromTree(node: node, outlineView: outlineView)
         }
 
         func handleContextMenu(for event: NSEvent) {
@@ -226,6 +254,75 @@ struct FileTreeView: NSViewRepresentable {
                   FileTreePathRestrictions.canRenameDirectory(node.path) else { return }
             appState.fileOperations.beginRename(path: node.path)
             appState.fileTreeReloadToken += 1
+        }
+
+        func selectedDirectoryPath() -> String? {
+            guard let outlineView, outlineView.selectedRow >= 0,
+                  let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode,
+                  node.isDirectory else { return nil }
+            return node.path
+        }
+
+        func toggleExpandSelectedDirectory() {
+            guard let outlineView else { return }
+            let row = outlineView.selectedRow
+            guard row >= 0,
+                  let node = outlineView.item(atRow: row) as? FileTreeNode,
+                  node.isDirectory else { return }
+            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+            if outlineView.isItemExpanded(node) {
+                outlineView.collapseItem(node, collapseChildren: false)
+                removeExpandedPath(node.path)
+            } else {
+                outlineView.reloadItem(node, reloadChildren: true)
+                outlineView.expandItem(node)
+                expandedDirectoryPaths.insert(node.path)
+            }
+        }
+
+        func openSelectedDirectoryFromReturn() {
+            guard let outlineView else { return }
+            var row = outlineView.selectedRow
+            if row < 0, outlineView.numberOfRows > 0 {
+                row = 0
+            }
+            guard row >= 0,
+                  let node = outlineView.item(atRow: row) as? FileTreeNode,
+                  node.isDirectory else { return }
+            if !outlineView.isItemExpanded(node) {
+                node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                outlineView.reloadItem(node, reloadChildren: true)
+                outlineView.expandItem(node)
+                expandedDirectoryPaths.insert(node.path)
+            }
+            openDirectoryFromTree(node: node, outlineView: outlineView)
+        }
+
+        private func openDirectoryFromTree(node: FileTreeNode, outlineView: NSOutlineView) {
+            appState.noteUserRequestedTreeDirectory(node.path)
+            markUserNavigatingTree(extended: true)
+            let keepPath = node.path
+            appState.loadDirectory(node.path, saveHistory: true)
+            DispatchQueue.main.async { [weak self, weak outlineView] in
+                guard let self, let outlineView else { return }
+                self.selectDirectoryInTree(path: keepPath, outlineView: outlineView, scroll: true)
+                outlineView.window?.makeFirstResponder(outlineView)
+            }
+        }
+
+        func selectDirectoryInTree(path: String, outlineView: NSOutlineView, scroll: Bool) {
+            let normalized = standardizedPath(path)
+            FileTreeFilter.addPriorityPath(normalized)
+            guard let match = findNodeByPath(normalized) else { return }
+            expandPath(to: match, outlineView: outlineView)
+            let row = outlineView.row(forItem: match)
+            guard row >= 0 else { return }
+            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            if scroll {
+                outlineView.scrollRowToVisible(row)
+            }
+            lastSyncedDirectory = normalized
+            lastSyncedImagePath = appState.fileData.currentImagePath
         }
 
         private func collapseAllAndExpandToHome() {
@@ -302,6 +399,17 @@ struct FileTreeView: NSViewRepresentable {
                     let coordinator = self
                     Task { @MainActor in coordinator?.syncSelectionIfNeeded() }
                 }
+            }
+            _ = appState.eventBus.subscribe(.directoryLoaded) { [weak self] _ in
+                Task { @MainActor in self?.syncSelectionIfNeeded() }
+            }
+            NotificationCenter.default.addObserver(
+                forName: .prowserCurrentIndexChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                let coordinator = self
+                Task { @MainActor in coordinator?.syncSelectionIfNeeded() }
             }
         }
 
@@ -397,23 +505,93 @@ struct FileTreeView: NSViewRepresentable {
             syncSelection()
         }
 
-        func syncSelection() {
+        func syncSelection(retryCount: Int = 0) {
             switch appState.fileData.currentViewMode {
             case .slideshow, .slideshow2, .slideshow3:
                 return
             default:
                 break
             }
-            guard let outlineView, let current = FileTreeFilter.highlightDirectory(appState: appState) else { return }
-            FileTreeFilter.addPriorityPath(current)
-            guard let match = findNodeByPath(current) else { return }
-            expandPath(to: match, outlineView: outlineView)
-            lastSyncedDirectory = current
-            if userIsNavigatingTree { return }
-            let row = outlineView.row(forItem: match)
-            if row >= 0 {
-                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                outlineView.scrollRowToVisible(row)
+            guard let outlineView else { return }
+
+            if let directory = directoryToHighlightForTreeSync() {
+                FileTreeFilter.addPriorityPath(directory)
+                if let imagePath = appState.fileData.currentImagePath {
+                    FileTreeFilter.addPriorityPath(
+                        URL(fileURLWithPath: imagePath).deletingLastPathComponent().standardizedFileURL.path
+                    )
+                }
+
+                guard let match = nodeForHighlight(path: directory, retryCount: retryCount) else { return }
+
+                expandPath(to: match, outlineView: outlineView)
+                lastSyncedDirectory = directory
+                lastSyncedImagePath = appState.fileData.currentImagePath
+
+                let pinUserDirectory = appState.userRequestedTreeDirectory != nil && !appState.specificFilesActive
+                if userIsNavigatingTree, !pinUserDirectory { return }
+
+                let row = outlineView.row(forItem: match)
+                if row >= 0 {
+                    outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                    outlineView.scrollRowToVisible(row)
+                }
+
+                if pinUserDirectory,
+                   let requested = appState.userRequestedTreeDirectory,
+                   let imagePath = appState.fileData.currentImagePath {
+                    let imageDir = FileTreeFilter.standardizedPath(
+                        URL(fileURLWithPath: imagePath).deletingLastPathComponent().standardizedFileURL.path
+                    )
+                    if imageDir == FileTreeFilter.standardizedPath(requested) {
+                        appState.clearUserRequestedTreeDirectory()
+                    }
+                }
+            }
+        }
+
+        /// Directory row to expand/select (Python `highlight_current_directory` / `user_requested_directory`).
+        private func directoryToHighlightForTreeSync() -> String? {
+            if let requested = appState.userRequestedTreeDirectory,
+               !appState.specificFilesActive {
+                return FileTreeFilter.standardizedPath(requested)
+            }
+            return FileTreeFilter.highlightDirectory(appState: appState)
+                .map { FileTreeFilter.standardizedPath($0) }
+        }
+
+        private func nodeForHighlight(path: String, retryCount: Int) -> FileTreeNode? {
+            if let node = findNodeByPath(path) {
+                highlightSyncRetryCount = 0
+                return node
+            }
+            refreshPathTowardHighlight(path)
+            guard retryCount < 8 else { return nil }
+            scheduleDebouncedHighlightSync(retryCount: retryCount + 1)
+            return nil
+        }
+
+        /// Invalidate/load path segments so filtered or lazy branches can resolve (Python `_scroll_to_directory`).
+        private func refreshPathTowardHighlight(_ targetPath: String) {
+            guard let outlineView else { return }
+            let normalized = standardizedPath(targetPath)
+            guard let root = rootContaining(normalized: normalized) else { return }
+            let rootNorm = standardizedPath(root.path)
+
+            var current = root
+            outlineView.reloadItem(current, reloadChildren: true)
+
+            if normalized == rootNorm { return }
+
+            var remainder = String(normalized.dropFirst(rootNorm.count))
+            if remainder.hasPrefix("/") { remainder.removeFirst() }
+
+            for component in remainder.split(separator: "/").map(String.init) {
+                current.invalidateChildren()
+                current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                outlineView.reloadItem(current, reloadChildren: true)
+                guard let next = current.children?.first(where: { $0.name == component }) else { return }
+                current = next
             }
         }
 
@@ -586,6 +764,7 @@ struct FileTreeView: NSViewRepresentable {
 @MainActor
 final class FileTreeOutlineView: NSOutlineView {
     weak var coordinator: FileTreeView.Coordinator?
+    weak var appState: AppState?
 
     override func mouseDown(with event: NSEvent) {
         coordinator?.markUserNavigatingTree()
@@ -625,9 +804,13 @@ final class FileTreeOutlineView: NSOutlineView {
     }
 
     override func keyDown(with event: NSEvent) {
-        coordinator?.markUserNavigatingTree()
-        if event.keyCode == 120 {
-            coordinator?.renameSelectedDirectory()
+        if let coordinator, let appState,
+           FileTreeKeyboard.handle(
+               event: event,
+               outlineView: self,
+               coordinator: coordinator,
+               appState: appState
+           ) {
             return
         }
         super.keyDown(with: event)

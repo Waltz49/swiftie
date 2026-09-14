@@ -3,6 +3,7 @@ import Foundation
 
 /// Browse view with zoom and pan. Port of `files/browse_view_handler.py` (phase 1).
 final class BrowseImageNSView: NSView {
+    weak var appState: AppState?
     var imagePath: String? {
         didSet { loadImage() }
     }
@@ -288,6 +289,14 @@ final class BrowseImageNSView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 48, !event.modifierFlags.contains(.command), let appState {
+            MainWindowKeyViewLoop.moveFromMainCanvas(appState: appState)
+            return
+        }
+        super.keyDown(with: event)
+    }
 
     private func imageDrawRect(for image: NSImage) -> NSRect {
         let imageSize = image.size

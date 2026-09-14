@@ -109,6 +109,16 @@ final class ImageListNSView: NSView {
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         tableView.scrollRowToVisible(row)
     }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 48, !event.modifierFlags.contains(.command), let appState {
+            MainWindowKeyViewLoop.moveFromMainCanvas(appState: appState)
+            return
+        }
+        super.keyDown(with: event)
+    }
 }
 
 @MainActor
@@ -308,6 +318,7 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
         view.appState = appState
         view.thumbnailCache = appState.thumbnailCache
         context.coordinator.listView = view
+        appState.listViewHost = view
         context.coordinator.syncFromAppState()
         return view
     }
