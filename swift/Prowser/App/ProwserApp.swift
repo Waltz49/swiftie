@@ -2279,10 +2279,14 @@ final class DirectoryLoadCoordinator {
         if let pinnedPath, let normalized = FileDataModel.normalizePath(pinnedPath) {
             if images.contains(normalized) {
                 appState.fileData.setCurrentImagePath(normalized)
-            } else if FileManager.default.fileExists(atPath: normalized) {
+            } else if FileDataModel.pathIsInDirectory(file: normalized, directory: path),
+                      FileManager.default.fileExists(atPath: normalized) {
+                // In this folder but omitted by filter (e.g. filename pattern).
                 appState.fileData.setCurrentImagePath(normalized)
             } else if let first = images.first {
                 appState.fileData.setCurrentImagePath(first)
+            } else {
+                appState.fileData.setCurrentImagePath(nil)
             }
         } else if let first = images.first {
             appState.fileData.setCurrentImagePath(first)

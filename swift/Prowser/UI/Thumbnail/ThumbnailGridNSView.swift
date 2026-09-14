@@ -560,8 +560,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
         var items: [NSDraggingItem] = []
         for (offset, path) in paths.enumerated() {
-            let writer = URL(fileURLWithPath: path) as NSURL
-            let item = NSDraggingItem(pasteboardWriter: writer)
+            let pbItem = NSPasteboardItem()
+            pbItem.setString(URL(fileURLWithPath: path).absoluteString, forType: .fileURL)
+            let item = NSDraggingItem(pasteboardWriter: pbItem)
             if let image = thumbnails[path] {
                 let preview = scaledDragPreview(image)
                 let origin = NSPoint(x: CGFloat(offset) * 4, y: CGFloat(offset) * 4)
@@ -571,7 +572,23 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             }
             items.append(item)
         }
-        beginDraggingSession(with: items, event: event, source: self)
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
+    func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
+    func draggingSession(_ session: NSDraggingSession, ignoreModifierKeysFor context: NSDraggingContext) -> Bool {
+        // AppKit's file-drag Option handling rewrites the session mask on mouse-up
+        // and cancels copy. We choose copy vs move in the destination instead.
+        true
+    }
+
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        // Re-query `sourceOperationMaskFor` when ⌥/⌘ changes mid-drag (copy badge on destinations).
+        _ = FileDragDropOperations.sourceOperationMask(for: .withinApplication)
     }
 
     private func dragPathsForIndex(_ index: Int) -> [String] {
@@ -619,12 +636,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         _ session: NSDraggingSession,
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
-        switch context {
-        case .outsideApplication:
-            return .copy
-        default:
-            return [.copy, .move]
-        }
+        FileDragDropOperations.sourceOperationMask(for: context)
     }
 
     func draggingSession(
@@ -632,14 +644,25 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         endedAt screenPoint: NSPoint,
         operation: NSDragOperation
     ) {
+        configSource?.debugLog(
+            "Thumbnail drag ended operation=\(operation.rawValue) copy=\(operation == .copy) move=\(operation == .move)"
+        )
         resetDragState()
     }
 
     // MARK: - Internal reorder via drop (Python ``dropEvent``)
 
+    private func internalReorderDropOperation(for paths: [String]) -> NSDragOperation {
+        let known = Set(imagePaths)
+        guard paths.allSatisfy({ known.contains($0) }) else { return [] }
+        return .move
+    }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard !isReferenceGraphMode, !localFilePaths(from: sender).isEmpty else { return [] }
-        return sender.draggingSourceOperationMask.intersection([.copy, .move])
+        guard !isReferenceGraphMode else { return [] }
+        let paths = localFilePaths(from: sender)
+        guard !paths.isEmpty else { return [] }
+        return internalReorderDropOperation(for: paths)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -655,7 +678,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         dropInsertionIndex = insertion
         dropIndicatorRect = dropIndicatorRect(for: insertion)
         needsDisplay = true
-        return sender.draggingSourceOperationMask.intersection([.copy, .move])
+        return internalReorderDropOperation(for: paths)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {

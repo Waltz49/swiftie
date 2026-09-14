@@ -259,6 +259,12 @@ final class AppConfig {
         boolValue(key, default: defaultValue)
     }
 
+    /// Console output for `--debug` / Settings → Debug mode.
+    func debugLog(_ message: String) {
+        guard bool(forKey: "debug_mode") else { return }
+        NSLog("%@", message)
+    }
+
     func int(forKey key: String, default defaultValue: Int = 0) -> Int {
         Int(numberValue(key, default: Double(defaultValue)))
     }

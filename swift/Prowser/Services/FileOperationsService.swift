@@ -206,7 +206,7 @@ final class FileOperationsService {
         return copied
     }
 
-    func move(paths: [String], to directory: String) throws -> [String] {
+    func move(paths: [String], to directory: String, refreshWhenDone: Bool = true) throws -> [String] {
         var blocked: [String] = []
         for path in paths where PrsortIO.isFileLocked(path) {
             blocked.append((path as NSString).lastPathComponent)
@@ -236,7 +236,9 @@ final class FileOperationsService {
         if !undoEntries.isEmpty {
             undoStack.pushMove(undoEntries)
         }
-        refreshAfterChange()
+        if refreshWhenDone {
+            refreshAfterChange()
+        }
         return moved
     }
 
@@ -282,6 +284,144 @@ final class FileOperationsService {
         } catch {
             appState.status.show("Operation failed: \(error.localizedDescription)")
         }
+    }
+
+    /// File-tree drop target. Port of `files/file_tree_handler.py` ``dropEvent``.
+    @discardableResult
+    func performFileTreeDrop(filePaths: [String], targetDirectory: String, operation: NSDragOperation) -> Bool {
+        guard let appState else { return false }
+
+        let files = filePaths.filter { path in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+            return !isDir.boolValue
+        }
+        guard !files.isEmpty else { return false }
+
+        let targetInLibrary = RenamePrefixPlanner.isInsidePhotosLibrary(targetDirectory)
+        let librarySources = files.filter { RenamePrefixPlanner.isInsidePhotosLibrary($0) }
+
+        if targetInLibrary {
+            if !librarySources.isEmpty {
+                showAlert(
+                    "Operation Not Allowed",
+                    """
+                    File operations within macOS Photos Library are not allowed.
+
+                    Photos Library files cannot be moved, renamed, or modified within the library.
+                    You can drag files OUT of the Photos Library to other locations.
+                    """
+                )
+            } else {
+                showAlert(
+                    "Operation Not Allowed",
+                    """
+                    Adding files to macOS Photos Library is not allowed.
+
+                    Please use the Photos app to add files to your Photos Library.
+                    """
+                )
+            }
+            return false
+        }
+
+        var copyOnly = FileDragDropOperations.isCopyDrop(operation)
+        if !librarySources.isEmpty {
+            copyOnly = true
+        }
+
+        if !copyOnly {
+            let targetReal = RenamePrefixPlanner.realPath(targetDirectory)
+            var lockedNames: [String] = []
+            for path in files {
+                let sourceDir = RenamePrefixPlanner.realPath((path as NSString).deletingLastPathComponent)
+                guard sourceDir != targetReal else { continue }
+                if PrsortIO.isFileLocked(path) {
+                    lockedNames.append((path as NSString).lastPathComponent)
+                }
+            }
+            if !lockedNames.isEmpty {
+                let preview = lockedNames.prefix(10).joined(separator: "\n")
+                let suffix = lockedNames.count > 10 ? "\n... and \(lockedNames.count - 10) more" : ""
+                showAlert(
+                    "Cannot Move Locked Files",
+                    """
+                    The following files are locked and cannot be moved:
+
+                    \(preview)\(suffix)
+
+                    Please unlock the files (⇧⌘L) before moving them, or hold Option to copy instead.
+                    """
+                )
+                return false
+            }
+        }
+
+        appState.config.updateSetting("last_drop_location", value: targetDirectory)
+        appState.refreshMenuState()
+
+        do {
+            if copyOnly {
+                let copied = try copy(paths: files, to: targetDirectory)
+                appState.config.debugLog(
+                    "FileTree copy completed count=\(copied.count) dest=\(targetDirectory)"
+                )
+                appState.status.showFileOperation("Copied \(copied.count) file(s)")
+                refreshDirectoryAfterTreeDrop(
+                    appState: appState,
+                    sourcePaths: files,
+                    targetDirectory: targetDirectory,
+                    copyOnly: true
+                )
+            } else {
+                let displayed = appState.fileData.displayedImages
+                let activePath = appState.fileData.currentImagePath
+                let moved = try move(paths: files, to: targetDirectory, refreshWhenDone: false)
+                guard !moved.isEmpty else { return false }
+                appState.status.showFileOperation("Moved \(moved.count) file(s)")
+                DirectoryRefreshService.applyRemovedFiles(
+                    appState: appState,
+                    removed: Set(files),
+                    displayed: displayed,
+                    activePath: activePath
+                )
+                for path in files {
+                    appState.selection.selectedFiles.remove(path)
+                }
+                appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
+                refreshDirectoryAfterTreeDrop(
+                    appState: appState,
+                    sourcePaths: files,
+                    targetDirectory: targetDirectory,
+                    copyOnly: false
+                )
+            }
+            appState.fileTreeReloadToken += 1
+            appState.eventBus.emit(.filesChangedOnDisk, payload: .string(targetDirectory))
+            return true
+        } catch {
+            appState.status.show("Operation failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func refreshDirectoryAfterTreeDrop(
+        appState: AppState,
+        sourcePaths: [String],
+        targetDirectory: String,
+        copyOnly: Bool
+    ) {
+        guard let currentDirectory = appState.fileData.currentDirectory else { return }
+        let currentNorm = FileDataModel.normalizePath(currentDirectory) ?? currentDirectory
+        let targetNorm = FileDataModel.normalizePath(targetDirectory) ?? targetDirectory
+        let sourcesFromCurrent = sourcePaths.contains { FileDataModel.pathIsInDirectory(file: $0, directory: currentNorm) }
+        let targetIsCurrent = currentNorm == targetNorm
+        if copyOnly {
+            guard targetIsCurrent else { return }
+        } else if !sourcesFromCurrent, !targetIsCurrent {
+            return
+        }
+        appState.loadDirectory(currentDirectory, saveHistory: false)
     }
 
     func moveToLastDropLocation(copyOnly: Bool = false) {

@@ -15,7 +15,7 @@ struct FileTreeView: NSViewRepresentable {
         tabStop.appState = appState
         appState.mainWindowTreeTabStop = tabStop
 
-        let scrollView = NSScrollView()
+        let scrollView = FileTreeScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
@@ -771,6 +771,44 @@ struct FileTreeView: NSViewRepresentable {
             return isDirectoryExpandable(node)
         }
 
+        // MARK: File tree drop (validateDrop drives move/copy cursor badge)
+
+        func outlineView(
+            _ outlineView: NSOutlineView,
+            validateDrop info: NSDraggingInfo,
+            proposedItem item: Any?,
+            proposedChildIndex index: UnsafeMutablePointer<Int>
+        ) -> NSDragOperation {
+            let paths = FileTreeOutlineView.filePaths(from: info)
+            guard !paths.isEmpty else { return [] }
+            guard let node = item as? FileTreeNode, node.isDirectory else { return [] }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: node.path, isDirectory: &isDir), isDir.boolValue else {
+                return []
+            }
+            index.pointee = NSOutlineViewDropOnItemIndex
+            let op = FileDragDropOperations.destinationOperation(
+                sourceMask: info.draggingSourceOperationMask,
+                filePaths: paths,
+                targetDirectory: node.path
+            )
+            if let outline = outlineView as? FileTreeOutlineView {
+                outline.storeTreeDropProposal(operation: op, targetDirectory: node.path)
+            }
+            // Badge follows `draggingUpdated` on the outline/scroll view; keep validateDrop in sync.
+            return op
+        }
+
+        func outlineView(
+            _ outlineView: NSOutlineView,
+            acceptDrop info: NSDraggingInfo,
+            item: Any?,
+            childIndex: Int
+        ) -> Bool {
+            guard let outline = outlineView as? FileTreeOutlineView else { return false }
+            return outline.performStoredFileTreeDrop(from: info)
+        }
+
         // MARK: NSOutlineViewDelegate
 
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -811,9 +849,44 @@ struct FileTreeView: NSViewRepresentable {
                     label += " ✓"
                 }
                 cell.textField?.stringValue = label
+                let isDropTarget = (outlineView as? FileTreeOutlineView)?.dropHighlightPath == node.path
+                cell.textField?.font = isDropTarget
+                    ? NSFont.boldSystemFont(ofSize: 11)
+                    : NSFont.systemFont(ofSize: 11)
                 cell.textField?.textColor = NSColor(appState.theme.colors.sidebarText)
             }
             return cell
+        }
+
+        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+            let rowView = FileTreeDropHighlightRowView()
+            if let node = item as? FileTreeNode,
+               let outline = outlineView as? FileTreeOutlineView {
+                rowView.isDropTarget = outline.dropHighlightPath == node.path
+            }
+            return rowView
+        }
+
+        fileprivate func refreshDropHighlight(oldPath: String?, newPath: String?) {
+            guard let outlineView else { return }
+            applyDropHighlightAppearance(path: oldPath, highlighted: false, outlineView: outlineView)
+            applyDropHighlightAppearance(path: newPath, highlighted: true, outlineView: outlineView)
+        }
+
+        private func applyDropHighlightAppearance(path: String?, highlighted: Bool, outlineView: NSOutlineView) {
+            guard let path else { return }
+            for row in 0..<outlineView.numberOfRows {
+                guard let node = outlineView.item(atRow: row) as? FileTreeNode, node.path == path else { continue }
+                if let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false) as? FileTreeDropHighlightRowView {
+                    rowView.isDropTarget = highlighted
+                }
+                if let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView {
+                    cell.textField?.font = highlighted
+                        ? NSFont.boldSystemFont(ofSize: 11)
+                        : NSFont.systemFont(ofSize: 11)
+                }
+                break
+            }
         }
 
         func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
@@ -837,9 +910,225 @@ struct FileTreeView: NSViewRepresentable {
 }
 
 @MainActor
+final class FileTreeDropHighlightRowView: NSTableRowView {
+    var isDropTarget = false {
+        didSet {
+            guard oldValue != isDropTarget else { return }
+            needsDisplay = true
+        }
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        if isDropTarget {
+            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.45).setFill()
+            bounds.fill()
+            return
+        }
+        super.drawBackground(in: dirtyRect)
+    }
+}
+
+/// Forwards drags so copy/move badges work when the outline is shorter than the scroll viewport.
+@MainActor
+final class FileTreeScrollView: NSScrollView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes(FileTreeOutlineView.draggedTypes)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes(FileTreeOutlineView.draggedTypes)
+    }
+
+    override func wantsPeriodicDraggingUpdates() -> Bool { true }
+
+    private var outline: FileTreeOutlineView? {
+        documentView as? FileTreeOutlineView
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        outline?.draggingEntered(sender) ?? []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        outline?.treeDropOperation(for: sender) ?? []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        outline?.draggingExited(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        outline?.prepareForDragOperation(sender) ?? false
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        outline?.performDragOperation(sender) ?? false
+    }
+}
+
+@MainActor
 final class FileTreeOutlineView: NSOutlineView {
     weak var coordinator: FileTreeView.Coordinator?
     weak var appState: AppState?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes(FileTreeOutlineView.draggedTypes)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes(FileTreeOutlineView.draggedTypes)
+    }
+
+    fileprivate static let draggedTypes: [NSPasteboard.PasteboardType] = [
+        .fileURL,
+        NSPasteboard.PasteboardType("public.file-url"),
+        NSPasteboard.PasteboardType("NSFilenamesPboardType"),
+    ]
+
+    fileprivate var proposedDropOperation: NSDragOperation = []
+    fileprivate var proposedDropDirectory: String?
+    /// Survives `draggingExited`, which AppKit often sends immediately before `acceptDrop`.
+    private var lastDropOperation: NSDragOperation = []
+    private var lastDropDirectory: String?
+    fileprivate var dropHighlightPath: String?
+
+    fileprivate func storeTreeDropProposal(operation: NSDragOperation, targetDirectory: String) {
+        proposedDropOperation = operation
+        proposedDropDirectory = targetDirectory
+        lastDropOperation = operation
+        lastDropDirectory = targetDirectory
+        setDropHighlightPath(targetDirectory)
+    }
+
+    fileprivate func consumeDropOperation() -> NSDragOperation {
+        let operation = lastDropOperation != [] ? lastDropOperation : proposedDropOperation
+        lastDropOperation = []
+        return operation
+    }
+
+    fileprivate func consumeDropDirectory() -> String? {
+        let directory = lastDropDirectory ?? proposedDropDirectory
+        lastDropDirectory = nil
+        return directory
+    }
+
+    fileprivate func clearTreeDropProposal() {
+        proposedDropOperation = []
+        proposedDropDirectory = nil
+        setDropHighlightPath(nil)
+    }
+
+    private func setDropHighlightPath(_ path: String?) {
+        let oldPath = dropHighlightPath
+        guard oldPath != path else { return }
+        dropHighlightPath = path
+        coordinator?.refreshDropHighlight(oldPath: oldPath, newPath: path)
+    }
+
+    override func wantsPeriodicDraggingUpdates() -> Bool { true }
+
+    /// Drives the move/copy pointer badge (green + for copy). `validateDrop` alone does not update it.
+    func treeDropOperation(for sender: NSDraggingInfo) -> NSDragOperation {
+        let paths = Self.filePaths(from: sender)
+        guard !paths.isEmpty else {
+            setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
+            clearTreeDropProposal()
+            return []
+        }
+        let point = convert(sender.draggingLocation, from: nil)
+        let row = row(at: point)
+        guard row >= 0,
+              let node = item(atRow: row) as? FileTreeNode,
+              node.isDirectory else {
+            setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
+            clearTreeDropProposal()
+            return []
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: node.path, isDirectory: &isDir), isDir.boolValue else {
+            clearTreeDropProposal()
+            return []
+        }
+        setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
+        let op = FileDragDropOperations.destinationOperation(
+            sourceMask: sender.draggingSourceOperationMask,
+            filePaths: paths,
+            targetDirectory: node.path
+        )
+        storeTreeDropProposal(operation: op, targetDirectory: node.path)
+        return op
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        lastDropOperation = []
+        lastDropDirectory = nil
+        return treeDropOperation(for: sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        treeDropOperation(for: sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
+        // Keep last copy/move so drop still runs after AppKit sends exited.
+        clearTreeDropProposal()
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if lastDropOperation == [], lastDropDirectory == nil {
+            _ = treeDropOperation(for: sender)
+        }
+        let ok = lastDropOperation != [] && lastDropDirectory != nil
+        appState?.config.debugLog(
+            "FileTree prepareForDragOperation ok=\(ok) op=\(lastDropOperation.rawValue) dir=\(lastDropDirectory ?? "nil")"
+        )
+        return ok
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        performStoredFileTreeDrop(from: sender)
+    }
+
+    fileprivate func performStoredFileTreeDrop(from sender: NSDraggingInfo) -> Bool {
+        let paths = Self.filePaths(from: sender)
+        let target = lastDropDirectory ?? proposedDropDirectory
+        let operation = lastDropOperation != [] ? lastDropOperation : proposedDropOperation
+        lastDropOperation = []
+        lastDropDirectory = nil
+        clearTreeDropProposal()
+        setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
+        guard !paths.isEmpty, let target, operation != [] else {
+            appState?.config.debugLog(
+                "FileTree drop rejected paths=\(paths.count) target=\(target ?? "nil") op=\(operation.rawValue)"
+            )
+            return false
+        }
+        appState?.config.debugLog(
+            "FileTree drop \(operation == .copy ? "copy" : "move") \(paths.count) file(s) -> \(target)"
+        )
+        return appState?.fileOperations.performFileTreeDrop(
+            filePaths: paths,
+            targetDirectory: target,
+            operation: operation
+        ) ?? false
+    }
+
+    static func filePaths(from draggingInfo: NSDraggingInfo) -> [String] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = draggingInfo.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] {
+            let paths = urls.map(\.path).filter { !$0.isEmpty }
+            if !paths.isEmpty { return paths }
+        }
+        if let names = draggingInfo.draggingPasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+            return names
+        }
+        return []
+    }
 
     override func mouseDown(with event: NSEvent) {
         coordinator?.markUserNavigatingTree()

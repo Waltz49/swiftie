@@ -98,6 +98,18 @@ final class FileDataModel {
         let expanded = (path as NSString).expandingTildeInPath
         return URL(fileURLWithPath: expanded).standardizedFileURL.path
     }
+
+    /// Parent directory of `path`, normalized (for “does this file belong in this folder?” checks).
+    static func parentDirectory(of path: String) -> String? {
+        guard let normalized = normalizePath(path) else { return nil }
+        return URL(fileURLWithPath: normalized).deletingLastPathComponent().standardizedFileURL.path
+    }
+
+    static func pathIsInDirectory(file: String, directory: String) -> Bool {
+        guard let dir = normalizePath(directory),
+              let parent = parentDirectory(of: file) else { return false }
+        return parent == dir
+    }
 }
 
 extension Notification.Name {

@@ -7,7 +7,9 @@ enum DisplayedImagesSync {
     static func ensureActiveImageListed(fileData: FileDataModel) {
         guard let raw = fileData.currentImagePath,
               let path = FileDataModel.normalizePath(raw),
-              FileManager.default.fileExists(atPath: path) else { return }
+              FileManager.default.fileExists(atPath: path),
+              let currentDirectory = fileData.currentDirectory,
+              FileDataModel.pathIsInDirectory(file: path, directory: currentDirectory) else { return }
 
         let images = fileData.getDisplayedImages()
         if images.contains(path) {
