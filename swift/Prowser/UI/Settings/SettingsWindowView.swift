@@ -249,8 +249,8 @@ private struct SettingsWindowCloseMonitor: NSViewRepresentable {
                         self.onCloseWithoutOK?()
                     }
                 }
+                onWindowAttached?()
             }
-            onWindowAttached?()
         }
 
         deinit {

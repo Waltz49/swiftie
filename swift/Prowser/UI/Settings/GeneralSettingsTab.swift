@@ -87,9 +87,10 @@ struct GeneralSettingsTab: View {
         }
         .onAppear {
             filterDraft = FilterPatternFormatting.forEditing(appState.filterSettings.filterPattern)
-            generalExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "general")
-            thumbnailsExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "thumbnails")
-            imageViewingExpanded = appState.config.settingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_viewing")
+            let groups = appState.config.settingsGroupsExpanded(storageKey: "general_settings_groups_expanded")
+            generalExpanded = groups["general"] ?? true
+            thumbnailsExpanded = groups["thumbnails"] ?? true
+            imageViewingExpanded = groups["image_viewing"] ?? true
         }
         .onChange(of: generalExpanded) { _, value in
             appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "general", expanded: value)

@@ -13,13 +13,15 @@ struct SlideshowPresetEditor: View {
     @State private var maxRotation = 0
     @State private var overlapPercent = 100
     @State private var direction = "right"
+    @State private var isLoading = false
+    @State private var persistTask: Task<Void, Never>?
 
     var body: some View {
         SettingsSection(title: title) {
             TextField("Name", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 240)
-                .onSubmit { persist() }
+                .onSubmit { persistNow() }
 
             slideshowIntSlider(title: "Slide duration (ms)", value: $rate, range: 500...15000, step: 250)
             slideshowIntSlider(title: "Transition speed (ms)", value: $transitionSpeed, range: 200...10000, step: 100)
@@ -33,14 +35,18 @@ struct SlideshowPresetEditor: View {
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 200)
-            .onChange(of: direction) { _, _ in persist() }
+            .onChange(of: direction) { _, _ in schedulePersist() }
         }
         .onAppear { load() }
-        .onChange(of: name) { _, _ in persist() }
-        .onChange(of: rate) { _, _ in persist() }
-        .onChange(of: transitionSpeed) { _, _ in persist() }
-        .onChange(of: maxRotation) { _, _ in persist() }
-        .onChange(of: overlapPercent) { _, _ in persist() }
+        .onChange(of: name) { _, _ in schedulePersist() }
+        .onChange(of: rate) { _, _ in schedulePersist() }
+        .onChange(of: transitionSpeed) { _, _ in schedulePersist() }
+        .onChange(of: maxRotation) { _, _ in schedulePersist() }
+        .onChange(of: overlapPercent) { _, _ in schedulePersist() }
+        .onDisappear {
+            persistTask?.cancel()
+            persistNow()
+        }
     }
 
     private func slideshowIntSlider(title: String, value: Binding<Int>, range: ClosedRange<Int>, step: Int) -> some View {
@@ -61,6 +67,8 @@ struct SlideshowPresetEditor: View {
     }
 
     private func load() {
+        isLoading = true
+        defer { isLoading = false }
         let preset = SlideshowPresetUtils.preset(from: appState.config.rawSettings(), key: presetKey)
         name = preset["name"] as? String ?? ""
         rate = preset["rate"] as? Int ?? 3500
@@ -71,7 +79,17 @@ struct SlideshowPresetEditor: View {
         direction = preset["direction"] as? String ?? "right"
     }
 
-    private func persist() {
+    private func schedulePersist() {
+        guard !isLoading else { return }
+        persistTask?.cancel()
+        persistTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            persistNow()
+        }
+    }
+
+    private func persistNow() {
         let overlapDelay = SlideshowPresetUtils.overlapDelay(overlapPercent: overlapPercent, transitionSpeed: transitionSpeed)
         let preset: [String: Any] = [
             "name": name.trimmingCharacters(in: .whitespacesAndNewlines),

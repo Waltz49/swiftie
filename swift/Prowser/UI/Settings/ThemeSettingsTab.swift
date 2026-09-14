@@ -6,6 +6,9 @@ struct ThemeSettingsTab: View {
     @Environment(AppState.self) private var appState
 
     @State private var groupExpanded: [String: Bool] = [:]
+    @State private var cachedEditPresetID = ""
+    @State private var cachedMerged: [String: Any] = [:]
+    @State private var cachedBrowse: [String: Any] = [:]
     @State private var newThemeName = ""
     @State private var showAddTheme = false
     @State private var addThemeBase = "dark"
@@ -32,6 +35,10 @@ struct ThemeSettingsTab: View {
         .background(SettingsDialogChrome.background)
         .onAppear {
             loadGroupExpanded()
+            refreshThemeColorCache()
+        }
+        .onChange(of: appState.theme.settingsEditPresetID) { _, _ in
+            refreshThemeColorCache()
         }
         .alert("New Custom Theme", isPresented: $showAddTheme) {
             TextField("Theme name", text: $newThemeName)
@@ -87,8 +94,8 @@ struct ThemeSettingsTab: View {
 
     @ViewBuilder
     private func colorSections(editID: String) -> some View {
-        let merged = appState.theme.mergedColorOverrides(for: editID)
-        let browse = appState.theme.browseTransparency(for: editID)
+        let merged = cachedEditPresetID == editID ? cachedMerged : appState.theme.mergedColorOverrides(for: editID)
+        let browse = cachedEditPresetID == editID ? cachedBrowse : appState.theme.browseTransparency(for: editID)
 
         CollapsibleSettingsSection(
             title: "Text & background",
@@ -288,6 +295,7 @@ struct ThemeSettingsTab: View {
                 onColorChange: { hex in
                     if let rgb = hexToRGB(hex) {
                         appState.theme.setBrowseTransparency(themeID: editID, key: "transparency_color", value: rgb, persist: false)
+                        refreshThemeColorCache()
                         notifyThemeChanged()
                     }
                 }
@@ -298,6 +306,7 @@ struct ThemeSettingsTab: View {
                 get: { useDiamonds },
                 set: { newValue in
                     appState.theme.setBrowseTransparency(themeID: editID, key: "use_diamonds", value: newValue, persist: false)
+                    refreshThemeColorCache()
                     notifyThemeChanged()
                 }
             ))
@@ -312,6 +321,7 @@ struct ThemeSettingsTab: View {
                 onColorChange: { hex in
                     if let rgb = hexToRGB(hex) {
                         appState.theme.setBrowseTransparency(themeID: editID, key: "browse_border_color", value: rgb, persist: false)
+                        refreshThemeColorCache()
                         notifyThemeChanged()
                     }
                 }
@@ -336,7 +346,7 @@ struct ThemeSettingsTab: View {
 
     private func groupBinding(_ key: String) -> Binding<Bool> {
         Binding(
-            get: { groupExpanded[key] ?? appState.theme.collapseGroupExpanded(key) },
+            get: { groupExpanded[key] ?? true },
             set: { newValue in
                 groupExpanded[key] = newValue
                 appState.theme.setCollapseGroupExpanded(key, expanded: newValue)
@@ -345,17 +355,33 @@ struct ThemeSettingsTab: View {
     }
 
     private func loadGroupExpanded() {
+        let groups = appState.config.settingsGroupsExpanded(storageKey: "theme_settings_groups_expanded")
         for key in ThemeKeys.collapseGroupKeys {
-            groupExpanded[key] = appState.theme.collapseGroupExpanded(key)
+            groupExpanded[key] = groups[key] ?? true
         }
+    }
+
+    private func refreshThemeColorCache() {
+        let editID = editThemeID
+        cachedEditPresetID = editID
+        cachedMerged = appState.theme.mergedColorOverrides(for: editID)
+        cachedBrowse = appState.theme.browseTransparency(for: editID)
     }
 
     private func setOverride(_ themeID: String, _ key: String, _ value: Any) {
         appState.theme.setColorOverride(themeID: themeID, key: key, value: value, persist: false)
+        if themeID == cachedEditPresetID {
+            var merged = cachedMerged
+            merged[key] = value
+            cachedMerged = merged
+        } else {
+            refreshThemeColorCache()
+        }
         notifyThemeChanged()
     }
 
     private func notifyThemeChanged() {
+        guard !appState.config.isSettingsSessionActive else { return }
         appState.eventBus.emit(.settingsChanged)
     }
 

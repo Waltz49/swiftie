@@ -115,16 +115,17 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
             return true
         }
 
-        let point = window.mouseLocationOutsideOfEventStream
-        if let hit = window.contentView?.hitTest(point),
-           let target = adjustableControl(from: hit),
-           applyArrow(to: target, event: event, focus: true, window: window) {
-            return true
-        }
-
         if let control = window.firstResponder as? NSControl,
            isAdjustableControlName(String(describing: type(of: control))),
            applyArrow(to: control, event: event) {
+            return true
+        }
+
+        let point = window.mouseLocationOutsideOfEventStream
+
+        if let hit = window.contentView?.hitTest(point),
+           let target = adjustableControl(from: hit),
+           applyArrow(to: target, event: event, focus: true, window: window) {
             return true
         }
 

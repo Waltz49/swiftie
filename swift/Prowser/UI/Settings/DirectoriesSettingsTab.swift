@@ -231,11 +231,12 @@ struct DirectoriesSettingsTab: View {
         if ignoreEntries.count < 3 {
             ignoreEntries.append(contentsOf: IgnoreEntry.defaults().suffix(3 - ignoreEntries.count))
         }
-        rootExpanded = appState.config.settingsGroupExpanded(storageKey: "directories_settings_groups_expanded", groupKey: "root_directories")
-        scanningExpanded = appState.config.settingsGroupExpanded(storageKey: "directories_settings_groups_expanded", groupKey: "scanning_options")
-        depthExpanded = appState.config.settingsGroupExpanded(storageKey: "directories_settings_groups_expanded", groupKey: "depth")
-        filesExpanded = appState.config.settingsGroupExpanded(storageKey: "directories_settings_groups_expanded", groupKey: "image_creation_temp_files")
-        ignoreExpanded = appState.config.settingsGroupExpanded(storageKey: "directories_settings_groups_expanded", groupKey: "ignore_directories")
+        let groups = appState.config.settingsGroupsExpanded(storageKey: "directories_settings_groups_expanded")
+        rootExpanded = groups["root_directories"] ?? true
+        scanningExpanded = groups["scanning_options"] ?? true
+        depthExpanded = groups["depth"] ?? true
+        filesExpanded = groups["image_creation_temp_files"] ?? true
+        ignoreExpanded = groups["ignore_directories"] ?? true
     }
 
     private func persistRoots() {

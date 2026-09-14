@@ -363,7 +363,13 @@ final class AppConfig {
     ]
 
     func applySettingsChange(emit: AppEventBus) {
+        guard !isSettingsSessionActive else { return }
         emit.emit(.settingsChanged)
+    }
+
+    /// Collapsible section expanded flags for a settings tab (single dictionary read).
+    func settingsGroupsExpanded(storageKey: String) -> [String: Bool] {
+        readSettings()[storageKey] as? [String: Bool] ?? [:]
     }
 
     func loadFromConfig(into filter: FilterSettingsModel) {
