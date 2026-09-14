@@ -63,6 +63,7 @@ struct FileTreeView: NSViewRepresentable {
         // Access image path so SwiftUI retriggers sync when thumbnail highlight moves.
         _ = appState.fileData.currentImagePath
         context.coordinator.syncSelectionIfNeeded()
+        context.coordinator.syncToActiveImageIfRequested()
         context.coordinator.focusTreeIfRequested()
         context.coordinator.collapseUIIfRequested()
         context.coordinator.expandToCurrentDirectoryIfRequested()
@@ -87,6 +88,7 @@ struct FileTreeView: NSViewRepresentable {
         private var lastCollapseUIToken = 0
         private var lastExpandToken = 0
         private var lastReloadToken = 0
+        private var lastSyncActiveImageToken = 0
         private var lastSyncedDirectory: String?
         private var lastSyncedImagePath: String?
         private var highlightSyncRetryCount = 0
@@ -116,6 +118,22 @@ struct FileTreeView: NSViewRepresentable {
             guard appState.fileTreeFocusToken != lastFocusToken else { return }
             lastFocusToken = appState.fileTreeFocusToken
             appState.focusFileTreeKeyboardTarget()
+        }
+
+        func syncToActiveImageIfRequested() {
+            guard appState.fileTreeSyncActiveImageToken != lastSyncActiveImageToken else { return }
+            lastSyncActiveImageToken = appState.fileTreeSyncActiveImageToken
+            lastSyncedDirectory = nil
+            lastSyncedImagePath = nil
+            syncSelection(retryCount: 0)
+            appState.focusFileTreeKeyboardTarget()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self else { return }
+                self.lastSyncedDirectory = nil
+                self.lastSyncedImagePath = nil
+                self.syncSelection(retryCount: 0)
+                self.appState.focusFileTreeKeyboardTarget()
+            }
         }
 
         func collapseUIIfRequested() {

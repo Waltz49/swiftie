@@ -66,6 +66,7 @@ final class AppState {
     let directoryHistory = DirectoryHistory()
     let browseImageHistory = BrowseImageHistoryController()
     var fileTreeFocusToken = 0
+    var fileTreeSyncActiveImageToken = 0
     /// While set, tree highlight follows this directory until the active image catches up (Python `user_requested_directory`).
     var userRequestedTreeDirectory: String?
     private var userRequestedTreeClearWork: DispatchWorkItem?
@@ -1192,15 +1193,30 @@ final class AppState {
     }
 
     func toggleFileTree() {
+        let wasVisible = config.bool(forKey: "file_tree_visible", default: true)
         setLeftSidebarPaneVisible(
             configKey: "file_tree_visible",
-            visible: !config.bool(forKey: "file_tree_visible", default: true)
+            visible: !wasVisible
         )
+        if !wasVisible {
+            revealFileTreeFocusedOnActiveImage()
+        }
     }
 
     func showFileTree() {
-        guard !config.bool(forKey: "file_tree_visible", default: true) else { return }
+        let wasVisible = config.bool(forKey: "file_tree_visible", default: true)
+        guard !wasVisible else {
+            revealFileTreeFocusedOnActiveImage()
+            return
+        }
         setLeftSidebarPaneVisible(configKey: "file_tree_visible", visible: true)
+        revealFileTreeFocusedOnActiveImage()
+    }
+
+    /// Show/focus file tree on the active image directory (Python tree show + `highlight_current_file`).
+    func revealFileTreeFocusedOnActiveImage() {
+        fileTreeSyncActiveImageToken += 1
+        requestFileTreeFocus()
     }
 
     func requestFileTreeFocus() {
