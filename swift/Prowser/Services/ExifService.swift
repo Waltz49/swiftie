@@ -81,10 +81,9 @@ enum ExifService {
         record.description = userDescription(exif: exif, tiff: tiff)
 
         if let exposure = exif[kCGImagePropertyExifExposureTime] as? Double {
-            record.exposure = exposure < 1 ? "1/\(Int(round(1 / exposure)))s" : "\(exposure)s"
+            record.exposure = formatExposureTime(exposure)
         } else if let exposure = exif[kCGImagePropertyExifExposureTime] as? NSNumber {
-            let value = exposure.doubleValue
-            record.exposure = value < 1 ? "1/\(Int(round(1 / value)))s" : "\(value)s"
+            record.exposure = formatExposureTime(exposure.doubleValue)
         }
 
         if let fNumber = exif[kCGImagePropertyExifFNumber] as? Double {
@@ -119,6 +118,19 @@ enum ExifService {
         record.extraFields = extraExifFields(exif: exif)
 
         return record
+    }
+
+    /// Port of Python `ExposureTime` display (`information_sidebar.py`); avoids divide-by-zero on bad EXIF.
+    private static func formatExposureTime(_ exposure: Double) -> String? {
+        guard exposure.isFinite, exposure > 0 else { return nil }
+        if exposure < 1 {
+            let reciprocal = 1 / exposure
+            guard reciprocal.isFinite else { return nil }
+            let denominator = Int(round(reciprocal))
+            guard denominator > 0 else { return nil }
+            return "1/\(denominator)s"
+        }
+        return "\(exposure)s"
     }
 
     static func userComment(path: String) -> String? {

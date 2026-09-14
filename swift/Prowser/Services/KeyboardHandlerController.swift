@@ -963,11 +963,13 @@ final class KeyboardHandlerController {
     }
 
     private func resolvedCurrentIndex(appState: AppState, images: [String]) -> Int {
+        guard !images.isEmpty else { return 0 }
         if let path = appState.fileData.currentImagePath,
            let index = images.firstIndex(of: path) {
             return index
         }
-        return appState.fileData.currentIndex
+        let idx = appState.fileData.currentIndex
+        return min(max(0, idx), images.count - 1)
     }
 
     /// Column-aware vertical step for Shift+Up/Down. Port of Python `_compute_shift_vertical_target`.
@@ -978,12 +980,13 @@ final class KeyboardHandlerController {
         count: Int
     ) -> Int {
         guard count > 0 else { return 0 }
-        let columns = resolvedThumbnailColumns(appState: appState, count: count)
-        let row = currentIndex / columns
-        let col = currentIndex % columns
+        let safeCurrent = min(max(0, currentIndex), count - 1)
+        let columns = max(1, resolvedThumbnailColumns(appState: appState, count: count))
+        let row = safeCurrent / columns
+        let col = safeCurrent % columns
         let targetRow = row + stepSign
         if targetRow < 0 || targetRow > (count - 1) / columns {
-            return currentIndex
+            return safeCurrent
         }
         var targetIndex = targetRow * columns + col
         let lastIndex = count - 1

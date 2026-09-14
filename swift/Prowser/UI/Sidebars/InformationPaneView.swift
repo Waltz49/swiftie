@@ -55,8 +55,10 @@ struct InformationPaneView: View {
             }
         }
         .onChange(of: appState.theme.colors) { _, _ in
-            themeRevision += 1
-            rebuildHTML()
+            Task { @MainActor in
+                themeRevision += 1
+                rebuildHTML()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
@@ -84,8 +86,8 @@ struct InformationPaneView: View {
 
     private func scheduleReload(path: String?) {
         metadataRefreshTask?.cancel()
-        metadataRefreshTask = Task {
-            try? await Task.sleep(for: .milliseconds(260))
+        metadataRefreshTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(TimingConstants.metadataOverlayRefreshDebounceMs))
             guard !Task.isCancelled else { return }
             await reload(path: path)
         }
@@ -99,7 +101,16 @@ struct InformationPaneView: View {
             html = ""
             return
         }
+        let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let current = appState.fileData.currentImagePath.map {
+            URL(fileURLWithPath: $0).standardizedFileURL.path
+        }
+        guard current == normalizedPath else { return }
         record = await ExifService.loadRecord(for: path, preferPythonDescription: true)
+        guard !Task.isCancelled,
+              appState.fileData.currentImagePath.map({
+                  URL(fileURLWithPath: $0).standardizedFileURL.path
+              }) == normalizedPath else { return }
         overlayData = InformationPaneHTMLBuilder.buildOverlayData(
             from: record,
             imageDirectory: (path as NSString).deletingLastPathComponent,
