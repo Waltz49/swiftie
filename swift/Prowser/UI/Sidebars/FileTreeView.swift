@@ -166,15 +166,22 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         private func expandLevels(from node: FileTreeNode, outlineView: NSOutlineView, remaining: Int) {
-            guard remaining > 0 else { return }
+            guard remaining > 0, isDirectoryExpandable(node) else { return }
             node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
             outlineView.reloadItem(node, reloadChildren: true)
             outlineView.expandItem(node)
             expandedDirectoryPaths.insert(node.path)
             guard remaining > 1, let children = node.children else { return }
-            for child in children where child.isDirectory {
+            for child in children where child.isDirectory && isDirectoryExpandable(child) {
                 expandLevels(from: child, outlineView: outlineView, remaining: remaining - 1)
             }
+        }
+
+        /// Filtered tree modes: expandable only when at least one child directory passes the tree filter (Python proxy `hasChildren`).
+        fileprivate func isDirectoryExpandable(_ node: FileTreeNode) -> Bool {
+            guard node.isDirectory else { return false }
+            if appState.filterSettings.filteredTree == "all" { return true }
+            return node.hasVisibleFilteredChildDirectories(appState: appState, rootPaths: rootPaths)
         }
 
         func applyThemeIfNeeded() {
@@ -234,6 +241,7 @@ struct FileTreeView: NSViewRepresentable {
                     outlineView.collapseItem(node, collapseChildren: false)
                     self.removeExpandedPath(node.path)
                 } else {
+                    guard self.isDirectoryExpandable(node) else { return }
                     node.loadChildrenIfNeeded(appState: self.appState, rootPaths: self.rootPaths)
                     outlineView.reloadItem(node, reloadChildren: true)
                     outlineView.expandItem(node)
@@ -287,15 +295,16 @@ struct FileTreeView: NSViewRepresentable {
             guard row >= 0,
                   let node = outlineView.item(atRow: row) as? FileTreeNode,
                   node.isDirectory else { return }
-            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
             if outlineView.isItemExpanded(node) {
                 outlineView.collapseItem(node, collapseChildren: false)
                 removeExpandedPath(node.path)
-            } else {
-                outlineView.reloadItem(node, reloadChildren: true)
-                outlineView.expandItem(node)
-                expandedDirectoryPaths.insert(node.path)
+                return
             }
+            guard isDirectoryExpandable(node) else { return }
+            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+            outlineView.reloadItem(node, reloadChildren: true)
+            outlineView.expandItem(node)
+            expandedDirectoryPaths.insert(node.path)
         }
 
         func openSelectedDirectoryFromReturn() {
@@ -307,7 +316,7 @@ struct FileTreeView: NSViewRepresentable {
             guard row >= 0,
                   let node = outlineView.item(atRow: row) as? FileTreeNode,
                   node.isDirectory else { return }
-            if !outlineView.isItemExpanded(node) {
+            if !outlineView.isItemExpanded(node), isDirectoryExpandable(node) {
                 node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
                 outlineView.reloadItem(node, reloadChildren: true)
                 outlineView.expandItem(node)
@@ -438,11 +447,13 @@ struct FileTreeView: NSViewRepresentable {
             let parentPaths = Set(discoveredPaths.map {
                 URL(fileURLWithPath: $0).deletingLastPathComponent().standardizedFileURL.path
             })
-            for parentPath in parentPaths.sorted(by: { $0.count < $1.count }) {
-                guard let parent = findNodeByPath(parentPath) else { continue }
-                parent.invalidateChildren()
-                guard outlineView.row(forItem: parent) >= 0 else { continue }
-                outlineView.reloadItem(parent, reloadChildren: true)
+            var pathsToReload = parentPaths
+            pathsToReload.formUnion(discoveredPaths)
+            for path in pathsToReload.sorted(by: { $0.count < $1.count }) {
+                guard let node = findNodeByPath(path) else { continue }
+                node.invalidateChildren()
+                guard outlineView.row(forItem: node) >= 0 else { continue }
+                outlineView.reloadItem(node, reloadChildren: true)
             }
             restoreTrackedExpansion(outlineView: outlineView)
             syncSelectionIfNeeded()
@@ -469,6 +480,8 @@ struct FileTreeView: NSViewRepresentable {
             for path in pathsToRefresh.sorted(by: { $0.count < $1.count }) {
                 guard let node = findNodeByPath(path) else { continue }
                 node.invalidateChildren()
+                guard outlineView.row(forItem: node) >= 0 else { continue }
+                outlineView.reloadItem(node, reloadChildren: true)
             }
             restoreTrackedExpansion(outlineView: outlineView)
             syncSelectionIfNeeded()
@@ -711,7 +724,8 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-            (item as? FileTreeNode)?.isDirectory == true
+            guard let node = item as? FileTreeNode else { return false }
+            return isDirectoryExpandable(node)
         }
 
         // MARK: NSOutlineViewDelegate
@@ -760,16 +774,16 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
-            if let node = item as? FileTreeNode {
-                node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-                if appState.renameStatusManager.isEnabled {
-                    appState.renameStatusManager.scanVisibleDirectories(
-                        [node.path],
-                        config: appState.config
-                    )
-                }
-                outlineView.reloadItem(node, reloadChildren: true)
+            guard let node = item as? FileTreeNode else { return false }
+            guard isDirectoryExpandable(node) else { return false }
+            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+            if appState.renameStatusManager.isEnabled {
+                appState.renameStatusManager.scanVisibleDirectories(
+                    [node.path],
+                    config: appState.config
+                )
             }
+            outlineView.reloadItem(node, reloadChildren: true)
             return true
         }
 
@@ -805,8 +819,7 @@ final class FileTreeOutlineView: NSOutlineView {
            let coordinator,
            let node = item(atRow: row) as? FileTreeNode,
            node.isDirectory {
-            node.loadChildrenIfNeeded(appState: coordinator.appState, rootPaths: coordinator.rootPaths)
-            if (node.children?.count ?? 0) > 0 {
+            if coordinator.isDirectoryExpandable(node) {
                 coordinator.scheduleSingleClickToggle(for: node)
             }
             selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -910,6 +923,11 @@ final class FileTreeNode: NSObject {
                 }
                 return FileTreeNode(path: entry.path, isDirectory: true, showHidden: showHidden, excluded: excluded)
             }
+    }
+
+    func hasVisibleFilteredChildDirectories(appState: AppState, rootPaths: [String]) -> Bool {
+        loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+        return !(children?.isEmpty ?? true)
     }
 
     func invalidateChildren() {
