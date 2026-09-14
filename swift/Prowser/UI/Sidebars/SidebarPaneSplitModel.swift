@@ -75,12 +75,6 @@ final class SidebarPaneSplitModel {
 
     /// Which left panes are shown in the stacked layout (matches Python `_display_pane_visibility`).
     static func leftDisplayPaneVisibility(appState: AppState) -> [Bool] {
-        let chatEnabled = BundleCapabilities.chatUIEnabled
-        let chatVisible = chatEnabled
-            && appState.config.bool(forKey: "chat_visible", default: false)
-        if chatVisible {
-            return [false, false, true]
-        }
         if appState.fileData.currentViewMode == .browse {
             return [false, false, false]
         }

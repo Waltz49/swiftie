@@ -110,7 +110,8 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                 : nil,
             status: descriptor.status,
             omitLeftBorder: model.side == .right ? true : descriptor.omitLeftBorder,
-            contextMenuKind: descriptor.contextMenuKind
+            contextMenuKind: descriptor.contextMenuKind,
+            titlebarFocusHighlighted: descriptor.contextMenuKind == .fileTree && appState.fileTreeKeyboardFocused
         ) {
             SidebarPaneBody(kind: descriptor.contextMenuKind) {
                 paneContent(for: descriptor.index)

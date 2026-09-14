@@ -31,6 +31,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     var imagePaths: [String] = [] {
         didSet {
             imageDimensionCache.removeAll()
+            basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: imagePaths)
             reloadLayout()
         }
     }
@@ -53,6 +54,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     var showImageSize: Bool = false {
         didSet { reloadLayout() }
+    }
+
+    var showExtensions: Bool = true {
+        didSet { needsDisplay = true }
     }
 
     var overlayBoxColor: NSColor = NSColor.black.withAlphaComponent(0.94)
@@ -87,6 +92,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         referenceGraph != nil && !imagePaths.isEmpty
     }
     private var imageDimensionCache: [String: String] = [:]
+    private var basenamesNeedingExtensions: Set<String> = []
     private var thumbnails: [String: NSImage] = [:]
     private var loadingPaths: Set<String> = []
     private var thumbnailPixelSize: Int = 256
@@ -1018,7 +1024,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
         var lines: [String] = []
         if showFilename {
-            lines.append((path as NSString).lastPathComponent)
+            lines.append(
+                ThumbnailLayout.overlayDisplayFilename(
+                    for: path,
+                    showExtensions: showExtensions,
+                    basenamesNeedingExtensions: basenamesNeedingExtensions
+                )
+            )
         }
         if showImageSize, let sizeText = dimensionText(for: path) {
             lines.append(sizeText)
@@ -1040,7 +1052,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         paragraph.alignment = .center
         paragraph.lineBreakMode = .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14),
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: paragraph,
         ]

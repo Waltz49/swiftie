@@ -118,20 +118,6 @@ struct InformationActionBarView: View {
                 tooltip: "Copy prompt to clipboard.\n⌥+click to copy full user comment.",
                 enabled: hasComment
             )
-            if BundleCapabilities.imageGenUIEnabled {
-                assetActionButton(
-                    "create",
-                    normal: "fromText",
-                    hover: "fromText_hover",
-                    tooltip: "Create image from this prompt"
-                )
-                assetActionButton(
-                    "editai",
-                    normal: "editAI",
-                    hover: "editAI_hover",
-                    tooltip: "Edit this image with AI"
-                )
-            }
             Spacer(minLength: 0)
             assetActionButton(
                 "delete",
@@ -172,46 +158,6 @@ struct InformationActionBarView: View {
                 userInfo: ["action": action]
             )
         }
-    }
-}
-
-@MainActor
-struct ChatToolbarView: View {
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        let chat = appState.chat
-        HStack(spacing: 4) {
-            SidebarAssetIconButton(
-                normalName: "prompt",
-                hoverName: "prompt_hover",
-                tooltip: "System prompt for chat\nOpen the system prompt library",
-                enabled: chat.isEnabled
-            ) {
-                chat.requestSystemPromptEdit()
-            }
-            SidebarAssetIconButton(
-                normalName: "copy_asst",
-                hoverName: "copy_asst_hover",
-                tooltip: "Copy images to Assistant's reply\nWhen enabled, assistant replies show the preceding user message images",
-                selected: chat.copyImagesToAssistant,
-                enabled: chat.isEnabled
-            ) {
-                chat.setCopyImagesToAssistant(!chat.copyImagesToAssistant)
-            }
-            Spacer(minLength: 0)
-            SidebarAssetIconButton(
-                normalName: "trash_icon",
-                hoverName: "trash_icon_hover",
-                tooltip: "Clear Chat\nRemove all messages and attachments"
-            ) {
-                chat.clear()
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 0)
-        .padding(.bottom, 5)
-        .background(appState.theme.colors.sidebarHeaderBackground.opacity(0.35))
     }
 }
 

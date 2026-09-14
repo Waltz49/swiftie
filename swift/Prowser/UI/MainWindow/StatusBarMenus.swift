@@ -75,19 +75,6 @@ enum StatusBarMenus {
         popUp(menu, relativeTo: view)
     }
 
-    static func showFileCountMenu(appState: AppState, relativeTo view: NSView) {
-        let menu = NSMenu()
-        let enabled = appState.config.bool(forKey: "background_clip_enabled", default: false)
-        let title = enabled ? "Turn off Background Extracts" : "Turn on Background Extracts"
-        menu.addItem(makeAction(title: title, handler: {
-            let next = !enabled
-            appState.config.updateSetting("background_clip_enabled", value: next)
-            appState.workers.reloadSettings(config: appState.config)
-            appState.status.show(next ? "Background extracts enabled" : "Background extracts disabled")
-        }))
-        popUp(menu, relativeTo: view)
-    }
-
     static func showDateMenu(appState: AppState, relativeTo view: NSView) {
         let menu = NSMenu()
         let useExif = appState.config.useExifDate

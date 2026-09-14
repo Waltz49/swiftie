@@ -68,13 +68,6 @@ struct InformationPaneView: View {
                 appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
             case "delete":
                 deleteComment()
-            case "create":
-                Task {
-                    let prompt = await appState.importPromptForActiveImageAsync()
-                    appState.openImageGenDialog(initialPrompt: prompt, autoImportEXIF: true)
-                }
-            case "editai":
-                editWithAI()
             default:
                 break
             }
@@ -146,36 +139,11 @@ struct InformationPaneView: View {
             appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
         case .edit:
             appState.beginEditUserComment()
-        case .create:
-            Task {
-                let prompt = await appState.importPromptForActiveImageAsync()
-                appState.openImageGenDialog(initialPrompt: prompt, autoImportEXIF: true)
-            }
-        case .editAI:
-            editWithAI()
+        case .create, .editAI, .cancelGeneration:
+            break
         case .delete:
             deleteComment()
-        case .cancelGeneration:
-            break
         }
-    }
-
-    /// Python ``InformationSidebar._on_edit_with_ai`` → ``open_imagegen_edit_dialog``: the unified
-    /// dialog opens on Edit for this image, prompt primed from the pane's user comment (an empty
-    /// comment clears the prompt), and Import Rest applied automatically.
-    @MainActor
-    private func editWithAI() {
-        guard let path = appState.fileData.currentImagePath,
-              FileManager.default.isReadableFile(atPath: path) else {
-            appState.status.show("No image selected")
-            return
-        }
-        appState.openImageGenDialog(
-            function: "edit",
-            initialPrompt: overlayData.speakablePlainText ?? "",
-            autoImportEXIF: true,
-            editSourcePaths: [path]
-        )
     }
 
     @MainActor

@@ -178,31 +178,6 @@ struct ProwserCommands: Commands {
         }
 
         CommandMenu("Search") {
-            if BundleCapabilities.clipSearchUIEnabled {
-                Button("Search by Text…") {
-                    Task { @MainActor in appState.presentClipSearchSheet() }
-                }
-                .keyboardShortcut("f", modifiers: .command)
-            }
-
-            if BundleCapabilities.similaritySearchUIEnabled {
-                Button("Find Similar Image Files…") {
-                    Task { @MainActor in appState.searchOperations.findSimilarImages() }
-                }
-                .keyboardShortcut("k", modifiers: .command)
-            }
-
-            if BundleCapabilities.personSearchUIEnabled {
-                SearchByPersonMenuButton(appState: appState)
-                QuickPersonSearchMenuButton(appState: appState)
-            }
-
-            if BundleCapabilities.clipSearchUIEnabled
-                || BundleCapabilities.similaritySearchUIEnabled
-                || BundleCapabilities.personSearchUIEnabled {
-                Divider()
-            }
-
             Button("Find Duplicate Image Files in Directory") {
                 Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
             }
@@ -216,11 +191,6 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.showImageInDirectory() }
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
-
-            if BundleCapabilities.facesUIEnabled {
-                Divider()
-                ExtractFacesMenuButton(appState: appState)
-            }
         }
 
         CommandMenu(MenuBarTitles.view) {
@@ -253,11 +223,6 @@ struct ProwserCommands: Commands {
 
             PaneToggleButton(appState: appState, pane: .statusBar)
                 .keyboardShortcut("b", modifiers: [])
-
-            if BundleCapabilities.chatUIEnabled {
-                ChatPaneToggleButton(appState: appState)
-                    .keyboardShortcut(",", modifiers: [])
-            }
 
             Divider()
 
@@ -345,13 +310,6 @@ struct ProwserCommands: Commands {
                 }
             }
             .keyboardShortcut("h", modifiers: .control)
-
-            if BundleCapabilities.facesUIEnabled {
-                Button("Cache Subdirectories' Faces") {
-                    Task { @MainActor in appState.cacheSubdirectoryFaces() }
-                }
-                .keyboardShortcut("=", modifiers: .command)
-            }
 
             Button("Cache Subdirectories' Thumbnails") {
                 Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
@@ -764,45 +722,6 @@ private struct TrashViewCopyMenuButton: View {
 }
 
 @MainActor
-private struct SearchByPersonMenuButton: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        Button("Search by Person…") {
-            appState.searchOperations.presentPersonSearch()
-        }
-        .keyboardShortcut("p", modifiers: .command)
-        .disabled(!BundleCapabilities.facesUIEnabled || !appState.menuRefresh.searchByPersonEnabled)
-    }
-}
-
-@MainActor
-private struct ExtractFacesMenuButton: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        Button("Extract Faces") {
-            appState.extractFacesFromSelection()
-        }
-        .keyboardShortcut("p", modifiers: [.command, .shift])
-        .disabled(!BundleCapabilities.facesUIEnabled || !appState.menuRefresh.extractFacesEnabled)
-    }
-}
-
-@MainActor
-private struct QuickPersonSearchMenuButton: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        Button("Quick Person Search") {
-            appState.runQuickPersonSearch()
-        }
-        .keyboardShortcut("p", modifiers: [.command, .control])
-        .disabled(!appState.menuRefresh.quickPersonSearchEnabled)
-    }
-}
-
-@MainActor
 private struct DeleteExifDateMenuButton: View {
     @Bindable var appState: AppState
 
@@ -963,18 +882,6 @@ private struct PaneToggleButton: View {
         case .informationSidebar: appState.toggleInformationSidebar()
         case .statusBar: appState.toggleStatusBar()
         }
-    }
-}
-
-private struct ChatPaneToggleButton: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        let visible = appState.config.bool(forKey: "chat_visible", default: false)
-        Button(MenuStateHelpers.paneToggleLabel("Chat", visible: visible)) {
-            Task { @MainActor in appState.toggleChatPane() }
-        }
-        .disabled(!BundleCapabilities.chatUIEnabled)
     }
 }
 

@@ -124,9 +124,7 @@ struct StatusBarView: View {
                 ),
                 sectionID: sectionID,
                 enabled: true,
-                action: BundleCapabilities.clipSearchUIEnabled
-                    ? { StatusBarMenus.showFileCountMenu(appState: appState, relativeTo: $0) }
-                    : nil
+                action: nil
             )
         }
     }

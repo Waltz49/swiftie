@@ -17,6 +17,8 @@ struct SidebarPaneTitlebar: View {
     var status: String? = nil
     var omitLeftBorder: Bool = false
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
+    /// Python `TREE_HEADER_FOCUS_BG_HEX` when the file tree has keyboard focus.
+    var titlebarFocusHighlighted: Bool = false
 
     @State private var dragStartY: CGFloat?
     @State private var suppressTitleClick = false
@@ -69,7 +71,11 @@ struct SidebarPaneTitlebar: View {
             }
             onTitleClick?()
         }
-        .background(colors.sidebarHeaderBackground)
+        .background(
+            titlebarFocusHighlighted
+                ? colors.sidebarHeaderFocusBackground
+                : colors.sidebarHeaderBackground
+        )
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(colors.sidebarHeaderBorder)
@@ -129,6 +135,7 @@ struct SidebarPaneSection<Content: View>: View {
     var status: String? = nil
     var omitLeftBorder: Bool = false
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
+    var titlebarFocusHighlighted: Bool = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -146,7 +153,8 @@ struct SidebarPaneSection<Content: View>: View {
                 onTitlebarDragEnded: onTitlebarDragEnded,
                 status: status,
                 omitLeftBorder: omitLeftBorder,
-                contextMenuKind: contextMenuKind
+                contextMenuKind: contextMenuKind,
+                titlebarFocusHighlighted: titlebarFocusHighlighted
             )
 
             if isExpanded {
@@ -207,18 +215,11 @@ struct SidebarPaneBody<Content: View>: View {
             FileTreeToolbarView()
         case .information:
             InformationActionBarView()
-        case .chat:
-            ChatToolbarView()
         }
     }
 
     private func usesInternalContextMenu(_ kind: SidebarPaneContextMenuKind) -> Bool {
-        switch kind {
-        case .fileTree, .chat:
-            return true
-        default:
-            return false
-        }
+        kind == .fileTree
     }
 
     private func toolbarVisible(for kind: SidebarPaneContextMenuKind) -> Bool {
@@ -227,8 +228,6 @@ struct SidebarPaneBody<Content: View>: View {
             return appState.fileTreeToolbarVisible
         case .information:
             return appState.informationMenuBarVisible
-        case .chat:
-            return appState.chatToolbarVisible
         }
     }
 }

@@ -129,29 +129,12 @@ enum ExifService {
     /// Python/piexif-backed user description (matches information sidebar in Qt app).
     @MainActor
     static func userDescription(path: String) async -> String? {
-        let native = loadRecord(for: path).description
-        if let registry = ExifBridgeSupport.registry, registry.isAvailable {
-            do {
-                if let description = try await registry.getExifUserDescription(path: path),
-                   !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    return description
-                }
-            } catch {
-                // Fall back to native ImageIO decode below.
-            }
-        }
-        return native
+        loadRecord(for: path).description
     }
 
     @MainActor
     static func loadRecord(for path: String, preferPythonDescription: Bool) async -> ExifRecord {
-        var record = loadRecord(for: path)
-        guard preferPythonDescription, ExifBridgeSupport.isAvailable else { return record }
-        if let description = await userDescription(path: path),
-           !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            record.description = description
-        }
-        return record
+        loadRecord(for: path)
     }
 
     private static let userCommentSkipHeadings: Set<String> = [
@@ -231,21 +214,11 @@ enum ExifService {
 
     @MainActor
     static func writeUserComment(path: String, text: String) async throws {
-        if let registry = ExifBridgeSupport.registry, registry.isAvailable {
-            let success = try await registry.writeExifUserComment(path: path, comment: text)
-            guard success else { throw ExifError.writeFailed }
-            return
-        }
         try writeUserCommentImageIO(path: path, text: text)
     }
 
     @MainActor
     static func deleteUserComment(path: String) async throws {
-        if let registry = ExifBridgeSupport.registry, registry.isAvailable {
-            let success = try await registry.deleteExifUserComment(path: path)
-            guard success else { throw ExifError.writeFailed }
-            return
-        }
         try deleteUserCommentImageIO(path: path)
     }
 

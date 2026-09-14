@@ -840,6 +840,24 @@ final class FileTreeOutlineView: NSOutlineView {
         }
         return super.validateProposedFirstResponder(responder, for: event)
     }
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok {
+            appState?.syncFileTreeKeyboardFocus(from: window)
+        }
+        return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let windowSnapshot = window
+        let appStateSnapshot = appState
+        let ok = super.resignFirstResponder()
+        DispatchQueue.main.async {
+            appStateSnapshot?.syncFileTreeKeyboardFocus(from: windowSnapshot)
+        }
+        return ok
+    }
 }
 
 @MainActor

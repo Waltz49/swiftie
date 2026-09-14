@@ -28,44 +28,12 @@ enum FileTreeKeyboard {
             return true
         }
 
-        if hasCommand, !hasShift, !hasOption, !hasControl {
-            if let path = coordinator.selectedDirectoryPath() {
-                switch event.charactersIgnoringModifiers?.lowercased() {
-                case "f":
-                    if BundleCapabilities.clipSearchUIEnabled {
-                        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
-                            showRestrictedAlert(path: path)
-                        } else {
-                            if appState.fileData.currentViewMode == .browse {
-                                appState.fileData.setViewMode(.thumbnail)
-                            }
-                            appState.clipSearchPrefillDirectory = path
-                            appState.showClipSearchSheet = true
-                        }
-                        return true
-                    }
-                case "p":
-                    if BundleCapabilities.personSearchUIEnabled {
-                        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
-                            showRestrictedAlert(path: path)
-                        } else {
-                            appState.personSearchPrefillDirectory = path
-                            appState.showPersonSearchSheet = true
-                        }
-                        return true
-                    }
-                case "c":
-                    appState.fileOperations.copyPathsToClipboard([path])
-                    appState.status.show("Copied path")
-                    return true
-                default:
-                    break
-                }
-            } else if event.charactersIgnoringModifiers?.lowercased() == "p",
-                      BundleCapabilities.personSearchUIEnabled {
-                appState.showPersonSearchSheet = true
-                return true
-            }
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "c",
+           let path = coordinator.selectedDirectoryPath() {
+            appState.fileOperations.copyPathsToClipboard([path])
+            appState.status.show("Copied path")
+            return true
         }
 
         if event.keyCode == 120, !hasCommand, !hasShift, !hasOption, !hasControl {

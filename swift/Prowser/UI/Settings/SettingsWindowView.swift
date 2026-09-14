@@ -155,14 +155,6 @@ struct SettingsWindowView: View {
             MapsEditorSettingsTab()
         case .slideshow:
             SlideshowSettingsTab()
-        case .similarity:
-            ModelsSearchSettingsTab()
-        case .faces:
-            FaceRecognitionSettingsTab()
-        case .captioning:
-            CaptioningSettingsTab()
-        case .lora:
-            LoRASettingsTab()
         case .caches:
             CacheSettingsTab()
         }

@@ -95,60 +95,6 @@ final class FileTreeOperationsService {
         appState.status.show("Found \(duplicates.count) duplicate files")
     }
 
-    func findSimilarImages(in directory: String) {
-        guard BundleCapabilities.similaritySearchUIEnabled else { return }
-        guard let appState else { return }
-        if FileTreePathRestrictions.isRootOrSystemVolume(directory) {
-            showRestrictedAlert(directory: directory)
-            return
-        }
-
-        if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
-        }
-
-        guard appState.workers.similaritySearch.isAvailable else {
-            appState.status.show("Similarity search requires Python.")
-            return
-        }
-
-        let references = currentReferencePaths(appState: appState)
-        if references.isEmpty {
-            showAlert(
-                "No Reference Image",
-                informative: "Select an image first, then use Find VisuallySimilar Image Files."
-            )
-            return
-        }
-
-        appState.status.show("Searching for similar images…")
-        Task { @MainActor in
-            do {
-                let paths = try await appState.searchOperations.findSimilarInFolder(
-                    directory: directory,
-                    recursive: true
-                )
-                appState.loadDirectory(directory, saveHistory: true)
-                appState.searchOperations.applySimilarityResults(paths)
-            } catch {
-                appState.status.show(error.localizedDescription)
-            }
-        }
-    }
-
-    private func currentReferencePaths(appState: AppState) -> [String] {
-        if let current = appState.fileData.currentImagePath,
-           FileManager.default.fileExists(atPath: current) {
-            return [current]
-        }
-        let displayed = Set(appState.fileData.displayedImages)
-        let selected = appState.selection.selectedFiles.filter { displayed.contains($0) }
-        if !selected.isEmpty {
-            return selected.sorted()
-        }
-        return []
-    }
-
     func clearCache(for directory: String) {
         guard let appState else { return }
         if FileTreePathRestrictions.isRootOrSystemVolume(directory) {

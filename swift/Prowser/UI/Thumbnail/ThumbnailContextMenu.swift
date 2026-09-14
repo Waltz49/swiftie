@@ -77,17 +77,6 @@ enum ThumbnailContextMenu {
         duplicate.target = MenuActions.shared
         duplicate.representedObject = paths
 
-        if BundleCapabilities.similaritySearchUIEnabled {
-            let findSimilar = menu.addItem(
-                withTitle: "Find Similar Images…",
-                action: #selector(MenuActions.findSimilar(_:)),
-                keyEquivalent: ""
-            )
-            NSMenuShortcutSupport.apply(display: "⌘K", to: findSimilar)
-            findSimilar.target = MenuActions.shared
-            findSimilar.representedObject = paths
-        }
-
         let showInDirectory = menu.addItem(
             withTitle: "Show in Directory",
             action: #selector(MenuActions.showInDirectory(_:)),
@@ -157,16 +146,6 @@ enum ThumbnailContextMenu {
             refGraph.representedObject = paths
         }
 
-        if BundleCapabilities.facesUIEnabled, singleOnly {
-            let faces = menu.addItem(
-                withTitle: "Extract Faces",
-                action: #selector(MenuActions.extractFaces(_:)),
-                keyEquivalent: ""
-            )
-            NSMenuShortcutSupport.apply(display: "⇧⌘P", to: faces)
-            faces.target = MenuActions.shared
-            faces.representedObject = paths
-        }
 
         let anyHasGPS = paths.contains { ExifService.gpsCoordinates(for: $0) != nil }
         let mapLocation = menu.addItem(
@@ -296,11 +275,6 @@ private final class MenuActions: NSObject {
         }
     }
 
-    @objc func findSimilar(_ sender: NSMenuItem) {
-        guard let appState else { return }
-        appState.searchOperations.findSimilarImages()
-    }
-
     @objc func convertFormat(_ sender: NSMenuItem) {
         guard let appState, let paths = sender.representedObject as? [String] else { return }
         appState.presentConvertFormatSheet(paths: paths)
@@ -340,11 +314,6 @@ private final class MenuActions: NSObject {
     @objc func showReferenceGraph(_ sender: NSMenuItem) {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
         appState.showReferenceGraph(for: path)
-    }
-
-    @objc func extractFaces(_ sender: NSMenuItem) {
-        guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
-        KnownFacesService.openExtractFaces(appState: appState, imagePath: path)
     }
 
     @objc func revealInFinder(_ sender: NSMenuItem) {

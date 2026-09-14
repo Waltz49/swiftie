@@ -78,18 +78,6 @@ private struct MainWindowSheetsModifier: ViewModifier {
                 KeyboardShortcutsHelpView()
                     .environment(\.themeColors, appState.theme.colors)
             }
-            .sheet(isPresented: $appState.showSimilaritySearchSheet) {
-                SimilaritySearchSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showPersonSearchSheet) {
-                PersonSearchSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showClipSearchSheet) {
-                ClipSearchSheet()
-                    .environment(appState)
-            }
             .sheet(isPresented: $appState.showConvertFormatSheet) {
                 ConvertFormatSheet()
                     .environment(appState)
@@ -123,14 +111,6 @@ private struct MainWindowSheetsModifier: ViewModifier {
             }
             .sheet(isPresented: $appState.showMoveWorkFilesSheet) {
                 MoveWorkFilesSheet()
-                    .environment(appState)
-            }
-            .sheet(item: $appState.quickPersonFacePick) { state in
-                QuickPersonFacePickSheet(state: state)
-                    .environment(appState)
-            }
-            .sheet(item: $appState.faceAssignState) { state in
-                FaceAssignSheet(state: state)
                     .environment(appState)
             }
             .sheet(isPresented: Binding(

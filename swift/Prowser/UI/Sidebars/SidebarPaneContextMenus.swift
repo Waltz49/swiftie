@@ -4,7 +4,6 @@ import SwiftUI
 enum SidebarPaneContextMenuKind: Equatable {
     case fileTree
     case information
-    case chat
 }
 
 /// Control-click / right-click menus for sidebar panes.
@@ -38,8 +37,6 @@ enum SidebarPaneContextMenus {
             return fileTreeMenu(appState: appState)
         case .information:
             return informationMenu(appState: appState)
-        case .chat:
-            return chatMenu(appState: appState)
         }
     }
 
@@ -79,10 +76,6 @@ enum SidebarPaneContextMenus {
 
         addAction(menu, title: "Edit User Comment", action: #selector(PaneMenuActions.infoEdit(_:)))
         addAction(menu, title: "Copy to Clipboard", enabled: hasComment, action: #selector(PaneMenuActions.infoCopy(_:)))
-        if BundleCapabilities.imageGenUIEnabled {
-            addAction(menu, title: "Create Image from this prompt", action: #selector(PaneMenuActions.infoCreate(_:)))
-            addAction(menu, title: "Edit this image with AI", action: #selector(PaneMenuActions.infoEditAI(_:)))
-        }
         addAction(menu, title: "Delete User Comment", enabled: hasComment, action: #selector(PaneMenuActions.infoDelete(_:)))
         menu.addItem(.separator())
         addCheckable(
@@ -90,46 +83,6 @@ enum SidebarPaneContextMenus {
             title: toolbarToggleTitle(visible: appState.informationMenuBarVisible, noun: "Menu Bar"),
             checked: appState.informationMenuBarVisible,
             action: #selector(PaneMenuActions.infoShowMenuBar(_:))
-        )
-        stripMenuIcons(menu)
-        return menu
-    }
-
-    private static func chatMenu(appState: AppState) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let chat = appState.chat
-
-        addAction(menu, title: "System prompt for chat", enabled: chat.isEnabled, action: #selector(PaneMenuActions.chatSystemPrompt(_:)))
-        addCheckable(
-            menu,
-            title: "Copy images to Assistant's reply",
-            checked: chat.copyImagesToAssistant,
-            enabled: chat.isEnabled,
-            action: #selector(PaneMenuActions.chatCopyImages(_:))
-        )
-        addCheckable(
-            menu,
-            title: "Submit Job Automatically",
-            checked: chat.automaticCreate,
-            enabled: chat.isEnabled,
-            action: #selector(PaneMenuActions.chatAutomaticCreate(_:))
-        )
-        addAction(menu, title: "Clear Chat", action: #selector(PaneMenuActions.chatClear(_:)))
-        menu.addItem(.separator())
-        addCheckable(
-            menu,
-            title: "Preserve Chat Across Sessions",
-            checked: chat.preserveAcrossSessions,
-            action: #selector(PaneMenuActions.chatPreserve(_:))
-        )
-        addAction(menu, title: "Tips…", action: #selector(PaneMenuActions.chatTips(_:)))
-        menu.addItem(.separator())
-        addCheckable(
-            menu,
-            title: toolbarToggleTitle(visible: appState.chatToolbarVisible),
-            checked: appState.chatToolbarVisible,
-            action: #selector(PaneMenuActions.chatShowToolbar(_:))
         )
         stripMenuIcons(menu)
         return menu
@@ -221,14 +174,6 @@ final class PaneMenuActions: NSObject {
         appState?.copyInformationComment(full: NSEvent.modifierFlags.contains(.option))
     }
 
-    @objc func infoCreate(_ sender: NSMenuItem) {
-        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "create"])
-    }
-
-    @objc func infoEditAI(_ sender: NSMenuItem) {
-        NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "editai"])
-    }
-
     @objc func infoDelete(_ sender: NSMenuItem) {
         NotificationCenter.default.post(name: .prowserInformationAction, object: nil, userInfo: ["action": "delete"])
     }
@@ -237,38 +182,6 @@ final class PaneMenuActions: NSObject {
         appState?.setInformationMenuBarVisible(toggledValue(sender))
     }
 
-    @objc func chatSystemPrompt(_ sender: NSMenuItem) {
-        appState?.chat.requestSystemPromptEdit()
-    }
-
-    @objc func chatCopyImages(_ sender: NSMenuItem) {
-        guard let appState else { return }
-        appState.chat.setCopyImagesToAssistant(toggledValue(sender))
-    }
-
-    @objc func chatAutomaticCreate(_ sender: NSMenuItem) {
-        guard let appState else { return }
-        appState.chat.setAutomaticCreate(toggledValue(sender))
-    }
-
-    @objc func chatClear(_ sender: NSMenuItem) {
-        appState?.chat.clear()
-    }
-
-    @objc func chatPreserve(_ sender: NSMenuItem) {
-        guard let appState else { return }
-        appState.chat.setPreserveAcrossSessions(toggledValue(sender))
-    }
-
-    @objc func chatTips(_ sender: NSMenuItem) {
-        appState?.status.show(
-            "Chat tips:\n• Use a clear system prompt for consistent replies.\n• Toggle “Copy images” to attach the current image to assistant context.\n• Preserve chat to keep history between launches."
-        )
-    }
-
-    @objc func chatShowToolbar(_ sender: NSMenuItem) {
-        appState?.setChatToolbarVisible(toggledValue(sender))
-    }
 }
 
 extension Notification.Name {
@@ -489,7 +402,6 @@ final class PaneToolsButtonView: NSView {
         switch kind {
         case .fileTree: return "File tree tools"
         case .information: return "File information tools"
-        case .chat: return "Chat tools"
         }
     }
 

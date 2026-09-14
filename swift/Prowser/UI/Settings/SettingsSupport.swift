@@ -11,10 +11,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case theme
     case maps
     case slideshow
-    case similarity
-    case faces
-    case captioning
-    case lora
     case caches
 
     var id: String { rawValue }
@@ -30,10 +26,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .theme: return "Theme"
         case .maps: return "Maps and Editor"
         case .slideshow: return "Slideshow"
-        case .similarity: return "Models for Search"
-        case .faces: return "Face Recognition"
-        case .captioning: return "Captioning"
-        case .lora: return "LoRA"
         case .caches: return "Caches"
         }
     }
@@ -49,25 +41,12 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .theme: return "paintpalette"
         case .maps: return "map"
         case .slideshow: return "play.rectangle"
-        case .similarity: return "sparkle.magnifyingglass"
-        case .faces: return "person.crop.rectangle"
-        case .captioning: return "text.bubble"
-        case .lora: return "cube"
         case .caches: return "externaldrive"
         }
     }
 
     static func visibleTabs() -> [SettingsTab] {
-        SettingsTab.allCases.filter { tab in
-            switch tab {
-            case .faces: return BundleCapabilities.facesUIEnabled
-            case .captioning, .lora: return BundleCapabilities.imageGenUIEnabled
-            case .similarity:
-                return BundleCapabilities.similaritySearchUIEnabled
-                    || BundleCapabilities.clipSearchUIEnabled
-            default: return true
-            }
-        }
+        SettingsTab.allCases
     }
 
     /// Session-only; updated when Settings closes with OK or Cancel (Python `_last_tab_id`).

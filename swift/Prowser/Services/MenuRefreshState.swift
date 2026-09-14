@@ -10,9 +10,6 @@ final class MenuRefreshState {
     var moveWorkFilesVisible = false
     var deleteExifDateEnabled = false
     var deleteExifDateTitle = "Delete EXIF Date from File…"
-    var quickPersonSearchEnabled = false
-    var searchByPersonEnabled = false
-    var extractFacesEnabled = false
     var destinationsMenuVisible = true
 
     func bind(_ appState: AppState) {
@@ -33,9 +30,6 @@ final class MenuRefreshState {
             default: "move"
         ) != "none"
         refreshDeleteExifDate(appState: appState)
-        refreshQuickPersonSearch(appState: appState)
-        refreshSearchByPerson(appState: appState)
-        refreshExtractFaces(appState: appState)
     }
 
     func refreshDeleteExifDate(appState: AppState) {
@@ -50,38 +44,5 @@ final class MenuRefreshState {
         deleteExifDateTitle = withExif.count > 1
             ? "Delete EXIF Dates from Files…"
             : "Delete EXIF Date from File…"
-    }
-
-    func refreshSearchByPerson(appState: AppState) {
-        guard BundleCapabilities.facesUIEnabled else {
-            searchByPersonEnabled = false
-            return
-        }
-        let mode = appState.fileData.currentViewMode
-        searchByPersonEnabled = mode == .thumbnail || mode == .browse || mode == .list
-    }
-
-    func refreshExtractFaces(appState: AppState) {
-        guard BundleCapabilities.facesUIEnabled else {
-            extractFacesEnabled = false
-            return
-        }
-        let paths = SelectionService.orderedSelectedFiles(appState: appState)
-        let path = paths.count == 1 ? paths[0] : appState.fileData.currentImagePath
-        extractFacesEnabled = path != nil && FileManager.default.fileExists(atPath: path ?? "")
-    }
-
-    func refreshQuickPersonSearch(appState: AppState) {
-        guard BundleCapabilities.facesUIEnabled else {
-            quickPersonSearchEnabled = false
-            return
-        }
-        let mode = appState.fileData.currentViewMode
-        guard mode == .thumbnail || mode == .browse else {
-            quickPersonSearchEnabled = false
-            return
-        }
-        let paths = SelectionService.selectedFilesOrCurrent(appState: appState)
-        quickPersonSearchEnabled = (1...QuickPersonSearchService.maxImages).contains(paths.count)
     }
 }

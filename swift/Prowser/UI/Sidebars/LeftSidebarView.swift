@@ -4,7 +4,6 @@ struct LeftSidebarView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let chat = appState.chat
         let displayVis = SidebarPaneSplitModel.leftDisplayPaneVisibility(appState: appState)
         let descriptors = [
             SidebarPaneDescriptor(
@@ -29,15 +28,11 @@ struct LeftSidebarView: View {
             ),
             SidebarPaneDescriptor(
                 index: 2,
-                title: "Chat",
+                title: "",
                 expandedConfigKey: "chat_visible",
                 defaultExpanded: false,
-                isDisplayed: displayVis[2],
-                status: chat.isStreaming ? "…" : nil,
-                omitLeftBorder: true,
-                allowsTitlebarDrag: true,
-                contextMenuKind: .chat,
-                preferredFitContentHeight: { 160 }
+                isDisplayed: false,
+                omitLeftBorder: true
             ),
         ]
 
@@ -46,7 +41,7 @@ struct LeftSidebarView: View {
             descriptors: descriptors,
             pane0: { FileTreeView().frame(minHeight: 80) },
             pane1: { PreviewPaneView().frame(minHeight: 64) },
-            pane2: { ChatPaneView().frame(minHeight: 80) }
+            pane2: { EmptyView() }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

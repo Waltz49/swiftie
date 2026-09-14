@@ -57,15 +57,15 @@ final class AppState {
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
     private let aboutDialog = AboutDialogController()
     private let settingsDialog = SettingsDialogController()
-    let chat: ChatController
     let theme: ThemeService
-    let workers: WorkerServices
     let informationSectionState: InformationSectionState
     let leftSidebarSplit: SidebarPaneSplitModel
     let rightSidebarSplit: SidebarPaneSplitModel
     let directoryHistory = DirectoryHistory()
     let browseImageHistory = BrowseImageHistoryController()
     var fileTreeFocusToken = 0
+    /// Tree pane keyboard focus (Python `combined_sidebar._update_tree_header_focus`).
+    var fileTreeKeyboardFocused = false
     var fileTreeSyncActiveImageToken = 0
     /// While set, tree highlight follows this directory until the active image catches up (Python `user_requested_directory`).
     var userRequestedTreeDirectory: String?
@@ -75,8 +75,6 @@ final class AppState {
     var showKeyboardHelp = false
     var isAboutDialogVisible: Bool { aboutDialog.isVisible }
     var isSettingsDialogVisible: Bool { settingsDialog.isVisible }
-    var showSimilaritySearchSheet = false
-    var showPersonSearchSheet = false
     var showFindReferencesSheet = false
     var showReferenceGraphSheet = false
     var referenceGraphActive = false
@@ -87,7 +85,6 @@ final class AppState {
     private var browseReturnThumbnailState: BrowseReturnThumbnailState?
     private var lastViewMode: ViewMode = .thumbnail
     var showFilterDialog = false
-    var showClipSearchSheet = false
     var showConvertFormatSheet = false
     var showResizeSheet = false
     var renamePrefixDialog: RenamePrefixDialogRequest?
@@ -96,21 +93,16 @@ final class AppState {
     /// True when a modal SwiftUI sheet should receive keyboard input exclusively.
     var hasModalSheetPresented: Bool {
         showFilterDialog
-            || showClipSearchSheet
             || showConvertFormatSheet
             || showResizeSheet
             || renamePrefixDialog != nil
             || showEditUserCommentSheet
             || exifBatchConfirmation != nil
             || showFindReferencesSheet
-            || showSimilaritySearchSheet
-            || showPersonSearchSheet
             || showReferenceGraphSheet
             || showKeyboardHelp
             || isAboutDialogVisible
             || showMoveWorkFilesSheet
-            || quickPersonFacePick != nil
-            || faceAssignState != nil
     }
     var editUserCommentText = ""
     var editUserCommentOriginalText = ""
@@ -124,7 +116,6 @@ final class AppState {
     var chromeSuppressed = false
     var fileTreeToolbarVisible = true
     var informationMenuBarVisible = true
-    var chatToolbarVisible = true
     /// True when viewing a custom file list (opened files, search results, etc.) — disables directory watcher refresh.
     var specificFilesActive = false
     /// Set when ⌘Q already confirmed quit so `applicationShouldTerminate` does not prompt twice.
@@ -138,8 +129,6 @@ final class AppState {
     var fileTreeCollapseUIToken = 0
     var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
-    var personSearchPrefillDirectory: String?
-    var clipSearchPrefillDirectory: String?
     var fileOpsTargetPaths: [String] = []
     /// Paths deleted in formatted-list mode; slot preserved with red-X overlay (Python `deleted_file_placeholders`).
     var deletedFilePlaceholders: Set<String> = []
@@ -149,15 +138,9 @@ final class AppState {
     weak var fileTreeOutlineView: FileTreeOutlineView?
     weak var browseImageHost: BrowseImageNSView?
     weak var listViewHost: ImageListNSView?
-    weak var chatPromptTextView: NSTextView?
     weak var mainWindowTreeTabStop: MainWindowTabFocusStopView?
-    weak var mainWindowChatTabStop: MainWindowTabFocusStopView?
     weak var mainWindowCanvasTabStop: MainWindowTabFocusStopView?
     var showMoveWorkFilesSheet = false
-    var quickPersonFacePick: QuickPersonFacePickState?
-    var quickPersonFacePickContinuation: (([Double]?) -> Void)?
-    var faceAssignState: FaceAssignState?
-    var knownFacesChangedToken = 0
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
     private(set) var sidebarLayoutRevision = 0
@@ -195,18 +178,11 @@ final class AppState {
         renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
-        workers = WorkerServices(profilePath: launchOptions.profilePath)
-        if BundleCapabilities.pythonMLEnabled {
-            workers.reloadSettings(config: config)
-            ExifBridgeSupport.registry = workers.imageGenRegistry
-        }
-        chat = ChatController(chatBridge: workers.chat, dataDirectory: config.dataDirectory)
         informationSectionState = InformationSectionState(config: config)
         loadSidebarToolbarSettings()
         observeViewModeChanges()
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
-        chat.bind(self)
         exifOperations.bind(self)
         searchOperations.bind(self)
         fileTreeOperations.bind(self)
@@ -215,12 +191,6 @@ final class AppState {
         keyboardHandler.bind(self)
         statusBarPeekMonitor.bind(self)
         browseImageHistory.bind(self)
-        workers.face.onFinished = { [weak self] count in
-            Task { @MainActor in self?.status.show("Face extraction complete (\(count) cached)") }
-        }
-        workers.face.onError = { [weak self] message in
-            Task { @MainActor in self?.status.show(message) }
-        }
         KeyboardInputTracer.installIfNeeded(config: config)
 
         directoryHistory.referenceGraphStateProvider = { [weak self] in
@@ -231,9 +201,7 @@ final class AppState {
         _ = eventBus.subscribe(.settingsChanged) { [weak self] _ in
             guard let self else { return }
             self.loadSidebarToolbarSettings()
-            self.chat.reloadPersistenceSettings()
             self.theme.reload()
-            self.workers.reloadSettings(config: self.config)
             KeyboardInputTracer.installIfNeeded(config: self.config)
             if let dir = self.fileData.currentDirectory {
                 self.loadDirectory(dir, saveHistory: false)
@@ -290,11 +258,6 @@ final class AppState {
 
     func swapBrowseImageHistoryFirstTwoAndShow() {
         browseImageHistory.swapFirstTwoAndShow()
-    }
-
-    func presentClipSearchSheet() {
-        guard BundleCapabilities.clipSearchUIEnabled else { return }
-        showClipSearchSheet = true
     }
 
     func presentConvertFormatSheet(paths: [String]? = nil) {
@@ -514,10 +477,6 @@ final class AppState {
 
     func isDeletedPlaceholder(path: String) -> Bool {
         deletedFilePlaceholders.contains(path) && !FileManager.default.fileExists(atPath: path)
-    }
-
-    func runQuickPersonSearch() {
-        Task { await QuickPersonSearchService.run(appState: self) }
     }
 
     func toggleRenameStatusChecking() {
@@ -810,7 +769,6 @@ final class AppState {
         // directory, which would discard the specific-files reference level.
         eventBus.emit(.directoryLoaded, payload: .string(directory))
         watchCurrentDirectory()
-        workers.onDirectoryLoaded(directory)
         selection.clear()
         status.show("Reference graph: \(normalized.count) files")
     }
@@ -1033,7 +991,6 @@ final class AppState {
         config.updateSetting("last_directory", value: directory)
         eventBus.emit(.directoryLoaded, payload: .string(directory))
         watchCurrentDirectory()
-        workers.onDirectoryLoaded(directory)
         selection.clear()
         status.show("Showing \(normalized.count) reference images")
     }
@@ -1150,11 +1107,10 @@ final class AppState {
         browseImageContentRevision += 1
     }
 
-    /// Python `toggle_thumbnail_filename_overlay`: None → Name → Size → Both → None.
-    /// In browse mode, ⌘I toggles the information sidebar instead.
+    /// Python `toggle_thumbnail_filename_overlay` (thumbnail/list) or browse `ctrl_i` number overlay.
     func cycleThumbnailOverlay() {
         if fileData.currentViewMode == .browse {
-            toggleInformationSidebar()
+            toggleNumberOverlay()
             return
         }
 
@@ -1174,6 +1130,14 @@ final class AppState {
         config.updateSetting("thumbnail_filename_visible", value: newFilename)
         config.updateSetting("show_image_size", value: newSize)
         config.applySettingsChange(emit: eventBus)
+        let label: String
+        switch (newFilename, newSize) {
+        case (false, false): label = "Thumbnail overlay: off"
+        case (true, false): label = "Thumbnail overlay: name"
+        case (false, true): label = "Thumbnail overlay: size"
+        default: label = "Thumbnail overlay: name and size"
+        }
+        status.show(label)
     }
 
     func toggleInformationSidebar() {
@@ -1388,15 +1352,6 @@ final class AppState {
         settingsDialog.show(appState: self)
     }
 
-    func openImageGenDialog(
-        function: String? = nil,
-        replaceJobID: String? = nil,
-        initialPrompt: String? = nil,
-        autoImportEXIF: Bool = false,
-        autoGenerate: Bool = false,
-        editSourcePaths: [String] = []
-    ) {}
-
     func userCommentForActiveImage() -> String? {
         guard let path = fileData.currentImagePath else { return nil }
         let comment = ExifService.userComment(path: path) ?? ""
@@ -1521,9 +1476,7 @@ final class AppState {
         true
     }
 
-    func prepareForApplicationExit() {
-        workers.shutdown()
-    }
+    func prepareForApplicationExit() {}
 
     func setFileTreeToolbarVisible(_ visible: Bool) {
         guard fileTreeToolbarVisible != visible else { return }
@@ -1539,17 +1492,9 @@ final class AppState {
         config.applySettingsChange(emit: eventBus)
     }
 
-    func setChatToolbarVisible(_ visible: Bool) {
-        guard chatToolbarVisible != visible else { return }
-        chatToolbarVisible = visible
-        config.updateSetting("chat_show_toolbar", value: visible)
-        config.applySettingsChange(emit: eventBus)
-    }
-
     private func loadSidebarToolbarSettings() {
         fileTreeToolbarVisible = config.bool(forKey: "file_tree_show_toolbar", default: true)
         informationMenuBarVisible = config.bool(forKey: "information_show_menu_bar", default: true)
-        chatToolbarVisible = config.bool(forKey: "chat_show_toolbar", default: true)
     }
 
     func reloadSidebarWidthsFromConfig() {
@@ -1612,14 +1557,6 @@ final class AppState {
         case .right:
             config.updateSetting("right_sidebar_visible", value: visible)
         }
-        noteSidebarLayoutChanged()
-    }
-
-    func toggleChatPane() {
-        clearChromeSuppression()
-        let visible = !config.bool(forKey: "chat_visible", default: false)
-        config.updateSetting("chat_visible", value: visible)
-        if visible { revealSidebarColumn(.left) }
         noteSidebarLayoutChanged()
     }
 
@@ -1706,7 +1643,6 @@ final class AppState {
             config.updateSetting("last_directory", value: directory)
             eventBus.emit(.directoryLoaded, payload: .string(directory))
             watchCurrentDirectory()
-            workers.onDirectoryLoaded(directory)
             selection.clear()
             status.show(hadFilter ? "Opened \(normalized.count) files, filter cleared" : "Opened \(normalized.count) files")
             return
@@ -1745,18 +1681,11 @@ final class AppState {
         fileData.setViewMode(.thumbnail)
     }
 
-    /// True when at least one left sidebar pane is open (browse: chat only).
+    /// True when at least one left sidebar pane is open.
     var leftSidebarPaneActive: Bool {
-        if fileData.currentViewMode == .browse {
-            return BundleCapabilities.chatUIEnabled
-                && config.bool(forKey: "chat_visible", default: false)
-        }
+        if fileData.currentViewMode == .browse { return false }
         if config.bool(forKey: "file_tree_visible", default: true) { return true }
         if config.bool(forKey: "preview_visible", default: true) { return true }
-        if BundleCapabilities.chatUIEnabled,
-           config.bool(forKey: "chat_visible", default: false) {
-            return true
-        }
         return false
     }
 
@@ -2118,6 +2047,9 @@ final class AppState {
 
     func toggleNumberOverlay() {
         numberOverlayVisible.toggle()
+        if fileData.currentViewMode == .browse {
+            status.show(numberOverlayVisible ? "Browse overlay: on" : "Browse overlay: off")
+        }
     }
 
     func toggleBrowseActualSize() {
@@ -2279,7 +2211,6 @@ final class DirectoryLoadCoordinator {
             appState.config.updateSetting("last_directory", value: dir)
             appState.eventBus.emit(.directoryLoaded, payload: .string(dir))
             appState.watchCurrentDirectory()
-            appState.workers.onDirectoryLoaded(dir)
         } else if let directory = directories.first {
             loadDirectory(directory, saveHistory: true)
         }
@@ -2353,7 +2284,6 @@ final class DirectoryLoadCoordinator {
         appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))
         appState.watchCurrentDirectory()
-        appState.workers.onDirectoryLoaded(path)
     }
 
     func goBack() {

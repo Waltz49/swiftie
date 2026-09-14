@@ -103,8 +103,8 @@ enum ExitScriptUtils {
         if let shebangBin = shebangInterpreterBinDirectory(scriptPath) {
             pathPrefixes.append(shebangBin)
         }
-        if let repoRoot = PythonLocator.locateRepoRoot() {
-            let venvBin = repoRoot.appendingPathComponent("venv_image_browser/bin").path
+        if let envRoot = ProcessInfo.processInfo.environment["PROWSER_PYTHON_ROOT"], !envRoot.isEmpty {
+            let venvBin = URL(fileURLWithPath: envRoot).appendingPathComponent("venv_image_browser/bin").path
             if FileManager.default.isExecutableFile(atPath: venvBin + "/python") {
                 pathPrefixes.append(venvBin)
             }
@@ -117,11 +117,7 @@ enum ExitScriptUtils {
     }
 
     private static func resolvePythonInterpreter() -> String {
-        if let repoRoot = PythonLocator.locateRepoRoot(),
-           let executable = PythonLocator.locatePythonExecutable(repoRoot: repoRoot) {
-            return executable
-        }
-        return "/usr/bin/python3"
+        "/usr/bin/python3"
     }
 
     private static func shebangInterpreterBinDirectory(_ scriptPath: String) -> String? {

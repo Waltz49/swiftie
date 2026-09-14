@@ -147,7 +147,7 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 | ⌃L | View log (Tools → Debug) |
 | F5 | Show reference graph for active image |
 
-Optional search features (when enabled in build): **Cmd+F** (CLIP text search), **Cmd+K** (find similar images).
+Search menu: duplicate detection (**Shift+Cmd+F** recursive), **Shift+Cmd+H** show image in directory.
 
 ## List View
 

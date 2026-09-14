@@ -418,13 +418,6 @@ final class RenamePrefixService {
             progress.update(value: value, label: message)
         }
 
-        // Pause background CLIP worker so its cache is flushed before names change
-        let clip = appState.workers.clip
-        if !clip.prepareForMassRename(progress: { progress.update(label: $0) }) {
-            appState.status.show("Warning: Background CLIP process did not flush in time. Proceeding anyway.")
-        }
-        defer { clip.resumeAfterMassRename(priorityDirectory: appState.fileData.currentDirectory) }
-
         // Locked files order (from .prsort) preserved BEFORE any sorting
         let lockedFilesOrder: [String] = {
             guard !PrsortIO.lockedFilenames(in: targetDirectory).isEmpty else { return [] }

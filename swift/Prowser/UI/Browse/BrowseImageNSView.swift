@@ -217,30 +217,138 @@ final class BrowseImageNSView: NSView {
         }
     }
 
-    private func drawNumberOverlay(in rect: NSRect) {
-        let name = imagePath.map { ($0 as NSString).lastPathComponent } ?? ""
-        let indexText = overlayCount > 0 ? "\(overlayIndex + 1) / \(overlayCount)" : ""
-        var lines: [String] = []
-        if !indexText.isEmpty { lines.append(indexText) }
-        if !name.isEmpty { lines.append(name) }
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 22),
-            .foregroundColor: NSColor.white,
-            .strokeColor: NSColor.black,
-            .strokeWidth: -2.0,
-        ]
-        var y: CGFloat = 16
-        for line in lines {
-            let size = (line as NSString).size(withAttributes: attrs)
-            let drawRect = NSRect(
-                x: rect.maxX - size.width - 20,
-                y: y,
-                width: size.width,
-                height: size.height
-            )
-            (line as NSString).draw(in: drawRect, withAttributes: attrs)
-            y += size.height + 4
+    private static let browseOverlayBaseFontSize: CGFloat = 196
+    private static let browseOverlayMargin: CGFloat = 20
+    private static let browseOverlayShadowOffset: CGFloat = 6
+
+    /// Port of `image_browser_window._extract_imagegen_digits`.
+    private static func extractImagegenDigits(from path: String) -> String? {
+        let basename = (path as NSString).lastPathComponent
+        guard let regex = try? NSRegularExpression(
+            pattern: #"^imagegen-(\d{4})\.(webp|png|jpg|jpeg)$"#,
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let range = NSRange(basename.startIndex..., in: basename)
+        guard let match = regex.firstMatch(in: basename, range: range),
+              match.numberOfRanges > 1,
+              let digitRange = Range(match.range(at: 1), in: basename) else {
+            return nil
         }
+        return String(basename[digitRange])
+    }
+
+    private func browseOverlayMainLine(for path: String) -> (text: String, fontSize: CGFloat) {
+        if let digits = Self.extractImagegenDigits(from: path) {
+            return (digits, Self.browseOverlayBaseFontSize)
+        }
+        let basename = (path as NSString).lastPathComponent
+        let fontSize = max(1, floor(Self.browseOverlayBaseFontSize * 0.25))
+        return (basename, fontSize)
+    }
+
+    private func browseOverlaySizeText() -> String? {
+        guard let image = sourceImage else { return nil }
+        let pixels: NSSize
+        if let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+           rep.pixelsWide > 0, rep.pixelsHigh > 0 {
+            pixels = NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        } else {
+            pixels = image.size
+        }
+        let width = Int(pixels.width.rounded())
+        let height = Int(pixels.height.rounded())
+        guard width > 0, height > 0 else { return nil }
+        return "\(width) x \(height)"
+    }
+
+    private func impactFont(size: CGFloat) -> NSFont {
+        NSFont(name: "Impact", size: size) ?? NSFont.boldSystemFont(ofSize: size)
+    }
+
+    /// Python `update_number_overlay`: Impact, white text + black shadow, name/size at different point sizes.
+    private func drawNumberOverlay(in rect: NSRect) {
+        guard let path = imagePath else { return }
+        let (mainText, mainFontSize) = browseOverlayMainLine(for: path)
+        guard !mainText.isEmpty else { return }
+
+        let mainFont = impactFont(size: mainFontSize)
+        let contentWidth = max(1, rect.width - Self.browseOverlayMargin * 2)
+        var topY = Self.browseOverlayMargin
+
+        let mainHeight = drawBrowseOverlayLine(
+            mainText,
+            font: mainFont,
+            topY: topY,
+            contentWidth: contentWidth,
+            in: rect
+        )
+        // Below main line (Python QLabel stack; Qt `size_y = y + main_text_height - 20` overlaps in practice).
+        topY += mainHeight + Self.browseOverlaySizeGap
+
+        if let sizeText = browseOverlaySizeText() {
+            // Size line scales from the 196pt base so basename mode is not stuck at 12pt.
+            let sizeFontSize = max(20, floor(Self.browseOverlayBaseFontSize * 0.25))
+            let sizeFont = impactFont(size: sizeFontSize)
+            drawBrowseOverlayLine(
+                sizeText,
+                font: sizeFont,
+                topY: topY,
+                contentWidth: contentWidth,
+                in: rect
+            )
+        }
+    }
+
+    private static let browseOverlaySizeGap: CGFloat = 10
+
+    @discardableResult
+    private func drawBrowseOverlayLine(
+        _ text: String,
+        font: NSFont,
+        topY: CGFloat,
+        contentWidth: CGFloat,
+        in rect: NSRect
+    ) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .right
+
+        let whiteAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph,
+        ]
+        let blackAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraph,
+        ]
+
+        let lineHeight = overlayLineHeight(text: text, font: font, width: contentWidth)
+        let lineRect = NSRect(
+            x: rect.maxX - contentWidth - Self.browseOverlayMargin,
+            y: topY,
+            width: contentWidth,
+            height: lineHeight
+        )
+        let shadowRect = lineRect.offsetBy(
+            dx: -Self.browseOverlayShadowOffset,
+            dy: Self.browseOverlayShadowOffset
+        )
+        (text as NSString).draw(with: shadowRect, options: [.usesLineFragmentOrigin], attributes: blackAttrs)
+        (text as NSString).draw(with: lineRect, options: [.usesLineFragmentOrigin], attributes: whiteAttrs)
+        return lineHeight
+    }
+
+    /// Layout height for a single overlay line (matches Qt `QFontMetrics.boundingRect` more closely than NSString boundingRect).
+    private func overlayLineHeight(text: String, font: NSFont, width: CGFloat) -> CGFloat {
+        let storage = NSTextStorage(string: text, attributes: [.font: font])
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        let layout = NSLayoutManager()
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        return ceil(layout.usedRect(for: container).height)
     }
 
     override func scrollWheel(with event: NSEvent) {

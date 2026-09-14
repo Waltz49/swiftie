@@ -31,6 +31,43 @@ enum ThumbnailLayout {
         }
     }
 
+    /// Basenames that appear with more than one extension in the current view (Python `_basenames_needing_extensions`).
+    static func basenamesWithMultipleExtensions(in paths: [String]) -> Set<String> {
+        var extensionsByStem: [String: Set<String>] = [:]
+        for path in paths {
+            let filename = (path as NSString).lastPathComponent
+            let stem = ((filename as NSString).deletingPathExtension as NSString).lastPathComponent
+            let ext = (filename as NSString).pathExtension.lowercased()
+            if ext.isEmpty {
+                extensionsByStem[stem, default: []].insert("")
+            } else {
+                extensionsByStem[stem, default: []].insert(ext)
+            }
+        }
+        return Set(
+            extensionsByStem.filter { pair in
+                let exts = pair.value.filter { !$0.isEmpty }
+                return exts.count > 1
+            }.map(\.key)
+        )
+    }
+
+    static func overlayDisplayFilename(
+        for path: String,
+        showExtensions: Bool,
+        basenamesNeedingExtensions: Set<String>
+    ) -> String {
+        let filename = (path as NSString).lastPathComponent
+        let nsName = filename as NSString
+        let ext = nsName.pathExtension
+        guard !ext.isEmpty else { return filename }
+        let stem = (nsName.deletingPathExtension as NSString).lastPathComponent
+        if showExtensions || basenamesNeedingExtensions.contains(stem) {
+            return filename
+        }
+        return stem
+    }
+
     static func metrics(
         for viewportWidth: CGFloat,
         itemCount: Int,

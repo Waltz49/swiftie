@@ -86,6 +86,13 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘I — thumbnail overlay cycle, or browse filename/index overlay (Python browse ctrl_i).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "i" {
+            appState.cycleThumbnailOverlay()
+            return true
+        }
+
         // ⌘+arrow multi-select in thumbnail/list view.
         if hasCommand, !hasShift, !hasOption,
            appState.fileData.currentViewMode == .thumbnail || appState.fileData.currentViewMode == .list {
@@ -110,24 +117,6 @@ final class KeyboardHandlerController {
            event.charactersIgnoringModifiers == ";" {
             if appState.fileData.currentViewMode == .browse {
                 appState.swapBrowseImageHistoryFirstTwoAndShow()
-                return true
-            }
-        }
-
-        // ⌘F — CLIP text search sheet.
-        if hasCommand, !hasShift, !hasOption, !hasControl,
-           event.charactersIgnoringModifiers?.lowercased() == "f" {
-            if BundleCapabilities.clipSearchUIEnabled {
-                appState.presentClipSearchSheet()
-                return true
-            }
-        }
-
-        // ⌘K — find similar images (Python menu shortcut).
-        if hasCommand, !hasShift, !hasOption, !hasControl,
-           event.charactersIgnoringModifiers?.lowercased() == "k" {
-            if BundleCapabilities.similaritySearchUIEnabled {
-                appState.searchOperations.findSimilarImages()
                 return true
             }
         }
@@ -455,17 +444,6 @@ final class KeyboardHandlerController {
             default:
                 break
             }
-        }
-
-        if event.keyCode == 101, BundleCapabilities.chatUIEnabled {
-            appState.toggleChatPane()
-            return true
-        }
-        if BundleCapabilities.chatUIEnabled,
-           event.keyCode == 43, !hasShift, !hasControl,
-           !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
-            appState.toggleChatPane()
-            return true
         }
 
         switch event.keyCode {

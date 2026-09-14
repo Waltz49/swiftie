@@ -112,30 +112,10 @@ struct DirectoriesSettingsTab: View {
                 }
 
                 CollapsibleSettingsSection(
-                    title: BundleCapabilities.imageGenUIEnabled
-                        ? "Image Creation & Temporary Files"
-                        : "Temporary Files",
+                    title: "Temporary Files",
                     stateKey: "image_creation_temp_files",
                     isExpanded: $filesExpanded
                 ) {
-                    if BundleCapabilities.imageGenUIEnabled {
-                        Text("When enabled, newly generated images are saved in the folder below. When disabled, images are saved to ~/Downloads.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack {
-                            Toggle("", isOn: $imageCreationEnabled)
-                                .labelsHidden()
-                                .onChange(of: imageCreationEnabled) { _, _ in persistImageCreation() }
-                            TextField("Generated images folder", text: $imageCreationPath)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { persistImageCreation() }
-                            Button("Choose…") {
-                                SettingsSupport.pickDirectory(into: $imageCreationPath)
-                                persistImageCreation()
-                            }
-                        }
-                    }
 
                     HStack {
                         TextField("Temporary files", text: $temporaryFilesPath, prompt: Text("Default: \(defaultTempPath)"))

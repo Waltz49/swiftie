@@ -23,26 +23,6 @@ enum FileTreeContextMenu {
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.renameDirectory(_:))
         )
-        if BundleCapabilities.clipSearchUIEnabled {
-            addAction(
-                menu,
-                title: "Search by Description...",
-                shortcut: "⌘F",
-                enabled: !restricted,
-                representedObject: directoryPath,
-                action: #selector(FileTreeMenuActions.searchByDescription(_:))
-            )
-        }
-        if BundleCapabilities.personSearchUIEnabled {
-            addAction(
-                menu,
-                title: "Search by Person...",
-                shortcut: "⌘P",
-                enabled: !restricted,
-                representedObject: directoryPath,
-                action: #selector(FileTreeMenuActions.searchByPerson(_:))
-            )
-        }
         addAction(
             menu,
             title: "Copy Directory Path",
@@ -72,15 +52,6 @@ enum FileTreeContextMenu {
             representedObject: directoryPath,
             action: #selector(FileTreeMenuActions.findDuplicates(_:))
         )
-        if BundleCapabilities.similaritySearchUIEnabled {
-            addAction(
-                menu,
-                title: "Find VisuallySimilar Image Files",
-                enabled: !restricted,
-                representedObject: directoryPath,
-                action: #selector(FileTreeMenuActions.findSimilarImages(_:))
-            )
-        }
         addAction(
             menu,
             title: "Clear Cache",
@@ -131,29 +102,6 @@ final class FileTreeMenuActions: NSObject {
         appState.fileTreeReloadToken += 1
     }
 
-    @objc func searchByDescription(_ sender: NSMenuItem) {
-        guard let appState, let path = sender.representedObject as? String else { return }
-        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
-            showRestrictedAlert(path: path)
-            return
-        }
-        if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
-        }
-        appState.clipSearchPrefillDirectory = path
-        appState.showClipSearchSheet = true
-    }
-
-    @objc func searchByPerson(_ sender: NSMenuItem) {
-        guard let appState, let path = sender.representedObject as? String else { return }
-        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
-            showRestrictedAlert(path: path)
-            return
-        }
-        appState.personSearchPrefillDirectory = path
-        appState.showPersonSearchSheet = true
-    }
-
     @objc func copyDirectoryPath(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
         appState.fileOperations.copyPathsToClipboard([path])
@@ -173,11 +121,6 @@ final class FileTreeMenuActions: NSObject {
     @objc func findDuplicates(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
         appState.fileTreeOperations.findDuplicateImages(in: path)
-    }
-
-    @objc func findSimilarImages(_ sender: NSMenuItem) {
-        guard let appState, let path = sender.representedObject as? String else { return }
-        appState.fileTreeOperations.findSimilarImages(in: path)
     }
 
     @objc func clearCache(_ sender: NSMenuItem) {

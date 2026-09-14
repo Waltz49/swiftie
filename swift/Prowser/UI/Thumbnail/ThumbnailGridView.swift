@@ -262,6 +262,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.wrapAround = appState.config.bool(forKey: "wrap_around", default: true)
             gridView.showFilenames = appState.config.bool(forKey: "thumbnail_filename_visible", default: false)
             gridView.showImageSize = appState.config.bool(forKey: "show_image_size", default: false)
+            gridView.showExtensions = appState.config.bool(forKey: "show_extensions", default: true)
             gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
             gridView.reloadLayout()
             appState.thumbnailGridColumns = gridView.gridColumnCount

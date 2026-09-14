@@ -3,7 +3,7 @@ import SwiftUI
 @MainActor
 struct CacheSettingsTab: View {
     @Environment(AppState.self) private var appState
-    @State private var totals = CacheManagementService.CacheTotals(thumbnails: 0, similarity: 0, search: 0)
+    @State private var totals = CacheManagementService.CacheTotals(thumbnails: 0, metadata: 0)
     @State private var statusMessage = ""
     @State private var sourceDirectories = ""
 
@@ -28,36 +28,12 @@ struct CacheSettingsTab: View {
 
                     HStack(spacing: 8) {
                         cacheButton("Clear Thumbs") { clearThumbnails() }
-                        if BundleCapabilities.similaritySearchUIEnabled || BundleCapabilities.clipSearchUIEnabled {
-                            cacheButton("Clear Image Rec") { clearImageRec() }
-                        }
-                        if BundleCapabilities.facesUIEnabled {
-                            cacheButton("Clear Face") { clearFace() }
-                        }
                         cacheButton("Scrub") { scrubCaches() }
                     }
                     Button("Clear All") { clearAll() }
                     Text("This may temporarily slow down the application as caches are rebuilt.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-
-                if BundleCapabilities.clipSearchUIEnabled {
-                    SettingsSection(title: "Background Processing") {
-                        Toggle("Enable idle search-data collection", isOn: boolBinding("background_clip_enabled"))
-                        Toggle(
-                            "Gather thumbnails for uncached images",
-                            isOn: boolBinding("background_clip_gather_thumbnails", default: true)
-                        )
-                        .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
-                        if BundleCapabilities.facesUIEnabled {
-                            Toggle(
-                                "Extract face encodings in background",
-                                isOn: boolBinding("background_clip_extract_faces")
-                            )
-                            .disabled(!appState.config.bool(forKey: "background_clip_enabled", default: false))
-                        }
-                    }
                 }
 
                 if appState.config.bool(forKey: "debug_mode") {
@@ -78,7 +54,7 @@ struct CacheSettingsTab: View {
                 }
             }
             .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .onAppear {
             refreshTotals()
@@ -90,13 +66,9 @@ struct CacheSettingsTab: View {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         let thumbs = formatter.string(fromByteCount: totals.thumbnails)
-        if BundleCapabilities.pythonMLEnabled {
-            let total = formatter.string(fromByteCount: totals.total)
-            let sim = formatter.string(fromByteCount: totals.similarity)
-            let search = formatter.string(fromByteCount: totals.search)
-            return "Total \(total): \(thumbs) Thumbs, \(sim) Similarity, \(search) Search"
-        }
-        return "Thumbnails \(thumbs)"
+        let meta = formatter.string(fromByteCount: totals.metadata)
+        let total = formatter.string(fromByteCount: totals.total)
+        return "Total \(total): \(thumbs) Thumbs, \(meta) Metadata"
     }
 
     private func cacheButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -119,36 +91,17 @@ struct CacheSettingsTab: View {
         refreshTotals()
     }
 
-    private func clearImageRec() {
-        guard confirm("Clear Image Recognition Cache", "This will clear all cached CNN and CLIP feature data.") else { return }
-        let removed = CacheManagementService.clearImageRecognitionCache(paths: appState.config.profilePaths)
-        statusMessage = "Cleared \(removed) image recognition cache entries."
-        appState.workers.reloadSettings(config: appState.config)
-        refreshTotals()
-    }
-
-    private func clearFace() {
-        guard confirm("Clear Face Cache", "This will delete cached face encodings and face sample thumbnails.") else { return }
-        let removed = CacheManagementService.clearFaceCache(paths: appState.config.profilePaths, dataDirectory: appState.config.dataDirectory)
-        statusMessage = "Cleared \(removed) face cache entries."
-        refreshTotals()
-    }
-
     private func scrubCaches() {
         let result = CacheManagementService.scrubCaches(paths: appState.config.profilePaths)
         let reclaimed = ByteCountFormatter.string(fromByteCount: result.bytesReclaimed, countStyle: .file)
-        statusMessage = "Scrubbed \(result.thumbnailsRemoved) thumbnails, \(result.recognitionRemoved) recognition entries. Reclaimed \(reclaimed)."
+        statusMessage = "Scrubbed \(result.thumbnailsRemoved) thumbnails. Reclaimed \(reclaimed)."
         refreshTotals()
     }
 
     private func clearAll() {
-        let message = BundleCapabilities.pythonMLEnabled
-            ? "This will clear all thumbnail, metadata, and recognition caches."
-            : "This will clear all thumbnail and metadata caches."
-        guard confirm("Clear All Caches", message) else { return }
-        let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths, dataDirectory: appState.config.dataDirectory)
+        guard confirm("Clear All Caches", "This will clear all thumbnail and metadata caches.") else { return }
+        let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths)
         statusMessage = "Cleared \(removed) cache entries."
-        appState.workers.reloadSettings(config: appState.config)
         refreshTotals()
     }
 
@@ -160,12 +113,5 @@ struct CacheSettingsTab: View {
             cancelTitle: "Cancel",
             defaultCancel: true
         )
-    }
-
-    private func boolBinding(_ key: String, default defaultValue: Bool = false) -> Binding<Bool> {
-        SettingsSupport.boolBinding(config: appState.config, key: key, default: defaultValue) {
-            appState.config.applySettingsChange(emit: appState.eventBus)
-            appState.workers.reloadSettings(config: appState.config)
-        }
     }
 }
