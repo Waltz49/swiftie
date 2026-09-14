@@ -228,17 +228,19 @@ final class AppState {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self else { return }
             let path = notification.object as? String
-            Task { @MainActor in self.browseImageHistory.onCurrentImageChanged(path) }
+            MainActor.assumeIsolated {
+                self?.browseImageHistory.onCurrentImageChanged(path)
+            }
         }
         NotificationCenter.default.addObserver(
             forName: .prowserViewModeChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.browseImageHistory.onViewModeChanged() }
+            MainActor.assumeIsolated {
+                self?.browseImageHistory.onViewModeChanged()
+            }
         }
 
         startNamedPipeListener()

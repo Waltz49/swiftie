@@ -20,7 +20,7 @@ final class BrowseImageHistoryController {
     }
 
     func prune() {
-        history = history.filter { FileManager.default.fileExists(atPath: $0) }
+        history = history.filter { Self.isExistingImageFile($0) }
         if history.count > Self.maxEntries {
             history = Array(history.prefix(Self.maxEntries))
         }
@@ -28,7 +28,7 @@ final class BrowseImageHistoryController {
 
     func touch(_ path: String) {
         guard let normalized = FileDataModel.normalizePath(path),
-              FileManager.default.fileExists(atPath: normalized) else { return }
+              Self.isExistingImageFile(normalized) else { return }
         if let index = history.firstIndex(of: normalized) {
             history.remove(at: index)
         }
@@ -49,9 +49,9 @@ final class BrowseImageHistoryController {
         cancelPending()
         guard appState.fileData.currentViewMode == .browse else { return }
         guard let normalized = FileDataModel.normalizePath(path),
-              FileManager.default.fileExists(atPath: normalized) else { return }
+              Self.isExistingImageFile(normalized) else { return }
 
-        let delayMS = appState.config.int(forKey: "browse_image_history_save_after_ms", default: 3000)
+        let delayMS = max(0, min(5000, appState.config.int(forKey: "browse_image_history_save_after_ms", default: 3000)))
         if delayMS <= 0 {
             touch(normalized)
             return
@@ -71,7 +71,13 @@ final class BrowseImageHistoryController {
 
     func onViewModeChanged() {
         guard let appState else { return }
-        if appState.fileData.currentViewMode != .browse {
+        if appState.fileData.currentViewMode == .browse {
+            // Python schedules from display_image whenever browse is showing, including
+            // Return/F into the already-highlighted file (no current-path change).
+            if let path = appState.fileData.currentImagePath {
+                scheduleRecord(path: path)
+            }
+        } else {
             cancelPending()
         }
     }
@@ -94,10 +100,14 @@ final class BrowseImageHistoryController {
         let mode = appState.fileData.currentViewMode
         guard mode == .browse || mode == .thumbnail else { return }
 
+        KeyboardInputTracer.log(
+            "F3 openHistory mode=\(mode.rawValue) stored=\(history.count)",
+            config: appState.config
+        )
+
         prune()
-        let paths = history.filter { FileManager.default.fileExists(atPath: $0) }
+        let paths = history.filter { Self.isExistingImageFile($0) }
         guard !paths.isEmpty else {
-            appState.status.show("Browse image history is empty")
             return
         }
 
@@ -106,18 +116,21 @@ final class BrowseImageHistoryController {
             config: appState.config,
             selection: appState.selection
         )
+        // Leaving browse would restore stashed directory thumbs and clobber this level.
+        appState.clearBrowseReturnState()
         appState.selection.clear()
         appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         appState.config.updateSetting("sort_reversed", value: false)
+        let directory = URL(fileURLWithPath: paths[0]).deletingLastPathComponent().path
         appState.setSpecificFilesActive(true)
-        if let firstDirectory = paths.first.map({ ($0 as NSString).deletingLastPathComponent }) {
-            appState.fileData.setCurrentDirectory(firstDirectory)
-        }
+        appState.fileData.setCurrentDirectory(directory)
         appState.fileData.setDisplayedImages(paths)
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(paths[0])
         appState.fileData.setViewMode(.thumbnail)
-        appState.status.show("Image history (\(paths.count) images)")
+        appState.eventBus.emit(.directoryLoaded, payload: .string(directory))
+        appState.watchCurrentDirectory()
+        appState.menuRefresh.refreshAll()
     }
 
     /// ⌘; — swap F3 browse history [0]↔[1], then show the new first image in browse mode.
@@ -130,7 +143,14 @@ final class BrowseImageHistoryController {
         history.swapAt(0, 1)
 
         let newFirst = history[0]
-        guard FileManager.default.fileExists(atPath: newFirst) else { return }
+        guard Self.isExistingImageFile(newFirst) else { return }
         appState.openImageInBrowse(path: newFirst)
+    }
+
+    /// Python `os.path.isfile` — skip directories and missing paths.
+    private static func isExistingImageFile(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
     }
 }

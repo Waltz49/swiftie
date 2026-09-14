@@ -197,6 +197,15 @@ final class KeyboardHandlerController {
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
+        // F3 — Image History (Python File ▸ Image History WindowShortcut).
+        if !hasCommand, !hasControl, !hasShift, !hasOption, Self.isF3Key(event) {
+            let mode = appState.fileData.currentViewMode
+            if mode == .browse || mode == .thumbnail {
+                appState.openBrowseImageHistory()
+                return true
+            }
+        }
+
         // F4, ., ^. — hide/show all panes (Python toggle_chrome).
         if hasControl, !hasCommand, !hasShift, !hasOption,
            event.charactersIgnoringModifiers == "." {
@@ -253,7 +262,12 @@ final class KeyboardHandlerController {
             return false
         }
         if appState.hasModalSheetPresented { return false }
-        if !fromTreeFocus, Self.fileTreeKeyboardTargetIsFocused(in: event.window) { return false }
+        if !fromTreeFocus, Self.fileTreeKeyboardTargetIsFocused(in: event.window) {
+            // Python Image History is a WindowShortcut; still handle F3 when the tree has focus.
+            if !Self.isF3Key(event) {
+                return false
+            }
+        }
         if isTextInputFocused(in: event.window) { return false }
         if NSApp.keyWindow == nil { return false }
         return true
@@ -284,6 +298,10 @@ final class KeyboardHandlerController {
         else { owns = true }
 
         return owns
+    }
+
+    private static func isF3Key(_ event: NSEvent) -> Bool {
+        event.keyCode == 99 || event.specialKey == .f3
     }
 
     private static func isArrowKey(_ keyCode: UInt16) -> Bool {
@@ -366,9 +384,6 @@ final class KeyboardHandlerController {
                 }
             case 109: // F10 — clear directory history stacks
                 appState.clearDirectoryHistory()
-                return true
-            case 99: // F3 — browse image history
-                appState.openBrowseImageHistory()
                 return true
             case 111: // F12 — toggle list view
                 appState.toggleListView()
@@ -526,9 +541,6 @@ final class KeyboardHandlerController {
                 return navigateLinear(appState: appState, delta: 1)
             }
             return returnToThumbnails(appState: appState)
-        case 99:
-            appState.openBrowseImageHistory()
-            return true
         case 27, 43: // minus, keypad -
             appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.zoomOut))
             return true
