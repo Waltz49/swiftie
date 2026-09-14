@@ -1,6 +1,18 @@
 import AppKit
 import SwiftUI
 
+/// Match Python ``apply_thumbnail_scroll_area_chrome`` (grid-colored viewport, not shell ``background``).
+enum ThumbnailScrollAreaChrome {
+    static func apply(to scrollView: NSScrollView, colors: ThemeColors) {
+        let background = colors.thumbnailGridBackground.nsColor
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = background
+        let clip = scrollView.contentView
+        clip.drawsBackground = true
+        clip.backgroundColor = background
+    }
+}
+
 struct ThumbnailGridView: NSViewRepresentable {
     @Environment(AppState.self) private var appState
 
@@ -14,7 +26,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
-        scrollView.drawsBackground = false
+        ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
 
         let gridView = ThumbnailGridNSView(frame: .zero)
         gridView.gridDelegate = context.coordinator
@@ -245,6 +257,9 @@ struct ThumbnailGridView: NSViewRepresentable {
         func syncFromAppState() {
             guard let gridView else { return }
             let paths = appState.fileData.displayedImages
+            if let scrollView {
+                ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
+            }
             gridView.applyTheme(appState.theme.colors)
             gridView.currentDirectory = appState.fileData.currentDirectory
             gridView.filterPattern = appState.filterSettings.filterPattern

@@ -203,6 +203,9 @@ final class AppState {
             self.loadSidebarToolbarSettings()
             self.theme.reload()
             KeyboardInputTracer.installIfNeeded(config: self.config)
+            // Do not rescan `currentDirectory` in specific-files / reference levels — same as
+            // `openReferenceGraphPresentation` (a full `loadDirectory` clears the aggregate grid).
+            guard !self.specificFilesActive, !self.referenceGraphActive else { return }
             if let dir = self.fileData.currentDirectory {
                 self.loadDirectory(dir, saveHistory: false)
             }

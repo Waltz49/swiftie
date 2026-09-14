@@ -38,10 +38,18 @@ final class FileTreeOperationsService {
             return
         }
 
+        appState.directoryHistory.saveCurrent(
+            fileData: appState.fileData,
+            config: appState.config,
+            selection: appState.selection
+        )
+        appState.clearBrowseReturnState()
         if appState.fileData.currentViewMode == .browse {
             appState.fileData.setViewMode(.thumbnail)
         }
+        let baseDirectory = URL(fileURLWithPath: images[0]).deletingLastPathComponent().path
         appState.setSpecificFilesActive(true)
+        appState.fileData.setCurrentDirectory(baseDirectory)
         appState.fileData.setDisplayedImages(images)
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(images[0])

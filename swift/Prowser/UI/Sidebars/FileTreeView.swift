@@ -125,13 +125,13 @@ struct FileTreeView: NSViewRepresentable {
             lastSyncActiveImageToken = appState.fileTreeSyncActiveImageToken
             lastSyncedDirectory = nil
             lastSyncedImagePath = nil
-            syncSelection(retryCount: 0)
+            syncSelection(retryCount: 0, force: true)
             appState.focusFileTreeKeyboardTarget()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self else { return }
                 self.lastSyncedDirectory = nil
                 self.lastSyncedImagePath = nil
-                self.syncSelection(retryCount: 0)
+                self.syncSelection(retryCount: 0, force: true)
                 self.appState.focusFileTreeKeyboardTarget()
             }
         }
@@ -194,12 +194,21 @@ struct FileTreeView: NSViewRepresentable {
         func markUserNavigatingTree(extended: Bool = false) {
             userIsNavigatingTree = true
             userNavigationReset?.cancel()
+            pendingHighlightSync?.cancel()
+            pendingHighlightSync = nil
             let delay: TimeInterval = extended ? 1.0 : 0.2
             let work = DispatchWorkItem { [weak self] in
-                self?.userIsNavigatingTree = false
+                guard let self else { return }
+                self.userIsNavigatingTree = false
+                self.syncSelectionIfNeeded()
             }
             userNavigationReset = work
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+
+        private func shouldDeferTreeHighlightSync() -> Bool {
+            let pinUserDirectory = appState.userRequestedTreeDirectory != nil && !appState.specificFilesActive
+            return userIsNavigatingTree && !pinUserDirectory
         }
 
         func syncSelectionIfNeeded() {
@@ -209,7 +218,8 @@ struct FileTreeView: NSViewRepresentable {
             default:
                 break
             }
-            let currentDir = FileTreeFilter.highlightDirectory(appState: appState)
+            if shouldDeferTreeHighlightSync() { return }
+            let currentDir = treeHighlightDirectoryPath()
             let currentImage = appState.fileData.currentImagePath
             if currentDir == lastSyncedDirectory, currentImage == lastSyncedImagePath {
                 return
@@ -225,7 +235,7 @@ struct FileTreeView: NSViewRepresentable {
                 self.syncSelection(retryCount: self.highlightSyncRetryCount)
             }
             pendingHighlightSync = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
         }
 
         func cancelPendingSingleClick() {
@@ -243,7 +253,7 @@ struct FileTreeView: NSViewRepresentable {
                 } else {
                     guard self.isDirectoryExpandable(node) else { return }
                     node.loadChildrenIfNeeded(appState: self.appState, rootPaths: self.rootPaths)
-                    outlineView.reloadItem(node, reloadChildren: true)
+                    self.reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
                     outlineView.expandItem(node)
                     self.expandedDirectoryPaths.insert(node.path)
                 }
@@ -302,7 +312,7 @@ struct FileTreeView: NSViewRepresentable {
             }
             guard isDirectoryExpandable(node) else { return }
             node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-            outlineView.reloadItem(node, reloadChildren: true)
+            reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
             outlineView.expandItem(node)
             expandedDirectoryPaths.insert(node.path)
         }
@@ -318,7 +328,7 @@ struct FileTreeView: NSViewRepresentable {
                   node.isDirectory else { return }
             if !outlineView.isItemExpanded(node), isDirectoryExpandable(node) {
                 node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-                outlineView.reloadItem(node, reloadChildren: true)
+                reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
                 outlineView.expandItem(node)
                 expandedDirectoryPaths.insert(node.path)
             }
@@ -341,7 +351,7 @@ struct FileTreeView: NSViewRepresentable {
             let normalized = standardizedPath(path)
             FileTreeFilter.addPriorityPath(normalized)
             guard let match = findNodeByPath(normalized) else { return }
-            expandPath(to: match, outlineView: outlineView)
+            expandPath(to: match, outlineView: outlineView, preserveSelection: false)
             let row = outlineView.row(forItem: match)
             guard row >= 0 else { return }
             outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -536,7 +546,7 @@ struct FileTreeView: NSViewRepresentable {
             syncSelection()
         }
 
-        func syncSelection(retryCount: Int = 0) {
+        func syncSelection(retryCount: Int = 0, force: Bool = false) {
             switch appState.fileData.currentViewMode {
             case .slideshow, .slideshow2, .slideshow3:
                 return
@@ -544,6 +554,7 @@ struct FileTreeView: NSViewRepresentable {
                 break
             }
             guard let outlineView else { return }
+            if !force, shouldDeferTreeHighlightSync() { return }
 
             if let directory = directoryToHighlightForTreeSync() {
                 FileTreeFilter.addPriorityPath(directory)
@@ -555,12 +566,9 @@ struct FileTreeView: NSViewRepresentable {
 
                 guard let match = nodeForHighlight(path: directory, retryCount: retryCount) else { return }
 
-                expandPath(to: match, outlineView: outlineView)
+                expandPath(to: match, outlineView: outlineView, preserveSelection: false)
                 lastSyncedDirectory = directory
                 lastSyncedImagePath = appState.fileData.currentImagePath
-
-                let pinUserDirectory = appState.userRequestedTreeDirectory != nil && !appState.specificFilesActive
-                if userIsNavigatingTree, !pinUserDirectory { return }
 
                 let row = outlineView.row(forItem: match)
                 if row >= 0 {
@@ -568,6 +576,7 @@ struct FileTreeView: NSViewRepresentable {
                     outlineView.scrollRowToVisible(row)
                 }
 
+                let pinUserDirectory = appState.userRequestedTreeDirectory != nil && !appState.specificFilesActive
                 if pinUserDirectory,
                    let requested = appState.userRequestedTreeDirectory,
                    let imagePath = appState.fileData.currentImagePath {
@@ -587,8 +596,27 @@ struct FileTreeView: NSViewRepresentable {
                !appState.specificFilesActive {
                 return FileTreeFilter.standardizedPath(requested)
             }
-            return FileTreeFilter.highlightDirectory(appState: appState)
-                .map { FileTreeFilter.standardizedPath($0) }
+            return treeHighlightDirectoryPath()
+        }
+
+        private func treeHighlightDirectoryPath() -> String? {
+            FileTreeFilter.directoryForTreeImageHighlight(appState: appState)
+        }
+
+        private func reloadItemPreservingSelection(
+            _ outlineView: NSOutlineView,
+            _ item: Any,
+            reloadChildren: Bool
+        ) {
+            let selectedItem = outlineView.selectedRow >= 0
+                ? outlineView.item(atRow: outlineView.selectedRow)
+                : nil
+            outlineView.reloadItem(item, reloadChildren: reloadChildren)
+            guard let selectedItem else { return }
+            let row = outlineView.row(forItem: selectedItem)
+            if row >= 0 {
+                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            }
         }
 
         private func nodeForHighlight(path: String, retryCount: Int) -> FileTreeNode? {
@@ -610,7 +638,7 @@ struct FileTreeView: NSViewRepresentable {
             let rootNorm = standardizedPath(root.path)
 
             var current = root
-            outlineView.reloadItem(current, reloadChildren: true)
+            reloadItemPreservingSelection(outlineView, current, reloadChildren: true)
 
             if normalized == rootNorm { return }
 
@@ -620,7 +648,7 @@ struct FileTreeView: NSViewRepresentable {
             for component in remainder.split(separator: "/").map(String.init) {
                 current.invalidateChildren()
                 current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-                outlineView.reloadItem(current, reloadChildren: true)
+                reloadItemPreservingSelection(outlineView, current, reloadChildren: true)
                 guard let next = current.children?.first(where: { $0.name == component }) else { return }
                 current = next
             }
@@ -668,10 +696,18 @@ struct FileTreeView: NSViewRepresentable {
             return current
         }
 
-        private func expandPath(to node: FileTreeNode, outlineView: NSOutlineView) {
+        private func expandPath(
+            to node: FileTreeNode,
+            outlineView: NSOutlineView,
+            preserveSelection: Bool = true
+        ) {
             let normalized = standardizedPath(node.path)
             guard let root = rootContaining(normalized: normalized) else { return }
             let rootNorm = standardizedPath(root.path)
+
+            let selectedItem = outlineView.selectedRow >= 0
+                ? outlineView.item(atRow: outlineView.selectedRow)
+                : nil
 
             var chain: [FileTreeNode] = [root]
             if normalized != rootNorm {
@@ -684,7 +720,7 @@ struct FileTreeView: NSViewRepresentable {
                         current.invalidateChildren()
                         current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
                     }
-                    outlineView.reloadItem(current, reloadChildren: true)
+                    reloadItemPreservingSelection(outlineView, current, reloadChildren: true)
                     guard let next = current.children?.first(where: { $0.name == component }) else { return }
                     chain.append(next)
                     current = next
@@ -692,9 +728,16 @@ struct FileTreeView: NSViewRepresentable {
             }
 
             for item in chain {
-                outlineView.reloadItem(item, reloadChildren: true)
+                reloadItemPreservingSelection(outlineView, item, reloadChildren: true)
                 outlineView.expandItem(item)
                 expandedDirectoryPaths.insert(item.path)
+            }
+
+            if preserveSelection, let selectedItem {
+                let row = outlineView.row(forItem: selectedItem)
+                if row >= 0 {
+                    outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                }
             }
         }
 
@@ -783,7 +826,7 @@ struct FileTreeView: NSViewRepresentable {
                     config: appState.config
                 )
             }
-            outlineView.reloadItem(node, reloadChildren: true)
+            reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
             return true
         }
 
@@ -844,6 +887,7 @@ final class FileTreeOutlineView: NSOutlineView {
            ) {
             return
         }
+        coordinator?.markUserNavigatingTree()
         super.keyDown(with: event)
     }
 

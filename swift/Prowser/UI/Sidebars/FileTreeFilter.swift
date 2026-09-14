@@ -47,15 +47,51 @@ enum FileTreeFilter {
         URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
-    /// Directory the tree should highlight: parent of the current image, else `currentDirectory`.
-    /// Matches Python `highlight_current_file` using `os.path.dirname(current_image_path)`.
+    /// True when thumbnails can list files from more than one folder (`highlight_current_file` exception).
+    private static func followsActiveImageDirectoryInTree(appState: AppState) -> Bool {
+        appState.specificFilesActive || appState.referenceGraphActive
+    }
+
+    /// Directory the tree should track for navigation/filter paths.
+    /// Prefer `currentDirectory` (set synchronously in `load_directory`) over the image path,
+    /// which can lag during async thumbnail loads (Python `highlight_current_directory`).
     static func highlightDirectory(appState: AppState) -> String? {
+        if followsActiveImageDirectoryInTree(appState: appState),
+           let path = appState.fileData.currentImagePath {
+            let dir = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+            if !dir.isEmpty { return standardizedPath(dir) }
+        }
+        if let current = appState.fileData.currentDirectory {
+            return standardizedPath(current)
+        }
         if let path = appState.fileData.currentImagePath {
             let dir = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
-            if !dir.isEmpty { return dir }
+            if !dir.isEmpty { return standardizedPath(dir) }
         }
-        guard let current = appState.fileData.currentDirectory else { return nil }
-        return standardizedPath(current)
+        return nil
+    }
+
+    /// Directory row for tree expand/select while following the active image (Python `highlight_current_file`).
+    static func directoryForTreeImageHighlight(appState: AppState) -> String? {
+        if followsActiveImageDirectoryInTree(appState: appState),
+           let path = appState.fileData.currentImagePath {
+            let imageDir = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+            if !imageDir.isEmpty { return standardizedPath(imageDir) }
+        }
+        if let path = appState.fileData.currentImagePath {
+            let imageDir = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+            if !imageDir.isEmpty {
+                let normalizedImageDir = standardizedPath(imageDir)
+                if let current = appState.fileData.currentDirectory {
+                    let normalizedCurrent = standardizedPath(current)
+                    if normalizedImageDir != normalizedCurrent {
+                        return normalizedCurrent
+                    }
+                }
+                return normalizedImageDir
+            }
+        }
+        return highlightDirectory(appState: appState)
     }
 
     /// Keep a directory and its ancestors visible in filtered tree modes.
