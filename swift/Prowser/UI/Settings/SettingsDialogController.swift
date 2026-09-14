@@ -70,6 +70,9 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
                         target.makeFirstResponder(control)
                     }
                 }
+                DispatchQueue.main.async {
+                    SettingsScrollFocus.scrollFirstResponderIntoView(in: target)
+                }
                 return event
             }) {
             inputIsolationMonitors.append(mouseMonitor)
@@ -78,7 +81,15 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
                 guard KeyboardHandlerController.isPreferencesWindow(window), window.isVisible else { return event }
                 if KeyboardHandlerController.isArrowKeyPublic(event.keyCode),
                    Self.handlePreferencesArrow(window: window, event: event) {
+                    DispatchQueue.main.async {
+                        SettingsScrollFocus.scrollFirstResponderIntoView(in: window)
+                    }
                     return nil
+                }
+                if event.keyCode == 48 {
+                    DispatchQueue.main.async {
+                        SettingsScrollFocus.scrollFirstResponderIntoView(in: window)
+                    }
                 }
                 if KeyboardHandlerController.mouseIsInWindow(window)
                     || KeyboardHandlerController.firstResponderIsInWindow(window)

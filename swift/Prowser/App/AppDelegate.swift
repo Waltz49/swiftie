@@ -42,8 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { [weak self] note in
-                (note.object as? NSWindow)?.orderOut(nil)
-                self?.hideAllWindows()
+                MainActor.assumeIsolated {
+                    (note.object as? NSWindow)?.orderOut(nil)
+                    self?.hideAllWindows()
+                }
             }
             return
         }
@@ -206,7 +208,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.closeDuplicateMainWindows()
+            MainActor.assumeIsolated {
+                self?.closeDuplicateMainWindows()
+            }
         }
     }
 
