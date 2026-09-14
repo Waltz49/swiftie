@@ -23,11 +23,19 @@ enum FileDragDropOperations {
         return flags.intersection(.deviceIndependentFlagsMask)
     }
 
-    static func sourceOperationMask(for context: NSDraggingContext) -> NSDragOperation {
+    static func sourceOperationMask(for context: NSDraggingContext, filePaths: [String] = []) -> NSDragOperation {
+        // Photos Library originals must never be offered as a move to Finder
+        // (same-volume drop would delete them). Copying out is allowed.
+        // Within the app, still offer move so the drop handler can refuse it
+        // with a message pointing at copy.
+        if filePaths.contains(where: RenamePrefixPlanner.isInsidePhotosLibrary),
+           context == .outsideApplication {
+            return .copy
+        }
         // Always offer both. Destination (and ⌥) pick copy vs move. Returning `.copy`
         // only while Option is held makes AppKit cancel the drop when Option is
         // released on mouse-up (slide-back, as if Escape was pressed).
-        [.copy, .move]
+        return NSDragOperation([.copy, .move])
     }
 
     /// Single operation for destination feedback (cursor badge + drop). Never return `.copy | .move`.
@@ -50,10 +58,8 @@ enum FileDragDropOperations {
         let allowed = offered.intersection([.copy, .move])
         guard allowed != [] else { return [] }
 
-        if filePaths.contains(where: RenamePrefixPlanner.isInsidePhotosLibrary) {
-            return allowed.contains(.copy) ? .copy : []
-        }
-
+        // Same-volume default is move; the drop handler refuses Photos Library
+        // moves with a message. Different-volume default is copy (allowed).
         let sameVolume = filePaths.allSatisfy { isSameVolume(file: $0, directory: targetDirectory) }
         if sameVolume, allowed.contains(.move) {
             return .move

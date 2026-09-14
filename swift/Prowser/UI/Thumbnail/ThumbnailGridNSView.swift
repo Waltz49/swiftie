@@ -588,7 +588,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
         // Re-query `sourceOperationMaskFor` when ⌥/⌘ changes mid-drag (copy badge on destinations).
-        _ = FileDragDropOperations.sourceOperationMask(for: .withinApplication)
+        _ = FileDragDropOperations.sourceOperationMask(for: .withinApplication, filePaths: draggingPaths)
     }
 
     private func dragPathsForIndex(_ index: Int) -> [String] {
@@ -636,7 +636,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         _ session: NSDraggingSession,
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
-        FileDragDropOperations.sourceOperationMask(for: context)
+        FileDragDropOperations.sourceOperationMask(for: context, filePaths: draggingPaths)
     }
 
     func draggingSession(

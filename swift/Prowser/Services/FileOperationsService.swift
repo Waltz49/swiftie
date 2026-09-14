@@ -21,11 +21,17 @@ final class FileOperationsService {
 
     func confirmAndMoveToTrash(_ paths: [String], forceConfirmation: Bool = false) -> [String] {
         guard !paths.isEmpty else { return [] }
+        var remaining = paths
+        if remaining.contains(where: RenamePrefixPlanner.isInsidePhotosLibrary) {
+            showAlert("Operation Not Allowed", Self.photosLibraryDeleteMessage)
+            remaining = remaining.filter { !RenamePrefixPlanner.isInsidePhotosLibrary($0) }
+            if remaining.isEmpty { return [] }
+        }
         let confirm = forceConfirmation || (appState?.config.bool(forKey: "confirm_delete", default: true) ?? true)
-        if confirm, !confirmDelete(paths: paths) {
+        if confirm, !confirmDelete(paths: remaining) {
             return []
         }
-        return moveToTrash(paths)
+        return moveToTrash(remaining)
     }
 
     /// Delete current/selected files (⌘Delete). Port of `file_operations_manager.delete_selected_files`.
@@ -185,6 +191,9 @@ final class FileOperationsService {
     }
 
     func copy(paths: [String], to directory: String) throws -> [String] {
+        guard allowPhotosLibraryTransfer(paths: paths, targetDirectory: directory, copyOnly: true) else {
+            return []
+        }
         var copied: [String] = []
         let destDir = URL(fileURLWithPath: directory)
         for path in paths {
@@ -207,6 +216,9 @@ final class FileOperationsService {
     }
 
     func move(paths: [String], to directory: String, refreshWhenDone: Bool = true) throws -> [String] {
+        guard allowPhotosLibraryTransfer(paths: paths, targetDirectory: directory, copyOnly: false) else {
+            return []
+        }
         var blocked: [String] = []
         for path in paths where PrsortIO.isFileLocked(path) {
             blocked.append((path as NSString).lastPathComponent)
@@ -273,8 +285,10 @@ final class FileOperationsService {
 
         do {
             if shouldCopy {
-                _ = try copy(paths: paths, to: expanded)
-                appState.status.show("Copied \(paths.count) file(s) to destination \(slot)")
+                let copied = try copy(paths: paths, to: expanded)
+                if !copied.isEmpty {
+                    appState.status.show("Copied \(copied.count) file(s) to destination \(slot)")
+                }
             } else {
                 let moved = try move(paths: paths, to: expanded)
                 if !moved.isEmpty {
@@ -298,36 +312,9 @@ final class FileOperationsService {
         }
         guard !files.isEmpty else { return false }
 
-        let targetInLibrary = RenamePrefixPlanner.isInsidePhotosLibrary(targetDirectory)
-        let librarySources = files.filter { RenamePrefixPlanner.isInsidePhotosLibrary($0) }
-
-        if targetInLibrary {
-            if !librarySources.isEmpty {
-                showAlert(
-                    "Operation Not Allowed",
-                    """
-                    File operations within macOS Photos Library are not allowed.
-
-                    Photos Library files cannot be moved, renamed, or modified within the library.
-                    You can drag files OUT of the Photos Library to other locations.
-                    """
-                )
-            } else {
-                showAlert(
-                    "Operation Not Allowed",
-                    """
-                    Adding files to macOS Photos Library is not allowed.
-
-                    Please use the Photos app to add files to your Photos Library.
-                    """
-                )
-            }
+        let copyOnly = FileDragDropOperations.isCopyDrop(operation)
+        guard allowPhotosLibraryTransfer(paths: files, targetDirectory: targetDirectory, copyOnly: copyOnly) else {
             return false
-        }
-
-        var copyOnly = FileDragDropOperations.isCopyDrop(operation)
-        if !librarySources.isEmpty {
-            copyOnly = true
         }
 
         if !copyOnly {
@@ -363,6 +350,7 @@ final class FileOperationsService {
         do {
             if copyOnly {
                 let copied = try copy(paths: files, to: targetDirectory)
+                guard !copied.isEmpty else { return false }
                 appState.config.debugLog(
                     "FileTree copy completed count=\(copied.count) dest=\(targetDirectory)"
                 )
@@ -438,8 +426,10 @@ final class FileOperationsService {
         }
         do {
             if copyOnly {
-                _ = try copy(paths: paths, to: lastDrop)
-                appState.status.show("Copied to last drop location")
+                let copied = try copy(paths: paths, to: lastDrop)
+                if !copied.isEmpty {
+                    appState.status.show("Copied to last drop location")
+                }
             } else {
                 let moved = try move(paths: paths, to: lastDrop)
                 if !moved.isEmpty {
@@ -724,6 +714,60 @@ final class FileOperationsService {
             }
         }
         return nil
+    }
+
+    private static let photosLibraryDeleteMessage = """
+        Deleting files from macOS Photos Library is not allowed.
+
+        Photos Library files cannot be deleted or modified.
+        """
+
+    /// Photos Library: no add/delete/move of library files. Copying out is allowed.
+    private func allowPhotosLibraryTransfer(
+        paths: [String],
+        targetDirectory: String,
+        copyOnly: Bool
+    ) -> Bool {
+        let targetInLibrary = RenamePrefixPlanner.isInsidePhotosLibrary(targetDirectory)
+        let hasLibrarySources = paths.contains(where: RenamePrefixPlanner.isInsidePhotosLibrary)
+
+        if targetInLibrary {
+            let message: String
+            if hasLibrarySources {
+                message = """
+                    File operations within macOS Photos Library are not allowed.
+
+                    Photos Library files cannot be moved, renamed, or modified within the library.
+                    You can copy files OUT of the Photos Library to other locations.
+                    """
+            } else {
+                message = """
+                    Adding files to macOS Photos Library is not allowed.
+
+                    Please use the Photos app to add files to your Photos Library.
+                    """
+            }
+            appState?.config.debugLog(
+                "Photos Library blocked \(hasLibrarySources ? "within-library" : "add") dest=\(targetDirectory)"
+            )
+            showAlert("Operation Not Allowed", message)
+            return false
+        }
+
+        if hasLibrarySources && !copyOnly {
+            appState?.config.debugLog("Photos Library blocked move from library dest=\(targetDirectory)")
+            showAlert(
+                "Operation Not Allowed",
+                """
+                Moving files from macOS Photos Library is not allowed.
+
+                Photos Library files cannot be moved, renamed, or modified.
+                You can copy files OUT of the Photos Library to other locations.
+                """
+            )
+            return false
+        }
+        return true
     }
 
     private func showAlert(_ title: String, _ message: String) {
