@@ -14,6 +14,8 @@ struct ShortcutsSidebarView: View {
         let lastDrop = validLastDropLabel()
         let destinationClicksEnabled = clickMode != "not_links"
 
+        let effectiveCopy = copyMode || clickMode == "copy"
+
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 PersistedScrollOffsetReader(
@@ -25,21 +27,23 @@ struct ShortcutsSidebarView: View {
 
                 Divider()
                     .overlay(palette.muted.opacity(0.35))
+                    .padding(.top, 17)
 
-                moveSection(
-                    destinations: destinations,
-                    lastDrop: lastDrop,
-                    copyMode: copyMode,
+                sectionHeaderRow(
+                    title: effectiveCopy ? "↘ Keys for copying files:" : "↘ Keys for moving files:",
                     palette: palette,
-                    destinationClicksEnabled: destinationClicksEnabled,
-                    clickMode: clickMode
+                    settingsTab: .destinations
                 )
 
                 clickModeSection(palette: palette)
 
-                Text("⌘1–⌘9 move · ⌥⌘1–⌥⌘9 copy · ^1–^9 open favorite")
-                    .font(.caption2)
-                    .foregroundStyle(palette.muted)
+                destinationRows(
+                    destinations: destinations,
+                    lastDrop: lastDrop,
+                    copyMode: effectiveCopy,
+                    palette: palette,
+                    destinationClicksEnabled: destinationClicksEnabled
+                )
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -78,23 +82,16 @@ struct ShortcutsSidebarView: View {
         }
     }
 
-    private func moveSection(
+    private func destinationRows(
         destinations: [ShortcutSlot],
         lastDrop: ShortcutSlot?,
         copyMode: Bool,
         palette: OrganizePalette,
-        destinationClicksEnabled: Bool,
-        clickMode: String
+        destinationClicksEnabled: Bool
     ) -> some View {
-        let effectiveCopy = copyMode || clickMode == "copy"
-        return VStack(alignment: .leading, spacing: 4) {
-            sectionHeaderRow(
-                title: effectiveCopy ? "↘ Keys for copying files:" : "↘ Keys for moving files:",
-                palette: palette,
-                settingsTab: .destinations
-            )
+        VStack(alignment: .leading, spacing: 1) {
             if destinations.isEmpty {
-                Text(effectiveCopy ? "No valid copy destinations are defined." : "No valid move destinations are defined.")
+                Text(copyMode ? "No valid copy destinations are defined." : "No valid move destinations are defined.")
                     .font(.system(size: 14))
                     .foregroundStyle(palette.muted)
                     .padding(.leading, 10)
@@ -105,12 +102,12 @@ struct ShortcutsSidebarView: View {
                         label: slot.label,
                         tooltip: slot.fullPath,
                         palette: palette,
-                        copyMode: effectiveCopy,
+                        copyMode: copyMode,
                         actionEnabled: destinationClicksEnabled,
                         action: {
                             appState.fileOperations.moveToDestination(
                                 slot: slot.number,
-                                copyOnly: effectiveCopy
+                                copyOnly: copyMode
                             )
                         }
                     )
@@ -122,10 +119,19 @@ struct ShortcutsSidebarView: View {
                     label: lastDrop.label,
                     tooltip: lastDrop.fullPath,
                     palette: palette,
-                    copyMode: effectiveCopy,
+                    copyMode: copyMode,
                     actionEnabled: destinationClicksEnabled,
-                    action: { appState.fileOperations.moveToLastDropLocation(copyOnly: effectiveCopy) }
+                    action: { appState.fileOperations.moveToLastDropLocation(copyOnly: copyMode) }
                 )
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    moveKeyLabel(number: 0, palette: palette)
+                    Text("Not yet set")
+                        .font(.system(size: 14))
+                        .foregroundStyle(palette.muted)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 10)
             }
         }
     }
@@ -134,20 +140,17 @@ struct ShortcutsSidebarView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text("Click Mode")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(palette.heading)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(palette.primary)
                     .help(clickModeTooltip)
-                Picker("", selection: clickModeBinding()) {
-                    Text("No Action").tag("not_links")
-                    Text("Move").tag("move")
-                    Text("Copy").tag("copy")
-                }
-                .labelsHidden()
-                .frame(maxWidth: 140)
-                .help(clickModeTooltip)
+                ClickModeCombo(
+                    selection: clickModeBinding(),
+                    palette: palette,
+                    tooltip: clickModeTooltip
+                )
             }
             Text("This does not affect keyboard shortcuts.")
-                .font(.caption)
+                .font(.system(size: 10))
                 .foregroundStyle(palette.muted)
         }
     }
@@ -211,7 +214,7 @@ struct ShortcutsSidebarView: View {
         action: @escaping () -> Void
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            moveKeyLabel(number: number, muted: palette.muted)
+            moveKeyLabel(number: number, palette: palette)
             OrganizeLinkButton(
                 title: label,
                 normalColor: palette.destinationLink,
@@ -225,16 +228,15 @@ struct ShortcutsSidebarView: View {
         .padding(.leading, 10)
     }
 
-    private func moveKeyLabel(number: Int, muted: Color) -> some View {
+    private func moveKeyLabel(number: Int, palette: OrganizePalette) -> some View {
         HStack(spacing: 0) {
             Text("⌘ \(number)")
             Text(" / ")
-                .foregroundStyle(muted)
+                .foregroundStyle(palette.disabled)
             Text("⌥⌘ \(number):")
         }
         .font(.system(size: 14))
-        .foregroundStyle(appState.theme.colors.sidebarText)
-        .frame(minWidth: 108, alignment: .trailing)
+        .foregroundStyle(palette.primary)
     }
 
     // MARK: - Data
@@ -270,11 +272,16 @@ struct ShortcutsSidebarView: View {
         let favoriteLink: Color
         let destinationLink: Color
         let heading: Color
+        let primary: Color
         let muted: Color
+        let disabled: Color
         let favoriteHover: Color
         let moveHover: Color
         let copyHover: Color
         let gearLink: Color
+        let comboBackground: Color
+        let comboBorder: Color
+        let comboHoverBorder: Color
     }
 
     private func validFavoriteSlots() -> [ShortcutSlot] {
@@ -287,17 +294,19 @@ struct ShortcutsSidebarView: View {
 
     private func validDestinationSlots() -> [ShortcutSlot] {
         appState.config.moveDestinations().enumerated().compactMap { index, path in
-            guard let expanded = validExpandedPath(path),
-                  let label = displayName(for: expanded) else { return nil }
-            return ShortcutSlot(number: index + 1, label: label, fullPath: expanded)
+            guard let expanded = validExpandedPath(path) else { return nil }
+            return ShortcutSlot(
+                number: index + 1,
+                label: destinationDisplayName(for: expanded),
+                fullPath: expanded
+            )
         }
     }
 
     private func validLastDropLabel() -> ShortcutSlot? {
         let path = appState.lastDropLocation
-        guard let expanded = validExpandedPath(path),
-              let label = displayName(for: expanded) else { return nil }
-        return ShortcutSlot(number: 0, label: label, fullPath: expanded)
+        guard let expanded = validExpandedPath(path) else { return nil }
+        return ShortcutSlot(number: 0, label: destinationDisplayName(for: expanded), fullPath: expanded)
     }
 
     private func validExpandedPath(_ path: String?) -> String? {
@@ -315,6 +324,19 @@ struct ShortcutsSidebarView: View {
             return "~" + String(path.dropFirst(NSHomeDirectory().count))
         }
         return (path as NSString).lastPathComponent
+    }
+
+    /// Last path segment only, matching `path_to_display_segment` in `shortcuts_sidebar.py`.
+    private func destinationDisplayName(for path: String) -> String {
+        var p = path
+        if p.hasPrefix(NSHomeDirectory()) {
+            p = "~" + String(p.dropFirst(NSHomeDirectory().count))
+        }
+        while p.hasSuffix("/") && p.count > 1 {
+            p.removeLast()
+        }
+        let base = (p as NSString).lastPathComponent
+        return base.isEmpty ? p : base
     }
 
     private func organizePalette() -> OrganizePalette {
@@ -335,18 +357,71 @@ struct ShortcutsSidebarView: View {
             fallback: Color(hex: favoriteHoverDefault) ?? .cyan
         )
         let primary = themeColor("shortcuts_sidebar_primary_text_hex", fallback: base.sidebarText)
-        let destinationLink = primary == base.sidebarText ? favoriteHover : primary
+        let destinationLink = primary
 
         return OrganizePalette(
             favoriteLink: favoriteHover,
             destinationLink: destinationLink,
             heading: themeColor("shortcuts_sidebar_heading_text_hex", fallback: base.sidebarHeaderText),
-            muted: themeColor("sidebar_text_muted_hex", fallback: base.sidebarText.opacity(0.65)),
+            primary: primary,
+            muted: themeColor("sidebar_text_muted_hex", fallback: base.sidebarMutedText),
+            disabled: themeColor("text_disabled_hex", fallback: Color(hex: "#888888") ?? .gray),
             favoriteHover: favoriteHover,
             moveHover: Color(hex: "#FF8080") ?? Color(red: 1, green: 0.5, blue: 0.5),
             copyHover: Color(hex: "#80FF80") ?? Color(red: 0.5, green: 1, blue: 0.5),
-            gearLink: destinationLink
+            gearLink: destinationLink,
+            comboBackground: themeColor("shortcuts_combo_bg_hex", fallback: base.sidebarBackground),
+            comboBorder: themeColor("shortcuts_combo_border_hex", fallback: base.defaultBorder),
+            comboHoverBorder: themeColor("shortcuts_combo_hover_border_hex", fallback: base.splitterHandleHover)
         )
+    }
+
+    private struct ClickModeCombo: View {
+        @Binding var selection: String
+        let palette: OrganizePalette
+        let tooltip: String
+
+        @State private var isHovering = false
+
+        private var title: String {
+            switch selection {
+            case "move": return "Move"
+            case "copy": return "Copy"
+            default: return "No Action"
+            }
+        }
+
+        var body: some View {
+            Menu {
+                Button("No Action") { selection = "not_links" }
+                Button("Move") { selection = "move" }
+                Button("Copy") { selection = "copy" }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(palette.primary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .frame(width: 102, alignment: .leading)
+                .background(palette.comboBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(isHovering ? palette.comboHoverBorder : palette.comboBorder, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(tooltip)
+            .onHover { isHovering = $0 }
+        }
     }
 }
 
