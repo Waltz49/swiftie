@@ -49,9 +49,13 @@ struct ExitScriptsSheet: View {
                     SettingsSupport.pickFile(into: text, allowedTypes: ["py", "sh", ""])
                 }
                 let validation = ExitScriptUtils.validateExitScriptCommand(text.wrappedValue)
-                Image(systemName: validation.valid ? "checkmark.circle" : "exclamationmark.triangle")
-                    .foregroundStyle(validation.valid ? .green : .orange)
-                    .help(validation.message)
+                if validation.message.isEmpty {
+                    SettingsPathValidationIndicator(state: .empty)
+                } else if validation.valid {
+                    SettingsPathValidationIndicator(state: .valid(tooltip: validation.message))
+                } else {
+                    SettingsPathValidationIndicator(state: .invalid(tooltip: validation.message))
+                }
             }
         }
     }

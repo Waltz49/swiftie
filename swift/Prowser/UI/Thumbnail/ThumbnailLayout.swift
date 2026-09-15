@@ -6,9 +6,15 @@ enum ThumbnailLayout {
     static let minCellSize: CGFloat = 80
     static let maxCellSize: CGFloat = 450
     static let defaultCellSize: CGFloat = 150
-    static let horizontalSpacing: CGFloat = 8
-    static let verticalSpacing: CGFloat = 8
-    static let canvasInset: CGFloat = 12
+    /// Python `THUMBNAIL_SPACING` — horizontal/vertical gap between cell slots in the grid.
+    static let thumbnailSpacing: CGFloat = 4
+    static let horizontalSpacing: CGFloat = thumbnailSpacing
+    static let verticalSpacing: CGFloat = thumbnailSpacing
+    /// Left inset for the grid (tighter than Python `BASE_MARGIN` to reduce dead space).
+    static let leadingMargin: CGFloat = 8
+    /// Right inset before scrollbar / viewport edge.
+    static let trailingMargin: CGFloat = 0
+    static let canvasInset: CGFloat = 8
     static let labelHeight: CGFloat = 18
     /// Space around each thumbnail for borders (Python `BORDER_SPACE`).
     static let borderSpace: CGFloat = 4
@@ -20,6 +26,7 @@ enum ThumbnailLayout {
         let columns: Int
         let cellWidth: CGFloat
         let cellHeight: CGFloat
+        let xOffset: CGFloat
         let contentSize: NSSize
     }
 
@@ -73,16 +80,25 @@ enum ThumbnailLayout {
         itemCount: Int,
         showFilename: Bool,
         showImageSize: Bool = false,
-        cellSize: CGFloat = defaultCellSize
+        cellSize: CGFloat = defaultCellSize,
+        scrollbarWidth: CGFloat = 0
     ) -> GridMetrics {
         let targetCell = min(max(cellSize, minCellSize), maxCellSize)
-        let usableWidth = max(viewportWidth - canvasInset * 2, minCellSize)
-        let columns = max(1, Int((usableWidth + horizontalSpacing) / (targetCell + horizontalSpacing)))
-        let cellWidth = (usableWidth - horizontalSpacing * CGFloat(columns - 1)) / CGFloat(columns)
+        let availableWidth = max(
+            viewportWidth - scrollbarWidth - leadingMargin - trailingMargin,
+            1
+        )
+        let columnStride = targetCell + thumbnailSpacing
+        let columns = max(1, Int(availableWidth / columnStride))
+        // Fixed cell size from settings (Python `thumbnail_size` / `rect_size`), not stretched to fill width.
+        let cellWidth = targetCell
         let imageHeight = cellWidth
         let label = overlayLabelHeight(showFilename: showFilename, showImageSize: showImageSize)
         let cellHeight = imageHeight + label
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
+
+        let xOffset = leadingMargin
+
         let contentHeight = canvasInset * 2
             + CGFloat(rows) * cellHeight
             + CGFloat(max(0, rows - 1)) * verticalSpacing
@@ -90,6 +106,7 @@ enum ThumbnailLayout {
             columns: columns,
             cellWidth: cellWidth,
             cellHeight: cellHeight,
+            xOffset: xOffset,
             contentSize: NSSize(width: viewportWidth, height: contentHeight)
         )
     }
@@ -97,7 +114,7 @@ enum ThumbnailLayout {
     static func frame(for index: Int, metrics: GridMetrics) -> NSRect {
         let col = index % metrics.columns
         let row = index / metrics.columns
-        let x = canvasInset + CGFloat(col) * (metrics.cellWidth + horizontalSpacing)
+        let x = metrics.xOffset + CGFloat(col) * (metrics.cellWidth + thumbnailSpacing)
         let y = canvasInset + CGFloat(row) * (metrics.cellHeight + verticalSpacing)
         return NSRect(x: x, y: y, width: metrics.cellWidth, height: metrics.cellHeight)
     }
@@ -143,12 +160,52 @@ enum ThumbnailLayout {
         metrics: GridMetrics,
         itemCount: Int
     ) -> [Int] {
-        guard itemCount > 0 else { return [] }
+        indicesIntersecting(
+            visibleRect.insetBy(dx: -metrics.cellWidth, dy: -metrics.cellHeight),
+            metrics: metrics,
+            itemCount: itemCount,
+            referenceNodeFrames: nil
+        )
+    }
+
+    /// Index range intersecting `rect` without scanning the full list when in grid mode.
+    static func indicesIntersecting(
+        _ rect: NSRect,
+        metrics: GridMetrics,
+        itemCount: Int,
+        referenceNodeFrames: [Int: NSRect]?
+    ) -> [Int] {
+        guard itemCount > 0, !rect.isEmpty else { return [] }
+        if let referenceNodeFrames {
+            return (0..<itemCount).filter { index in
+                guard let frame = referenceNodeFrames[index] else { return false }
+                return frame.intersects(rect)
+            }
+        }
+        let columns = max(1, metrics.columns)
+        let rowStride = metrics.cellHeight + verticalSpacing
+        let colStride = metrics.cellWidth + thumbnailSpacing
+        guard rowStride > 0, colStride > 0 else { return [] }
+
+        let expanded = rect
+        let minRow = max(0, Int(floor((expanded.minY - canvasInset) / rowStride)))
+        let maxRow = min(
+            (itemCount - 1) / columns,
+            Int(floor((expanded.maxY - canvasInset) / rowStride))
+        )
+        let minCol = max(0, Int(floor((expanded.minX - metrics.xOffset) / colStride)))
+        let maxCol = min(columns - 1, Int(floor((expanded.maxX - metrics.xOffset) / colStride)))
+
+        guard minRow <= maxRow, minCol <= maxCol else { return [] }
+
         var result: [Int] = []
-        for index in 0..<itemCount {
-            let frame = frame(for: index, metrics: metrics)
-            if frame.intersects(visibleRect.insetBy(dx: -metrics.cellWidth, dy: -metrics.cellHeight)) {
-                result.append(index)
+        for row in minRow...maxRow {
+            for col in minCol...maxCol {
+                let index = row * columns + col
+                if index >= itemCount { continue }
+                if frame(for: index, metrics: metrics).intersects(rect) {
+                    result.append(index)
+                }
             }
         }
         return result

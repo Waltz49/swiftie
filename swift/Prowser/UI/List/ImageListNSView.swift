@@ -27,6 +27,7 @@ final class ImageListNSView: NSView {
 
     var imagePaths: [String] = [] {
         didSet {
+            guard oldValue != imagePaths else { return }
             tableView.host = self
             tableView.reloadData()
             syncSelection()
@@ -34,15 +35,24 @@ final class ImageListNSView: NSView {
     }
 
     var currentPath: String? {
-        didSet { syncSelection() }
+        didSet {
+            guard oldValue != currentPath else { return }
+            syncSelection()
+        }
     }
 
     var selectedPaths: Set<String> = [] {
-        didSet { tableView.reloadData() }
+        didSet {
+            guard oldValue != selectedPaths else { return }
+            tableView.reloadData()
+        }
     }
 
     var multiSelectMode = false {
-        didSet { tableView.reloadData() }
+        didSet {
+            guard oldValue != multiSelectMode else { return }
+            tableView.reloadData()
+        }
     }
 
     var rowHeight: CGFloat = 48 {
@@ -53,7 +63,10 @@ final class ImageListNSView: NSView {
     }
 
     var thumbnailRefreshToken = 0 {
-        didSet { tableView.reloadData() }
+        didSet {
+            guard oldValue != thumbnailRefreshToken else { return }
+            tableView.reloadData()
+        }
     }
 
     var themeColors = ThemeColors.dark
@@ -220,6 +233,8 @@ private final class ImageListRowCell: NSTableCellView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let sizeLabel = NSTextField(labelWithString: "")
     private var loadTask: Task<Void, Never>?
+    private var configuredPath: String?
+    private var configuredRefreshToken = -1
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -291,6 +306,14 @@ private final class ImageListRowCell: NSTableCellView {
         layer?.backgroundColor = background.cgColor
         wantsLayer = true
 
+        let needsThumbnailLoad = configuredPath != path
+            || configuredRefreshToken != refreshToken
+            || thumbView.image == nil
+        configuredPath = path
+        configuredRefreshToken = refreshToken
+        guard needsThumbnailLoad else { return }
+
+        loadTask?.cancel()
         thumbView.image = nil
         let pixelSize = Int(max(28, thumbSize))
         loadTask = Task {
@@ -340,7 +363,10 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
 
         func syncFromAppState() {
             guard let listView else { return }
-            listView.imagePaths = appState.fileData.displayedImages
+            let paths = appState.fileData.displayedImages
+            if listView.imagePaths != paths {
+                listView.imagePaths = paths
+            }
             listView.currentPath = appState.fileData.currentImagePath
             listView.selectedPaths = appState.selection.selectedFiles
             listView.multiSelectMode = appState.selection.multiSelectMode

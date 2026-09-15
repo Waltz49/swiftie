@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
@@ -161,6 +162,56 @@ enum SettingsSupport {
         panel.prompt = "Choose"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         binding.wrappedValue = url.deletingPathExtension().lastPathComponent
+    }
+
+    /// Favorite slots accept a directory or image file (Python `browse_favorite_destination`).
+    static func pickFavoriteDestination(into binding: Binding<String>, imageExtensions: [String]) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        let types = imageExtensions.compactMap { ext -> UTType? in
+            let normalized = normalizeImageExtension(ext)
+            guard !normalized.isEmpty else { return nil }
+            return UTType(filenameExtension: normalized)
+        }
+        if !types.isEmpty {
+            panel.allowedContentTypes = types
+        }
+        let current = SettingsPathValidation.expandedPath(binding.wrappedValue)
+        if !current.isEmpty {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: current, isDirectory: &isDir) {
+                panel.directoryURL = isDir.boolValue
+                    ? URL(fileURLWithPath: current, isDirectory: true)
+                    : URL(fileURLWithPath: current).deletingLastPathComponent()
+            }
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var isDir: ObjCBool = false
+        let path = url.path
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+            binding.wrappedValue = StatusBarFormatter.displayPath(path)
+            return
+        }
+        let ext = url.pathExtension.lowercased()
+        let allowed = Set(imageExtensions.map { normalizeImageExtension($0) })
+        if allowed.contains(ext) {
+            binding.wrappedValue = StatusBarFormatter.displayPath(path)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Invalid File"
+        alert.informativeText = "Selected file is not an image file:\n\n\(path)"
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    private static func normalizeImageExtension(_ ext: String) -> String {
+        let lower = ext.lowercased()
+        if lower.hasPrefix(".") { return String(lower.dropFirst()) }
+        return lower
     }
 }
 

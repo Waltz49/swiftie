@@ -81,6 +81,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var deletedPlaceholdersObserver: UUID?
         private var selectionObserver: NSObjectProtocol?
         private var lastSyncedIndex = -1
+        private var lastSyncedDirectory: String?
 
         init(appState: AppState) {
             self.appState = appState
@@ -261,12 +262,18 @@ struct ThumbnailGridView: NSViewRepresentable {
                 ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
             }
             gridView.applyTheme(appState.theme.colors)
-            gridView.currentDirectory = appState.fileData.currentDirectory
+            let directory = appState.fileData.currentDirectory
+            if lastSyncedDirectory != directory {
+                gridView.clearThumbnails()
+                lastSyncedDirectory = directory
+                lastSyncedIndex = -1
+            }
+            gridView.currentDirectory = directory
             gridView.filterPattern = appState.filterSettings.filterPattern
             gridView.imageExtensions = appState.config.imageExtensions
             if gridView.imagePaths != paths {
+                gridView.pruneThumbnails(keeping: Set(paths))
                 gridView.imagePaths = paths
-                gridView.clearThumbnails()
                 lastSyncedIndex = -1
             }
             gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
@@ -279,7 +286,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.showImageSize = appState.config.bool(forKey: "show_image_size", default: false)
             gridView.showExtensions = appState.config.bool(forKey: "show_extensions", default: true)
             gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
-            gridView.reloadLayout()
+            gridView.reloadLayoutIfNeeded()
             appState.thumbnailGridColumns = gridView.gridColumnCount
             if index != lastSyncedIndex {
                 gridView.selectIndex(index, scroll: inThumbnailMode, notifyDelegate: false)

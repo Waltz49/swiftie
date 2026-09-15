@@ -28,7 +28,7 @@ struct MainWindowView: View {
                 center: {
                     ZStack(alignment: .bottomLeading) {
                         ContentStackView()
-                            .frame(minWidth: 400, maxHeight: .infinity)
+                            .frame(minWidth: SidebarWidthLimits.centerMin, maxHeight: .infinity)
                             .background(MainWindowCanvasTabStopView())
                         NotificationBubbleOverlay()
                     }

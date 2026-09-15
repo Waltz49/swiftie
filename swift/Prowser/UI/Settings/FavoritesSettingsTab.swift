@@ -9,7 +9,7 @@ struct FavoritesSettingsTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Favorites").font(.title2)
-                Text("Favorite directories accessible via ⌃1–⌃9.")
+                Text("Favorite directories or image files accessible via ⌃1–⌃9.")
                     .foregroundStyle(.secondary)
 
                 ForEach(0..<9, id: \.self) { index in
@@ -17,11 +17,20 @@ struct FavoritesSettingsTab: View {
                         Text("⌃\(index + 1)").frame(width: 28, alignment: .trailing)
                         TextField("Path", text: pathBinding(index))
                             .textFieldStyle(.roundedBorder)
+                        SettingsPathValidationIndicator(
+                            state: SettingsPathValidation.validateFavoriteDestinationPath(
+                                favorites[index] ?? "",
+                                imageExtensions: appState.config.imageExtensions
+                            )
+                        )
                         Button("Choose…") {
-                            SettingsSupport.pickDirectory(into: Binding(
-                                get: { favorites[index] },
-                                set: { favorites[index] = $0; persist() }
-                            ))
+                            SettingsSupport.pickFavoriteDestination(
+                                into: Binding(
+                                    get: { favorites[index] ?? "" },
+                                    set: { favorites[index] = $0.isEmpty ? nil : $0; persist() }
+                                ),
+                                imageExtensions: appState.config.imageExtensions
+                            )
                         }
                     }
                 }

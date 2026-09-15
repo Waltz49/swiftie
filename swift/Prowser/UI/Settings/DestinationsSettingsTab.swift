@@ -25,6 +25,9 @@ struct DestinationsSettingsTab: View {
                         Text("Slot \(index + 1)").frame(width: 56, alignment: .trailing)
                         TextField("Path", text: pathBinding(index))
                             .textFieldStyle(.roundedBorder)
+                        SettingsPathValidationIndicator(
+                            state: SettingsPathValidation.validateMoveDestinationPath(destinations[index] ?? "")
+                        )
                         Button("Choose…") {
                             SettingsSupport.pickDirectory(into: Binding(
                                 get: { destinations[index] },
