@@ -177,10 +177,9 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
-        /// Filtered tree modes: expandable only when at least one child directory passes the tree filter (Python proxy `hasChildren`).
+        /// Expandable only when at least one child directory would appear in the outline (`all` and filtered modes).
         fileprivate func isDirectoryExpandable(_ node: FileTreeNode) -> Bool {
             guard node.isDirectory else { return false }
-            if appState.filterSettings.filteredTree == "all" { return true }
             return node.hasVisibleFilteredChildDirectories(appState: appState, rootPaths: rootPaths)
         }
 
@@ -729,6 +728,13 @@ struct FileTreeView: NSViewRepresentable {
 
             for item in chain {
                 reloadItemPreservingSelection(outlineView, item, reloadChildren: true)
+                if !isDirectoryExpandable(item) {
+                    if outlineView.isItemExpanded(item) {
+                        outlineView.collapseItem(item, collapseChildren: false)
+                    }
+                    removeExpandedPath(item.path)
+                    continue
+                }
                 outlineView.expandItem(item)
                 expandedDirectoryPaths.insert(item.path)
             }
@@ -863,8 +869,16 @@ struct FileTreeView: NSViewRepresentable {
             if let node = item as? FileTreeNode,
                let outline = outlineView as? FileTreeOutlineView {
                 rowView.isDropTarget = outline.dropHighlightPath == node.path
+                rowView.showsDisclosureTriangle = isDirectoryExpandable(node)
+            } else {
+                rowView.showsDisclosureTriangle = false
             }
             return rowView
+        }
+
+        func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
+            let show = (outlineView.item(atRow: row) as? FileTreeNode).map(isDirectoryExpandable) ?? false
+            FileTreeDropHighlightRowView.applyDisclosureVisibility(to: rowView, show: show)
         }
 
         fileprivate func refreshDropHighlight(oldPath: String?, newPath: String?) {
@@ -903,6 +917,11 @@ struct FileTreeView: NSViewRepresentable {
             return true
         }
 
+        func outlineView(_ outlineView: NSOutlineView, shouldShowOutlineCellForItem item: Any) -> Bool {
+            guard let node = item as? FileTreeNode else { return false }
+            return isDirectoryExpandable(node)
+        }
+
         func outlineView(_ outlineView: NSOutlineView, shouldShowCellExpansionFor item: Any) -> Bool {
             false
         }
@@ -918,6 +937,23 @@ final class FileTreeDropHighlightRowView: NSTableRowView {
         }
     }
 
+    var showsDisclosureTriangle = true {
+        didSet {
+            guard oldValue != showsDisclosureTriangle else { return }
+            applyDisclosureVisibility()
+        }
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        applyDisclosureVisibility()
+    }
+
+    override func layout() {
+        super.layout()
+        applyDisclosureVisibility()
+    }
+
     override func drawBackground(in dirtyRect: NSRect) {
         if isDropTarget {
             NSColor.selectedContentBackgroundColor.withAlphaComponent(0.45).setFill()
@@ -925,6 +961,26 @@ final class FileTreeDropHighlightRowView: NSTableRowView {
             return
         }
         super.drawBackground(in: dirtyRect)
+    }
+
+    static func applyDisclosureVisibility(to rowView: NSTableRowView, show: Bool) {
+        if let custom = rowView as? FileTreeDropHighlightRowView {
+            custom.showsDisclosureTriangle = show
+            custom.applyDisclosureVisibility()
+            return
+        }
+        hideNonCellSubviews(in: rowView, show: show)
+    }
+
+    fileprivate func applyDisclosureVisibility() {
+        Self.hideNonCellSubviews(in: self, show: showsDisclosureTriangle)
+    }
+
+    private static func hideNonCellSubviews(in rowView: NSTableRowView, show: Bool) {
+        for subview in rowView.subviews where !(subview is NSTableCellView) {
+            subview.isHidden = !show
+            subview.alphaValue = show ? 1 : 0
+        }
     }
 }
 
