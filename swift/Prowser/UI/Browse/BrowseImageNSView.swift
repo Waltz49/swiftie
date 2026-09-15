@@ -238,7 +238,7 @@ final class BrowseImageNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor(themeColors.browseBorderColor).setFill()
-        bounds.fill()
+        dirtyRect.fill()
 
         guard let image = sourceImage else {
             drawEmptyState()

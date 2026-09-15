@@ -783,7 +783,7 @@ struct FileTreeView: NSViewRepresentable {
             _ outlineView: NSOutlineView,
             validateDrop info: NSDraggingInfo,
             proposedItem item: Any?,
-            proposedChildIndex index: UnsafeMutablePointer<Int>
+            proposedChildIndex _: Int
         ) -> NSDragOperation {
             let paths = FileTreeOutlineView.filePaths(from: info)
             guard !paths.isEmpty else { return [] }
@@ -792,7 +792,7 @@ struct FileTreeView: NSViewRepresentable {
             guard FileManager.default.fileExists(atPath: node.path, isDirectory: &isDir), isDir.boolValue else {
                 return []
             }
-            index.pointee = NSOutlineViewDropOnItemIndex
+            outlineView.setDropItem(item, dropChildIndex: NSOutlineViewDropOnItemIndex)
             let op = FileDragDropOperations.destinationOperation(
                 sourceMask: info.draggingSourceOperationMask,
                 filePaths: paths,
@@ -922,7 +922,11 @@ struct FileTreeView: NSViewRepresentable {
             return isDirectoryExpandable(node)
         }
 
-        func outlineView(_ outlineView: NSOutlineView, shouldShowCellExpansionFor item: Any) -> Bool {
+        func outlineView(
+            _: NSOutlineView,
+            shouldShowCellExpansionFor _: NSTableColumn?,
+            item _: Any
+        ) -> Bool {
             false
         }
     }

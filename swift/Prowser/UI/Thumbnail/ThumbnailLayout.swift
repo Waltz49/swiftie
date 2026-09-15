@@ -12,6 +12,9 @@ enum ThumbnailLayout {
     static let verticalSpacing: CGFloat = thumbnailSpacing
     static let baseMargin: CGFloat = ThumbnailGridLayoutService.baseMargin
     static let canvasInset: CGFloat = 8
+    /// Height in points of the top cover strip, measured down from the top of the thumbnail pane.
+    /// Hides the previous-row sliver left by auto-scroll. Change this to make the bar taller or shorter.
+    static let topCoverBandHeight: CGFloat = 20
     static let labelHeight: CGFloat = 18
     /// Space around each thumbnail for borders (Python `BORDER_SPACE`).
     static let borderSpace: CGFloat = 4

@@ -71,16 +71,6 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         }
     }
 
-    private var layoutSignature: String {
-        descriptors.map { descriptor in
-            let expanded = model.paneExpanded(
-                configKey: descriptor.expandedConfigKey,
-                default: descriptor.defaultExpanded
-            )
-            return "\(descriptor.index):\(descriptor.isDisplayed):\(expanded)"
-        }.joined(separator: "|")
-    }
-
     @ViewBuilder
     private func paneBlock(descriptor: SidebarPaneDescriptor, height: CGFloat) -> some View {
         let expanded = model.paneExpanded(

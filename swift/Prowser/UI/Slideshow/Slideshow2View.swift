@@ -47,12 +47,16 @@ struct Slideshow2View: View {
             }
             .onAppear {
                 slideIndex = appState.fileData.currentIndex
-                appState.slideshow2ViewportSize = geometry.size
+                if appState.slideshow2ViewportSize != geometry.size {
+                    appState.slideshow2ViewportSize = geometry.size
+                }
                 loadSlide(images: images, viewport: geometry.size)
                 startPanTimer(images: images)
             }
             .onChange(of: geometry.size) { _, newSize in
-                appState.slideshow2ViewportSize = newSize
+                if appState.slideshow2ViewportSize != newSize {
+                    appState.slideshow2ViewportSize = newSize
+                }
             }
         }
         .onChange(of: appState.fileData.currentIndex) { _, newIndex in

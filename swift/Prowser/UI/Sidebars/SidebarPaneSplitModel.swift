@@ -137,7 +137,11 @@ final class SidebarPaneSplitModel {
 
     func applySizes(_ newSizes: [CGFloat], appState: AppState, persist: Bool) {
         guard newSizes.count == 3 else { return }
-        sizes = newSizes
+        let sizesChanged = sizes.count != 3
+            || zip(sizes, newSizes).contains { abs($0 - $1) > 0.5 }
+        if sizesChanged {
+            sizes = newSizes
+        }
         if persist {
             mergePersistedSizes(appState: appState)
         }
