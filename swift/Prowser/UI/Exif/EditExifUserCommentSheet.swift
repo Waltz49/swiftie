@@ -8,6 +8,7 @@ struct EditExifUserCommentSheet: View {
     @Environment(\.themeColors) private var colors
 
     @State private var thumbnail: NSImage?
+    @FocusState private var editorFocused: Bool
 
     private var path: String? { appState.editUserCommentPath }
     private var filename: String {
@@ -35,7 +36,10 @@ struct EditExifUserCommentSheet: View {
             minWidth: 480,
             minHeight: 320
         )
-        .onAppear { loadThumbnail() }
+        .onAppear {
+            loadThumbnail()
+            DispatchQueue.main.async { editorFocused = true }
+        }
     }
 
     private var headerRow: some View {
@@ -109,6 +113,7 @@ struct EditExifUserCommentSheet: View {
         .scrollContentBackground(.hidden)
         .background(colors.dialogInputBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .focused($editorFocused)
     }
 
     private var footerRow: some View {

@@ -131,10 +131,6 @@ enum WindowFullscreen {
     }
 
     private static func isMainBrowserWindow(_ window: NSWindow) -> Bool {
-        guard window.canBecomeKey else { return false }
-        if window.identifier?.rawValue == "prowser.settings" || window.title == "Prowser Preferences" {
-            return false
-        }
-        return true
+        BrowserWindowIdentity.isMainBrowserWindow(window)
     }
 }

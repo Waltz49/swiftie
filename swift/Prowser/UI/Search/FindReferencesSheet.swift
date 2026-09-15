@@ -4,6 +4,7 @@ import SwiftUI
 struct FindReferencesSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
 
     private let thumbSize: CGFloat = 96
     private let columns = [GridItem(.adaptive(minimum: 96, maximum: 120), spacing: 8)]
@@ -28,6 +29,7 @@ struct FindReferencesSheet: View {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                         ForEach(appState.findReferencesMatches, id: \.self) { path in
                             Button {
+                                closeDialog()
                                 dismiss()
                                 appState.showReferenceGraph(for: path)
                             } label: {
@@ -42,7 +44,7 @@ struct FindReferencesSheet: View {
             }
 
             DialogButtonRow([
-                DialogButton("Close", isDefault: true, isCancel: true) { dismiss() },
+                DialogButton("Close", isDefault: true, isCancel: true) { closeDialog(); dismiss() },
             ], focusDefaultOnAppear: true)
         }
         .padding(16)

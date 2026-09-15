@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Dynamic menu enable/visibility flags (Python `menu_manager.py` `aboutToShow` handlers).
@@ -11,14 +12,20 @@ final class MenuRefreshState {
     var deleteExifDateEnabled = false
     var deleteExifDateTitle = "Delete EXIF Date from File…"
     var destinationsMenuVisible = true
+    /// False while a dialog/settings/about window is key so SwiftUI Command shortcuts
+    /// do not fire against the browser (Python `WindowShortcut` parity).
+    var browserWindowShortcutsEnabled = true
+    private var keyWindowObservers: [NSObjectProtocol] = []
 
     func bind(_ appState: AppState) {
         self.appState = appState
+        installKeyWindowObservers()
         refreshAll()
     }
 
     func refreshAll() {
         guard let appState else { return }
+        refreshBrowserWindowShortcuts()
         canViewTrash = TrashDirectoryService.hasReadableTrashWithImages(
             extensions: appState.config.imageExtensions
         )
@@ -44,5 +51,26 @@ final class MenuRefreshState {
         deleteExifDateTitle = withExif.count > 1
             ? "Delete EXIF Dates from Files…"
             : "Delete EXIF Date from File…"
+    }
+
+    func refreshBrowserWindowShortcuts() {
+        browserWindowShortcutsEnabled = BrowserWindowIdentity.browserWindowOwnsShortcuts()
+    }
+
+    private func installKeyWindowObservers() {
+        guard keyWindowObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        keyWindowObservers = [
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.refreshBrowserWindowShortcuts()
+                }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.refreshBrowserWindowShortcuts()
+                }
+            },
+        ]
     }
 }

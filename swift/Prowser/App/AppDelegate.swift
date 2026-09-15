@@ -228,12 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func isMainBrowserWindow(_ window: NSWindow) -> Bool {
-        guard window.isVisible else { return false }
-        let title = window.title
-        if window.identifier?.rawValue == "prowser.settings" || title == "Prowser Preferences" {
-            return false
-        }
-        return window.canBecomeKey
+        BrowserWindowIdentity.isMainBrowserWindow(window)
     }
 
     private func scheduleMenuBarDeduplication() {

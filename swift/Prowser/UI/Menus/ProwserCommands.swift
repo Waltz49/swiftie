@@ -5,6 +5,12 @@ import AppKit
 struct ProwserCommands: Commands {
     @Bindable var appState: AppState
 
+    private var allowBrowserShortcuts: Bool {
+        MainActor.assumeIsolated {
+            appState.menuRefresh.browserWindowShortcutsEnabled
+        }
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) { }
 
@@ -24,146 +30,152 @@ struct ProwserCommands: Commands {
         }
 
         CommandMenu(MenuBarTitles.edit) {
-            ExternalEditorButton(appState: appState)
+            Group {
+                ExternalEditorButton(appState: appState)
 
-            Divider()
+                Divider()
 
-            Button("Undo Delete") {
-                Task { @MainActor in appState.fileOperations.undoLastFileOperation() }
+                Button("Undo Delete") {
+                    Task { @MainActor in appState.fileOperations.undoLastFileOperation() }
+                }
+                .keyboardShortcut("z", modifiers: .command)
+
+                Divider()
+
+                Button("Rename with Custom Prefix…") {
+                    Task { @MainActor in appState.renameWithCustomPrefix() }
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
+                Button("Convert Image Format…") {
+                    Task { @MainActor in appState.presentConvertFormatSheet() }
+                }
+                .keyboardShortcut("m", modifiers: .command)
+
+                Button("Resize…") {
+                    Task { @MainActor in appState.presentResizeSheet() }
+                }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Lock Files") {
+                    Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
+                }
+                .keyboardShortcut("l", modifiers: .command)
+
+                Button("Unlock Files") {
+                    Task { @MainActor in appState.fileOperations.unlockSelectedFiles() }
+                }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Copy Image") {
+                    Task { @MainActor in appState.fileOperations.copyImageToClipboard() }
+                }
+                .keyboardShortcut("c", modifiers: .control)
+
+                Button("Copy Path") {
+                    Task { @MainActor in copyPath() }
+                }
+                .keyboardShortcut("c", modifiers: .command)
+
+                Button("Select All") {
+                    Task { @MainActor in appState.fileOperations.selectAllDisplayed() }
+                }
+                .keyboardShortcut("a", modifiers: .command)
+
+                Button("Deselect All") {
+                    Task { @MainActor in appState.fileOperations.deselectAll() }
+                }
             }
-            .keyboardShortcut("z", modifiers: .command)
-
-            Divider()
-
-            Button("Rename with Custom Prefix…") {
-                Task { @MainActor in appState.renameWithCustomPrefix() }
-            }
-            .keyboardShortcut("n", modifiers: .command)
-
-            Button("Convert Image Format…") {
-                Task { @MainActor in appState.presentConvertFormatSheet() }
-            }
-            .keyboardShortcut("m", modifiers: .command)
-
-            Button("Resize…") {
-                Task { @MainActor in appState.presentResizeSheet() }
-            }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button("Lock Files") {
-                Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
-            }
-            .keyboardShortcut("l", modifiers: .command)
-
-            Button("Unlock Files") {
-                Task { @MainActor in appState.fileOperations.unlockSelectedFiles() }
-            }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button("Copy Image") {
-                Task { @MainActor in appState.fileOperations.copyImageToClipboard() }
-            }
-            .keyboardShortcut("c", modifiers: .control)
-
-            Button("Copy Path") {
-                Task { @MainActor in copyPath() }
-            }
-            .keyboardShortcut("c", modifiers: .command)
-
-            Button("Select All") {
-                Task { @MainActor in appState.fileOperations.selectAllDisplayed() }
-            }
-            .keyboardShortcut("a", modifiers: .command)
-
-            Button("Deselect All") {
-                Task { @MainActor in appState.fileOperations.deselectAll() }
-            }
+            .disabled(!allowBrowserShortcuts)
         }
 
         CommandMenu(MenuBarTitles.file) {
-            Button("Open File…") {
-                Task { @MainActor in appState.openFileDialog() }
-            }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
-
-            Button("Open Directory…") {
-                Task { @MainActor in openDirectory() }
-            }
-            .keyboardShortcut("o", modifiers: .command)
-
-            Divider()
-
-            Button("Back") {
-                Task { @MainActor in appState.goBack() }
-            }
-            .keyboardShortcut("[", modifiers: .command)
-
-            Button("Forward") {
-                Task { @MainActor in appState.goForward() }
-            }
-            .keyboardShortcut("]", modifiers: .command)
-
-            Divider()
-
-            Menu("Recent…") {
-                RecentDirectoriesMenuContent(appState: appState)
-            }
-
-            Menu("Favorites") {
-                ForEach(1...9, id: \.self) { slot in
-                    FavoriteMenuButton(appState: appState, slot: slot)
+            Group {
+                Button("Open File…") {
+                    Task { @MainActor in appState.openFileDialog() }
                 }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
+                Button("Open Directory…") {
+                    Task { @MainActor in openDirectory() }
+                }
+                .keyboardShortcut("o", modifiers: .command)
+
+                Divider()
+
+                Button("Back") {
+                    Task { @MainActor in appState.goBack() }
+                }
+                .keyboardShortcut("[", modifiers: .command)
+
+                Button("Forward") {
+                    Task { @MainActor in appState.goForward() }
+                }
+                .keyboardShortcut("]", modifiers: .command)
+
+                Divider()
+
+                Menu("Recent…") {
+                    RecentDirectoriesMenuContent(appState: appState)
+                }
+
+                Menu("Favorites") {
+                    ForEach(1...9, id: \.self) { slot in
+                        FavoriteMenuButton(appState: appState, slot: slot)
+                    }
+                }
+
+                DestinationsMenuVisibility(appState: appState)
+
+                Divider()
+
+                Button("Settings…") {
+                    Task { @MainActor in appState.openSettingsWindow() }
+                }
+                .keyboardShortcut(",", modifiers: .command)
+
+                LastImageMenuButton(appState: appState)
+
+                Button("Delete File") {
+                    Task { @MainActor in deleteSelection() }
+                }
+                .keyboardShortcut(.delete, modifiers: [.command, .shift])
+
+                Button("Copy User Comment") {
+                    Task { @MainActor in appState.copyUserCommentToClipboard() }
+                }
+
+                Divider()
+
+                Button("Reveal in Finder") {
+                    Task { @MainActor in revealSelection() }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+
+                Button("Move to Trash") {
+                    Task { @MainActor in deleteSelection() }
+                }
+                .keyboardShortcut(.delete, modifiers: .command)
+
+                Button("Refresh") {
+                    Task { @MainActor in appState.refreshDirectory() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                TrashViewCopyMenuButton(appState: appState)
+
+                Button("Image History") {
+                    Task { @MainActor in appState.openBrowseImageHistory() }
+                }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF3FunctionKey)!)), modifiers: [])
+
+                Divider()
             }
-
-            DestinationsMenuVisibility(appState: appState)
-
-            Divider()
-
-            Button("Settings…") {
-                Task { @MainActor in appState.openSettingsWindow() }
-            }
-            .keyboardShortcut(",", modifiers: .command)
-
-            LastImageMenuButton(appState: appState)
-
-            Button("Delete File") {
-                Task { @MainActor in deleteSelection() }
-            }
-            .keyboardShortcut(.delete, modifiers: [.command, .shift])
-
-            Button("Copy User Comment") {
-                Task { @MainActor in appState.copyUserCommentToClipboard() }
-            }
-
-            Divider()
-
-            Button("Reveal in Finder") {
-                Task { @MainActor in revealSelection() }
-            }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
-
-            Button("Move to Trash") {
-                Task { @MainActor in deleteSelection() }
-            }
-            .keyboardShortcut(.delete, modifiers: .command)
-
-            Button("Refresh") {
-                Task { @MainActor in appState.refreshDirectory() }
-            }
-            .keyboardShortcut("r", modifiers: .command)
-
-            TrashViewCopyMenuButton(appState: appState)
-
-            Button("Image History") {
-                Task { @MainActor in appState.openBrowseImageHistory() }
-            }
-            .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF3FunctionKey)!)), modifiers: [])
-
-            Divider()
+            .disabled(!allowBrowserShortcuts)
 
             Button("Close Window") {
                 Task { @MainActor in NSApp.keyWindow?.performClose(nil) }
@@ -175,26 +187,31 @@ struct ProwserCommands: Commands {
             Button("About…") {
                 Task { @MainActor in appState.showAboutDialog() }
             }
+            .disabled(!allowBrowserShortcuts)
         }
 
         CommandMenu("Search") {
-            Button("Find Duplicate Image Files in Directory") {
-                Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
-            }
+            Group {
+                Button("Find Duplicate Image Files in Directory") {
+                    Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
+                }
 
-            Button("Find Duplicate Image Files (Recursive)") {
-                Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
-            }
-            .keyboardShortcut("f", modifiers: .shift)
+                Button("Find Duplicate Image Files (Recursive)") {
+                    Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
+                }
+                .keyboardShortcut("f", modifiers: .shift)
 
-            Button("Show Image in Directory") {
-                Task { @MainActor in appState.showImageInDirectory() }
+                Button("Show Image in Directory") {
+                    Task { @MainActor in appState.showImageInDirectory() }
+                }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
             }
-            .keyboardShortcut("h", modifiers: [.command, .shift])
+            .disabled(!allowBrowserShortcuts)
         }
 
         CommandMenu(MenuBarTitles.view) {
-            Button("Enter Image Viewer") {
+            Group {
+                Button("Enter Image Viewer") {
                 Task { @MainActor in
                     guard appState.fileData.currentImagePath != nil else { return }
                     appState.fileData.setViewMode(.browse)
@@ -271,10 +288,13 @@ struct ProwserCommands: Commands {
             Divider()
 
             ThemeMenuContent(appState: appState, applyTheme: applyTheme)
+            }
+            .disabled(!allowBrowserShortcuts)
         }
 
         CommandMenu("Tools") {
-            Button("Quick Mass Rename…") {
+            Group {
+                Button("Quick Mass Rename…") {
                 Task { @MainActor in appState.quickMassRename() }
             }
             .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -441,23 +461,28 @@ struct ProwserCommands: Commands {
                     }
                 }
             }
+            }
+            .disabled(!allowBrowserShortcuts)
         }
 
         CommandGroup(replacing: .help) {
-            Button("Keyboard Shortcuts") {
-                Task { @MainActor in appState.showKeyboardHelp = true }
-            }
-            .keyboardShortcut("/", modifiers: [])
+            Group {
+                Button("Keyboard Shortcuts") {
+                    Task { @MainActor in appState.showKeyboardHelp = true }
+                }
+                .keyboardShortcut("/", modifiers: [])
 
-            Button("About Prowser") {
-                Task { @MainActor in appState.showAboutDialog() }
+                Button("About Prowser") {
+                    Task { @MainActor in appState.showAboutDialog() }
+                }
             }
+            .disabled(!allowBrowserShortcuts)
         }
     }
 
     @MainActor
     private func navigate(_ direction: ThumbnailNavigateDirection) {
-        if KeyboardHandlerController.preferencesPanelOwnsKeyboardFocus(appState: appState) {
+        if !appState.menuRefresh.browserWindowShortcutsEnabled {
             return
         }
         let images = appState.fileData.displayedImages

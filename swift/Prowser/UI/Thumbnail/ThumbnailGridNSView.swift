@@ -108,12 +108,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private struct LayoutSnapshot: Equatable {
         let viewportWidth: CGFloat
+        let viewportHeight: CGFloat
         let itemCount: Int
         let showFilename: Bool
         let showImageSize: Bool
         let cellSize: CGFloat
         let referenceGraphNodeCount: Int
         let manualReferenceThumbSize: Bool
+        let manualThumbnailSize: Bool
     }
 
     private var dragSourceIndex: Int?
@@ -176,9 +178,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         referenceLayout = nil
         referenceNodeFrames = [:]
-        let cellSize = CGFloat(
-            configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
-                ?? ThumbnailLayout.defaultCellSize
+        let viewport = viewportSizeForLayout()
+        let cellSize = resolvedLayoutCellSize(
+            viewportWidth: viewportWidth,
+            viewportHeight: viewport.height
         )
         metrics = ThumbnailLayout.metrics(
             for: viewportWidth,
@@ -188,8 +191,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             cellSize: cellSize,
             scrollbarWidth: verticalScrollbarReservedWidth()
         )
-        // Match Python: canvas is at least viewport-sized so grid background fills the visible area.
-        let viewport = viewportSizeForLayout()
         applyDocumentSize(
             NSSize(
                 width: max(metrics.contentSize.width, viewport.width),
@@ -744,8 +745,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             MainWindowKeyViewLoop.moveFromMainCanvas(appState: appState)
             return
         }
-        if let appState,
-           KeyboardHandlerController.settingsPreferencesShouldReceiveKeyboard(appState: appState, event: event) {
+        if !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event) {
             super.keyDown(with: event)
             return
         }
@@ -775,7 +775,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
-            guard window.isKeyWindow || window.canBecomeKey else {
+            guard window.isKeyWindow else {
                 self.logKey("claimKeyboardFocus skipped (window not key)")
                 return
             }
@@ -977,21 +977,45 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         max(thumbnailPixelSize, Int(metrics.cellWidth * 2))
     }
 
+    /// Python `current_thumbnail_size` when auto; config `thumbnail_cell_size` when manual.
+    private func resolvedLayoutCellSize(viewportWidth: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        let manual = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        if manual {
+            return CGFloat(
+                configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
+                    ?? ThumbnailLayout.defaultCellSize
+            )
+        }
+        let overlay = ThumbnailLayout.overlayLabelHeight(
+            showFilename: showFilenames,
+            showImageSize: showImageSize
+        )
+        let optimal = ThumbnailGridLayoutService.calculateOptimalThumbnailSize(
+            numImages: imagePaths.count,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            scrollbarWidth: verticalScrollbarReservedWidth(),
+            overlayHeight: overlay
+        )
+        return CGFloat(optimal)
+    }
+
     private func currentLayoutSnapshot(viewportWidth: CGFloat? = nil) -> LayoutSnapshot {
         let width = viewportWidth ?? viewportWidthForLayout()
-        let cellSize = CGFloat(
-            configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
-                ?? ThumbnailLayout.defaultCellSize
-        )
-        let manualSize = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        let height = viewportSizeForLayout().height
+        let manual = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        let manualRef = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        let cellSize = resolvedLayoutCellSize(viewportWidth: width, viewportHeight: height)
         return LayoutSnapshot(
             viewportWidth: width,
+            viewportHeight: height,
             itemCount: imagePaths.count,
             showFilename: showFilenames,
             showImageSize: showImageSize,
             cellSize: cellSize,
             referenceGraphNodeCount: referenceGraph?.nodes.count ?? 0,
-            manualReferenceThumbSize: manualSize
+            manualReferenceThumbSize: manualRef,
+            manualThumbnailSize: manual
         )
     }
 

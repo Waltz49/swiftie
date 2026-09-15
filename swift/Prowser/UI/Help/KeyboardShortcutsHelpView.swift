@@ -2,6 +2,7 @@ import SwiftUI
 
 struct KeyboardShortcutsHelpView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
     @Environment(\.themeColors) private var colors
 
     var body: some View {
@@ -105,7 +106,7 @@ struct KeyboardShortcutsHelpView: View {
             }
 
             DialogButtonRow([
-                DialogButton("Close", isDefault: true, isCancel: true) { dismiss() },
+                DialogButton("Close", isDefault: true, isCancel: true) { closeDialog(); dismiss() },
             ], focusDefaultOnAppear: true)
         }
         .padding(24)

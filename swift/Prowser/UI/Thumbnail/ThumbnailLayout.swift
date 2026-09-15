@@ -10,10 +10,7 @@ enum ThumbnailLayout {
     static let thumbnailSpacing: CGFloat = 4
     static let horizontalSpacing: CGFloat = thumbnailSpacing
     static let verticalSpacing: CGFloat = thumbnailSpacing
-    /// Left inset for the grid (tighter than Python `BASE_MARGIN` to reduce dead space).
-    static let leadingMargin: CGFloat = 8
-    /// Right inset before scrollbar / viewport edge.
-    static let trailingMargin: CGFloat = 0
+    static let baseMargin: CGFloat = ThumbnailGridLayoutService.baseMargin
     static let canvasInset: CGFloat = 8
     static let labelHeight: CGFloat = 18
     /// Space around each thumbnail for borders (Python `BORDER_SPACE`).
@@ -83,21 +80,21 @@ enum ThumbnailLayout {
         cellSize: CGFloat = defaultCellSize,
         scrollbarWidth: CGFloat = 0
     ) -> GridMetrics {
-        let targetCell = min(max(cellSize, minCellSize), maxCellSize)
-        let availableWidth = max(
-            viewportWidth - scrollbarWidth - leadingMargin - trailingMargin,
-            1
+        let targetCell = min(
+            max(cellSize, CGFloat(ThumbnailGridLayoutService.minThumbnailSize)),
+            maxCellSize
         )
-        let columnStride = targetCell + thumbnailSpacing
-        let columns = max(1, Int(availableWidth / columnStride))
-        // Fixed cell size from settings (Python `thumbnail_size` / `rect_size`), not stretched to fill width.
+        // Python `calculate_grid_layout`: columns from fixed slot width, not stretched cells.
+        let availableWidth = max(viewportWidth - scrollbarWidth - baseMargin * 2, 1)
+        let cellSlot = targetCell + borderSpace + thumbnailSpacing
+        let columns = max(1, Int(availableWidth / cellSlot))
         let cellWidth = targetCell
         let imageHeight = cellWidth
         let label = overlayLabelHeight(showFilename: showFilename, showImageSize: showImageSize)
         let cellHeight = imageHeight + label
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
 
-        let xOffset = leadingMargin
+        let xOffset = baseMargin
 
         let contentHeight = canvasInset * 2
             + CGFloat(rows) * cellHeight
@@ -114,7 +111,8 @@ enum ThumbnailLayout {
     static func frame(for index: Int, metrics: GridMetrics) -> NSRect {
         let col = index % metrics.columns
         let row = index / metrics.columns
-        let x = metrics.xOffset + CGFloat(col) * (metrics.cellWidth + thumbnailSpacing)
+        let columnStride = metrics.cellWidth + borderSpace + thumbnailSpacing
+        let x = metrics.xOffset + CGFloat(col) * columnStride
         let y = canvasInset + CGFloat(row) * (metrics.cellHeight + verticalSpacing)
         return NSRect(x: x, y: y, width: metrics.cellWidth, height: metrics.cellHeight)
     }
@@ -184,7 +182,7 @@ enum ThumbnailLayout {
         }
         let columns = max(1, metrics.columns)
         let rowStride = metrics.cellHeight + verticalSpacing
-        let colStride = metrics.cellWidth + thumbnailSpacing
+        let colStride = metrics.cellWidth + borderSpace + thumbnailSpacing
         guard rowStride > 0, colStride > 0 else { return [] }
 
         let expanded = rect

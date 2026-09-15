@@ -3,6 +3,7 @@ import SwiftUI
 struct MoveWorkFilesSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
     @State private var directoryName = ""
     @State private var errorMessage = ""
 
@@ -23,17 +24,14 @@ struct MoveWorkFilesSheet: View {
                     .foregroundStyle(.red)
             }
 
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Move") { moveFiles() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!isValidName(directoryName))
-            }
+            DialogButtonRow([
+                DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
+                DialogButton("Move", isDefault: true, isEnabled: isValidName(directoryName)) { moveFiles() },
+            ])
         }
         .padding(20)
-        .frame(width: 420)
+        .frame(minWidth: 420)
+        .themeDialogStyle()
     }
 
     private func isValidName(_ name: String) -> Bool {
@@ -53,6 +51,7 @@ struct MoveWorkFilesSheet: View {
         do {
             let moved = try MoveWorkFilesService.moveWorkFiles(appState: appState, destinationName: name)
             appState.status.show("Moved \(moved) file(s)")
+            closeDialog()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

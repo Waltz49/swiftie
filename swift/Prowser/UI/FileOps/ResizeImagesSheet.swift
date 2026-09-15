@@ -5,6 +5,7 @@ import SwiftUI
 struct ResizeImagesSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
     @Environment(\.themeColors) private var colors
 
     @State private var width = 1920
@@ -185,7 +186,7 @@ struct ResizeImagesSheet: View {
                 .help("When unchecked, a copy is saved as name-0001.ext and the original is kept.")
 
             DialogButtonRow([
-                DialogButton("Cancel", isDefault: true, isCancel: true, isEnabled: !isResizing) { dismiss() },
+                DialogButton("Cancel", isDefault: true, isCancel: true, isEnabled: !isResizing) { closeDialog(); dismiss() },
                 DialogButton("Resize", isEnabled: !(isResizing || paths.isEmpty)) { resize() },
             ])
         }
@@ -431,6 +432,7 @@ struct ResizeImagesSheet: View {
 
         let result = ResizeImagesService.resizeBatch(paths: paths, request: request, progress: progress)
         isResizing = false
+        closeDialog()
         dismiss()
 
         if !result.outputPaths.isEmpty {

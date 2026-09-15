@@ -26,6 +26,9 @@ final class KeyboardHandlerController {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if Self.isolateNonBrowserKeyDown(event) {
+                return nil
+            }
             let handled = self.handleKeyDown(event)
             return handled ? nil : event
         }
@@ -253,15 +256,11 @@ final class KeyboardHandlerController {
     }
 
     private func shouldHandle(_ event: NSEvent, fromTreeFocus: Bool = false) -> Bool {
-        guard let appState else { return false }
+        guard appState != nil else { return false }
         if NSApp.modalWindow != nil { return false }
-        if appState.showKeyboardHelp || appState.isAboutDialogVisible {
+        if !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event) {
             return false
         }
-        if Self.settingsPreferencesShouldReceiveKeyboard(appState: appState, event: event) {
-            return false
-        }
-        if appState.hasModalSheetPresented { return false }
         if !fromTreeFocus, Self.fileTreeKeyboardTargetIsFocused(in: event.window) {
             // Python Image History is a WindowShortcut; still handle F3 when the tree has focus.
             if !Self.isF3Key(event) {
@@ -273,7 +272,7 @@ final class KeyboardHandlerController {
         return true
     }
 
-    /// Preferences are non-modal, but browser shortcuts must not run while the user is working in Preferences.
+    /// Preferences are non-modal, but browser shortcuts must not run while Preferences is key.
     static func settingsPreferencesShouldReceiveKeyboard(appState: AppState, event: NSEvent) -> Bool {
         preferencesPanelOwnsKeyboardFocus(appState: appState, event: event)
     }
@@ -281,23 +280,68 @@ final class KeyboardHandlerController {
     /// Shared gate for menu shortcuts, the keyboard handler, and the thumbnail grid.
     static func preferencesPanelOwnsKeyboardFocus(appState: AppState, event: NSEvent? = nil) -> Bool {
         guard appState.isSettingsDialogVisible else { return false }
-        guard let prefs = visiblePreferencesWindow() else { return false }
+        if isPreferencesWindow(NSApp.keyWindow) { return true }
+        if let event, isPreferencesWindow(event.window) { return true }
+        return false
+    }
 
-        let keyIsPrefs = isPreferencesWindow(NSApp.keyWindow)
-        let eventInPrefs = event.map { $0.window === prefs } ?? false
-        let frInPrefs = firstResponderIsInWindow(prefs)
-        let mouseIn = mouseIsInWindow(prefs)
-        let mainKey = isLikelyMainBrowserWindow(NSApp.keyWindow)
+    /// Consume Command shortcuts that would otherwise hit browser menus while a dialog
+    /// is key or a text field is first responder (⌘A select-all thumbnails, ⌘C copy path, …).
+    static func isolateNonBrowserKeyDown(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control) else { return false }
 
-        let owns: Bool
-        if keyIsPrefs { owns = true }
-        else if eventInPrefs { owns = true }
-        else if frInPrefs { owns = true }
-        else if mouseIn { owns = true }
-        else if mainKey { owns = false }
-        else { owns = true }
+        if isWindowChromeCommand(event) { return false }
 
-        return owns
+        let keyWindow = NSApp.keyWindow
+        let textFocused = (keyWindow?.firstResponder).map(isTextEditingResponder) ?? false
+        let dialogOwns = !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event)
+        guard textFocused || dialogOwns else { return false }
+
+        if isTextNavigationCommand(event) { return false }
+        if dialogOwns, isDialogSaveCommand(event) { return false }
+
+        if performStandardEditingShortcut(event) {
+            return true
+        }
+        return true
+    }
+
+    private static func isWindowChromeCommand(_ event: NSEvent) -> Bool {
+        let chars = event.charactersIgnoringModifiers?.lowercased()
+        return chars == "w" || chars == "q"
+    }
+
+    private static func isDialogSaveCommand(_ event: NSEvent) -> Bool {
+        event.keyCode == 36 || event.keyCode == 76
+    }
+
+    private static func isTextNavigationCommand(_ event: NSEvent) -> Bool {
+        isArrowKey(event.keyCode)
+    }
+
+    @discardableResult
+    private static func performStandardEditingShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let shift = flags.contains(.shift)
+        let option = flags.contains(.option)
+        guard !option else { return false }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "a" where !shift:
+            return NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+        case "c" where !shift:
+            return NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+        case "x" where !shift:
+            return NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+        case "v" where !shift:
+            return NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+        case "z" where !shift:
+            return NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
+        case "z" where shift:
+            return NSApp.sendAction(Selector(("redo:")), to: nil, from: nil)
+        default:
+            return false
+        }
     }
 
     private static func isF3Key(_ event: NSEvent) -> Bool {
@@ -326,9 +370,7 @@ final class KeyboardHandlerController {
     }
 
     static func isLikelyMainBrowserWindow(_ window: NSWindow?) -> Bool {
-        guard let window, window.isVisible else { return false }
-        if isPreferencesWindow(window) { return false }
-        return window.canBecomeKey
+        BrowserWindowIdentity.isMainBrowserWindow(window)
     }
 
     static func visiblePreferencesWindow() -> NSWindow? {
@@ -336,9 +378,7 @@ final class KeyboardHandlerController {
     }
 
     static func isPreferencesWindow(_ window: NSWindow?) -> Bool {
-        guard let window else { return false }
-        if window.identifier?.rawValue == "prowser.settings" { return true }
-        return window.title == "Prowser Preferences"
+        BrowserWindowIdentity.isPreferencesWindow(window)
     }
 
     private func isTextInputFocused(in eventWindow: NSWindow?) -> Bool {

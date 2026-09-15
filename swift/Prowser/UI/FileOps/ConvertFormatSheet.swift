@@ -3,6 +3,7 @@ import SwiftUI
 struct ConvertFormatSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
 
     @State private var targetFormat: ConvertFormatService.TargetFormat = .jpeg
     @State private var deleteOriginal = false
@@ -28,7 +29,7 @@ struct ConvertFormatSheet: View {
             Toggle("Delete original after conversion", isOn: $deleteOriginal)
 
             DialogButtonRow([
-                DialogButton("Cancel", isCancel: true, isEnabled: !isConverting) { dismiss() },
+                DialogButton("Cancel", isCancel: true, isEnabled: !isConverting) { closeDialog(); dismiss() },
                 DialogButton("Convert", isDefault: true,
                              isEnabled: !(isConverting || appState.fileOpsTargetPaths.isEmpty)) { convert() },
             ])
@@ -55,6 +56,7 @@ struct ConvertFormatSheet: View {
             deleteOriginal: deleteOriginal
         )
         isConverting = false
+        closeDialog()
         dismiss()
         if !converted.isEmpty {
             appState.thumbnailInvalidationGeneration += 1

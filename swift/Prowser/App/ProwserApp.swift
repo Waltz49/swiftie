@@ -57,6 +57,7 @@ final class AppState {
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
     private let aboutDialog = AboutDialogController()
     private let settingsDialog = SettingsDialogController()
+    private let auxiliaryDialogs = AuxiliaryDialogController()
     let theme: ThemeService
     let informationSectionState: InformationSectionState
     let leftSidebarSplit: SidebarPaneSplitModel
@@ -1403,7 +1404,11 @@ final class AppState {
             let text = await ExifService.userDescription(path: path) ?? ""
             editUserCommentText = text
             editUserCommentOriginalText = text
+            let alreadyOpen = showEditUserCommentSheet
             showEditUserCommentSheet = true
+            if alreadyOpen {
+                auxiliaryDialogs.bringToFront(Self.DialogID.editExifUserComment)
+            }
         }
     }
 
@@ -1416,7 +1421,10 @@ final class AppState {
                 metadataCache.invalidate(path: path)
                 refreshDirectory()
             } catch {
-                editUserCommentError = error.localizedDescription
+                StyledMessageDialog.showWarning(
+                    title: "EXIF Error",
+                    message: error.localizedDescription
+                )
             }
         }
     }
@@ -1473,12 +1481,164 @@ final class AppState {
     }
 
     private static func isPrimaryBrowserWindow(_ window: NSWindow) -> Bool {
-        guard window.isVisible, window.canBecomeKey else { return false }
-        switch window.title {
-        case "Settings":
-            return false
-        default:
-            return true
+        BrowserWindowIdentity.isMainBrowserWindow(window)
+    }
+
+    enum DialogID {
+        static let editExifUserComment = "editExifUserComment"
+        static let keyboardHelp = "keyboardHelp"
+        static let convertFormat = "convertFormat"
+        static let resizeImages = "resizeImages"
+        static let renamePrefix = "renamePrefix"
+        static let findReferences = "findReferences"
+        static let referenceGraph = "referenceGraph"
+        static let exifBatchConfirmation = "exifBatchConfirmation"
+        static let filter = "filter"
+        static let moveWorkFiles = "moveWorkFiles"
+    }
+
+    func syncAuxiliaryDialogs() {
+        syncDialog(
+            id: DialogID.editExifUserComment,
+            show: showEditUserCommentSheet,
+            title: "Edit EXIF User Comment",
+            defaultSize: NSSize(width: 520, height: 420),
+            minSize: NSSize(width: 480, height: 320),
+            focusTextOnShow: true,
+            onClose: { [weak self] in self?.cancelEditUserComment() }
+        ) {
+            EditExifUserCommentSheet()
+        }
+        syncDialog(
+            id: DialogID.keyboardHelp,
+            show: showKeyboardHelp,
+            title: "Keyboard Shortcuts",
+            defaultSize: NSSize(width: 520, height: 520),
+            minSize: NSSize(width: 480, height: 400),
+            onClose: { [weak self] in self?.showKeyboardHelp = false }
+        ) {
+            KeyboardShortcutsHelpView()
+        }
+        syncDialog(
+            id: DialogID.convertFormat,
+            show: showConvertFormatSheet,
+            title: "Convert Image Format",
+            defaultSize: NSSize(width: 380, height: 220),
+            minSize: NSSize(width: 320, height: 180),
+            onClose: { [weak self] in self?.showConvertFormatSheet = false }
+        ) {
+            ConvertFormatSheet()
+        }
+        syncDialog(
+            id: DialogID.resizeImages,
+            show: showResizeSheet,
+            title: "Resize Images",
+            defaultSize: NSSize(width: 420, height: 480),
+            minSize: NSSize(width: 360, height: 360),
+            onClose: { [weak self] in self?.showResizeSheet = false }
+        ) {
+            ResizeImagesSheet()
+        }
+        syncDialog(
+            id: DialogID.renamePrefix,
+            show: renamePrefixDialog != nil,
+            title: "Rename with Custom Prefix",
+            defaultSize: NSSize(width: 560, height: 330),
+            minSize: NSSize(width: 520, height: 300),
+            onClose: { [weak self] in
+                guard let self, self.renamePrefixDialog != nil else { return }
+                self.renamePrefixDialog = nil
+                self.renamePrefixService.dialogFinished(nil)
+            }
+        ) {
+            if let request = renamePrefixDialog {
+                RenamePrefixSheet(request: request)
+            }
+        }
+        syncDialog(
+            id: DialogID.findReferences,
+            show: showFindReferencesSheet,
+            title: "Find References",
+            defaultSize: NSSize(width: 560, height: 420),
+            minSize: NSSize(width: 520, height: 380),
+            onClose: { [weak self] in self?.showFindReferencesSheet = false }
+        ) {
+            FindReferencesSheet()
+        }
+        syncDialog(
+            id: DialogID.referenceGraph,
+            show: showReferenceGraphSheet && referenceGraphData != nil,
+            title: "Reference Graph",
+            defaultSize: NSSize(width: 560, height: 460),
+            minSize: NSSize(width: 520, height: 400),
+            onClose: { [weak self] in self?.showReferenceGraphSheet = false }
+        ) {
+            if let graph = referenceGraphData {
+                ReferenceGraphView(graph: graph)
+            }
+        }
+        syncDialog(
+            id: DialogID.exifBatchConfirmation,
+            show: exifBatchConfirmation != nil,
+            title: exifBatchConfirmation?.title ?? "Confirm EXIF Change",
+            defaultSize: NSSize(width: 560, height: 460),
+            minSize: NSSize(width: 520, height: 420),
+            onClose: { [weak self] in self?.exifBatchConfirmation = nil }
+        ) {
+            if let state = exifBatchConfirmation {
+                ExifBatchConfirmationSheet(state: state) { [weak self] in
+                    self?.exifBatchConfirmation = nil
+                }
+            }
+        }
+        syncDialog(
+            id: DialogID.filter,
+            show: showFilterDialog,
+            title: "Edit Filters",
+            defaultSize: NSSize(width: 360, height: 400),
+            minSize: NSSize(width: 320, height: 360),
+            focusTextOnShow: true,
+            onClose: { [weak self] in self?.showFilterDialog = false }
+        ) {
+            FilterDialogSheet()
+        }
+        syncDialog(
+            id: DialogID.moveWorkFiles,
+            show: showMoveWorkFilesSheet,
+            title: "Move Work Files",
+            defaultSize: NSSize(width: 420, height: 180),
+            minSize: NSSize(width: 360, height: 160),
+            focusTextOnShow: true,
+            onClose: { [weak self] in self?.showMoveWorkFilesSheet = false }
+        ) {
+            MoveWorkFilesSheet()
+        }
+    }
+
+    private func syncDialog<Content: View>(
+        id: String,
+        show: Bool,
+        title: String,
+        defaultSize: NSSize,
+        minSize: NSSize,
+        focusTextOnShow: Bool = false,
+        onClose: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        if show {
+            guard !auxiliaryDialogs.isVisible(id) else { return }
+            auxiliaryDialogs.present(
+                id: id,
+                title: title,
+                appState: self,
+                defaultSize: defaultSize,
+                minSize: minSize,
+                focusTextOnShow: focusTextOnShow,
+                content: content(),
+                onClose: onClose
+            )
+        } else {
+            auxiliaryDialogs.close(id)
         }
     }
 
@@ -1486,7 +1646,9 @@ final class AppState {
         true
     }
 
-    func prepareForApplicationExit() {}
+    func prepareForApplicationExit() {
+        auxiliaryDialogs.closeAll()
+    }
 
     func setFileTreeToolbarVisible(_ visible: Bool) {
         guard fileTreeToolbarVisible != visible else { return }

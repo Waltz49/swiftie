@@ -48,7 +48,8 @@ struct MainWindowView: View {
         .environment(\.themeColors, appState.theme.colors)
         .background(appState.theme.colors.background)
         .toolbar(.hidden, for: .windowToolbar)
-        .modifier(MainWindowSheetsModifier(appState: appState))
+        .background(MainWindowIdentityAnchor())
+        .background(AuxiliaryDialogBridge())
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
             appState.refreshSidebarLayout()
@@ -66,74 +67,6 @@ struct MainWindowView: View {
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             NSApp.activate(ignoringOtherApps: true)
         }
-    }
-}
-
-private struct MainWindowSheetsModifier: ViewModifier {
-    @Bindable var appState: AppState
-
-    func body(content: Content) -> some View {
-        content
-            .sheet(isPresented: $appState.showKeyboardHelp) {
-                KeyboardShortcutsHelpView()
-                    .environment(\.themeColors, appState.theme.colors)
-            }
-            .sheet(isPresented: $appState.showConvertFormatSheet) {
-                ConvertFormatSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showResizeSheet) {
-                ResizeImagesSheet()
-                    .environment(appState)
-            }
-            .sheet(item: $appState.renamePrefixDialog) { request in
-                RenamePrefixSheet(request: request)
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showFindReferencesSheet) {
-                FindReferencesSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showReferenceGraphSheet) {
-                if let graph = appState.referenceGraphData {
-                    ReferenceGraphView(graph: graph)
-                        .environment(appState)
-                }
-            }
-            .sheet(item: $appState.exifBatchConfirmation) { state in
-                ExifBatchConfirmationSheet(state: state) {
-                    appState.exifBatchConfirmation = nil
-                }
-            }
-            .sheet(isPresented: $appState.showFilterDialog) {
-                FilterDialogSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: $appState.showMoveWorkFilesSheet) {
-                MoveWorkFilesSheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: Binding(
-                get: { appState.showEditUserCommentSheet },
-                set: { presented in
-                    if !presented {
-                        appState.cancelEditUserComment()
-                    } else {
-                        appState.showEditUserCommentSheet = true
-                    }
-                }
-            )) {
-                EditExifUserCommentSheet()
-                    .environment(appState)
-            }
-            .alert("EXIF Error", isPresented: Binding(
-                get: { appState.editUserCommentError != nil },
-                set: { if !$0 { appState.editUserCommentError = nil } }
-            )) {
-                Button("OK", role: .cancel) { appState.editUserCommentError = nil }
-            } message: {
-                Text(appState.editUserCommentError ?? "")
-            }
     }
 }
 

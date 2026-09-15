@@ -5,6 +5,7 @@ import SwiftUI
 struct ReferenceGraphView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
 
     let graph: ReferenceGraph
 
@@ -55,9 +56,10 @@ struct ReferenceGraphView: View {
             }
 
             DialogButtonRow(
-                [DialogButton("Close", isDefault: true, isCancel: true) { dismiss() }],
+                [DialogButton("Close", isDefault: true, isCancel: true) { closeDialog(); dismiss() }],
                 leadingButtons: graph.nodes.count >= 2
                     ? [DialogButton("Show in Browser") {
+                        closeDialog()
                         dismiss()
                         Task { @MainActor in
                             await appState.openReferenceGraphPresentation(

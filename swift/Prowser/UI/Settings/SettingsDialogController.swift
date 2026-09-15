@@ -29,7 +29,7 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
         .environment(\.themeColors, appState.theme.colors)
 
         let host = NSHostingController(rootView: view)
-        let window = NSWindow(contentViewController: host)
+        let window = AuxiliaryDialogWindow(contentViewController: host)
         window.title = "Prowser Preferences"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.minSize = NSSize(width: 760, height: 520)
@@ -91,9 +91,7 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
                         SettingsScrollFocus.scrollFirstResponderIntoView(in: window)
                     }
                 }
-                if KeyboardHandlerController.mouseIsInWindow(window)
-                    || KeyboardHandlerController.firstResponderIsInWindow(window)
-                    || KeyboardHandlerController.isPreferencesWindow(event.window) {
+                if KeyboardHandlerController.isPreferencesWindow(event.window) {
                     Self.ensurePreferencesKey(window)
                 }
                 return event

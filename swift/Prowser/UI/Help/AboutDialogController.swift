@@ -26,12 +26,14 @@ final class AboutDialogController: NSObject, NSWindowDelegate {
             .environment(appState)
             .environment(\.themeColors, appState.theme.colors)
         )
-        let window = NSWindow(contentViewController: host)
+        let window = AuxiliaryDialogWindow(contentViewController: host)
         window.title = "About Prowser"
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.minSize = NSSize(width: 400, height: 420)
         window.setContentSize(NSSize(width: 440, height: 480))
         window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.identifier = NSUserInterfaceItemIdentifier(BrowserWindowIdentity.about)
         window.delegate = self
         aboutWindow = window
         DialogGeometryPersistence.apply(
@@ -76,10 +78,12 @@ final class AboutDialogController: NSObject, NSWindowDelegate {
         .environment(\.themeColors, appState?.theme.colors ?? .dark)
 
         let host = NSHostingController(rootView: view)
-        let window = NSWindow(contentViewController: host)
+        let window = AuxiliaryDialogWindow(contentViewController: host)
         window.title = title
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.identifier = NSUserInterfaceItemIdentifier(BrowserWindowIdentity.dialogPrefix + "about.\(title.lowercased())")
         window.setContentSize(defaultSize)
         window.minSize = defaultSize
         if let aboutWindow {
