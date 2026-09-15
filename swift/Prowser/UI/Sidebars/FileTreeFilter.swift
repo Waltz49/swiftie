@@ -118,6 +118,84 @@ enum FileTreeFilter {
         }
     }
 
+    /// Immediate child directories on disk (same exclusions as `FileTreeNode` loading).
+    static func immediateChildDirectoryPaths(at path: String, appState: AppState) -> [String] {
+        let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
+        let excluded = PathExclusions.excludedPaths(config: appState.config)
+        let url = URL(fileURLWithPath: path)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: showHidden ? [] : [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        return entries
+            .filter { !PathExclusions.isExcluded($0.path, excluded: excluded) }
+            .compactMap { entry -> String? in
+                let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                guard isDir else { return nil }
+                guard !FileTreeExcludedExtensions.shouldExcludeDirectory(named: entry.lastPathComponent) else {
+                    return nil
+                }
+                return entry.standardizedFileURL.path
+            }
+    }
+
+    /// Whether this directory has matching images (shallow + deep discovery). Ignores navigation/priority visibility.
+    static func directoryContainsImagesForFilter(at path: String, appState: AppState) -> Bool {
+        let mode = appState.filterSettings.filteredTree
+        if mode == "all" { return true }
+        let pattern = mode == "use_filter" ? appState.filterSettings.filterPattern : "*"
+        return directoryContainsImagesForFilter(
+            at: path,
+            mode: mode,
+            pattern: pattern,
+            appState: appState
+        )
+    }
+
+    private static func directoryContainsImagesForFilter(
+        at path: String,
+        mode: String,
+        pattern: String,
+        appState: AppState
+    ) -> Bool {
+        let extensions = appState.config.imageExtensions
+        let immediate = DirectoryScanner.scanDirectory(
+            at: path,
+            extensions: extensions,
+            filterPattern: pattern
+        )
+        if !immediate.isEmpty { return true }
+        if let cached = FileTreeImageDiscovery.shared.cachedResult(path: path, appState: appState) {
+            return cached
+        }
+        FileTreeImageDiscovery.shared.scheduleCheck(path: path, appState: appState) { discoveredPath in
+            clearShallowCache()
+            scheduleDebouncedUpdate(discoveredPath: discoveredPath)
+        }
+        return false
+    }
+
+    /// True when an immediate subdirectory contains matching images (used for expand/collapse disclosure).
+    static func hasFilteredChildDirectory(at path: String, appState: AppState) -> Bool {
+        let mode = appState.filterSettings.filteredTree
+        if mode == "all" { return false }
+        let pattern = mode == "use_filter" ? appState.filterSettings.filterPattern : "*"
+        for childPath in immediateChildDirectoryPaths(at: path, appState: appState) {
+            if directoryContainsImagesForFilter(
+                at: childPath,
+                mode: mode,
+                pattern: pattern,
+                appState: appState
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
     static func shouldShowDirectory(at path: String, appState: AppState, rootPaths: [String]) -> Bool {
         let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
         let normalizedRoots = rootPaths.map {
@@ -145,35 +223,14 @@ enum FileTreeFilter {
             return cached
         }
 
-        let result = evaluateDirectory(at: normalized, mode: mode, pattern: pattern, appState: appState)
+        let result = directoryContainsImagesForFilter(
+            at: normalized,
+            mode: mode,
+            pattern: pattern,
+            appState: appState
+        )
         cache[normalized] = result
         return result
-    }
-
-    private static func evaluateDirectory(
-        at path: String,
-        mode: String,
-        pattern: String,
-        appState: AppState
-    ) -> Bool {
-        let extensions = appState.config.imageExtensions
-
-        let immediate = DirectoryScanner.scanDirectory(
-            at: path,
-            extensions: extensions,
-            filterPattern: pattern
-        )
-        if !immediate.isEmpty { return true }
-
-        if let cached = FileTreeImageDiscovery.shared.cachedResult(path: path, appState: appState) {
-            return cached
-        }
-
-        FileTreeImageDiscovery.shared.scheduleCheck(path: path, appState: appState) { discoveredPath in
-            clearShallowCache()
-            scheduleDebouncedUpdate(discoveredPath: discoveredPath)
-        }
-        return false
     }
 
     private static func isOnNavigationPath(_ path: String, appState: AppState) -> Bool {
