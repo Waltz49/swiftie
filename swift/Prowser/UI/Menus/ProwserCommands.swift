@@ -420,7 +420,7 @@ struct ProwserCommands: Commands {
                 Divider()
 
                 Button("Toggle Debug Mode") {
-                    Task { @MainActor in toggleDebugMode() }
+                    Task { @MainActor in appState.toggleDebugMode() }
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
 
@@ -641,13 +641,6 @@ struct ProwserCommands: Commands {
                 message: error.localizedDescription
             )
         }
-    }
-
-    @MainActor
-    private func toggleDebugMode() {
-        let enabled = !appState.config.bool(forKey: "debug_mode", default: false)
-        appState.config.updateSetting("debug_mode", value: enabled)
-        appState.status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
     }
 
 }

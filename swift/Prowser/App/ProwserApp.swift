@@ -166,6 +166,7 @@ final class AppState {
         }
 
         config.loadSettings()
+        config.applyLaunchDebugFlag(launchOptions.debug)
         migrateSwiftSidebarDefaults(config: config)
         discardPersistedLastDropLocation(config: config)
         leftSidebarSplit = SidebarPaneSplitModel(side: .left, config: config)
@@ -801,6 +802,13 @@ final class AppState {
         config.updateSetting("slideshow2_enlargement", value: newEnlargement)
         config.applySettingsChange(emit: eventBus)
         status.show(String(format: "Panning zoom: %.1fx (fit width)", newEnlargement))
+    }
+
+    func toggleDebugMode() {
+        let enabled = !config.bool(forKey: "debug_mode")
+        config.applyLaunchDebugFlag(enabled)
+        KeyboardInputTracer.installIfNeeded(config: config)
+        status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
     }
 
     func printCacheStatus() {

@@ -11,8 +11,15 @@ final class AppConfig {
     private var settingsDraft: [String: Any]?
     private let encoder = JSONSerialization.self
 
+    /// Session-only debug flag. Off at launch unless `--debug`; never written to settings.json.
+    private var sessionDebugEnabled = false
+
     /// True while the settings window is open (edits stay in memory until OK).
     var isSettingsSessionActive: Bool { settingsDraft != nil }
+
+    func applyLaunchDebugFlag(_ enabled: Bool) {
+        sessionDebugEnabled = enabled
+    }
 
     func uiThemeAtSettingsOpen() -> String? {
         settingsSnapshot?["ui_theme"] as? String
@@ -189,14 +196,20 @@ final class AppConfig {
 
     func saveSettings() {
         mergeMissingDefaults()
-        guard JSONSerialization.isValidJSONObject(settings),
-              let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]) else {
+        var toWrite = settings
+        toWrite.removeValue(forKey: "debug_mode")
+        guard JSONSerialization.isValidJSONObject(toWrite),
+              let data = try? JSONSerialization.data(withJSONObject: toWrite, options: [.prettyPrinted, .sortedKeys]) else {
             return
         }
         try? data.write(to: paths.settingsFile, options: .atomic)
     }
 
     func updateSetting(_ key: String, value: Any?) {
+        if key == "debug_mode" {
+            sessionDebugEnabled = value as? Bool ?? false
+            return
+        }
         mutateSettings { storage in
             if let value {
                 storage[key] = value
@@ -207,6 +220,10 @@ final class AppConfig {
     }
 
     func setValue(_ value: Any, forKey key: String) {
+        if key == "debug_mode" {
+            sessionDebugEnabled = value as? Bool ?? false
+            return
+        }
         mutateSettings { storage in
             storage[key] = value
         }
@@ -256,7 +273,8 @@ final class AppConfig {
     }
 
     func bool(forKey key: String, default defaultValue: Bool = false) -> Bool {
-        boolValue(key, default: defaultValue)
+        if key == "debug_mode" { return sessionDebugEnabled }
+        return boolValue(key, default: defaultValue)
     }
 
     /// Console output for `--debug` / Settings → Debug mode.
@@ -438,10 +456,12 @@ final class AppConfig {
     private func mutateSettings(_ mutate: (inout [String: Any]) -> Void) {
         if var draft = settingsDraft {
             mutate(&draft)
+            draft.removeValue(forKey: "debug_mode")
             settingsDraft = draft
             return
         }
         mutate(&settings)
+        settings.removeValue(forKey: "debug_mode")
         saveSettings()
     }
 

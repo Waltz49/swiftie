@@ -82,6 +82,14 @@ final class KeyboardHandlerController {
             }
         }
 
+        // ⌘⇧D toggles debug mode (Python ctrl_shift_d). Nested Debug menu
+        // shortcuts do not receive key equivalents, so handle it here.
+        if hasCommand, hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "d" {
+            appState.toggleDebugMode()
+            return true
+        }
+
         // ⌘⇧I toggles browse number overlay (Python ctrl_shift_i).
         if hasCommand, hasShift, !hasOption,
            event.charactersIgnoringModifiers?.lowercased() == "i" {

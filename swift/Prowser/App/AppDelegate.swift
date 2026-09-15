@@ -286,10 +286,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             flushPendingOpens()
         }
 
-        if launchOptions.debug {
-            appState.config.setValue(true, forKey: "debug_mode")
-        }
-
         let restore = appState.config.rawSettings()["restore_state"] as? [String: Any]
         let savedSpace = restore?["last_macos_space_mode"] as? Bool
         WindowFullscreen.applyLaunchPreference(
