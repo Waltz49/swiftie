@@ -65,15 +65,11 @@ actor ThumbnailCache {
         )
     }
 
-    func cachedThumbnail(for imagePath: String, size: Int) -> NSImage? {
+    /// Cache lookup only (no generation). Returns `CGImage` so `@MainActor` callers
+    /// can build `NSImage` without crossing a non-Sendable boundary.
+    func cachedThumbnail(for imagePath: String, size: Int) -> CGImage? {
         let memoryKey = memoryKey(for: imagePath, size: size)
-        if let hit = touchMemory(key: memoryKey) {
-            return hit
-        }
-        let url = diskURL(for: imagePath, size: size)
-        guard let image = NSImage(contentsOf: url) else { return nil }
-        storeInMemory(key: memoryKey, image: image, imagePath: imagePath, pixelSize: size)
-        return image
+        return cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size)?.image
     }
 
     func storeThumbnail(_ image: NSImage, for imagePath: String, size: Int) throws {

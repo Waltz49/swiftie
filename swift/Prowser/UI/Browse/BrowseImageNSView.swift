@@ -183,8 +183,7 @@ final class BrowseImageNSView: NSView {
             let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
             for size in [8192, 4096, 2048, 1024, 512] {
                 if Task.isCancelled { return }
-                if let cached = await appState.thumbnailCache.cachedThumbnail(for: normalized, size: size),
-                   let cg = cached.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                if let cg = await appState.thumbnailCache.cachedThumbnail(for: normalized, size: size) {
                     guard self.imagePath == path else { return }
                     self.sourceImage = NSImage(
                         cgImage: cg,

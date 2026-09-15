@@ -79,6 +79,13 @@ struct ContentStackView: View {
         // Keep thumbnail grid mounted (Qt stacked widget parity) so scroll/highlight survive browse.
         ZStack {
             ThumbnailGridView()
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(appState.theme.colors.thumbnailGridBackground)
+                        .frame(height: ThumbnailLayout.topCoverBandHeight)
+                        .frame(maxWidth: .infinity)
+                        .allowsHitTesting(false)
+                }
                 .opacity(fileData.currentViewMode == .thumbnail ? 1 : 0)
                 .allowsHitTesting(fileData.currentViewMode == .thumbnail)
                 .zIndex(fileData.currentViewMode == .thumbnail ? 1 : 0)

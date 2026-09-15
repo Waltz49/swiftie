@@ -11,83 +11,6 @@ enum ThumbnailScrollAreaChrome {
         clip.drawsBackground = true
         clip.backgroundColor = background
     }
-
-    @MainActor
-    static func apply(to host: ThumbnailGridHostView, colors: ThemeColors) {
-        apply(to: host.scrollView, colors: colors)
-        host.topCoverBand.fillColor = colors.thumbnailGridBackground.nsColor
-    }
-}
-
-/// Port of Python `CanvasManager` around the thumbnail scroll area.
-/// The top band covers the previous-row sliver left by auto-scroll alignment.
-@MainActor
-final class ThumbnailGridHostView: NSView {
-    let scrollView = NSScrollView()
-    let topCoverBand = ThumbnailTopCoverBand()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        configure()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configure()
-    }
-
-    private func configure() {
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.borderType = .noBorder
-        addSubview(scrollView)
-
-        topCoverBand.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(topCoverBand)
-
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            topCoverBand.leadingAnchor.constraint(equalTo: leadingAnchor),
-            topCoverBand.trailingAnchor.constraint(equalTo: trailingAnchor),
-            topCoverBand.topAnchor.constraint(equalTo: topAnchor),
-            topCoverBand.heightAnchor.constraint(equalToConstant: ThumbnailLayout.topCoverBandHeight),
-        ])
-    }
-
-    override func layout() {
-        super.layout()
-        // Python `_update_black_overlay`: keep the band above the canvas after layout/scroll chrome.
-        topCoverBand.zPositionRaise()
-    }
-}
-
-/// Port of Python `CanvasManager.black_overlay`. Height is `ThumbnailLayout.topCoverBandHeight`.
-@MainActor
-final class ThumbnailTopCoverBand: NSView {
-    var fillColor: NSColor = .black {
-        didSet { needsDisplay = true }
-    }
-
-    override var isOpaque: Bool { true }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        fillColor.setFill()
-        dirtyRect.fill()
-    }
-
-    func zPositionRaise() {
-        guard let superview, superview.subviews.last !== self else { return }
-        superview.addSubview(self, positioned: .above, relativeTo: nil)
-    }
 }
 
 struct ThumbnailGridView: NSViewRepresentable {
@@ -97,10 +20,13 @@ struct ThumbnailGridView: NSViewRepresentable {
         Coordinator(appState: appState)
     }
 
-    func makeNSView(context: Context) -> ThumbnailGridHostView {
-        let host = ThumbnailGridHostView()
-        let scrollView = host.scrollView
-        ThumbnailScrollAreaChrome.apply(to: host, colors: appState.theme.colors)
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
 
         let gridView = ThumbnailGridNSView(frame: .zero)
         gridView.gridDelegate = context.coordinator
@@ -124,16 +50,15 @@ struct ThumbnailGridView: NSViewRepresentable {
         }
         scrollView.documentView = gridView
         context.coordinator.gridView = gridView
-        context.coordinator.hostView = host
         appState.thumbnailGridHost = gridView
         context.coordinator.scrollView = scrollView
         context.coordinator.observeScrollView(scrollView)
         context.coordinator.startObserving(appState: appState)
         context.coordinator.syncFromAppState()
-        return host
+        return scrollView
     }
 
-    func updateNSView(_ host: ThumbnailGridHostView, context: Context) {
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.syncFromAppState()
     }
 
@@ -141,7 +66,6 @@ struct ThumbnailGridView: NSViewRepresentable {
     final class Coordinator: NSObject, ThumbnailGridDelegate {
         let appState: AppState
         weak var gridView: ThumbnailGridNSView?
-        weak var hostView: ThumbnailGridHostView?
         weak var scrollView: NSScrollView?
         private var boundsObserver: NSObjectProtocol?
         private var frameObserver: NSObjectProtocol?
@@ -277,12 +201,10 @@ struct ThumbnailGridView: NSViewRepresentable {
                 forName: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView,
                 queue: .main
-            ) { [weak self, weak gridView] _ in
+            ) { [weak gridView] _ in
                 let view = gridView
-                let coordinator = self
                 Task { @MainActor in
                     view?.noteVisibleRectChanged()
-                    coordinator?.hostView?.topCoverBand.zPositionRaise()
                 }
             }
             scrollView.postsFrameChangedNotifications = true
@@ -336,9 +258,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         func syncFromAppState() {
             guard let gridView else { return }
             let paths = appState.fileData.displayedImages
-            if let hostView {
-                ThumbnailScrollAreaChrome.apply(to: hostView, colors: appState.theme.colors)
-            } else if let scrollView {
+            if let scrollView {
                 ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
             }
             gridView.applyTheme(appState.theme.colors)
