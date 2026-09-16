@@ -150,8 +150,6 @@ struct InformationPaneView: View {
             appState.copyInformationComment(full: full, preferredText: overlayData.speakablePlainText)
         case .edit:
             appState.beginEditUserComment()
-        case .create, .editAI, .cancelGeneration:
-            break
         case .delete:
             deleteComment()
         }

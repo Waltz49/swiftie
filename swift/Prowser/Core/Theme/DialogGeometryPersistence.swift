@@ -160,11 +160,15 @@ enum DialogGeometryPersistence {
         key: String,
         nestedInImageGen: Bool
     ) -> Any? {
+        if let direct = config.rawSettings()[key] {
+            return direct
+        }
         if nestedInImageGen {
             let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
             return imagegen[key]
         }
-        return config.rawSettings()[key]
+        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
+        return imagegen[key]
     }
 
     private static func writeRawValue(
@@ -177,8 +181,13 @@ enum DialogGeometryPersistence {
             var imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
             imagegen[key] = value
             config.updateSetting("imagegen", value: imagegen)
-        } else {
-            config.updateSetting(key, value: value)
+            return
+        }
+        config.updateSetting(key, value: value)
+        if var imagegen = config.rawSettings()["imagegen"] as? [String: Any],
+           imagegen[key] != nil {
+            imagegen.removeValue(forKey: key)
+            config.updateSetting("imagegen", value: imagegen)
         }
     }
 

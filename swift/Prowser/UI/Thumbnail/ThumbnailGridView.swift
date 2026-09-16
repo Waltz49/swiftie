@@ -59,7 +59,8 @@ struct ThumbnailGridView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.syncFromAppState()
+        // Observers handle directory/filter/displayed/settings; this coalesces other AppState changes.
+        context.coordinator.syncFromAppStateIfNeeded()
     }
 
     @MainActor
@@ -82,6 +83,34 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var selectionObserver: NSObjectProtocol?
         private var lastSyncedIndex = -1
         private var lastSyncedDirectory: String?
+        private var lastGridSyncFingerprint: GridSyncFingerprint?
+        private var lastSelectionFingerprint: SelectionFingerprint?
+        private var lastSyncedThemeID: String?
+
+        /// Fields that drive grid layout, paths, theme, and highlight — not selection chrome alone.
+        private struct GridSyncFingerprint: Equatable {
+            var themeID: String
+            var directory: String?
+            var filterPattern: String
+            var imagePaths: [String]
+            var referenceGraphActive: Bool
+            var referenceGraphPathCount: Int
+            var referenceGraphEdgeCount: Int
+            var referenceGraphFocusPath: String?
+            var deletedPlaceholders: Set<String>
+            var highlightIndex: Int
+            var viewMode: ViewMode
+            var wrapAround: Bool
+            var showFilenames: Bool
+            var showImageSize: Bool
+            var showExtensions: Bool
+            var imageExtensions: [String]
+        }
+
+        private struct SelectionFingerprint: Equatable {
+            var selectedIndices: Set<Int>
+            var multiSelectMode: Bool
+        }
 
         init(appState: AppState) {
             self.appState = appState
@@ -155,6 +184,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                     Task { @MainActor in self?.restoreKeyboardFocusAfterFileOperation() }
                 }
             }
+            // Selection is not part of `GridSyncFingerprint`; keep this observer instead of full grid sync.
             if selectionObserver == nil {
                 selectionObserver = NotificationCenter.default.addObserver(
                     forName: .prowserSelectionChanged,
@@ -163,7 +193,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 ) { [weak self] _ in
                     let coordinator = self
                     Task { @MainActor in
-                        coordinator?.syncSelectionVisuals()
+                        coordinator?.syncSelectionVisualsIfNeeded()
                         coordinator?.appState.refreshMenuState()
                     }
                 }
@@ -260,12 +290,53 @@ struct ThumbnailGridView: NSViewRepresentable {
         }
 
         func syncFromAppState() {
+            syncFromAppState(force: true)
+        }
+
+        func syncFromAppStateIfNeeded() {
+            syncFromAppState(force: false)
+        }
+
+        private func syncFromAppState(force: Bool) {
             guard let gridView else { return }
             let paths = appState.fileData.displayedImages
-            if let scrollView {
-                ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
+            let index = resolvedHighlightIndex(in: paths)
+            let fingerprint = GridSyncFingerprint(
+                themeID: appState.theme.colors.themeID,
+                directory: appState.fileData.currentDirectory,
+                filterPattern: appState.filterSettings.filterPattern,
+                imagePaths: paths,
+                referenceGraphActive: appState.referenceGraphActive,
+                referenceGraphPathCount: appState.referenceGraphData?.nodes.count ?? 0,
+                referenceGraphEdgeCount: appState.referenceGraphData?.edges.count ?? 0,
+                referenceGraphFocusPath: appState.referenceGraphFocusPath,
+                deletedPlaceholders: appState.deletedFilePlaceholders,
+                highlightIndex: index,
+                viewMode: appState.fileData.currentViewMode,
+                wrapAround: appState.config.bool(forKey: "wrap_around", default: true),
+                showFilenames: appState.config.bool(forKey: "thumbnail_filename_visible", default: false),
+                showImageSize: appState.config.bool(forKey: "show_image_size", default: false),
+                showExtensions: appState.config.bool(forKey: "show_extensions", default: true),
+                imageExtensions: appState.config.imageExtensions
+            )
+            if !force, fingerprint == lastGridSyncFingerprint {
+                syncSelectionVisualsIfNeeded(to: gridView)
+                return
             }
-            gridView.applyTheme(appState.theme.colors)
+            let pathsChanged = fingerprint.imagePaths != lastGridSyncFingerprint?.imagePaths
+            lastGridSyncFingerprint = fingerprint
+            if pathsChanged {
+                lastSelectionFingerprint = nil
+            }
+
+            if force || fingerprint.themeID != lastSyncedThemeID {
+                if let scrollView {
+                    ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
+                }
+                gridView.applyTheme(appState.theme.colors)
+                lastSyncedThemeID = fingerprint.themeID
+            }
+
             let directory = appState.fileData.currentDirectory
             if lastSyncedDirectory != directory {
                 gridView.clearThumbnails()
@@ -283,13 +354,12 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
             gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
             gridView.updateEmptyStateContext()
-            let index = resolvedHighlightIndex(in: paths)
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
             applyThumbnailLoadingActive(inThumbnailMode, gridView: gridView)
-            gridView.wrapAround = appState.config.bool(forKey: "wrap_around", default: true)
-            gridView.showFilenames = appState.config.bool(forKey: "thumbnail_filename_visible", default: false)
-            gridView.showImageSize = appState.config.bool(forKey: "show_image_size", default: false)
-            gridView.showExtensions = appState.config.bool(forKey: "show_extensions", default: true)
+            gridView.wrapAround = fingerprint.wrapAround
+            gridView.showFilenames = fingerprint.showFilenames
+            gridView.showImageSize = fingerprint.showImageSize
+            gridView.showExtensions = fingerprint.showExtensions
             gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
             gridView.reloadLayoutIfNeeded()
             let columns = max(1, gridView.gridColumnCount)
@@ -302,7 +372,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             } else {
                 gridView.currentIndex = index
             }
-            syncSelectionVisuals(to: gridView)
+            syncSelectionVisualsIfNeeded(to: gridView)
             if inThumbnailMode {
                 gridView.startBackgroundThumbnailLoadingIfNeeded()
             }
@@ -324,11 +394,17 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.needsDisplay = true
         }
 
-        private func syncSelectionVisuals(to gridView: ThumbnailGridNSView? = nil) {
+        private func syncSelectionVisualsIfNeeded(to gridView: ThumbnailGridNSView? = nil) {
             let gridView = gridView ?? self.gridView
             guard let gridView else { return }
-            gridView.selectedIndices = SelectionService.selectedIndices(appState: appState)
-            gridView.multiSelectMode = appState.selection.multiSelectMode
+            let fingerprint = SelectionFingerprint(
+                selectedIndices: SelectionService.selectedIndices(appState: appState),
+                multiSelectMode: appState.selection.multiSelectMode
+            )
+            guard fingerprint != lastSelectionFingerprint else { return }
+            lastSelectionFingerprint = fingerprint
+            gridView.selectedIndices = fingerprint.selectedIndices
+            gridView.multiSelectMode = fingerprint.multiSelectMode
             gridView.needsDisplay = true
         }
 

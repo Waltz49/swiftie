@@ -33,5 +33,10 @@ let package = Package(
                 ]),
             ]
         ),
+        .testTarget(
+            name: "ProwserTests",
+            dependencies: ["Prowser"],
+            path: "ProwserTests"
+        ),
     ]
 )

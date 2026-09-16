@@ -53,7 +53,7 @@ final class AppState {
     let fileTreeOperations = FileTreeOperationsService()
     let renamePrefixService = RenamePrefixService()
     let status = StatusNotificationService()
-    private let keyboardHandler = KeyboardHandlerController()
+    let keyboardHandler = KeyboardHandlerController()
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
     private let aboutDialog = AboutDialogController()
     private let settingsDialog = SettingsDialogController()
@@ -70,7 +70,7 @@ final class AppState {
     var fileTreeSyncActiveImageToken = 0
     /// While set, tree highlight follows this directory until the active image catches up (Python `user_requested_directory`).
     var userRequestedTreeDirectory: String?
-    private var userRequestedTreeClearWork: DispatchWorkItem?
+    var userRequestedTreeClearWork: DispatchWorkItem?
     var settingsOpenRequestToken = 0
     var requestedSettingsTab: SettingsTab = .general
     var showKeyboardHelp = false
@@ -83,8 +83,8 @@ final class AppState {
     var referenceGraphData: ReferenceGraph?
     var slideshow2ViewportSize = CGSize(width: 800, height: 600)
     var statusBarPeekActive = false
-    private var browseReturnThumbnailState: BrowseReturnThumbnailState?
-    private var lastViewMode: ViewMode = .thumbnail
+    var browseReturnThumbnailState: BrowseReturnThumbnailState?
+    var lastViewMode: ViewMode = .thumbnail
     var showFilterDialog = false
     var showConvertFormatSheet = false
     var showResizeSheet = false
@@ -146,8 +146,8 @@ final class AppState {
     var showMoveWorkFilesSheet = false
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
-    private(set) var sidebarLayoutRevision = 0
-    private var chromeSavedLayout: ChromeSavedLayout?
+    var sidebarLayoutRevision = 0
+    var chromeSavedLayout: ChromeSavedLayout?
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
     private var suppressDirectoryRefreshUntil: Date?
@@ -554,43 +554,6 @@ final class AppState {
         status.show("Showing image in directory")
     }
 
-    func decreaseSlideshowOverlap() {
-        let transition = config.int(forKey: "slideshow_transition_speed", default: 1300)
-        let current = config.int(forKey: "slideshow_overlap_delay", default: 0)
-        let next = min(Int(Double(transition) * 1.0), current + Int(Double(transition) * 0.1))
-        config.updateSetting("slideshow_overlap_delay", value: next)
-        config.applySettingsChange(emit: eventBus)
-        showSlideshowOverlapStatus(transition: transition, delay: next)
-    }
-
-    func increaseSlideshowOverlap() {
-        let transition = config.int(forKey: "slideshow_transition_speed", default: 1300)
-        let current = config.int(forKey: "slideshow_overlap_delay", default: 0)
-        let next = max(-Int(Double(transition) * 0.3), current - Int(Double(transition) * 0.1))
-        config.updateSetting("slideshow_overlap_delay", value: next)
-        config.applySettingsChange(emit: eventBus)
-        showSlideshowOverlapStatus(transition: transition, delay: next)
-    }
-
-    func applySlideshowPreset(_ key: String) {
-        let preset = SlideshowPresetUtils.preset(from: config.rawSettings(), key: key)
-        config.updateSetting("slideshow_rate", value: preset["rate"] as? Int ?? 3500)
-        config.updateSetting("slideshow_transition_speed", value: preset["transition_speed"] as? Int ?? 1300)
-        config.updateSetting("slideshow_max_rotation", value: preset["max_rotation"] as? Int ?? 0)
-        config.updateSetting("slideshow_overlap_delay", value: preset["overlap_delay"] as? Int ?? 0)
-        config.updateSetting("slideshow_direction", value: preset["direction"] as? String ?? "right")
-        config.applySettingsChange(emit: eventBus)
-        status.show(SlideshowPresetUtils.statusMessage(for: preset))
-    }
-
-    private func showSlideshowOverlapStatus(transition: Int, delay: Int) {
-        let percent = SlideshowPresetUtils.overlapPercent(overlapDelay: delay, transitionSpeed: transition)
-        if percent > 100 {
-            status.show("Overlap: \(percent)% (incoming early)")
-        } else {
-            status.show("Overlap: \(percent)%")
-        }
-    }
 
     private func selectedImagePaths() -> [String] {
         if !selection.selectedFiles.isEmpty {
@@ -617,193 +580,7 @@ final class AppState {
         suppressDirectoryRefreshUntil = Date().addingTimeInterval(0.6)
     }
 
-    /// Python ``InformationSidebar._on_anchor_clicked`` for ``reflevel://``.
-    func handleInformationReferenceLevelClick(optionHeld: Bool) {
-        guard let path = fileData.currentImagePath,
-              FileManager.default.isReadableFile(atPath: path) else { return }
-        Task { @MainActor in
-            guard let comment = await ExifService.userDescription(path: path) else { return }
-            let imageDir = (path as NSString).deletingLastPathComponent
-            let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
-            guard !entries.isEmpty else { return }
 
-            if optionHeld {
-                let (paths, _, extensionSwapped) = ReferenceGraphService.resolveExifReferencePaths(
-                    imageDir: imageDir,
-                    currentPath: path,
-                    entries: entries
-                )
-                guard !paths.isEmpty else { return }
-                if extensionSwapped {
-                    status.show(
-                        "Some references were found with a different file extension",
-                        duration: 5
-                    )
-                }
-                openReferencePaths(paths, focusPath: path)
-                return
-            }
-
-            let (paths, extensionSwapped) = await ReferenceGraphService.collectReferenceChainPaths(
-                imageDir: imageDir,
-                rootPath: path,
-                entries: entries
-            )
-            guard paths.count >= 2 else { return }
-            if extensionSwapped {
-                status.show(
-                    "Some references were found with a different file extension",
-                    duration: 5
-                )
-            }
-            await openReferenceGraphPresentation(
-                paths: paths,
-                focusPath: path,
-                extensionSwapped: extensionSwapped
-            )
-        }
-    }
-
-    func showReferenceGraph(for path: String? = nil) {
-        guard let imagePath = path ?? fileData.currentImagePath else { return }
-        Task { @MainActor in
-            await openReferenceGraph(for: imagePath)
-        }
-    }
-
-    /// Python ``open_reference_graph_for_path``.
-    func openReferenceGraph(for imagePath: String) async {
-        guard FileManager.default.isReadableFile(atPath: imagePath) else { return }
-        guard let comment = await ExifService.userDescription(path: imagePath) else {
-            status.show("No EXIF user comment on this image")
-            return
-        }
-        let imageDir = (imagePath as NSString).deletingLastPathComponent
-        let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
-        guard !entries.isEmpty else {
-            StyledMessageDialog.showInformation(
-                title: "No References Found",
-                message: """
-                This image has no reference information in its EXIF user comment. \
-                References are saved there by the image generation functions when \
-                an image is created from other images.
-                """
-            )
-            return
-        }
-        let (paths, extensionSwapped) = await ReferenceGraphService.collectReferenceChainPaths(
-            imageDir: imageDir,
-            rootPath: imagePath,
-            entries: entries
-        )
-        guard paths.count >= 2 else {
-            StyledMessageDialog.showInformation(
-                title: "No References Found",
-                message: """
-                This image has no reference information in its EXIF user comment. \
-                References are saved there by the image generation functions when \
-                an image is created from other images.
-                """
-            )
-            return
-        }
-        await openReferenceGraphPresentation(
-            paths: paths,
-            focusPath: imagePath,
-            extensionSwapped: extensionSwapped
-        )
-    }
-
-    func clearReferenceGraphPresentation() {
-        referenceGraphActive = false
-        referenceGraphData = nil
-        referenceGraphFocusPath = nil
-    }
-
-    /// Python ``set_reference_graph_presentation``: build the DAG for a specific-files level.
-    /// Focus falls back to the current image, then the first path, when not in the set.
-    func setReferenceGraphPresentation(paths: [String], focusPath: String?) async {
-        let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
-        guard normalized.count > 1 else {
-            clearReferenceGraphPresentation()
-            return
-        }
-        var focus = focusPath ?? fileData.currentImagePath ?? normalized[0]
-        if let focusNorm = FileDataModel.normalizePath(focus), !normalized.contains(focusNorm) {
-            focus = normalized[0]
-        }
-        let graph = await ReferenceGraphService.buildReferenceGraph(paths: normalized, focusPath: focus)
-        referenceGraphActive = true
-        referenceGraphData = graph
-        referenceGraphFocusPath = graph.focusPath ?? focus
-    }
-
-    func openReferenceGraphPresentation(
-        paths: [String],
-        focusPath: String,
-        extensionSwapped: Bool = false
-    ) async {
-        let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
-        guard normalized.count >= 2 else { return }
-        if extensionSwapped {
-            status.show(
-                "Some references were found with a different file extension",
-                duration: 5
-            )
-        }
-
-        directoryHistory.saveCurrent(fileData: fileData, config: config, selection: selection)
-
-        await setReferenceGraphPresentation(paths: normalized, focusPath: focusPath)
-
-        config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
-        config.updateSetting("sort_reversed", value: false)
-        let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
-        setSpecificFilesActive(true)
-        fileData.setCurrentDirectory(directory)
-        fileData.setDisplayedImages(normalized)
-        if let focus = referenceGraphFocusPath,
-           let index = normalized.firstIndex(where: {
-               FileDataModel.normalizePath($0) == FileDataModel.normalizePath(focus)
-           }) {
-            fileData.setCurrentIndex(index)
-            fileData.setCurrentImagePath(normalized[index])
-        } else {
-            fileData.setCurrentIndex(0)
-            fileData.setCurrentImagePath(normalized[0])
-        }
-        if fileData.currentViewMode != .thumbnail {
-            fileData.setViewMode(.thumbnail)
-        }
-        config.updateSetting("last_directory", value: directory)
-        // Note: do not emit `.settingsChanged` here — its subscriber reloads the whole
-        // directory, which would discard the specific-files reference level.
-        eventBus.emit(.directoryLoaded, payload: .string(directory))
-        watchCurrentDirectory()
-        selection.clear()
-        status.show("Reference graph: \(normalized.count) files")
-    }
-
-    func fitSlideshow2ToCanvasWidth() {
-        guard fileData.currentViewMode == .slideshow2,
-              let path = fileData.currentImagePath,
-              let image = NSImage(contentsOfFile: path) else { return }
-        let imageSize = image.size
-        guard imageSize.width > 0, imageSize.height > 0 else { return }
-        let viewport = slideshow2ViewportSize
-        guard viewport.width > 1, viewport.height > 1 else { return }
-
-        let widthScale = (viewport.width * 1.5) / imageSize.width
-        let heightScale = (viewport.height * 1.5) / imageSize.height
-        let baseScale = max(widthScale, heightScale)
-        guard baseScale > 0 else { return }
-
-        let targetScale = viewport.width / imageSize.width
-        let newEnlargement = min(3.0, max(0.5, targetScale / baseScale))
-        config.updateSetting("slideshow2_enlargement", value: newEnlargement)
-        config.applySettingsChange(emit: eventBus)
-        status.show(String(format: "Panning zoom: %.1fx (fit width)", newEnlargement))
-    }
 
     func toggleDebugMode() {
         let enabled = !config.bool(forKey: "debug_mode")
@@ -878,100 +655,7 @@ final class AppState {
         aboutDialog.close()
     }
 
-    func updateStatusBarPeek(nearBottom: Bool) {
-        guard config.bool(forKey: "raise_status_bar_on_cursor_near_bottom", default: true) else { return }
-        guard !chromeSuppressed else { return }
-        let hidden = !config.bool(forKey: "status_bar_visible", default: true)
-        guard hidden else {
-            if statusBarPeekActive { statusBarPeekActive = false }
-            return
-        }
-        if nearBottom && !statusBarPeekActive {
-            statusBarPeekActive = true
-            sidebarLayoutRevision += 1
-            notifyMainContentLayoutChanged()
-        } else if !nearBottom && statusBarPeekActive {
-            statusBarPeekActive = false
-            sidebarLayoutRevision += 1
-            notifyMainContentLayoutChanged()
-        }
-    }
 
-    private func observeViewModeChanges() {
-        _ = NotificationCenter.default.addObserver(
-            forName: .prowserViewModeChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let raw = notification.object as? String ?? ""
-                let newMode = ViewMode(rawValue: raw) ?? .thumbnail
-                self.handleViewModeTransition(to: newMode)
-            }
-        }
-    }
-
-    private func handleViewModeTransition(to newMode: ViewMode) {
-        refreshMenuState()
-        let previous = lastViewMode
-        if previous != .browse && newMode == .browse {
-            prepareBrowseReturnStateIfNeeded()
-        }
-        if previous == .browse && newMode == .thumbnail {
-            restoreBrowseReturnStateIfNeeded()
-        }
-        lastViewMode = newMode
-    }
-
-    /// Drop stashed thumbnail context so exiting browse uses the current directory listing.
-    func clearBrowseReturnState() {
-        browseReturnThumbnailState = nil
-    }
-
-    private func prepareBrowseReturnStateIfNeeded() {
-        guard browseReturnThumbnailState == nil else { return }
-        guard shouldStashThumbnailContextForBrowse() else { return }
-        browseReturnThumbnailState = BrowseReturnThumbnailState(
-            displayedImages: fileData.displayedImages,
-            currentIndex: fileData.currentIndex,
-            currentImagePath: fileData.currentImagePath,
-            currentDirectory: fileData.currentDirectory,
-            specificFilesActive: specificFilesActive,
-            sortMode: config.string(forKey: "sort_mode", default: "date"),
-            sortReversed: config.bool(forKey: "sort_reversed", default: false),
-            thumbnailCellSize: config.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize),
-            manualThumbnailSize: config.bool(forKey: "manual_thumbnail_size", default: false)
-        )
-    }
-
-    private func shouldStashThumbnailContextForBrowse() -> Bool {
-        if specificFilesActive { return true }
-        if config.string(forKey: "sort_mode", default: "date") == SortMode.custom.rawValue {
-            return true
-        }
-        return false
-    }
-
-    private func restoreBrowseReturnStateIfNeeded() {
-        guard let stashed = browseReturnThumbnailState else { return }
-        browseReturnThumbnailState = nil
-        config.updateSetting("sort_mode", value: stashed.sortMode)
-        config.updateSetting("sort_reversed", value: stashed.sortReversed)
-        if let directory = stashed.currentDirectory {
-            fileData.setCurrentDirectory(directory)
-        }
-        setSpecificFilesActive(stashed.specificFilesActive)
-        fileData.setDisplayedImages(stashed.displayedImages)
-        if let path = stashed.currentImagePath {
-            fileData.setCurrentImagePath(path)
-        } else {
-            fileData.setCurrentIndex(stashed.currentIndex)
-        }
-        config.updateSetting("thumbnail_cell_size", value: stashed.thumbnailCellSize)
-        config.updateSetting("manual_thumbnail_size", value: stashed.manualThumbnailSize)
-        config.applySettingsChange(emit: eventBus)
-    }
 
     private func uniqueTopLevelDirectories(from paths: [String], limit: Int) -> [String] {
         var result: [String] = []
@@ -989,51 +673,6 @@ final class AppState {
         return result
     }
 
-    func openReferencePaths(_ paths: [String], focusPath: String?) {
-        let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
-        guard normalized.count >= 2 else { return }
-        clearReferenceGraphPresentation()
-        config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
-        config.updateSetting("sort_reversed", value: false)
-        let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
-        setSpecificFilesActive(true)
-        fileData.setCurrentDirectory(directory)
-        fileData.setDisplayedImages(normalized)
-        if let focusPath, let index = normalized.firstIndex(of: focusPath) {
-            fileData.setCurrentIndex(index)
-            fileData.setCurrentImagePath(focusPath)
-        } else {
-            fileData.setCurrentIndex(0)
-            fileData.setCurrentImagePath(normalized[0])
-        }
-        config.updateSetting("last_directory", value: directory)
-        eventBus.emit(.directoryLoaded, payload: .string(directory))
-        watchCurrentDirectory()
-        selection.clear()
-        status.show("Showing \(normalized.count) reference images")
-    }
-
-    func findReferences(to targetPath: String) {
-        let candidates = fileData.displayedImages.filter { $0 != targetPath }
-        guard !candidates.isEmpty else {
-            status.show("No images are available to search")
-            return
-        }
-        Task { @MainActor in
-            let matches = await ReferenceGraphService.imagesReferencing(
-                targetPath: targetPath,
-                in: candidates
-            )
-            if matches.isEmpty {
-                let name = (targetPath as NSString).lastPathComponent
-                status.show("No other images reference \"\(name)\" in EXIF")
-                return
-            }
-            findReferencesTargetPath = targetPath
-            findReferencesMatches = matches
-            showFindReferencesSheet = true
-        }
-    }
 
     private func startNamedPipeListener() {
         let listener = NamedPipeListener(pipePath: config.namedPipePath)
@@ -1071,54 +710,6 @@ final class AppState {
         directoryLoader.open(paths: paths)
     }
 
-    /// Python launch restore: thumbnail/slideshow reopen the folder, browse reopens the file.
-    func restoreSession(_ snapshot: AppConfig.RestoreStateSnapshot) {
-        let mode = ViewMode(rawValue: snapshot.lastViewMode) ?? .thumbnail
-        let directory = snapshot.lastDirectory.flatMap { path in
-            FileManager.default.fileExists(atPath: path) ? path : nil
-        } ?? snapshot.lastFile.flatMap { FileDataModel.parentDirectory(of: $0) }
-
-        let listModes: Set<ViewMode> = [.thumbnail, .list, .slideshow, .slideshow2, .slideshow3]
-        if listModes.contains(mode) {
-            if let directory, FileManager.default.fileExists(atPath: directory) {
-                loadDirectory(directory, saveHistory: false)
-            }
-        } else if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
-            openPaths([file])
-        } else if let directory, FileManager.default.fileExists(atPath: directory) {
-            loadDirectory(directory, saveHistory: false)
-        }
-
-        if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
-            fileData.setCurrentImagePath(file)
-            DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
-            if PhotosLibraryBrowseLoader.isPhotosLibraryPath(file) {
-                _ = PhotosLibraryBrowseLoader.requestAccessIfNeeded(for: file)
-            }
-        }
-        fileData.setViewMode(mode)
-    }
-
-    func persistRestoreState(enableLaunchRestore: Bool = false) {
-        let path = fileData.currentImagePath
-        let directory = fileData.currentDirectory
-        guard path != nil || directory != nil else { return }
-        if enableLaunchRestore {
-            config.saveRestoreState(
-                filePath: path,
-                directory: directory,
-                viewMode: fileData.currentViewMode.rawValue,
-                macosSpaceMode: WindowFullscreen.macOSSpaceModeForRestore()
-            )
-        } else {
-            config.updateRestoreSnapshot(
-                filePath: path,
-                directory: directory,
-                viewMode: fileData.currentViewMode.rawValue,
-                macosSpaceMode: WindowFullscreen.macOSSpaceModeForRestore()
-            )
-        }
-    }
 
     func loadDirectory(_ path: String, saveHistory: Bool = true) {
         setSpecificFilesActive(false)
@@ -1207,21 +798,6 @@ final class AppState {
         status.show(label)
     }
 
-    func toggleInformationSidebar() {
-        clearChromeSuppression()
-        let visible = !config.bool(forKey: "information_sidebar_visible", default: true)
-        config.updateSetting("information_sidebar_visible", value: visible)
-        if visible { revealSidebarColumn(.right) }
-        noteSidebarLayoutChanged()
-    }
-
-    func toggleShortcutsSidebar() {
-        clearChromeSuppression()
-        let visible = !config.bool(forKey: "shortcuts_sidebar_visible", default: true)
-        config.updateSetting("shortcuts_sidebar_visible", value: visible)
-        if visible { revealSidebarColumn(.right) }
-        noteSidebarLayoutChanged()
-    }
 
     func toggleFileTree() {
         let wasVisible = config.bool(forKey: "file_tree_visible", default: true)
@@ -1317,67 +893,6 @@ final class AppState {
         status.show("List row height reset")
     }
 
-    func openBrowseFromSlideshow() {
-        fileData.setViewMode(.browse)
-    }
-
-    func adjustSlideshowRate(slower: Bool) {
-        let rateMS = config.int(forKey: "slideshow_rate", default: 5000)
-        let newRateMS: Int
-        if rateMS < 1000 {
-            let rateSec = Double(rateMS) / 1000.0
-            let step = slower ? 0.125 : -0.125
-            newRateMS = Int(round(min(10.0, max(0.0, rateSec + step)) * 1000))
-        } else {
-            newRateMS = slower ? min(60_000, rateMS + 1000) : max(0, rateMS - 1000)
-        }
-        config.updateSetting("slideshow_rate", value: newRateMS)
-        config.applySettingsChange(emit: eventBus)
-        let sec = Double(newRateMS) / 1000.0
-        status.show(sec >= 1.0 ? "Slideshow rate: \(sec)s" : "Slideshow rate: \(newRateMS)ms")
-    }
-
-    func adjustSlideshowTransitionSpeed(slower: Bool) {
-        let current = config.int(forKey: "slideshow_transition_speed", default: 1300)
-        let next = slower ? min(6000, current + 100) : max(0, current - 100)
-        config.updateSetting("slideshow_transition_speed", value: next)
-        config.applySettingsChange(emit: eventBus)
-        status.show("Transition speed: \(next)ms")
-    }
-
-    func adjustSlideshowMaxRotation(increase: Bool) {
-        let current = config.int(forKey: "slideshow_max_rotation", default: 0)
-        let next = increase ? min(360, current + 5) : max(0, current - 5)
-        config.updateSetting("slideshow_max_rotation", value: next)
-        config.applySettingsChange(emit: eventBus)
-        status.show("Max rotation: \(next)°")
-    }
-
-    func setSlideshowDirection(_ direction: String) {
-        config.updateSetting("slideshow_direction", value: direction)
-        config.applySettingsChange(emit: eventBus)
-        let label: String
-        switch direction {
-        case "left": label = "From left"
-        case "right": label = "From right"
-        case "top": label = "From top"
-        case "bottom": label = "From bottom"
-        case "random": label = "Random"
-        case "none": label = "None (no transition)"
-        default: label = direction
-        }
-        status.show("Slideshow direction: \(label)")
-    }
-
-    func slideshowDirectionAdvanceIfMatches(_ direction: String) -> Bool {
-        let current = config.string(forKey: "slideshow_direction", default: "right")
-        if current == direction {
-            slideshowStep(delta: 1)
-            return true
-        }
-        setSlideshowDirection(direction)
-        return true
-    }
 
     func setFileTreeFilterMode(_ mode: String) {
         filterSettings.setFilteredTree(mode)
@@ -1708,76 +1223,6 @@ final class AppState {
         auxiliaryDialogs.closeAll()
     }
 
-    func setFileTreeToolbarVisible(_ visible: Bool) {
-        guard fileTreeToolbarVisible != visible else { return }
-        fileTreeToolbarVisible = visible
-        config.updateSetting("file_tree_show_toolbar", value: visible)
-        config.applySettingsChange(emit: eventBus)
-    }
-
-    func setInformationMenuBarVisible(_ visible: Bool) {
-        guard informationMenuBarVisible != visible else { return }
-        informationMenuBarVisible = visible
-        config.updateSetting("information_show_menu_bar", value: visible)
-        config.applySettingsChange(emit: eventBus)
-    }
-
-    private func loadSidebarToolbarSettings() {
-        fileTreeToolbarVisible = config.bool(forKey: "file_tree_show_toolbar", default: true)
-        informationMenuBarVisible = config.bool(forKey: "information_show_menu_bar", default: true)
-    }
-
-    func reloadSidebarWidthsFromConfig() {
-        leftSidebarWidth = SidebarWidthLimits.clampLeft(config.sidebarWidth)
-        rightSidebarWidth = SidebarWidthLimits.clampRight(config.rightSidebarWidth)
-    }
-
-    func refreshSidebarLayout() {
-        reloadSidebarWidthsFromConfig()
-        sidebarLayoutRevision += 1
-    }
-
-    func updateLeftSidebarWidth(_ width: CGFloat) {
-        let clamped = SidebarWidthLimits.clampLeft(width)
-        guard clamped > 0, abs(clamped - leftSidebarWidth) > 1 else { return }
-        leftSidebarWidth = clamped
-        persistSidebarWidth(side: .left, width: clamped)
-    }
-
-    func updateRightSidebarWidth(_ width: CGFloat) {
-        let clamped = SidebarWidthLimits.clampRight(width)
-        guard clamped > 0, abs(clamped - rightSidebarWidth) > 1 else { return }
-        rightSidebarWidth = clamped
-        persistSidebarWidth(side: .right, width: clamped)
-    }
-
-    func persistSidebarWidth(side: SidebarSplitSide, width: CGFloat) {
-        let rounded = Int(round(width))
-        let minimum = side == .left
-            ? Int(SidebarWidthLimits.leftMin)
-            : Int(SidebarWidthLimits.rightMin)
-        guard rounded >= minimum else { return }
-        switch side {
-        case .left:
-            if Int(round(config.sidebarWidth)) != rounded {
-                config.updateSetting("sidebar_width", value: rounded)
-            }
-        case .right:
-            if Int(round(config.rightSidebarWidth)) != rounded {
-                config.updateSetting("right_sidebar_width", value: rounded)
-            }
-        }
-    }
-
-    /// Flush sidebar column widths to `settings.json` (quit + layout changes). Pane sizes are
-    /// already saved at drag end / fit (Python `saved_splitter_sizes`).
-    func persistAllSidebarLayout() {
-        persistSidebarWidth(side: .left, width: leftSidebarWidth)
-        persistSidebarWidth(side: .right, width: rightSidebarWidth)
-        if !chromeSuppressed {
-            persistChromeVisibilityToConfig()
-        }
-    }
 
     func setOuterSidebarVisible(side: SidebarSplitSide, visible: Bool) {
         clearChromeSuppression()
@@ -1894,385 +1339,6 @@ final class AppState {
         StyledMessageDialog.showWarning(title: title, message: message)
     }
 
-    /// Port of Python ``preview_widget.isVisible()`` for thumbnail click behavior.
-    var isPreviewPaneVisible: Bool {
-        if fileData.currentViewMode == .browse { return false }
-        guard config.bool(forKey: "left_sidebar_visible", default: true) else { return false }
-        return config.bool(forKey: "preview_visible", default: true)
-    }
-
-    /// Exit browse mode and return to thumbnail view (port of ``close_browse_view``).
-    func closeBrowseView() {
-        if let path = fileData.currentImagePath,
-           let index = fileData.displayedImages.firstIndex(of: path) {
-            fileData.setCurrentIndex(index)
-        }
-        fileData.setViewMode(.thumbnail)
-    }
-
-    /// True when at least one left sidebar pane is open.
-    var leftSidebarPaneActive: Bool {
-        if fileData.currentViewMode == .browse { return false }
-        if config.bool(forKey: "file_tree_visible", default: true) { return true }
-        if config.bool(forKey: "preview_visible", default: true) { return true }
-        return false
-    }
-
-    /// True when at least one right sidebar pane is open.
-    var rightSidebarPaneActive: Bool {
-        if config.bool(forKey: "shortcuts_sidebar_visible", default: true) { return true }
-        if config.bool(forKey: "information_sidebar_visible", default: true) { return true }
-        return false
-    }
-
-    var statusBarColumnVisible: Bool {
-        !chromeSuppressed && config.bool(forKey: "status_bar_visible", default: true)
-    }
-
-    var effectiveStatusBarHeight: CGFloat {
-        if let override = chromeLayoutOverride {
-            return override.statusBarHeight
-        }
-        if statusBarColumnVisible { return ChromeLayoutAnimator.statusBarHeight }
-        if statusBarPeekActive,
-           config.bool(forKey: "raise_status_bar_on_cursor_near_bottom", default: true) {
-            return ChromeLayoutAnimator.statusBarHeight
-        }
-        return 0
-    }
-
-    var effectiveLeftSidebarWidth: CGFloat {
-        if let override = chromeLayoutOverride {
-            return override.leftWidth
-        }
-        return leftSidebarColumnVisible ? leftSidebarWidth : 0
-    }
-
-    var effectiveRightSidebarWidth: CGFloat {
-        if let override = chromeLayoutOverride {
-            return override.rightWidth
-        }
-        return rightSidebarColumnVisible ? rightSidebarWidth : 0
-    }
-
-    var effectiveLeftSidebarVisible: Bool {
-        if chromeLayoutOverride != nil {
-            return (chromeLayoutOverride?.leftWidth ?? 0) > 0.5
-        }
-        return leftSidebarColumnVisible
-    }
-
-    var effectiveRightSidebarVisible: Bool {
-        if chromeLayoutOverride != nil {
-            return (chromeLayoutOverride?.rightWidth ?? 0) > 0.5
-        }
-        return rightSidebarColumnVisible
-    }
-
-    var leftSidebarColumnVisible: Bool {
-        !chromeSuppressed
-            && config.bool(forKey: "left_sidebar_visible", default: true)
-            && leftSidebarPaneActive
-    }
-
-    var rightSidebarColumnVisible: Bool {
-        !chromeSuppressed
-            && config.bool(forKey: "right_sidebar_visible", default: true)
-            && rightSidebarPaneActive
-    }
-
-    var isAnyChromeVisible: Bool {
-        statusBarColumnVisible || leftSidebarColumnVisible || rightSidebarColumnVisible
-    }
-
-    var chromeToggleMenuTitle: String {
-        isAnyChromeVisible ? "Hide Panes" : "Show Panes"
-    }
-
-    func toggleChrome() {
-        if isAnyChromeVisible {
-            chromeSavedLayout = captureChromeLayout()
-            let from = currentChromeLayoutSnapshot()
-            let to = ChromeLayoutSnapshot(leftWidth: 0, rightWidth: 0, statusBarHeight: 0)
-            animateChromeLayout(from: from, to: to) {
-                self.chromeSuppressed = true
-                self.chromeLayoutOverride = nil
-                self.persistChromeVisibilityToConfig()
-                self.noteSidebarLayoutChanged()
-            }
-        } else {
-            if let saved = chromeSavedLayout {
-                chromeSuppressed = false
-                restoreChromeLayout(saved)
-            } else {
-                chromeSuppressed = false
-                showDefaultChrome()
-            }
-            let from = ChromeLayoutSnapshot(leftWidth: 0, rightWidth: 0, statusBarHeight: 0)
-            let to = targetChromeLayoutSnapshot()
-            animateChromeLayout(from: from, to: to) {
-                self.chromeLayoutOverride = nil
-                self.noteSidebarLayoutChanged()
-            }
-        }
-    }
-
-    private func captureChromeLayout() -> ChromeSavedLayout {
-        ChromeSavedLayout(
-            statusBarVisible: config.bool(forKey: "status_bar_visible", default: true),
-            fileTreeVisible: config.bool(forKey: "file_tree_visible", default: true),
-            previewVisible: config.bool(forKey: "preview_visible", default: true),
-            chatVisible: config.bool(forKey: "chat_visible", default: false),
-            shortcutsVisible: config.bool(forKey: "shortcuts_sidebar_visible", default: true),
-            informationVisible: config.bool(forKey: "information_sidebar_visible", default: true),
-            leftSidebarVisible: config.bool(forKey: "left_sidebar_visible", default: true),
-            rightSidebarVisible: config.bool(forKey: "right_sidebar_visible", default: true),
-            leftSidebarWidth: leftSidebarWidth,
-            rightSidebarWidth: rightSidebarWidth,
-            leftSplitterSizes: leftSidebarSplit.savedSizes,
-            rightSplitterSizes: rightSidebarSplit.savedSizes
-        )
-    }
-
-    private func restoreChromeLayout(_ layout: ChromeSavedLayout) {
-        leftSidebarWidth = SidebarWidthLimits.clampLeft(layout.leftSidebarWidth)
-        rightSidebarWidth = SidebarWidthLimits.clampRight(layout.rightSidebarWidth)
-        if layout.leftSplitterSizes.count == 3 {
-            config.saveSplitterSizes(leftSidebarSplit.persistenceKey, sizes: layout.leftSplitterSizes)
-        }
-        if layout.rightSplitterSizes.count == 3 {
-            config.saveSplitterSizes(rightSidebarSplit.persistenceKey, sizes: layout.rightSplitterSizes)
-        }
-        config.updateSetting("status_bar_visible", value: layout.statusBarVisible)
-        config.updateSetting("file_tree_visible", value: layout.fileTreeVisible)
-        config.updateSetting("preview_visible", value: layout.previewVisible)
-        config.updateSetting("chat_visible", value: layout.chatVisible)
-        config.updateSetting("shortcuts_sidebar_visible", value: layout.shortcutsVisible)
-        config.updateSetting("information_sidebar_visible", value: layout.informationVisible)
-        config.updateSetting("left_sidebar_visible", value: layout.leftSidebarVisible)
-        config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
-        persistSidebarWidth(side: .left, width: leftSidebarWidth)
-        persistSidebarWidth(side: .right, width: rightSidebarWidth)
-    }
-
-    private func showDefaultChrome() {
-        config.updateSetting("status_bar_visible", value: true)
-        config.updateSetting("file_tree_visible", value: true)
-        config.updateSetting("preview_visible", value: true)
-        config.updateSetting("chat_visible", value: true)
-        config.updateSetting("shortcuts_sidebar_visible", value: true)
-        config.updateSetting("information_sidebar_visible", value: true)
-        config.updateSetting("left_sidebar_visible", value: true)
-        config.updateSetting("right_sidebar_visible", value: true)
-    }
-
-    private func persistChromeVisibilityToConfig() {
-        if chromeSuppressed {
-            config.updateSetting("status_bar_visible", value: false)
-            config.updateSetting("file_tree_visible", value: false)
-            config.updateSetting("preview_visible", value: false)
-            config.updateSetting("chat_visible", value: false)
-            config.updateSetting("shortcuts_sidebar_visible", value: false)
-            config.updateSetting("information_sidebar_visible", value: false)
-            config.updateSetting("right_sidebar_visible", value: false)
-            return
-        }
-        let layout = captureChromeLayout()
-        config.updateSetting("status_bar_visible", value: layout.statusBarVisible)
-        config.updateSetting("file_tree_visible", value: layout.fileTreeVisible)
-        config.updateSetting("preview_visible", value: layout.previewVisible)
-        config.updateSetting("chat_visible", value: layout.chatVisible)
-        config.updateSetting("shortcuts_sidebar_visible", value: layout.shortcutsVisible)
-        config.updateSetting("information_sidebar_visible", value: layout.informationVisible)
-        config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
-    }
-
-    private func clearChromeSuppression() {
-        chromeSuppressed = false
-    }
-
-    func onSidebarPaneToggled(side: SidebarSplitSide, paneIndex: Int, nowVisible: Bool) {
-        if side == .left, nowVisible, paneIndex != 2,
-           config.bool(forKey: "chat_visible", default: false) {
-            config.updateSetting("chat_visible", value: false)
-        }
-        if nowVisible {
-            revealSidebarColumn(side)
-        }
-        noteSidebarLayoutChanged()
-    }
-
-    func noteSidebarLayoutChanged() {
-        if !chromeSuppressed {
-            config.updateSetting("left_sidebar_visible", value: leftSidebarPaneActive)
-            config.updateSetting("right_sidebar_visible", value: rightSidebarPaneActive)
-        }
-        // Pane sizes are persisted only by user drag / fit (Python `_on_splitter_moved`,
-        // `_resize_pane_to_height`); show/hide relayouts from the saved sizes.
-        sidebarLayoutRevision += 1
-        notifyMainContentLayoutChanged()
-    }
-
-    func notifyMainContentLayoutChanged() {
-        eventBus.emit(.mainContentLayoutChanged)
-        MainWindowKeyViewLoop.sync(appState: self)
-    }
-
-    func handleTreeForwardedKeyboard(_ event: NSEvent) -> Bool {
-        keyboardHandler.handleKeyEventFromTree(event)
-    }
-
-    private func setLeftSidebarPaneVisible(configKey: String, visible: Bool) {
-        clearChromeSuppression()
-        if visible, configKey != "chat_visible",
-           config.bool(forKey: "chat_visible", default: false) {
-            config.updateSetting("chat_visible", value: false)
-        }
-        config.updateSetting(configKey, value: visible)
-        if visible { revealSidebarColumn(.left) }
-        noteSidebarLayoutChanged()
-    }
-
-    private func revealSidebarColumn(_ side: SidebarSplitSide) {
-        switch side {
-        case .left:
-            config.updateSetting("left_sidebar_visible", value: true)
-        case .right:
-            config.updateSetting("right_sidebar_visible", value: true)
-        }
-    }
-
-    func toggleStatusBar() {
-        clearChromeSuppression()
-        let currentlyVisible = config.bool(forKey: "status_bar_visible", default: true)
-        let from = currentChromeLayoutSnapshot()
-        if currentlyVisible {
-            let to = ChromeLayoutSnapshot(
-                leftWidth: from.leftWidth,
-                rightWidth: from.rightWidth,
-                statusBarHeight: 0
-            )
-            animateChromeLayout(from: from, to: to) {
-                self.config.updateSetting("status_bar_visible", value: false)
-                self.chromeLayoutOverride = nil
-                self.notifyMainContentLayoutChanged()
-            }
-        } else {
-            config.updateSetting("status_bar_visible", value: true)
-            let to = ChromeLayoutSnapshot(
-                leftWidth: from.leftWidth,
-                rightWidth: from.rightWidth,
-                statusBarHeight: ChromeLayoutAnimator.statusBarHeight
-            )
-            animateChromeLayout(from: from, to: to) {
-                self.chromeLayoutOverride = nil
-                self.notifyMainContentLayoutChanged()
-            }
-        }
-    }
-
-    func applySortMode(_ mode: SortMode, reversed: Bool) {
-        if fileData.currentViewMode == .list {
-            fileData.setViewMode(.thumbnail)
-        }
-        guard fileData.currentViewMode == .thumbnail || fileData.currentViewMode == .browse else { return }
-        guard !fileData.displayedImages.isEmpty else { return }
-
-        config.updateSetting("sort_mode", value: mode.rawValue)
-        config.updateSetting("sort_reversed", value: reversed)
-        if mode != .exifDate && mode != .exifYear && mode != .duplicates {
-            clearDeletedPlaceholders()
-        }
-        applyCurrentSort()
-        status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
-        menuRefresh.refreshAll()
-    }
-
-    /// Re-sort the current displayed list in place (Python `apply_current_sort`).
-    /// Does not rescan the directory.
-    func applyCurrentSort() {
-        let current = fileData.currentImagePath
-        let options = SortingService.Options.from(config: config)
-        let sorted = SortingService.sorted(
-            fileData.displayedImages,
-            options: options,
-            metadataCache: metadataCache
-        )
-        metadataCache.saveIfNeeded()
-        fileData.setDisplayedImages(sorted)
-        if let current, sorted.contains(current) {
-            fileData.setCurrentImagePath(current)
-        }
-    }
-
-    private static func sortStatusMessage(mode: SortMode, reversed: Bool) -> String {
-        switch mode {
-        case .size:
-            let direction = reversed ? "Smallest first" : "Largest first"
-            return "Sort mode set to Size (\(direction))"
-        case .name:
-            return reversed ? "Sort mode set to Name (Z-A)" : "Sort mode set to Name (A-Z)"
-        case .date:
-            let direction = reversed ? "Oldest first" : "Newest first"
-            return "Sort mode set to Date (\(direction))"
-        case .exifDate:
-            let direction = reversed ? "Oldest first" : "Newest first"
-            return "Sort mode set to EXIF Date (\(direction))"
-        case .exifYear:
-            let direction = reversed ? "Oldest first" : "Newest first"
-            return "Sort mode set to EXIF Year (\(direction))"
-        case .custom:
-            return "Sort mode set to Custom"
-        case .random:
-            return "Random Sort"
-        default:
-            return "Sort mode set to \(mode.displayName)"
-        }
-    }
-
-    func setUseExifDate(_ enabled: Bool) {
-        config.updateSetting("use_exif_date", value: enabled)
-        config.applySettingsChange(emit: eventBus)
-    }
-
-    func presentFilterEditSheet() {
-        showFilterDialog = true
-    }
-
-    func saveFilterPresets(_ filters: [String]) {
-        config.saveFilters(filters)
-    }
-
-    private func currentChromeLayoutSnapshot() -> ChromeLayoutSnapshot {
-        if let override = chromeLayoutOverride {
-            return override
-        }
-        return targetChromeLayoutSnapshot()
-    }
-
-    private func targetChromeLayoutSnapshot() -> ChromeLayoutSnapshot {
-        ChromeLayoutSnapshot(
-            leftWidth: leftSidebarColumnVisible ? leftSidebarWidth : 0,
-            rightWidth: rightSidebarColumnVisible ? rightSidebarWidth : 0,
-            statusBarHeight: statusBarColumnVisible ? ChromeLayoutAnimator.statusBarHeight : 0
-        )
-    }
-
-    private func animateChromeLayout(
-        from: ChromeLayoutSnapshot,
-        to: ChromeLayoutSnapshot,
-        onComplete: @escaping () -> Void
-    ) {
-        chromeLayoutOverride = from
-        sidebarLayoutRevision += 1
-        ChromeLayoutAnimator.animate(from: from, to: to) { snapshot in
-            self.chromeLayoutOverride = snapshot
-            self.sidebarLayoutRevision += 1
-            self.notifyMainContentLayoutChanged()
-        } onComplete: {
-            onComplete()
-        }
-    }
 
     func toggleNumberOverlay() {
         numberOverlayVisible.toggle()
@@ -2365,29 +1431,6 @@ final class AppState {
         status.show("Thumbnail size reset")
     }
 
-    func startSlideshow(_ mode: ViewMode) {
-        guard !fileData.displayedImages.isEmpty else { return }
-        if fileData.currentViewMode == mode {
-            fileData.setViewMode(.thumbnail)
-        } else {
-            fileData.setViewMode(mode)
-        }
-    }
-
-    func slideshowStep(delta: Int) {
-        let images = fileData.displayedImages
-        guard !images.isEmpty else { return }
-        let wrap = config.bool(forKey: "wrap_around", default: true)
-        let next = nextSlideshowIndex(fileData.currentIndex + delta, count: images.count, wrap: wrap)
-        fileData.setCurrentIndex(next)
-        fileData.setCurrentImagePath(images[next])
-    }
-
-    private func nextSlideshowIndex(_ raw: Int, count: Int, wrap: Bool) -> Int {
-        guard count > 0 else { return 0 }
-        if wrap { return ((raw % count) + count) % count }
-        return min(max(0, raw), count - 1)
-    }
 }
 
 /// Last drop is session-only (Python `FileTree._last_drop_location`); strip any saved copy.
@@ -2592,7 +1635,7 @@ final class DirectoryLoadCoordinator {
     }
 }
 
-private struct BrowseReturnThumbnailState {
+struct BrowseReturnThumbnailState {
     var displayedImages: [String]
     var currentIndex: Int
     var currentImagePath: String?

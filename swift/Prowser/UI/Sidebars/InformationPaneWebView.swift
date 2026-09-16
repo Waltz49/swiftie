@@ -8,10 +8,7 @@ enum InformationPaneLinkAction: Equatable {
     case refLevel(optionHeld: Bool)
     case edit
     case copy(fullComment: Bool)
-    case create
-    case editAI
     case delete
-    case cancelGeneration
 }
 
 struct InformationPaneWebView: NSViewRepresentable {
@@ -99,17 +96,10 @@ struct InformationPaneWebView: NSViewRepresentable {
             case "edit://":
                 onLink(.edit, modifiers)
                 return true
-            case "create://":
-                onLink(.create, modifiers)
-                return true
-            case "editai://":
-                onLink(.editAI, modifiers)
+            case "create://", "editai://", "cancelgen://":
                 return true
             case "delete://":
                 onLink(.delete, modifiers)
-                return true
-            case "cancelgen://":
-                onLink(.cancelGeneration, modifiers)
                 return true
             default:
                 return false

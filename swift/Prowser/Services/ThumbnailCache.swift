@@ -15,6 +15,8 @@ actor ThumbnailCache {
     private var ignoreExifRotation: Bool
     private var memoryCache: [String: MemoryEntry] = [:]
     private var memoryKeysByPath: [String: Set<String>] = [:]
+    /// Cached on-disk thumbnail sizes per normalized image path (avoids full cache-dir scans).
+    private var diskSizesByPath: [String: Set<Int>] = [:]
     private var mtimeStatCache: [String: (mtime: Int?, cachedAt: Date)] = [:]
     private var lruCounter: UInt64 = 0
     private let memoryLimit = 12_000
@@ -34,6 +36,7 @@ actor ThumbnailCache {
             ignoreExifRotation = ignore
             memoryCache.removeAll()
             memoryKeysByPath.removeAll()
+            diskSizesByPath.removeAll()
             mtimeStatCache.removeAll()
         }
     }
@@ -46,6 +49,7 @@ actor ThumbnailCache {
                 memoryCache.removeValue(forKey: key)
             }
         }
+        diskSizesByPath.removeValue(forKey: normalized)
     }
 
     func cacheKey(for imagePath: String) -> String {
@@ -83,6 +87,7 @@ actor ThumbnailCache {
         }
         let url = diskURL(for: imagePath, size: size)
         try jpeg.write(to: url, options: .atomic)
+        registerDiskSize(imagePath: imagePath, size: size)
     }
 
     struct GeneratedThumbnail: Sendable {
@@ -143,6 +148,7 @@ actor ThumbnailCache {
         }
         let url = diskURL(for: imagePath, size: size)
         try await decodePool.writeJPEG(jpeg, to: url)
+        registerDiskSize(imagePath: imagePath, size: size)
     }
 
     private func cachedThumbnailResult(memoryKey: String, imagePath: String, size: Int) -> GeneratedThumbnail? {
@@ -155,6 +161,7 @@ actor ThumbnailCache {
               let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
         }
+        registerDiskSize(imagePath: imagePath, size: size)
         storeInMemory(key: memoryKey, image: image, imagePath: imagePath, pixelSize: size)
         return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
     }
@@ -180,17 +187,28 @@ actor ThumbnailCache {
         }
 
         let base = cacheKey(for: imagePath)
-        guard let filenames = try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path) else {
-            return nil
-        }
+        let prefix = "\(base)_"
         var bestDiskSize = 0
         var bestDiskURL: URL?
-        let prefix = "\(base)_"
-        for filename in filenames where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
-            guard let cachedSize = parseSize(fromDiskFilename: filename, prefix: prefix) else { continue }
-            if cachedSize >= size && cachedSize > bestDiskSize {
+        if let indexedSizes = diskSizesByPath[normalized], !indexedSizes.isEmpty {
+            for cachedSize in indexedSizes where cachedSize >= size && cachedSize > bestDiskSize {
                 bestDiskSize = cachedSize
-                bestDiskURL = thumbnailDirectory.appendingPathComponent(filename)
+                bestDiskURL = thumbnailDirectory.appendingPathComponent(
+                    ThumbnailCacheKey.diskFilename(cacheKey: base, size: cachedSize)
+                )
+            }
+        }
+        if bestDiskURL == nil, memoryKeysByPath[normalized] != nil {
+            guard let filenames = try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path) else {
+                return nil
+            }
+            for filename in filenames where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
+                guard let cachedSize = parseSize(fromDiskFilename: filename, prefix: prefix) else { continue }
+                registerDiskSize(imagePath: imagePath, size: cachedSize)
+                if cachedSize >= size && cachedSize > bestDiskSize {
+                    bestDiskSize = cachedSize
+                    bestDiskURL = thumbnailDirectory.appendingPathComponent(filename)
+                }
             }
         }
         guard let url = bestDiskURL,
@@ -219,6 +237,11 @@ actor ThumbnailCache {
         )
         scaled.unlockFocus()
         return scaled
+    }
+
+    private func registerDiskSize(imagePath: String, size: Int) {
+        let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
+        diskSizesByPath[normalized, default: []].insert(size)
     }
 
     private func parseSize(fromMemoryKey key: String) -> Int? {
