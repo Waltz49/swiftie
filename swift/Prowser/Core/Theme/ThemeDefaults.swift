@@ -36,6 +36,9 @@ enum ThemeDefaults {
             "dialog_muted_blend_percent": 50,
             "sidebar_muted_blend_percent": 50,
             "status_bar_muted_blend_percent": 50,
+            "qtooltip_bg_hex": "#000000",
+            "qtooltip_fg_hex": "#ddeeff",
+            "qtooltip_border_hex": "#b2b2b8",
         ]
     }
 
@@ -79,6 +82,9 @@ enum ThemeDefaults {
             "thumbnail_empty_filter_btn_border_hex": "#38506b",
             "thumbnail_empty_filter_btn_border_hover_hex": "#41a6c6",
             "thumbnail_empty_filter_btn_text_hover_hex": "#bbecff",
+            "qtooltip_bg_hex": "#000000",
+            "qtooltip_fg_hex": "#ddeeff",
+            "qtooltip_border_hex": "#b2b2b8",
         ]
     }
 
@@ -122,6 +128,9 @@ enum ThemeDefaults {
             "thumbnail_empty_filter_btn_border_hex": "#b0bec5",
             "thumbnail_empty_filter_btn_border_hover_hex": "#2196f3",
             "thumbnail_empty_filter_btn_text_hover_hex": "#0d47a1",
+            "qtooltip_bg_hex": "#fffff0",
+            "qtooltip_fg_hex": "#1a1a1a",
+            "qtooltip_border_hex": "#a0a0a0",
         ]
     }
 

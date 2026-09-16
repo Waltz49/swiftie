@@ -73,7 +73,12 @@ struct AppAssetIconButton: View {
                 .strokeBorder(Color.secondary.opacity(isHovered ? 0.8 : 0.45), lineWidth: 1)
         )
         .onHover { isHovered = $0 }
-        .help(tooltip)
+        .graphicButtonTooltip(text: tooltip, icon: tooltipIcon)
+    }
+
+    private var tooltipIcon: NSImage? {
+        AppAssets.nsImage(name: hoverName, fileExtension: fileExtension)
+            ?? AppAssets.nsImage(name: normalName, fileExtension: fileExtension)
     }
 }
 
@@ -86,6 +91,9 @@ final class NSAssetIconButton: NSButton {
     private let activeNormalName: String?
     private let activeHoverName: String?
     private let iconPixelSize: CGFloat
+    private let tooltipText: String
+    private let tooltipToken: UUID
+    var tooltipThemeColors: ThemeColors = .dark
     private var isHovered = false
     private var trackingArea: NSTrackingArea?
 
@@ -107,11 +115,12 @@ final class NSAssetIconButton: NSButton {
         self.activeNormalName = activeNormalName
         self.activeHoverName = activeHoverName
         self.iconPixelSize = iconSize ?? max(12, size - 4)
+        self.tooltipText = tooltip
+        self.tooltipToken = UUID()
         super.init(frame: .zero)
         bezelStyle = .shadowlessSquare
         isBordered = false
         imagePosition = .imageOnly
-        toolTip = tooltip
         translatesAutoresizingMaskIntoConstraints = false
         widthAnchor.constraint(equalToConstant: size).isActive = true
         heightAnchor.constraint(equalToConstant: size).isActive = true
@@ -140,11 +149,25 @@ final class NSAssetIconButton: NSButton {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         applyIcon()
+        showGraphicTooltip()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
         applyIcon()
+        GraphicButtonTooltipPopup.shared.hide(token: tooltipToken)
+    }
+
+    private func showGraphicTooltip() {
+        let tip = tooltipText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tip.isEmpty, let icon = tooltipIcon() else { return }
+        GraphicButtonTooltipPopup.shared.scheduleShow(
+            token: tooltipToken,
+            text: tip,
+            icon: icon,
+            colors: tooltipThemeColors,
+            anchorView: self
+        )
     }
 
     private func applyIcon() {
@@ -168,6 +191,17 @@ final class NSAssetIconButton: NSButton {
         )
         sized.unlockFocus()
         image = sized
+    }
+
+    private func tooltipIcon() -> NSImage? {
+        let imageName: String
+        if showsActiveIcon, let activeHoverName {
+            imageName = activeHoverName
+        } else {
+            imageName = hoverName
+        }
+        return AppAssets.nsImage(name: imageName)
+            ?? AppAssets.nsImage(name: normalName)
     }
 }
 
@@ -219,6 +253,10 @@ struct SidebarAssetIconButton: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)
         .onHover { isHovered = $0 }
-        .help(tooltip)
+        .graphicButtonTooltip(text: tooltip, icon: tooltipIcon)
+    }
+
+    private var tooltipIcon: NSImage? {
+        AppAssets.nsImage(name: hoverName) ?? AppAssets.nsImage(name: normalName)
     }
 }

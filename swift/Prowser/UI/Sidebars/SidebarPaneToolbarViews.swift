@@ -224,8 +224,18 @@ private struct SidebarToolbarIconButton: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)
-        .help(tooltip)
+        .graphicButtonTooltip(text: tooltip, icon: tooltipIcon)
         .onHover { hovering = $0 }
+    }
+
+    private var tooltipIcon: NSImage? {
+        if let imageProvider {
+            return imageProvider(true)
+        }
+        if let systemName {
+            return NSImage(systemSymbolName: systemName, accessibilityDescription: nil)
+        }
+        return nil
     }
 
     private var foregroundColor: Color {

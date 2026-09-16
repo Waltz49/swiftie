@@ -136,13 +136,14 @@ enum PenDrawnIcons {
         }
     }
 
-    private static func drawImage(size: CGFloat, _ draw: (NSRect) -> Void) -> NSImage {
+    private static func drawImage(size: CGFloat, _ draw: @escaping (NSRect) -> Void) -> NSImage {
         let dimension = NSSize(width: size, height: size)
-        let image = NSImage(size: dimension)
-        image.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        draw(NSRect(origin: .zero, size: dimension))
-        image.unlockFocus()
-        return image
+        // Python QPainter origin is top-left. `lockFocus` is bottom-left and inverted the
+        // tree-toolbar glyphs (squeeze, checkmark, filter).
+        return NSImage(size: dimension, flipped: true) { rect in
+            NSGraphicsContext.current?.imageInterpolation = .high
+            draw(rect)
+            return true
+        }
     }
 }

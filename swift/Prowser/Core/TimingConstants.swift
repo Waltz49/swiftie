@@ -7,4 +7,6 @@ enum TimingConstants {
     static let metadataOverlayRefreshDebounceMs = 1
     /// Port of `image_browser_window.py` `on_scroll_changed` debounce (100 ms).
     static let thumbnailScrollLoadDebounceMs = 100
+    /// Qt default `SH_ToolTip_WakeUpDelay` used by `IconGraphicTooltipFilter`.
+    static let graphicButtonTooltipDelayMs = 700
 }

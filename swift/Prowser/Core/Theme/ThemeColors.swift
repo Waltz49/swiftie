@@ -69,6 +69,11 @@ struct ThemeColors: Equatable {
     var progressBarText: Color
     var progressBarFill: Color
 
+    /// Python `qtooltip_bg_hex` / `graphic_button_tooltip_stylesheet`.
+    var tooltipBackground: Color
+    var tooltipText: Color
+    var tooltipBorder: Color
+
     var dialogMutedBlendPercent: Int
     var sidebarMutedBlendPercent: Int
     var statusBarMutedBlendPercent: Int
@@ -158,6 +163,9 @@ struct ThemeColors: Equatable {
         let progressBgHex = hex("progress_bar_bg_hex", "#1a1a1a")
         let progressBorderHex = hex("progress_bar_border_hex", borderHex)
         let progressTextHex = hex("progress_bar_text_hex", sidebarTextHex)
+        let tooltipFallback = themeID == "light"
+            ? (bg: "#fffff0", fg: "#1a1a1a", border: "#a0a0a0")
+            : (bg: "#000000", fg: "#ddeeff", border: "#b2b2b8")
 
         return ThemeColors(
             themeID: themeID,
@@ -221,6 +229,9 @@ struct ThemeColors: Equatable {
             progressBarBorder: Color(hex: progressBorderHex) ?? Color(hex: borderHex) ?? .gray,
             progressBarText: Color(hex: progressTextHex) ?? resolvedColor("sidebar_text_color_hex", "#b6b6b6"),
             progressBarFill: Color(hex: "#3478F6") ?? Color(red: 0.20, green: 0.47, blue: 0.96),
+            tooltipBackground: resolvedColor("qtooltip_bg_hex", tooltipFallback.bg),
+            tooltipText: resolvedColor("qtooltip_fg_hex", tooltipFallback.fg),
+            tooltipBorder: resolvedColor("qtooltip_border_hex", tooltipFallback.border),
             dialogMutedBlendPercent: dialogBlend,
             sidebarMutedBlendPercent: sidebarBlend,
             statusBarMutedBlendPercent: statusBlend
