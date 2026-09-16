@@ -296,9 +296,6 @@ struct ThumbnailGridView: NSViewRepresentable {
                 lastSyncedIndex = index
             } else {
                 gridView.currentIndex = index
-                if inThumbnailMode {
-                    gridView.scrollToSelectionAfterLayout()
-                }
             }
             syncSelectionVisuals(to: gridView)
             if inThumbnailMode,
@@ -383,10 +380,13 @@ struct ThumbnailGridView: NSViewRepresentable {
             )
         }
 
-        func thumbnailGridDidOpenBrowse(index: Int, path: String) {
-            lastSyncedIndex = index
+        func thumbnailGridDidOpenBrowse(path: String) {
+            if let index = appState.fileData.displayedImages.firstIndex(of: path) {
+                lastSyncedIndex = index
+            }
             SelectionService.openBrowseFromThumbnailActivation(
                 appState: appState,
+                path: path,
                 isDoubleClick: true
             )
         }

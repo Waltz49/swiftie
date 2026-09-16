@@ -208,9 +208,19 @@ enum SelectionService {
 
     /// Port of Python ``navigation_manager.handle_thumbnail_click`` / ``_on_thumbnail_double_clicked``.
     /// Single-click opens browse when the preview pane is hidden; double-click opens when it is visible.
-    static func openBrowseFromThumbnailActivation(appState: AppState, isDoubleClick: Bool) {
+    static func openBrowseFromThumbnailActivation(
+        appState: AppState,
+        path: String? = nil,
+        isDoubleClick: Bool
+    ) {
         if isDoubleClick {
             guard appState.isPreviewPaneVisible else { return }
+            if let path,
+               let index = appState.fileData.displayedImages.firstIndex(of: path),
+               appState.fileData.currentImagePath != path {
+                clearSelection(appState: appState)
+                selectThumbnail(appState: appState, index: index, addToSelection: false)
+            }
         } else {
             guard !appState.isPreviewPaneVisible else { return }
         }

@@ -13,7 +13,7 @@ protocol ThumbnailGridDelegate: AnyObject {
         cmdPressed: Bool,
         ctrlPressed: Bool
     )
-    func thumbnailGridDidOpenBrowse(index: Int, path: String)
+    func thumbnailGridDidOpenBrowse(path: String)
     /// Single-click browse activation (preview hidden). Fired on mouse up when the press was not a drag.
     func thumbnailGridDidActivateBrowse()
     func thumbnailGridDidReorder(path: String, insertionIndex: Int)
@@ -118,7 +118,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let manualThumbnailSize: Bool
     }
 
-    private var dragSourceIndex: Int?
+    /// File path under the first mouse-down of a press–drag–click gesture (cleared on mouse up).
+    private var dragSourcePath: String?
     private var dragStartPoint: NSPoint?
     private var dropInsertionIndex: Int?
     private var dropIndicatorRect: NSRect?
@@ -383,7 +384,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             let imageFrame = imageFrame(in: cell)
             let borderRect = ThumbnailLayout.thumbnailBorderRect(in: imageFrame)
             let contentRect = ThumbnailLayout.imageContentRect(in: imageFrame)
-            let isCurrent = index == currentIndex
+            let path = imagePaths[index]
+            let isCurrent = path == appState?.fileData.currentImagePath
             let isSelected = selectedIndices.contains(index)
 
             drawThumbnailBackground(
@@ -391,8 +393,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 isCurrent: isCurrent,
                 isSelected: isSelected
             )
-
-            let path = imagePaths[index]
             if let image = thumbnails[path] {
                 drawThumbnail(image, in: contentRect)
             } else {
@@ -525,15 +525,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         let point = convert(event.locationInWindow, from: nil)
         guard let index = indexAt(point: point) else { return }
-        dragSourceIndex = index
+        // Keep first-click drag/selection state; second down must not retarget selection.
+        if event.clickCount >= 2 {
+            return
+        }
+        let path = imagePaths[index]
+        dragSourcePath = path
         dragStartPoint = point
         externalDragStarted = false
         suppressBrowseActivation = false
         draggingPaths = []
         dropInsertionIndex = nil
         dropIndicatorRect = nil
-        let path = imagePaths[index]
-        currentIndex = index
         let shiftPressed = flags.contains(.shift)
         let cmdPressed = flags.contains(.command)
         let ctrlPressed = flags.contains(.control)
@@ -557,10 +560,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let shiftPressed = flags.contains(.shift)
         let cmdPressed = flags.contains(.command)
         let ctrlPressed = flags.contains(.control)
-        if !suppressBrowseActivation, let index = indexAt(point: point) {
+        if !suppressBrowseActivation, !shiftPressed, !cmdPressed, !ctrlPressed {
             if event.clickCount >= 2 {
-                gridDelegate?.thumbnailGridDidOpenBrowse(index: index, path: imagePaths[index])
-            } else if !shiftPressed, !cmdPressed, !ctrlPressed {
+                guard let path = browseActivationPath(at: point) else {
+                    resetDragState()
+                    return
+                }
+                gridDelegate?.thumbnailGridDidOpenBrowse(path: path)
+            } else {
                 gridDelegate?.thumbnailGridDidActivateBrowse()
             }
         }
@@ -577,18 +584,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard let start = dragStartPoint, let sourceIndex = dragSourceIndex else { return }
+        guard let start = dragStartPoint, let sourcePath = dragSourcePath else { return }
         let distance = hypot(point.x - start.x, point.y - start.y)
         guard distance >= dragThreshold else { return }
         suppressBrowseActivation = true
         guard !externalDragStarted else { return }
-        beginExternalDrag(from: sourceIndex, event: event)
+        beginExternalDrag(from: sourcePath, event: event)
     }
 
     // MARK: - External drag (Python ``_start_internal_drag`` file URL export)
 
-    private func beginExternalDrag(from sourceIndex: Int, event: NSEvent) {
-        let paths = dragPathsForIndex(sourceIndex)
+    private func beginExternalDrag(from sourcePath: String, event: NSEvent) {
+        let paths = dragPathsForPath(sourcePath)
         guard !paths.isEmpty else { return }
         draggingPaths = paths
         externalDragStarted = true
@@ -626,14 +633,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         _ = FileDragDropOperations.sourceOperationMask(for: .withinApplication, filePaths: draggingPaths)
     }
 
-    private func dragPathsForIndex(_ index: Int) -> [String] {
-        guard imagePaths.indices.contains(index) else { return [] }
-        if multiSelectMode, selectedIndices.contains(index) {
+    private func dragPathsForPath(_ sourcePath: String) -> [String] {
+        guard imagePaths.contains(sourcePath) else { return [] }
+        if multiSelectMode,
+           let sourceIndex = imagePaths.firstIndex(of: sourcePath),
+           selectedIndices.contains(sourceIndex) {
             return imagePaths.enumerated().compactMap { idx, path in
                 selectedIndices.contains(idx) ? path : nil
             }
         }
-        return [imagePaths[index]]
+        return [sourcePath]
     }
 
     private func scaledDragPreview(_ image: NSImage) -> NSImage {
@@ -652,7 +661,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func resetDragState() {
-        dragSourceIndex = nil
+        dragSourcePath = nil
         dragStartPoint = nil
         externalDragStarted = false
         draggingPaths = []
@@ -759,8 +768,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         case 125: navigate(.down)
         case 126: navigate(.up)
         case 36: // return
-            let path = imagePaths[currentIndex]
-            gridDelegate?.thumbnailGridDidOpenBrowse(index: currentIndex, path: path)
+            guard let path = appState?.fileData.currentImagePath,
+                  imagePaths.contains(path) else { return }
+            gridDelegate?.thumbnailGridDidOpenBrowse(path: path)
         default:
             super.keyDown(with: event)
         }
@@ -833,8 +843,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func applySelectionDelta(_ delta: Int, wrap: Bool) {
-        let next = nextIndex(currentIndex, delta: delta, wrap: wrap)
-        guard next != currentIndex else { return }
+        let base = highlightedListIndex() ?? currentIndex
+        let next = nextIndex(base, delta: delta, wrap: wrap)
+        guard next != base else { return }
         currentIndex = next
         gridDelegate?.thumbnailGridDidSelect(index: next, path: imagePaths[next])
         scrollToCurrent()
@@ -852,10 +863,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func scrollToCurrent() {
         guard let scrollView = enclosingScrollView else { return }
-        guard currentIndex >= 0, currentIndex < imagePaths.count else { return }
+        guard let index = highlightedListIndex() else { return }
         layoutSubtreeIfNeeded()
         scrollView.layoutSubtreeIfNeeded()
-        let cell = cellFrame(for: currentIndex)
+        let cell = cellFrame(for: index)
         scrollView.contentView.scrollToVisible(cell.insetBy(dx: -20, dy: -20))
     }
 
@@ -870,6 +881,23 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             if cellFrame(for: index).contains(point) {
                 return index
             }
+        }
+        return nil
+    }
+
+    /// Resolve list index from ``FileDataModel/currentImagePath`` (not cached grid index).
+    private func highlightedListIndex() -> Int? {
+        guard let path = appState?.fileData.currentImagePath else { return nil }
+        return imagePaths.firstIndex(of: path)
+    }
+
+    /// Path for browse on double-click: release hit-test, else first mouse-down of the pair.
+    private func browseActivationPath(at point: NSPoint) -> String? {
+        if let index = indexAt(point: point), imagePaths.indices.contains(index) {
+            return imagePaths[index]
+        }
+        if let dragSourcePath, imagePaths.contains(dragSourcePath) {
+            return dragSourcePath
         }
         return nil
     }
