@@ -7,14 +7,14 @@ enum MenuStateHelpers {
         let favorites = config.favoriteDirectories()
         guard slot >= 1, slot <= favorites.count else { return "\(slot). (empty)" }
         guard let path = favorites[slot - 1],
-              !path.isEmpty,
-              FileManager.default.fileExists(atPath: path) else {
+              !path.isEmpty else {
             return "\(slot). (empty)"
         }
-        let expanded = (path as NSString).expandingTildeInPath
-        var isDir: ObjCBool = false
-        FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir)
-        let name = (expanded as NSString).lastPathComponent
+        let labels = PathLabelDisambiguation.favoriteLabels(
+            config: config,
+            imageExtensions: config.imageExtensions
+        )
+        guard let name = labels[path] else { return "\(slot). (empty)" }
         return "\(slot). \(name)"
     }
 
@@ -22,10 +22,17 @@ enum MenuStateHelpers {
         let favorites = config.favoriteDirectories()
         guard slot >= 1, slot <= favorites.count else { return false }
         guard let path = favorites[slot - 1], !path.isEmpty else { return false }
-        return FileManager.default.fileExists(atPath: path)
+        return PathLabelDisambiguation.isEligibleFavorite(
+            stored: path,
+            imageExtensions: config.imageExtensions
+        )
     }
 
-    static func destinationMenuLabel(slot: Int, config: AppConfig) -> String {
+    static func destinationMenuLabel(
+        slot: Int,
+        config: AppConfig,
+        lastDropLocation: String?
+    ) -> String {
         let destinations = config.moveDestinations()
         let verb = config.string(forKey: "destination_menu_action", default: "move")
         let actionWord = verb == "copy" ? "Copy to" : "Move to"
@@ -34,12 +41,37 @@ enum MenuStateHelpers {
               !path.isEmpty else {
             return "\(actionWord) Destination \(slot)"
         }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+        guard PathLabelDisambiguation.isEligibleMoveDestination(stored: path) else {
             return "\(actionWord) Destination \(slot)"
         }
-        let name = ((path as NSString).expandingTildeInPath as NSString).lastPathComponent
+        let labels = PathLabelDisambiguation.moveDestinationLabels(
+            config: config,
+            lastDropLocation: lastDropLocation
+        )
+        guard let name = labels[path] else {
+            return "\(actionWord) Destination \(slot)"
+        }
         return "\(actionWord) \(name)"
+    }
+
+    static func lastDropDestinationMenuLabel(
+        config: AppConfig,
+        lastDropLocation: String?
+    ) -> String {
+        let verb = config.string(forKey: "destination_menu_action", default: "move")
+        let actionWord = verb == "copy" ? "Copy to" : "Move to"
+        guard let lastDropLocation,
+              PathLabelDisambiguation.isEligibleLastDropDirectory(stored: lastDropLocation) else {
+            return "\(actionWord) to Last Drop Location"
+        }
+        let labels = PathLabelDisambiguation.moveDestinationLabels(
+            config: config,
+            lastDropLocation: lastDropLocation
+        )
+        if let name = labels[lastDropLocation] {
+            return "\(actionWord) to \(name)"
+        }
+        return "\(actionWord) to Last Drop Location"
     }
 
     static func destinationIsVisible(slot: Int, config: AppConfig) -> Bool {

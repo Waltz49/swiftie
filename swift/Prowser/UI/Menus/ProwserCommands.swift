@@ -776,8 +776,17 @@ private struct MoveDestinationsMenu: View {
                 DestinationMenuButton(appState: appState, slot: slot)
             }
             Divider()
-            Button("Last Drop Location") {
-                Task { @MainActor in appState.fileOperations.moveToLastDropLocation(copyOnly: false) }
+            Button(MenuStateHelpers.lastDropDestinationMenuLabel(
+                config: appState.config,
+                lastDropLocation: appState.lastDropLocation
+            )) {
+                Task { @MainActor in
+                    let copyOnly = appState.config.string(
+                        forKey: "destination_menu_action",
+                        default: "move"
+                    ) == "copy"
+                    appState.fileOperations.moveToLastDropLocation(copyOnly: copyOnly)
+                }
             }
             MoveWorkFilesMenuButton(appState: appState)
             Divider()
@@ -818,7 +827,11 @@ private struct DestinationMenuButton: View {
 
     var body: some View {
         if MenuStateHelpers.destinationIsVisible(slot: slot, config: appState.config) {
-            Button(MenuStateHelpers.destinationMenuLabel(slot: slot, config: appState.config)) {
+            Button(MenuStateHelpers.destinationMenuLabel(
+                slot: slot,
+                config: appState.config,
+                lastDropLocation: appState.lastDropLocation
+            )) {
                 Task { @MainActor in
                     let copyOnly = appState.config.string(forKey: "destination_menu_action", default: "move") == "copy"
                     appState.fileOperations.moveToDestination(slot: slot, copyOnly: copyOnly)

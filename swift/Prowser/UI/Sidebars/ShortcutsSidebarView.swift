@@ -285,58 +285,50 @@ struct ShortcutsSidebarView: View {
     }
 
     private func validFavoriteSlots() -> [ShortcutSlot] {
-        appState.config.favoriteDirectories().enumerated().compactMap { index, path in
-            guard let expanded = validExpandedPath(path),
-                  let label = displayName(for: expanded) else { return nil }
-            return ShortcutSlot(number: index + 1, label: label, fullPath: expanded)
+        let labels = PathLabelDisambiguation.favoriteLabels(
+            config: appState.config,
+            imageExtensions: appState.config.imageExtensions
+        )
+        return appState.config.favoriteDirectories().enumerated().compactMap { index, path in
+            guard let path,
+                  let label = labels[path] else { return nil }
+            let fullPath = PathLabelDisambiguation.tooltipPath(path)
+            return ShortcutSlot(number: index + 1, label: label, fullPath: fullPath)
         }
     }
 
     private func validDestinationSlots() -> [ShortcutSlot] {
-        appState.config.moveDestinations().enumerated().compactMap { index, path in
-            guard let expanded = validExpandedPath(path) else { return nil }
-            return ShortcutSlot(
-                number: index + 1,
-                label: destinationDisplayName(for: expanded),
-                fullPath: expanded
-            )
+        let labels = moveDestinationLabelMap()
+        return appState.config.moveDestinations().enumerated().compactMap { index, path in
+            guard let path,
+                  PathLabelDisambiguation.isEligibleMoveDestination(stored: path),
+                  let label = labels[path] else { return nil }
+            let fullPath = PathLabelDisambiguation.tooltipPath(path)
+            return ShortcutSlot(number: index + 1, label: label, fullPath: fullPath)
         }
     }
 
     private func validLastDropLabel() -> ShortcutSlot? {
-        let path = appState.lastDropLocation
-        guard let expanded = validExpandedPath(path) else { return nil }
-        return ShortcutSlot(number: 0, label: destinationDisplayName(for: expanded), fullPath: expanded)
+        guard let path = appState.lastDropLocation,
+              PathLabelDisambiguation.isEligibleLastDropDirectory(stored: path) else { return nil }
+        let labels = moveDestinationLabelMap()
+        guard let label = labels[path] else { return nil }
+        return ShortcutSlot(
+            number: 0,
+            label: label,
+            fullPath: PathLabelDisambiguation.tooltipPath(path)
+        )
     }
 
-    private func validExpandedPath(_ path: String?) -> String? {
-        guard let path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
+    private func moveDestinationLabelMap() -> [String: String] {
+        let lastDrop = appState.lastDropLocation
+        let includeLastDrop = lastDrop.flatMap { path in
+            PathLabelDisambiguation.isEligibleLastDropDirectory(stored: path) ? path : nil
         }
-        let expanded = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-            .standardizedFileURL.path
-        guard FileManager.default.fileExists(atPath: expanded) else { return nil }
-        return expanded
-    }
-
-    private func displayName(for path: String) -> String? {
-        if path.hasPrefix(NSHomeDirectory()) {
-            return "~" + String(path.dropFirst(NSHomeDirectory().count))
-        }
-        return (path as NSString).lastPathComponent
-    }
-
-    /// Last path segment only, matching `path_to_display_segment` in `shortcuts_sidebar.py`.
-    private func destinationDisplayName(for path: String) -> String {
-        var p = path
-        if p.hasPrefix(NSHomeDirectory()) {
-            p = "~" + String(p.dropFirst(NSHomeDirectory().count))
-        }
-        while p.hasSuffix("/") && p.count > 1 {
-            p.removeLast()
-        }
-        let base = (p as NSString).lastPathComponent
-        return base.isEmpty ? p : base
+        return PathLabelDisambiguation.moveDestinationLabels(
+            config: appState.config,
+            lastDropLocation: includeLastDrop
+        )
     }
 
     private func organizePalette() -> OrganizePalette {
