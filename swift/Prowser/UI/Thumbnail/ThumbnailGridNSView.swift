@@ -124,6 +124,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var backgroundLoadWorkItem: DispatchWorkItem?
     private var backgroundLoadFollowUpWorkItem: DispatchWorkItem?
     private var backgroundLoadSession: UInt64 = 0
+    /// True while the user is scrolling; off-screen batch loads are paused.
+    private var backgroundLoadingSuspended = false
     var wrapAround = true
 
     private struct LayoutSnapshot: Equatable {
@@ -288,6 +290,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     /// Called when the user scrolls; reloads thumbnails for newly visible cells only.
     func noteVisibleRectChanged() {
+        suspendBackgroundThumbnailLoading()
         scheduleLoadVisibleThumbnails(debounced: true)
     }
 
@@ -344,9 +347,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func invalidateThumbnailLoadingSession() {
         backgroundLoadSession += 1
+        backgroundLoadingSuspended = false
         cancelPendingBackgroundBatches()
+        visibleLoadDebounceWorkItem?.cancel()
+        visibleLoadDebounceWorkItem = nil
         visibleLoadRetryWorkItem?.cancel()
         visibleLoadRetryWorkItem = nil
+    }
+
+    private func suspendBackgroundThumbnailLoading() {
+        backgroundLoadingSuspended = true
+        cancelPendingBackgroundBatches()
     }
 
     func updateEmptyStateContext() {
@@ -1027,7 +1038,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         if debounced {
             visibleLoadDebounceWorkItem?.cancel()
             let work = DispatchWorkItem { [weak self] in
-                self?.loadVisibleThumbnails()
+                self?.handleScrollSettledThumbnailLoad()
             }
             visibleLoadDebounceWorkItem = work
             DispatchQueue.main.asyncAfter(
@@ -1036,8 +1047,34 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             )
         } else {
             visibleLoadDebounceWorkItem?.cancel()
-            loadVisibleThumbnails()
+            backgroundLoadingSuspended = false
+            loadVisibleThumbnails(scheduleBackground: true)
         }
+    }
+
+    /// After scroll quiesces: load viewport thumbs, then resume off-screen batches.
+    private func handleScrollSettledThumbnailLoad() {
+        loadVisibleThumbnails(scheduleBackground: false)
+        backgroundLoadingSuspended = false
+        resumeBackgroundThumbnailLoadingForCurrentViewport()
+    }
+
+    private func resumeBackgroundThumbnailLoadingForCurrentViewport() {
+        guard thumbnailLoadingActive else { return }
+        guard appState?.fileData.currentViewMode == .thumbnail else { return }
+        guard let scrollView = enclosingScrollView else { return }
+        let visible = scrollView.documentVisibleRect
+        let visibleIndices = visibleThumbnailIndices(in: visible)
+        if visibleIndices.isEmpty {
+            if !imagePaths.isEmpty {
+                scheduleVisibleLoadRetry()
+            }
+            return
+        }
+        let visibleSet = Set(visibleIndices)
+        let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
+        let excluded = visibleSet.union(nearVisible)
+        scheduleBackgroundThumbnailLoading(excluded: excluded, session: backgroundLoadSession)
     }
 
     private func thumbnailGenerationPixelSize() -> Int {
@@ -1155,9 +1192,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         return nearVisible.sorted()
     }
 
-    private func requestThumbnailLoad(for path: String) {
+    private func requestThumbnailLoad(for path: String, isBackground: Bool = false) {
         guard thumbnailLoadingActive else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
+        if isBackground, backgroundLoadingSuspended { return }
         if thumbnails[path] != nil || loadingPaths.contains(path) { return }
         loadingPaths.insert(path)
         let pixelSize = thumbnailGenerationPixelSize()
@@ -1178,6 +1216,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func scheduleBackgroundThumbnailLoading(excluded: Set<Int>, session: UInt64) {
         guard thumbnailLoadingActive else { return }
+        guard !backgroundLoadingSuspended else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
         guard !imagePaths.isEmpty else { return }
 
@@ -1198,6 +1237,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func queueBackgroundThumbnailBatch(indices: [Int], session: UInt64) {
         guard session == backgroundLoadSession else { return }
         guard thumbnailLoadingActive else { return }
+        guard !backgroundLoadingSuspended else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
 
         let batchSize = TimingConstants.thumbnailBackgroundLoadBatchSize
@@ -1205,10 +1245,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let remaining = Array(indices.dropFirst(batchSize))
 
         for index in batch {
-            requestThumbnailLoad(for: imagePaths[index])
+            if backgroundLoadingSuspended { break }
+            requestThumbnailLoad(for: imagePaths[index], isBackground: true)
         }
 
-        guard !remaining.isEmpty else { return }
+        guard !remaining.isEmpty, !backgroundLoadingSuspended else { return }
 
         let followUp = DispatchWorkItem { [weak self] in
             self?.queueBackgroundThumbnailBatch(indices: remaining, session: session)
@@ -1225,7 +1266,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard !imagePaths.isEmpty else { return }
         visibleLoadRetryWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.loadVisibleThumbnails()
+            guard let self else { return }
+            self.loadVisibleThumbnails(scheduleBackground: !self.backgroundLoadingSuspended)
         }
         visibleLoadRetryWorkItem = work
         DispatchQueue.main.asyncAfter(
@@ -1234,7 +1276,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
-    private func loadVisibleThumbnails() {
+    private func loadVisibleThumbnails(scheduleBackground: Bool = true) {
         guard thumbnailLoadingActive else { return }
         guard let scrollView = enclosingScrollView else { return }
         let visible = scrollView.documentVisibleRect
@@ -1249,15 +1291,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
 
         for index in visibleIndices.sorted() {
-            requestThumbnailLoad(for: imagePaths[index])
+            requestThumbnailLoad(for: imagePaths[index], isBackground: false)
         }
         for index in nearVisible {
-            requestThumbnailLoad(for: imagePaths[index])
+            requestThumbnailLoad(for: imagePaths[index], isBackground: false)
         }
 
+        guard scheduleBackground, !backgroundLoadingSuspended else { return }
         let excluded = visibleSet.union(nearVisible)
-        let session = backgroundLoadSession
-        scheduleBackgroundThumbnailLoading(excluded: excluded, session: session)
+        scheduleBackgroundThumbnailLoading(excluded: excluded, session: backgroundLoadSession)
     }
 
     private func thumbnailRect(for index: Int) -> NSRect {
