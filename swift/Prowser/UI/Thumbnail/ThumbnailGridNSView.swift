@@ -32,10 +32,26 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     var imagePaths: [String] = [] {
         didSet {
+            if oldValue != imagePaths {
+                invalidateThumbnailLoadingSession()
+            }
             let keeping = Set(imagePaths)
             imageDimensionCache = imageDimensionCache.filter { keeping.contains($0.key) }
             basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: imagePaths)
             reloadLayoutIfNeeded()
+        }
+    }
+
+    /// When false (browse/list/etc.), visible and background thumbnail requests are not started.
+    var thumbnailLoadingActive = true {
+        didSet {
+            if thumbnailLoadingActive {
+                if oldValue == false {
+                    scheduleLoadVisibleThumbnails(debounced: false)
+                }
+            } else {
+                invalidateThumbnailLoadingSession()
+            }
         }
     }
 
@@ -104,6 +120,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var lastLayoutViewportWidth: CGFloat = 0
     private var lastLayoutSnapshot: LayoutSnapshot?
     private var visibleLoadDebounceWorkItem: DispatchWorkItem?
+    private var visibleLoadRetryWorkItem: DispatchWorkItem?
+    private var backgroundLoadWorkItem: DispatchWorkItem?
+    private var backgroundLoadFollowUpWorkItem: DispatchWorkItem?
+    private var backgroundLoadSession: UInt64 = 0
     var wrapAround = true
 
     private struct LayoutSnapshot: Equatable {
@@ -305,9 +325,28 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     func clearThumbnails() {
+        invalidateThumbnailLoadingSession()
         thumbnails.removeAll()
         loadingPaths.removeAll()
         needsDisplay = true
+    }
+
+    /// Port of Python `start_background_thumbnail_loading_if_needed`.
+    func startBackgroundThumbnailLoadingIfNeeded() {
+        guard thumbnailLoadingActive, !imagePaths.isEmpty else { return }
+        let needsLoading = imagePaths.contains { path in
+            thumbnails[path] == nil && !loadingPaths.contains(path)
+        }
+        if needsLoading {
+            scheduleLoadVisibleThumbnails(debounced: false)
+        }
+    }
+
+    private func invalidateThumbnailLoadingSession() {
+        backgroundLoadSession += 1
+        cancelPendingBackgroundBatches()
+        visibleLoadRetryWorkItem?.cancel()
+        visibleLoadRetryWorkItem = nil
     }
 
     func updateEmptyStateContext() {
@@ -1047,42 +1086,178 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
-    private func loadVisibleThumbnails() {
-        guard let scrollView = enclosingScrollView else { return }
-        let visible = scrollView.documentVisibleRect
-        let indices: [Int]
+    private func cancelPendingBackgroundBatches() {
+        backgroundLoadWorkItem?.cancel()
+        backgroundLoadFollowUpWorkItem?.cancel()
+        backgroundLoadWorkItem = nil
+        backgroundLoadFollowUpWorkItem = nil
+    }
+
+    private func visibleThumbnailIndices(in visibleRect: NSRect) -> [Int] {
         if isReferenceGraphMode {
-            indices = imagePaths.indices.filter { index in
-                cellFrame(for: index).intersects(
-                    visible.insetBy(dx: -metrics.cellWidth, dy: -metrics.cellHeight)
-                )
-            }
-        } else {
-            indices = ThumbnailLayout.visibleIndices(
-                in: visible,
+            let expanded = visibleRect.insetBy(dx: -metrics.cellWidth, dy: -metrics.cellHeight)
+            return ThumbnailLayout.indicesIntersecting(
+                expanded,
                 metrics: metrics,
-                itemCount: imagePaths.count
+                itemCount: imagePaths.count,
+                referenceNodeFrames: referenceNodeFrames
             )
         }
+        return ThumbnailLayout.visibleIndices(
+            in: visibleRect,
+            metrics: metrics,
+            itemCount: imagePaths.count
+        )
+    }
+
+    /// Adjacent row/column cells around the viewport (Python `_get_canvas_near_visible_indices`).
+    private func nearVisibleThumbnailIndices(
+        visibleRect: NSRect,
+        visible: Set<Int>
+    ) -> [Int] {
+        if isReferenceGraphMode {
+            let expanded = visibleRect.insetBy(
+                dx: -metrics.cellWidth * 2,
+                dy: -metrics.cellHeight * 2
+            )
+            return ThumbnailLayout.indicesIntersecting(
+                expanded,
+                metrics: metrics,
+                itemCount: imagePaths.count,
+                referenceNodeFrames: referenceNodeFrames
+            )
+            .filter { !visible.contains($0) }
+        }
+        let columns = max(1, metrics.columns)
+        var nearVisible = Set<Int>()
+        for idx in visible {
+            let row = idx / columns
+            let col = idx % columns
+            for rowOffset in [-1, 1] {
+                let targetRow = row + rowOffset
+                guard targetRow >= 0 else { continue }
+                let maxRow = (imagePaths.count - 1) / columns
+                guard targetRow <= maxRow else { continue }
+                let start = targetRow * columns
+                let end = min(start + columns, imagePaths.count)
+                for i in start..<end where !visible.contains(i) {
+                    nearVisible.insert(i)
+                }
+            }
+            for colOffset in [-1, 1] {
+                let targetCol = col + colOffset
+                guard targetCol >= 0, targetCol < columns else { continue }
+                let targetIdx = row * columns + targetCol
+                guard targetIdx < imagePaths.count, !visible.contains(targetIdx) else { continue }
+                nearVisible.insert(targetIdx)
+            }
+        }
+        return nearVisible.sorted()
+    }
+
+    private func requestThumbnailLoad(for path: String) {
+        guard thumbnailLoadingActive else { return }
+        guard appState?.fileData.currentViewMode == .thumbnail else { return }
+        if thumbnails[path] != nil || loadingPaths.contains(path) { return }
+        loadingPaths.insert(path)
         let pixelSize = thumbnailGenerationPixelSize()
-        for index in indices {
-            let path = imagePaths[index]
-            if thumbnails[path] != nil || loadingPaths.contains(path) { continue }
-            loadingPaths.insert(path)
-            gridDelegate?.thumbnailGridNeedsThumbnail(path: path, size: pixelSize) { [weak self] image in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.loadingPaths.remove(path)
-                    guard let image else { return }
-                    self.thumbnails[path] = image
-                    if let paintIndex = self.imagePaths.firstIndex(of: path) {
-                        self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
-                    } else {
-                        self.needsDisplay = true
-                    }
+        gridDelegate?.thumbnailGridNeedsThumbnail(path: path, size: pixelSize) { [weak self] image in
+            Task { @MainActor in
+                guard let self else { return }
+                self.loadingPaths.remove(path)
+                guard let image else { return }
+                self.thumbnails[path] = image
+                if let paintIndex = self.imagePaths.firstIndex(of: path) {
+                    self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
+                } else {
+                    self.needsDisplay = true
                 }
             }
         }
+    }
+
+    private func scheduleBackgroundThumbnailLoading(excluded: Set<Int>, session: UInt64) {
+        guard thumbnailLoadingActive else { return }
+        guard appState?.fileData.currentViewMode == .thumbnail else { return }
+        guard !imagePaths.isEmpty else { return }
+
+        let backgroundIndices = (0..<imagePaths.count).filter { !excluded.contains($0) }
+        guard !backgroundIndices.isEmpty else { return }
+
+        cancelPendingBackgroundBatches()
+        let work = DispatchWorkItem { [weak self] in
+            self?.queueBackgroundThumbnailBatch(indices: backgroundIndices, session: session)
+        }
+        backgroundLoadWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(TimingConstants.thumbnailBackgroundLoadInitialDelayMs) / 1000.0,
+            execute: work
+        )
+    }
+
+    private func queueBackgroundThumbnailBatch(indices: [Int], session: UInt64) {
+        guard session == backgroundLoadSession else { return }
+        guard thumbnailLoadingActive else { return }
+        guard appState?.fileData.currentViewMode == .thumbnail else { return }
+
+        let batchSize = TimingConstants.thumbnailBackgroundLoadBatchSize
+        let batch = indices.prefix(batchSize)
+        let remaining = Array(indices.dropFirst(batchSize))
+
+        for index in batch {
+            requestThumbnailLoad(for: imagePaths[index])
+        }
+
+        guard !remaining.isEmpty else { return }
+
+        let followUp = DispatchWorkItem { [weak self] in
+            self?.queueBackgroundThumbnailBatch(indices: remaining, session: session)
+        }
+        backgroundLoadFollowUpWorkItem = followUp
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(TimingConstants.thumbnailBackgroundLoadBatchDelayMs) / 1000.0,
+            execute: followUp
+        )
+    }
+
+    private func scheduleVisibleLoadRetry() {
+        guard thumbnailLoadingActive else { return }
+        guard !imagePaths.isEmpty else { return }
+        visibleLoadRetryWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.loadVisibleThumbnails()
+        }
+        visibleLoadRetryWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(TimingConstants.thumbnailVisibleLoadRetryMs) / 1000.0,
+            execute: work
+        )
+    }
+
+    private func loadVisibleThumbnails() {
+        guard thumbnailLoadingActive else { return }
+        guard let scrollView = enclosingScrollView else { return }
+        let visible = scrollView.documentVisibleRect
+        let visibleIndices = visibleThumbnailIndices(in: visible)
+        if visibleIndices.isEmpty, !imagePaths.isEmpty {
+            scheduleVisibleLoadRetry()
+            return
+        }
+        visibleLoadRetryWorkItem?.cancel()
+        visibleLoadRetryWorkItem = nil
+        let visibleSet = Set(visibleIndices)
+        let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
+
+        for index in visibleIndices.sorted() {
+            requestThumbnailLoad(for: imagePaths[index])
+        }
+        for index in nearVisible {
+            requestThumbnailLoad(for: imagePaths[index])
+        }
+
+        let excluded = visibleSet.union(nearVisible)
+        let session = backgroundLoadSession
+        scheduleBackgroundThumbnailLoading(excluded: excluded, session: session)
     }
 
     private func thumbnailRect(for index: Int) -> NSRect {

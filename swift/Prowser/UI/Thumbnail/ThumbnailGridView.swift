@@ -99,10 +99,14 @@ struct ThumbnailGridView: NSViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] notification in
-                    guard let mode = notification.object as? String,
-                          mode == ViewMode.thumbnail.rawValue else { return }
+                    guard let mode = notification.object as? String else { return }
                     let coordinator = self
-                    Task { @MainActor in coordinator?.ensureHighlightedVisible() }
+                    Task { @MainActor in
+                        coordinator?.applyThumbnailLoadingActive(mode == ViewMode.thumbnail.rawValue)
+                        if mode == ViewMode.thumbnail.rawValue {
+                            coordinator?.ensureHighlightedVisible()
+                        }
+                    }
                 }
             }
             if filterPatternObserver == nil {
@@ -281,6 +285,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.updateEmptyStateContext()
             let index = resolvedHighlightIndex(in: paths)
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
+            applyThumbnailLoadingActive(inThumbnailMode, gridView: gridView)
             gridView.wrapAround = appState.config.bool(forKey: "wrap_around", default: true)
             gridView.showFilenames = appState.config.bool(forKey: "thumbnail_filename_visible", default: false)
             gridView.showImageSize = appState.config.bool(forKey: "show_image_size", default: false)
@@ -298,10 +303,19 @@ struct ThumbnailGridView: NSViewRepresentable {
                 gridView.currentIndex = index
             }
             syncSelectionVisuals(to: gridView)
+            if inThumbnailMode {
+                gridView.startBackgroundThumbnailLoadingIfNeeded()
+            }
             if inThumbnailMode,
                !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: gridView.window) {
                 gridView.claimKeyboardFocus()
             }
+        }
+
+        private func applyThumbnailLoadingActive(_ active: Bool, gridView: ThumbnailGridNSView? = nil) {
+            let gridView = gridView ?? self.gridView
+            guard let gridView else { return }
+            gridView.thumbnailLoadingActive = active
         }
 
         private func syncDeletedPlaceholders() {
