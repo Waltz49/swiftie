@@ -540,9 +540,18 @@ final class FileOperationsService {
               !path.isEmpty else { return }
         let expanded = (path as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue {
+        guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir) else { return }
+
+        if isDir.boolValue {
             appState.loadDirectory(expanded, saveHistory: true)
+            appState.clearBrowseReturnState()
+            if appState.fileData.currentViewMode != .thumbnail {
+                appState.fileData.setViewMode(.thumbnail)
+            }
         } else {
+            let ext = URL(fileURLWithPath: expanded).pathExtension.lowercased()
+            let allowed = Set(appState.config.imageExtensions.map { AppConfig.normalizeExtension($0) })
+            guard allowed.contains(ext) else { return }
             appState.openPaths([expanded])
         }
     }
