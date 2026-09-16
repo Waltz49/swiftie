@@ -125,16 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         guard isPrimary else { return }
-        let path = appState.fileData.currentImagePath
-        let directory = appState.fileData.currentDirectory
-        if path != nil || directory != nil {
-            appState.config.saveRestoreState(
-                filePath: path,
-                directory: directory,
-                viewMode: appState.fileData.currentViewMode.rawValue,
-                macosSpaceMode: WindowFullscreen.macOSSpaceModeForRestore()
-            )
-        }
+        appState.persistRestoreState(enableLaunchRestore: true)
         appState.prepareForApplicationExit()
         if appState.config.isSettingsSessionActive {
             appState.config.cancelSettingsSession()
@@ -264,22 +255,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.openPaths(finderPaths)
         } else if !launchOptions.paths.isEmpty {
             appState.openPaths(launchOptions.paths)
-        } else if appState.config.restoreState, let snapshot = appState.config.getRestoreState() {
-            if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
-                appState.openPaths([file])
-            } else if let lastDir = snapshot.lastDirectory, FileManager.default.fileExists(atPath: lastDir) {
-                appState.loadDirectory(lastDir)
-            }
-            if let mode = ViewMode(rawValue: snapshot.lastViewMode) {
-                appState.fileData.setViewMode(mode)
-            }
-            if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
-                appState.fileData.setCurrentImagePath(file)
-                DisplayedImagesSync.ensureActiveImageListed(fileData: appState.fileData)
-                if PhotosLibraryBrowseLoader.isPhotosLibraryPath(file) {
-                    _ = PhotosLibraryBrowseLoader.requestAccessIfNeeded(for: file)
-                }
-            }
+        } else if let snapshot = appState.config.getRestoreState() {
+            appState.restoreSession(snapshot)
+        } else if let lastDir = appState.config.lastDirectory,
+                  FileManager.default.fileExists(atPath: lastDir) {
+            appState.loadDirectory(lastDir)
         }
 
         if !pendingOpenPaths.isEmpty {

@@ -245,6 +245,7 @@ final class AppState {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.browseImageHistory.onViewModeChanged()
+                self?.persistRestoreState()
             }
         }
 
@@ -1068,6 +1069,55 @@ final class AppState {
 
     func openPaths(_ paths: [String]) {
         directoryLoader.open(paths: paths)
+    }
+
+    /// Python launch restore: thumbnail/slideshow reopen the folder, browse reopens the file.
+    func restoreSession(_ snapshot: AppConfig.RestoreStateSnapshot) {
+        let mode = ViewMode(rawValue: snapshot.lastViewMode) ?? .thumbnail
+        let directory = snapshot.lastDirectory.flatMap { path in
+            FileManager.default.fileExists(atPath: path) ? path : nil
+        } ?? snapshot.lastFile.flatMap { FileDataModel.parentDirectory(of: $0) }
+
+        let listModes: Set<ViewMode> = [.thumbnail, .list, .slideshow, .slideshow2, .slideshow3]
+        if listModes.contains(mode) {
+            if let directory, FileManager.default.fileExists(atPath: directory) {
+                loadDirectory(directory, saveHistory: false)
+            }
+        } else if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
+            openPaths([file])
+        } else if let directory, FileManager.default.fileExists(atPath: directory) {
+            loadDirectory(directory, saveHistory: false)
+        }
+
+        if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
+            fileData.setCurrentImagePath(file)
+            DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+            if PhotosLibraryBrowseLoader.isPhotosLibraryPath(file) {
+                _ = PhotosLibraryBrowseLoader.requestAccessIfNeeded(for: file)
+            }
+        }
+        fileData.setViewMode(mode)
+    }
+
+    func persistRestoreState(enableLaunchRestore: Bool = false) {
+        let path = fileData.currentImagePath
+        let directory = fileData.currentDirectory
+        guard path != nil || directory != nil else { return }
+        if enableLaunchRestore {
+            config.saveRestoreState(
+                filePath: path,
+                directory: directory,
+                viewMode: fileData.currentViewMode.rawValue,
+                macosSpaceMode: WindowFullscreen.macOSSpaceModeForRestore()
+            )
+        } else {
+            config.updateRestoreSnapshot(
+                filePath: path,
+                directory: directory,
+                viewMode: fileData.currentViewMode.rawValue,
+                macosSpaceMode: WindowFullscreen.macOSSpaceModeForRestore()
+            )
+        }
     }
 
     func loadDirectory(_ path: String, saveHistory: Bool = true) {
@@ -2397,6 +2447,7 @@ final class DirectoryLoadCoordinator {
             appState.config.updateSetting("last_directory", value: dir)
             appState.eventBus.emit(.directoryLoaded, payload: .string(dir))
             appState.watchCurrentDirectory()
+            appState.persistRestoreState()
         } else if let directory = directories.first {
             loadDirectory(directory, saveHistory: true)
         }
@@ -2478,6 +2529,7 @@ final class DirectoryLoadCoordinator {
         appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))
         appState.watchCurrentDirectory()
+        appState.persistRestoreState()
     }
 
     func goBack() {

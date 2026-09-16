@@ -66,20 +66,19 @@ final class AppConfig {
         var lastMacOSSpaceMode: Bool?
     }
 
-    /// Python `get_restore_state` (nil when disabled or paths missing).
+    /// Python `get_restore_state` (nil when disabled or no usable paths).
     func getRestoreState() -> RestoreStateSnapshot? {
         guard restoreState else { return nil }
         let dict = restoreStateDict()
-        let lastFile = dict["last_file"] as? String
-        if let lastFile, !lastFile.isEmpty, !FileManager.default.fileExists(atPath: lastFile) {
-            clearRestoreState()
-            return nil
+        var lastFile = dict["last_file"] as? String
+        if let file = lastFile, file.isEmpty || !FileManager.default.fileExists(atPath: file) {
+            lastFile = nil
         }
-        let lastDirectory = dict["last_directory"] as? String
-        if let lastDirectory, !lastDirectory.isEmpty, !FileManager.default.fileExists(atPath: lastDirectory) {
-            clearRestoreState()
-            return nil
+        var lastDirectory = dict["last_directory"] as? String
+        if let directory = lastDirectory, directory.isEmpty || !FileManager.default.fileExists(atPath: directory) {
+            lastDirectory = nil
         }
+        guard lastFile != nil || lastDirectory != nil else { return nil }
         return RestoreStateSnapshot(
             lastFile: lastFile,
             lastDirectory: lastDirectory,
@@ -88,7 +87,7 @@ final class AppConfig {
         )
     }
 
-    /// Python `save_restore_state`.
+    /// Python `save_restore_state` — always marks restore enabled (same as Python).
     func saveRestoreState(
         filePath: String?,
         directory: String?,
@@ -96,13 +95,53 @@ final class AppConfig {
         macosSpaceMode: Bool?
     ) {
         var restore = restoreStateDict()
-        restore["enabled"] = restore["enabled"] as? Bool ?? true
-        restore["last_file"] = filePath
-        restore["last_directory"] = directory
+        restore["enabled"] = true
+        if let filePath, !filePath.isEmpty {
+            restore["last_file"] = filePath
+        } else {
+            restore["last_file"] = NSNull()
+        }
+        if let directory, !directory.isEmpty {
+            restore["last_directory"] = directory
+        } else {
+            restore["last_directory"] = NSNull()
+        }
         restore["last_view_mode"] = viewMode
-        restore["last_macos_space_mode"] = macosSpaceMode
+        if let macosSpaceMode {
+            restore["last_macos_space_mode"] = macosSpaceMode
+        } else {
+            restore["last_macos_space_mode"] = NSNull()
+        }
         updateSetting("restore_state", value: restore)
-        if let directory {
+        if let directory, !directory.isEmpty {
+            mutateSettings { $0["last_directory"] = directory }
+        }
+    }
+
+    /// Update last file/folder/view without changing the launch-restore toggle.
+    func updateRestoreSnapshot(
+        filePath: String?,
+        directory: String?,
+        viewMode: String,
+        macosSpaceMode: Bool?
+    ) {
+        var restore = restoreStateDict()
+        if let filePath, !filePath.isEmpty {
+            restore["last_file"] = filePath
+        } else {
+            restore["last_file"] = NSNull()
+        }
+        if let directory, !directory.isEmpty {
+            restore["last_directory"] = directory
+        } else {
+            restore["last_directory"] = NSNull()
+        }
+        restore["last_view_mode"] = viewMode
+        if let macosSpaceMode {
+            restore["last_macos_space_mode"] = macosSpaceMode
+        }
+        updateSetting("restore_state", value: restore)
+        if let directory, !directory.isEmpty {
             mutateSettings { $0["last_directory"] = directory }
         }
     }
