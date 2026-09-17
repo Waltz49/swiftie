@@ -11,7 +11,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Prowser</string>
+	<string>swift-prowser</string>
+	<key>CFBundleDisplayName</key>
+	<string>swift-prowser</string>
 	<key>CFBundleIconFile</key>
 	<string>Prowser</string>
 	<key>CFBundlePackageType</key>

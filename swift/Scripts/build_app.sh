@@ -204,9 +204,9 @@ if [[ "$CONFIG" == "release" ]]; then
     # Drop debug symbols and unused local symbols from the packaged binary.
     strip -rSTx "$APP_MACOS/Prowser"
 fi
-# SwiftPM Bundle.module looks for Prowser_Prowser.bundle at Bundle.main.bundleURL
-# (the .app wrapper). Do not also copy it into Contents/Resources (duplicate weight).
-ditto --norsrc --noextattr --noqtn "$RESOURCE_BUNDLE" "$OUTPUT/Prowser_Prowser.bundle"
+# SwiftPM Bundle.module resolves Prowser_Prowser.bundle under Contents/Resources when packaged.
+# Do not place it at the .app root (breaks codesign sealing / Full Disk Access identity).
+ditto --norsrc --noextattr --noqtn "$RESOURCE_BUNDLE" "$APP_RESOURCES/Prowser_Prowser.bundle"
 
 cp "$INFO_PLIST_SRC" "$OUTPUT/Contents/Info.plist"
 ICON_SRC="$SWIFT_ROOT/Prowser/Resources/Assets/Prowser.icns"
@@ -225,12 +225,37 @@ if [[ "$NERB_PROFILE" -eq 1 ]]; then
     /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PROWSER_PROFILE string ${NERB_PROFILE_PATH}" "$PLIST"
 fi
 
+sign_app_bundle() {
+    local app_path="$1"
+    local entitlements="$2"
+    local binary="$app_path/Contents/MacOS/Prowser"
+    # Ad-hoc signing; use a stable Developer ID identity here for daily installs if you have one.
+    local -a sign=(codesign --force --sign - --timestamp=none)
+
+    if [[ ! -f "$entitlements" ]]; then
+        echo "warning: entitlements not found at $entitlements; skipping codesign" >&2
+        return 0
+    fi
+    if [[ ! -f "$binary" ]]; then
+        echo "error: app binary not found at $binary" >&2
+        return 1
+    fi
+
+    echo "Code signing app bundle (ad-hoc, Photos entitlement on executable)..."
+    "${sign[@]}" --entitlements "$entitlements" "$binary" \
+        || { echo "error: codesign failed for $binary" >&2; return 1; }
+    # Seal the .app so TCC (e.g. Full Disk Access) associates with the bundle, not a lone binary.
+    "${sign[@]}" "$app_path" \
+        || { echo "error: codesign failed for $app_path" >&2; return 1; }
+    if codesign --verify --deep --strict "$app_path" >/dev/null 2>&1; then
+        echo "  codesign verify: OK"
+    else
+        echo "warning: codesign --verify reported issues for $app_path" >&2
+    fi
+}
+
 ENTITLEMENTS="$SWIFT_ROOT/Prowser/Resources/Prowser.entitlements"
-if [[ -f "$ENTITLEMENTS" ]]; then
-    echo "Signing with Photos library entitlement..."
-    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_MACOS/Prowser" 2>/dev/null \
-        || echo "warning: codesign failed (Photos privacy prompt may not appear for unsigned runs)" >&2
-fi
+sign_app_bundle "$OUTPUT" "$ENTITLEMENTS"
 
 # Register with Launch Services so Finder Open With sees this bundle.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -244,6 +269,10 @@ echo "  binary:        $APP_MACOS/Prowser ($(du -h "$APP_MACOS/Prowser" | awk '{
 if [[ "$NERB_PROFILE" -eq 1 ]]; then
     echo "  profile:       $NERB_PROFILE_PATH  (-p $NERB_PROFILE_PATH)"
 fi
+echo ""
+echo "Privacy:"
+echo "  Full Disk Access is manual: System Settings → Privacy & Security → Full Disk Access → +"
+echo "  Choose this .app (listed as swift-prowser). Re-add after rebuild if access stops working."
 echo ""
 echo "Launch:"
 echo "  open \"$OUTPUT\""

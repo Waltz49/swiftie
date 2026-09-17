@@ -43,7 +43,7 @@ enum ThumbnailEmptyStateRenderer {
 
             \(displayDirectory)
 
-            Enable Full Disk Access for Prowser (or your terminal) under
+            Enable Full Disk Access for swift-prowser (or your terminal) under
             System Settings → Privacy & Security
             """
         }

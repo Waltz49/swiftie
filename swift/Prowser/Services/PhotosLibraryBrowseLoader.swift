@@ -28,8 +28,8 @@ enum PhotosLibraryBrowseLoader {
         """
         macOS blocked reading this Photos library file.
 
-        Allow Prowser under System Settings → Privacy & Security → Photos,
-        or grant Full Disk Access to Prowser.app.
+        Allow swift-prowser under System Settings → Privacy & Security → Photos,
+        or grant Full Disk Access to swift-prowser.app.
         """
     }
 
