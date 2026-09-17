@@ -76,7 +76,13 @@ final class SidebarPaneSplitModel {
     /// Which left panes are shown in the stacked layout (matches Python `_display_pane_visibility`).
     static func leftDisplayPaneVisibility(appState: AppState) -> [Bool] {
         if appState.fileData.currentViewMode == .browse {
-            return [false, false, false]
+            // Keep the file tree mounted (left column is hidden in browse) so highlight state
+            // stays in sync with the active image while browsing.
+            return [
+                appState.config.bool(forKey: "file_tree_visible", default: true),
+                false,
+                false,
+            ]
         }
         return [
             appState.config.bool(forKey: "file_tree_visible", default: true),

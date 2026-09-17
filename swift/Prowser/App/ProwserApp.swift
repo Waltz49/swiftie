@@ -718,6 +718,25 @@ final class AppState {
         menuRefresh.refreshAll()
     }
 
+    /// After browse, align `currentDirectory` with the active image so the file tree can highlight correctly.
+    func ensureCurrentDirectoryAlignedWithActiveImage() {
+        guard let path = fileData.currentImagePath,
+              FileManager.default.fileExists(atPath: path) else { return }
+        if specificFilesActive || referenceGraphActive {
+            return
+        }
+        let dir = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+        if let current = fileData.currentDirectory,
+           Self.directoryPathsMatch(current, dir) {
+            return
+        }
+        loadDirectory(dir, saveHistory: false)
+        if let normalized = FileDataModel.normalizePath(path) {
+            fileData.setCurrentImagePath(normalized)
+            DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+        }
+    }
+
     func goBack() {
         directoryLoader.goBack()
     }
@@ -820,9 +839,14 @@ final class AppState {
         revealFileTreeFocusedOnActiveImage()
     }
 
+    /// Expand/select the tree row for the active image directory without moving keyboard focus.
+    func syncFileTreeToActiveImage() {
+        fileTreeSyncActiveImageToken += 1
+    }
+
     /// Show/focus file tree on the active image directory (Python tree show + `highlight_current_file`).
     func revealFileTreeFocusedOnActiveImage() {
-        fileTreeSyncActiveImageToken += 1
+        syncFileTreeToActiveImage()
         requestFileTreeFocus()
     }
 
@@ -1637,6 +1661,7 @@ final class DirectoryLoadCoordinator {
 
 struct BrowseReturnThumbnailState {
     var displayedImages: [String]
+    /// Legacy snapshot only; restore resolves selection by `currentImagePath`, not index.
     var currentIndex: Int
     var currentImagePath: String?
     var currentDirectory: String?

@@ -26,8 +26,25 @@ extension AppState {
         }
         if previous == .browse && newMode == .thumbnail {
             restoreBrowseReturnStateIfNeeded()
+            ensureCurrentDirectoryAlignedWithActiveImage()
+            reconcileUserRequestedTreeDirectoryWithActiveImage()
+            syncFileTreeToActiveImage()
+            focusMainCanvas()
         }
         lastViewMode = newMode
+    }
+
+    /// Drop a stale tree pin when browse navigation moved the active image to another folder.
+    func reconcileUserRequestedTreeDirectoryWithActiveImage() {
+        guard let requested = userRequestedTreeDirectory,
+              !specificFilesActive,
+              let path = fileData.currentImagePath else { return }
+        let imageDir = FileTreeFilter.standardizedPath(
+            URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+        )
+        if imageDir != FileTreeFilter.standardizedPath(requested) {
+            clearUserRequestedTreeDirectory()
+        }
     }
 
     /// Drop stashed thumbnail context so exiting browse uses the current directory listing.
@@ -62,6 +79,7 @@ extension AppState {
     func restoreBrowseReturnStateIfNeeded() {
         guard let stashed = browseReturnThumbnailState else { return }
         browseReturnThumbnailState = nil
+        let pathAtBrowseExit = fileData.currentImagePath
         config.updateSetting("sort_mode", value: stashed.sortMode)
         config.updateSetting("sort_reversed", value: stashed.sortReversed)
         if let directory = stashed.currentDirectory {
@@ -69,14 +87,31 @@ extension AppState {
         }
         setSpecificFilesActive(stashed.specificFilesActive)
         fileData.setDisplayedImages(stashed.displayedImages)
-        if let path = stashed.currentImagePath {
+        if let path = Self.resolveActiveImagePathAfterBrowseRestore(
+            preferred: pathAtBrowseExit,
+            fallback: stashed.currentImagePath,
+            in: fileData.displayedImages
+        ) {
             fileData.setCurrentImagePath(path)
-        } else {
-            fileData.setCurrentIndex(stashed.currentIndex)
         }
         config.updateSetting("thumbnail_cell_size", value: stashed.thumbnailCellSize)
         config.updateSetting("manual_thumbnail_size", value: stashed.manualThumbnailSize)
         config.applySettingsChange(emit: eventBus)
+    }
+
+    /// Pick the active file by path after restoring a stashed thumbnail list. Never uses list indices.
+    private static func resolveActiveImagePathAfterBrowseRestore(
+        preferred: String?,
+        fallback: String?,
+        in displayedImages: [String]
+    ) -> String? {
+        for candidate in [preferred, fallback] {
+            guard let candidate,
+                  let normalized = FileDataModel.normalizePath(candidate),
+                  displayedImages.contains(normalized) else { continue }
+            return normalized
+        }
+        return nil
     }
     /// Python launch restore: thumbnail/slideshow reopen the folder, browse reopens the file.
     func restoreSession(_ snapshot: AppConfig.RestoreStateSnapshot) {

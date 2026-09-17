@@ -126,14 +126,6 @@ struct FileTreeView: NSViewRepresentable {
             lastSyncedDirectory = nil
             lastSyncedImagePath = nil
             syncSelection(retryCount: 0, force: true)
-            appState.focusFileTreeKeyboardTarget()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let self else { return }
-                self.lastSyncedDirectory = nil
-                self.lastSyncedImagePath = nil
-                self.syncSelection(retryCount: 0, force: true)
-                self.appState.focusFileTreeKeyboardTarget()
-            }
         }
 
         func collapseUIIfRequested() {
@@ -591,6 +583,7 @@ struct FileTreeView: NSViewRepresentable {
 
         /// Directory row to expand/select (Python `highlight_current_directory` / `user_requested_directory`).
         private func directoryToHighlightForTreeSync() -> String? {
+            appState.reconcileUserRequestedTreeDirectoryWithActiveImage()
             if let requested = appState.userRequestedTreeDirectory,
                !appState.specificFilesActive {
                 return FileTreeFilter.standardizedPath(requested)

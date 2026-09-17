@@ -36,7 +36,32 @@ final class KeyboardHandlerController {
 
     /// Tree forwards unhandled keys here (Python `keyboard_handler_manager.handle_key_event` from the tree view).
     func handleKeyEventFromTree(_ event: NSEvent) -> Bool {
-        handleKeyDown(event, fromTreeFocus: true)
+        let handled = handleKeyDown(event, fromTreeFocus: true)
+        if handled, Self.treeJumpKeyShouldMoveFocusToCanvas(event) {
+            appState?.focusMainCanvas()
+            appState?.syncFileTreeKeyboardFocus(from: event.window)
+        }
+        return handled
+    }
+
+    /// E/H and Home/End jump the active image; focus should leave the file tree (thumbnail/list/browse canvas).
+    private static func treeJumpKeyShouldMoveFocusToCanvas(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) || flags.contains(.control) || flags.contains(.shift) {
+            return false
+        }
+        switch event.keyCode {
+        case 115, 119: // Home, End
+            return true
+        default:
+            break
+        }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "h", "e":
+            return true
+        default:
+            return false
+        }
     }
 
     static func fileTreeKeyboardTargetIsFocused(in window: NSWindow?) -> Bool {
@@ -1166,9 +1191,8 @@ final class KeyboardHandlerController {
 
     private func returnToThumbnails(appState: AppState) -> Bool {
         resetBrowseDoubleTap()
-        if let path = appState.fileData.currentImagePath,
-           let index = appState.fileData.displayedImages.firstIndex(of: path) {
-            appState.fileData.setCurrentIndex(index)
+        if let path = appState.fileData.currentImagePath {
+            appState.fileData.setCurrentImagePath(path)
         }
         appState.fileData.setViewMode(.thumbnail)
         return true

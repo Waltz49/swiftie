@@ -115,9 +115,8 @@ extension AppState {
 
     /// Exit browse mode and return to thumbnail view (port of ``close_browse_view``).
     func closeBrowseView() {
-        if let path = fileData.currentImagePath,
-           let index = fileData.displayedImages.firstIndex(of: path) {
-            fileData.setCurrentIndex(index)
+        if let path = fileData.currentImagePath {
+            fileData.setCurrentImagePath(path)
         }
         fileData.setViewMode(.thumbnail)
     }
