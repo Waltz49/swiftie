@@ -102,7 +102,9 @@ final class RenameStatusManager {
         guard !imageFiles.isEmpty else { return false }
 
         if !filterPattern.isEmpty, filterPattern != "*" {
-            imageFiles = imageFiles.filter { fnmatch($0, pattern: filterPattern) }
+            imageFiles = imageFiles.filter {
+                DirectoryScanner.matchesGlob($0, pattern: filterPattern)
+            }
         }
         guard !imageFiles.isEmpty else { return false }
 
@@ -140,11 +142,5 @@ final class RenameStatusManager {
             return number
         }
         return nil
-    }
-
-    private static func fnmatch(_ name: String, pattern: String) -> Bool {
-        let normalized = pattern.hasPrefix("*") ? pattern : "*\(pattern)*"
-        return (name as NSString).range(of: normalized, options: [.caseInsensitive]).location != NSNotFound
-            || name.contains(pattern.replacingOccurrences(of: "*", with: ""))
     }
 }

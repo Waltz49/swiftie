@@ -22,12 +22,15 @@ enum AppKitDialogKeyboardNavigation {
             // Floating panels share the parent key window; during `runModal(for:)` route keys
             // to the modal panel even when `event.window` is still the main window.
             let isModalDialog = NSApp.modalWindow === window
-            guard isModalDialog || (window.isKeyWindow && event.window === window) else { return event }
+            let panelIsKey = window.isKeyWindow
+            guard isModalDialog || panelIsKey else { return event }
 
             if event.keyCode == 53, let escapeButton {
                 escapeButton.performClick(nil)
                 return nil
             }
+
+            guard isModalDialog || (panelIsKey && event.window === window) else { return event }
 
             let focused = window.firstResponder as? NSButton
             let currentIndex = focused.flatMap { buttonsLeftToRight.firstIndex(of: $0) }

@@ -199,7 +199,6 @@ struct ProwserCommands: Commands {
                 Button("Find Duplicate Image Files (Recursive)") {
                     Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
                 }
-                .keyboardShortcut("f", modifiers: .shift)
 
                 Button("Show Image in Directory") {
                     Task { @MainActor in appState.showImageInDirectory() }

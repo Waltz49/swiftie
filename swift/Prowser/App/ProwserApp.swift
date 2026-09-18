@@ -125,6 +125,15 @@ final class DirectoryLoadCoordinator {
                 selection: appState.selection
             )
         }
+        if !appState.referenceGraphActive {
+            appState.duplicateSections = []
+            appState.setSpecificFilesActive(false)
+            // Python `directory_loader.load_directory`: leaving duplicate grouped view on normal load.
+            if appState.config.string(forKey: "sort_mode", default: "date") == SortMode.duplicates.rawValue {
+                appState.config.updateSetting("sort_mode", value: SortMode.date.rawValue)
+                appState.config.updateSetting("sort_reversed", value: false)
+            }
+        }
         let scanned = DirectoryScanner.scanDirectory(
             at: path,
             extensions: appState.config.imageExtensions,
@@ -136,22 +145,18 @@ final class DirectoryLoadCoordinator {
         appState.fileData.setCurrentDirectory(path)
         let pinnedPath = appState.fileData.currentImagePath
         appState.fileData.setDisplayedImages(images)
-        if let pinnedPath, let normalized = FileDataModel.normalizePath(pinnedPath) {
-            if images.contains(normalized) {
-                appState.fileData.setCurrentImagePath(normalized)
-            } else if FileDataModel.pathIsInDirectory(file: normalized, directory: path),
-                      FileManager.default.fileExists(atPath: normalized) {
-                // In this folder but omitted by filter (e.g. filename pattern).
-                appState.fileData.setCurrentImagePath(normalized)
-            } else if let first = images.first {
-                appState.fileData.setCurrentImagePath(first)
-            } else {
-                appState.fileData.setCurrentImagePath(nil)
-            }
+        if let pinnedPath, let normalized = FileDataModel.normalizePath(pinnedPath),
+           images.contains(normalized) {
+            appState.fileData.setCurrentImagePath(normalized)
         } else if let first = images.first {
             appState.fileData.setCurrentImagePath(first)
+        } else {
+            appState.fileData.setCurrentImagePath(nil)
         }
-        DisplayedImagesSync.ensureActiveImageListed(fileData: appState.fileData)
+        DisplayedImagesSync.ensureActiveImageListed(
+            fileData: appState.fileData,
+            filterPattern: appState.filterSettings.filterPattern
+        )
         appState.config.updateSetting("last_directory", value: path)
         appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))
@@ -185,9 +190,12 @@ final class DirectoryLoadCoordinator {
         if let directory = entry.directory {
             appState.fileData.setCurrentDirectory(directory)
         }
+        appState.duplicateSections = entry.duplicateSections
         if !entry.displayedImages.isEmpty {
             appState.fileData.setDisplayedImages(entry.displayedImages)
             if entry.referenceGraphActive {
+                appState.setSpecificFilesActive(true)
+            } else if entry.specificFilesActive {
                 appState.setSpecificFilesActive(true)
             } else if let directory = entry.directory {
                 let scanned = Set(DirectoryScanner.scanDirectory(

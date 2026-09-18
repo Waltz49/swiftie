@@ -1076,6 +1076,10 @@ final class KeyboardHandlerController {
     ) -> Int {
         guard count > 0 else { return 0 }
         let safeCurrent = min(max(0, currentIndex), count - 1)
+        if let rowLayout = appState.thumbnailSectionedRowLayout,
+           !appState.duplicateSections.isEmpty {
+            return rowLayout.verticalTarget(currentIndex: safeCurrent, stepSign: stepSign)
+        }
         let columns = max(1, resolvedThumbnailColumns(appState: appState, count: count))
         let row = safeCurrent / columns
         let col = safeCurrent % columns

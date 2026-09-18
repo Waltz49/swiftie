@@ -58,6 +58,7 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 - [x] Inline toolbar: collapse all, rename status, settings, filter presets (all / images only / use filter)
 - [x] Toolbar visibility toggle (“Show Toolbar”) in tools/context menu
 - [x] Tree pane empty-area context menu → same as tools menu (`tree_tools_menu.py`)
+- [x] **Keyboard focus:** tree-context shortcuts (⇧F, ⇧A, F2, ⌘C directory path) require file-tree first responder; selecting a folder claims focus (`fileTreeKeyboardFocused`, titlebar highlight)
 
 ### Preview pane
 
@@ -125,7 +126,7 @@ Source: `files/file_tree_handler.py` `contextMenuEvent`. Menu in `FileTreeContex
 - [~] Copy Directory Path (⌘C)
 - [~] Open in Finder
 - [~] Show All Images inc. Subdirs (⇧A)
-- [~] Find Duplicate Image Files (⇧F)
+- [x] Find Duplicate Image Files (⇧F — file tree keyboard focus only; highlighted folder)
 - [~] Find Visually Similar Image Files — `findSimilarInFolder` via `SimilaritySearchBridge`
 - [~] Clear Cache (folder subtree)
 
@@ -226,8 +227,8 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [~] Search by Person… (⌘P)
 - [x] Quick Person Search (⌃⌘P)
 - [~] Extract Faces (⇧⌘P in Python Search menu)
-- [~] Find Duplicate Image Files — in directory
-- [~] Find Duplicate Image Files — recursive (⇧F)
+- [x] Find Duplicate Image Files — in directory
+- [x] Find Duplicate Image Files — recursive (Search menu, click only; no ⇧F — use tree context menu or tree focus + ⇧F)
 - [ ] Find Similar Image Files submenu (in directory / recursive — separate from ⌘K reorder)
 - [x] Show Image in Directory (⇧⌘H)
 - [~] Dynamic `aboutToShow` (`update_search_menu_states`)

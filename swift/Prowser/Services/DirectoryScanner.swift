@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Scans a directory for image files. Port of `directory_loader._scan_directory_efficiently`.
@@ -86,21 +87,23 @@ enum DirectoryScanner {
         return false
     }
 
-    /// Simple glob: `*` wildcard only (matches Python session filter for common cases).
+    /// Port of `ImageBrowserConfig.get_filter_pattern_for_matching` + `fnmatch.fnmatch(..., .lower())`.
+    static func patternForMatching(_ storedPattern: String) -> String {
+        if storedPattern == "*" || storedPattern.isEmpty { return "*" }
+        if storedPattern.contains("*") || storedPattern.contains("?") || storedPattern.contains("[") {
+            return storedPattern
+        }
+        return storedPattern + "*"
+    }
+
+    /// Filename filter match (Python `sorting_manager.filter_images_by_pattern`).
     static func matchesGlob(_ filename: String, pattern: String) -> Bool {
         if pattern == "*" || pattern.isEmpty { return true }
-        if pattern.hasPrefix("*") && pattern.hasSuffix("*") {
-            let middle = String(pattern.dropFirst().dropLast())
-            return filename.contains(middle)
+        let matchPattern = patternForMatching(pattern)
+        return filename.withCString { namePtr in
+            matchPattern.withCString { patternPtr in
+                fnmatch(patternPtr, namePtr, FNM_CASEFOLD) == 0
+            }
         }
-        if pattern.hasPrefix("*") {
-            let suffix = String(pattern.dropFirst())
-            return filename.hasSuffix(suffix)
-        }
-        if pattern.hasSuffix("*") {
-            let prefix = String(pattern.dropLast())
-            return filename.hasPrefix(prefix)
-        }
-        return filename == pattern
     }
 }

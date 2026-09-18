@@ -199,6 +199,11 @@ enum DirectoryRefreshService {
         }
 
         invalidateThumbnails(appState: appState, paths: Array(removed))
+
+        let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
+        if sortMode == .duplicates {
+            appState.applyCurrentSort()
+        }
     }
 
     private static func nextImageAfterDeletion(

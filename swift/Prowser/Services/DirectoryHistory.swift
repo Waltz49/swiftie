@@ -15,10 +15,13 @@ final class DirectoryHistory {
         /// Python `state['presentation'] == 'reference_graph'`.
         var referenceGraphActive: Bool = false
         var referenceGraphFocusPath: String? = nil
+        var specificFilesActive: Bool = false
+        var duplicateSections: [DuplicateGroupPresentation.DuplicateSection] = []
     }
 
     /// Supplies the reference-graph presentation flags (owned by `AppState`) when capturing state.
     var referenceGraphStateProvider: (() -> (active: Bool, focusPath: String?))?
+    var duplicateStateProvider: (() -> (specificFilesActive: Bool, duplicateSections: [DuplicateGroupPresentation.DuplicateSection]))?
 
     private var backward: [Entry] = []
     private var forward: [Entry] = []
@@ -52,6 +55,7 @@ final class DirectoryHistory {
 
     func entry(from fileData: FileDataModel, config: AppConfig, selection: SelectionModel) -> Entry {
         let graphState = referenceGraphStateProvider?() ?? (active: false, focusPath: nil)
+        let duplicateState = duplicateStateProvider?() ?? (specificFilesActive: false, duplicateSections: [])
         return Entry(
             directory: fileData.currentDirectory,
             currentPath: fileData.currentImagePath,
@@ -62,7 +66,9 @@ final class DirectoryHistory {
             sortMode: config.string(forKey: "sort_mode", default: SortMode.date.rawValue),
             sortReversed: config.bool(forKey: "sort_reversed", default: false),
             referenceGraphActive: graphState.active,
-            referenceGraphFocusPath: graphState.focusPath
+            referenceGraphFocusPath: graphState.focusPath,
+            specificFilesActive: duplicateState.specificFilesActive,
+            duplicateSections: duplicateState.duplicateSections
         )
     }
 

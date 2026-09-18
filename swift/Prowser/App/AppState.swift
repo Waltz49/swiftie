@@ -91,6 +91,8 @@ final class AppState {
     private var quitConfirmedViaClose = false
     /// Live column count from the thumbnail grid layout (source of truth for keyboard navigation).
     var thumbnailGridColumns = 1
+    /// Visual row map for duplicate-section thumbnail ↑/↓ (from live grid layout).
+    var thumbnailSectionedRowLayout: ThumbnailSectionedLayout.RowLayout?
     /// Bumped when on-disk image content changes so list/thumbnail views reload affected thumbs.
     var thumbnailInvalidationGeneration = 0
     /// Bumped when the active browse image file changes on disk at the same path.
@@ -103,6 +105,8 @@ final class AppState {
     var lastDropLocation: String?
     /// Paths deleted in formatted-list mode; slot preserved with red-X overlay (Python `deleted_file_placeholders`).
     var deletedFilePlaceholders: Set<String> = []
+    /// Section boundaries for duplicate-group thumbnail layout (Python `duplicate_sections`).
+    var duplicateSections: [DuplicateGroupPresentation.DuplicateSection] = []
     let menuRefresh = MenuRefreshState()
     let renameStatusManager: RenameStatusManager
     weak var thumbnailGridHost: ThumbnailGridNSView?
@@ -182,6 +186,10 @@ final class AppState {
         directoryHistory.referenceGraphStateProvider = { [weak self] in
             guard let self else { return (active: false, focusPath: nil) }
             return (active: self.referenceGraphActive, focusPath: self.referenceGraphFocusPath)
+        }
+        directoryHistory.duplicateStateProvider = { [weak self] in
+            guard let self else { return (specificFilesActive: false, duplicateSections: []) }
+            return (specificFilesActive: self.specificFilesActive, duplicateSections: self.duplicateSections)
         }
 
         // Lifetime bus subscriptions (app teardown ends the process).
@@ -723,7 +731,10 @@ final class AppState {
         loadDirectory(dir, saveHistory: false)
         if let normalized = FileDataModel.normalizePath(path) {
             fileData.setCurrentImagePath(normalized)
-            DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+            DisplayedImagesSync.ensureActiveImageListed(
+                fileData: fileData,
+                filterPattern: filterSettings.filterPattern
+            )
         }
     }
 
@@ -1010,7 +1021,10 @@ final class AppState {
             loadDirectory(directory, saveHistory: saveHistory)
         }
         fileData.setCurrentImagePath(path)
-        DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+        DisplayedImagesSync.ensureActiveImageListed(
+            fileData: fileData,
+            filterPattern: filterSettings.filterPattern
+        )
         if let normalized = FileDataModel.normalizePath(path),
            let index = fileData.displayedImages.firstIndex(of: normalized) {
             fileData.setCurrentIndex(index)
@@ -1322,7 +1336,10 @@ final class AppState {
         config.updateSetting("sort_reversed", value: false)
         loadDirectory(directory, saveHistory: false)
         fileData.setCurrentImagePath(filePath)
-        DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+        DisplayedImagesSync.ensureActiveImageListed(
+            fileData: fileData,
+            filterPattern: filterSettings.filterPattern
+        )
         fileData.setViewMode(.thumbnail)
         status.show(hadFilter ? "Opened file, filter cleared" : "Opened file")
     }

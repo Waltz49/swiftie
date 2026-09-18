@@ -23,6 +23,7 @@ final class CancellableProgressPanelController {
         )
         panel.title = title
         panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.level = .modalPanel
@@ -77,9 +78,15 @@ final class CancellableProgressPanelController {
             buttonsLeftToRight: [cancelButton],
             escapeButton: cancelButton
         )
-        panel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(cancelButton)
         refresh()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.panel.makeKeyAndOrderFront(nil)
+            self.panel.makeFirstResponder(self.cancelButton)
+        }
     }
 
     func close() {

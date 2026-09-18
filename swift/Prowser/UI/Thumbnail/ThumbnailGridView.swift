@@ -95,6 +95,8 @@ struct ThumbnailGridView: NSViewRepresentable {
             var showImageSize: Bool
             var showExtensions: Bool
             var imageExtensions: [String]
+            var duplicateSections: [DuplicateGroupPresentation.DuplicateSection]
+            var sortMode: String
         }
 
         private struct SelectionFingerprint: Equatable {
@@ -147,7 +149,12 @@ struct ThumbnailGridView: NSViewRepresentable {
                 self.appState.refreshMenuState()
             }
             bag.subscribe(.deletedPlaceholdersChanged) { [weak self] _ in
-                self?.syncDeletedPlaceholders()
+                guard let self else { return }
+                self.syncDeletedPlaceholders()
+                if self.appState.isFormattedListMode(), !self.appState.duplicateSections.isEmpty {
+                    self.gridView?.reloadLayoutIfNeeded()
+                    self.gridView?.publishNavigationLayoutToAppState()
+                }
             }
         }
 
@@ -244,7 +251,9 @@ struct ThumbnailGridView: NSViewRepresentable {
                 showFilenames: appState.config.bool(forKey: "thumbnail_filename_visible", default: false),
                 showImageSize: appState.config.bool(forKey: "show_image_size", default: false),
                 showExtensions: appState.config.bool(forKey: "show_extensions", default: true),
-                imageExtensions: appState.config.imageExtensions
+                imageExtensions: appState.config.imageExtensions,
+                duplicateSections: appState.duplicateSections,
+                sortMode: appState.config.string(forKey: "sort_mode", default: SortMode.date.rawValue)
             )
             if !force, fingerprint == lastGridSyncFingerprint {
                 syncSelectionVisualsIfNeeded(to: gridView)
@@ -279,6 +288,9 @@ struct ThumbnailGridView: NSViewRepresentable {
                 lastSyncedIndex = -1
             }
             gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
+            let duplicateMode = fingerprint.sortMode == SortMode.duplicates.rawValue
+            gridView.isDuplicateSectionMode = duplicateMode && !fingerprint.duplicateSections.isEmpty
+            gridView.duplicateSections = fingerprint.duplicateSections
             gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
             gridView.updateEmptyStateContext()
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
@@ -289,6 +301,9 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.showExtensions = fingerprint.showExtensions
             gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
             gridView.reloadLayoutIfNeeded()
+            if duplicateMode, !fingerprint.duplicateSections.isEmpty {
+                gridView.publishNavigationLayoutToAppState()
+            }
             let columns = max(1, gridView.gridColumnCount)
             if appState.thumbnailGridColumns != columns {
                 appState.thumbnailGridColumns = columns
@@ -438,10 +453,16 @@ struct ThumbnailGridView: NSViewRepresentable {
             ThumbnailContextMenu.show(for: event, clickedIndex: clickedIndex, in: view, appState: appState)
         }
 
-        func thumbnailGridDidUpdateLayout(columns: Int) {
+        func thumbnailGridDidUpdateLayout(
+            columns: Int,
+            sectionedRowLayout: ThumbnailSectionedLayout.RowLayout?
+        ) {
             let value = max(1, columns)
             if appState.thumbnailGridColumns != value {
                 appState.thumbnailGridColumns = value
+            }
+            if appState.thumbnailSectionedRowLayout != sectionedRowLayout {
+                appState.thumbnailSectionedRowLayout = sectionedRowLayout
             }
         }
 

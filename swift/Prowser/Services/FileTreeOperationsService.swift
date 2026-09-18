@@ -61,46 +61,12 @@ final class FileTreeOperationsService {
 
     func findDuplicateImages(in directory: String) {
         guard let appState else { return }
-        if FileTreePathRestrictions.isRootOrSystemVolume(directory) {
-            showRestrictedAlert(directory: directory)
-            return
+        Task { @MainActor in
+            await DuplicateFinderService.findRecursive(
+                appState: appState,
+                overrideRootDirectory: directory
+            )
         }
-
-        if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
-        }
-
-        let excluded = PathExclusions.excludedPaths(config: appState.config)
-        let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
-        let maxDepth = appState.config.int(forKey: "search_depth", default: 4)
-        let paths = DirectoryScanner.scanDirectoryRecursive(
-            at: directory,
-            extensions: appState.config.imageExtensions,
-            filterPattern: appState.filterSettings.filterPattern,
-            maxDepth: maxDepth,
-            excludedPaths: excluded,
-            includeHidden: showHidden
-        )
-
-        guard !paths.isEmpty else {
-            showAlert("No images found", informative: "No matching images in this folder tree.")
-            return
-        }
-
-        let duplicates = DuplicateHashService.duplicateSortedPaths(paths)
-        guard !duplicates.isEmpty else {
-            showAlert("No Duplicates Found", informative: "No exact byte-for-byte duplicates found (recursive).")
-            return
-        }
-
-        appState.loadDirectory(directory, saveHistory: true)
-        appState.config.updateSetting("sort_mode", value: SortMode.duplicates.rawValue)
-        appState.setSpecificFilesActive(true)
-        appState.fileData.setDisplayedImages(duplicates)
-        appState.fileData.setCurrentIndex(0)
-        appState.fileData.setCurrentImagePath(duplicates[0])
-        appState.fileData.setViewMode(.thumbnail)
-        appState.status.show("Found \(duplicates.count) duplicate files")
     }
 
     func clearCache(for directory: String) {

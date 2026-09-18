@@ -402,6 +402,9 @@ extension AppState {
         if mode != .exifDate && mode != .exifYear && mode != .duplicates {
             clearDeletedPlaceholders()
         }
+        if mode != .duplicates {
+            duplicateSections = []
+        }
         applyCurrentSort()
         status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
         menuRefresh.refreshAll()
@@ -419,6 +422,12 @@ extension AppState {
         )
         metadataCache.saveIfNeeded()
         fileData.setDisplayedImages(sorted)
+        if options.mode == .duplicates {
+            let pairs = DuplicateHashService.duplicateGroupPairs(sorted)
+            duplicateSections = DuplicateGroupPresentation.duplicateSections(from: pairs)
+        } else if !duplicateSections.isEmpty {
+            duplicateSections = []
+        }
         if let current, sorted.contains(current) {
             fileData.setCurrentImagePath(current)
         }

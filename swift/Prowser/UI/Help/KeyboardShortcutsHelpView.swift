@@ -81,6 +81,14 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘Return / ⌘⇧Return", "Collapse / expand file tree"),
                         ("F2", "Rename selected file"),
                     ])
+                    shortcutSection("File tree (when tree has focus)", rows: [
+                        ("F2", "Rename highlighted directory"),
+                        ("⌘C", "Copy directory path"),
+                        ("⇧A", "Show all images including subdirectories"),
+                        ("⇧F", "Find duplicate image files (recursive from highlighted folder)"),
+                        ("Return / Space", "Open folder or expand/collapse"),
+                        ("Tab", "Move focus to thumbnail grid"),
+                    ])
                     shortcutSection("File & Search", rows: [
                         ("⌘O", "Open directory"),
                         ("⌘⇧O", "Open file"),
@@ -92,7 +100,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘⇧H", "Show image in directory"),
                         ("⌘Z", "Undo delete (restore from Trash)"),
                         ("⌘⇧Z", "Resize images"),
-                        ("⇧F", "Find duplicate files (recursive)"),
+                        ("Search menu", "Find duplicate files (recursive) — no keyboard shortcut"),
                         ("⌘1–⌘9", "Move to destination"),
                         ("⌘0", "Move to last drop location"),
                         ("⌥⌘1–⌥⌘9", "Copy to destination"),

@@ -4,12 +4,20 @@ import Foundation
 /// directory scans omit it (e.g. filename filter).
 @MainActor
 enum DisplayedImagesSync {
-    static func ensureActiveImageListed(fileData: FileDataModel) {
+    static func ensureActiveImageListed(
+        fileData: FileDataModel,
+        filterPattern: String = "*"
+    ) {
         guard let raw = fileData.currentImagePath,
               let path = FileDataModel.normalizePath(raw),
               FileManager.default.fileExists(atPath: path),
               let currentDirectory = fileData.currentDirectory,
               FileDataModel.pathIsInDirectory(file: path, directory: currentDirectory) else { return }
+
+        let basename = (path as NSString).lastPathComponent
+        if !DirectoryScanner.matchesGlob(basename, pattern: filterPattern) {
+            return
+        }
 
         let images = fileData.getDisplayedImages()
         if images.contains(path) {

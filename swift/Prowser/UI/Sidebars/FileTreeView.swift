@@ -261,10 +261,12 @@ struct FileTreeView: NSViewRepresentable {
 
         func handleContextMenu(for event: NSEvent) {
             guard let outlineView else { return }
+            appState.focusFileTreeKeyboardTarget()
             let point = outlineView.convert(event.locationInWindow, from: nil)
             let row = outlineView.row(at: point)
 
             if row >= 0, let node = outlineView.item(atRow: row) as? FileTreeNode, node.isDirectory {
+                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                 FileTreeContextMenu.show(for: event, directoryPath: node.path, in: outlineView, appState: appState)
                 return
             }
@@ -1196,6 +1198,7 @@ final class FileTreeOutlineView: NSOutlineView {
                 coordinator.scheduleSingleClickToggle(for: node)
             }
             selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            appState?.focusFileTreeKeyboardTarget()
             return
         }
 

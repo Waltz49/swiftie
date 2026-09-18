@@ -18,4 +18,13 @@ final class DirectoryScannerTests: XCTestCase {
         XCTAssertTrue(DirectoryScanner.matchesGlob("only.png", pattern: "only.png"))
         XCTAssertFalse(DirectoryScanner.matchesGlob("only.jpg", pattern: "only.png"))
     }
+
+    func testMatchesGlobCaseInsensitive() {
+        XCTAssertTrue(DirectoryScanner.matchesGlob("DSC_0001.jpg", pattern: "dsc_*"))
+        XCTAssertTrue(DirectoryScanner.matchesGlob("Vacation.jpg", pattern: "vacation*"))
+    }
+
+    func testMatchesGlobMiddleWildcard() {
+        XCTAssertTrue(DirectoryScanner.matchesGlob("IMG_001_edit.jpg", pattern: "IMG_*_edit.jpg*"))
+    }
 }

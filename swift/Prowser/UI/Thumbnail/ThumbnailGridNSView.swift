@@ -20,7 +20,7 @@ protocol ThumbnailGridDelegate: AnyObject {
     func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void)
     func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
     func thumbnailGridDidApplyFilter(label: String)
-    func thumbnailGridDidUpdateLayout(columns: Int)
+    func thumbnailGridDidUpdateLayout(columns: Int, sectionedRowLayout: ThumbnailSectionedLayout.RowLayout?)
 }
 
 /// Custom-painted thumbnail grid. Port of `thumbnails/thumbnail_canvas.py` (phase 1).
@@ -90,6 +90,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     var referenceGraph: ReferenceGraph? {
         didSet { reloadLayoutIfNeeded() }
     }
+    /// Duplicate-group section layout (Python `duplicate_sections` + `is_section_mode`).
+    var duplicateSections: [DuplicateGroupPresentation.DuplicateSection] = [] {
+        didSet { reloadLayoutIfNeeded() }
+    }
+    var isDuplicateSectionMode: Bool = false {
+        didSet { reloadLayoutIfNeeded() }
+    }
+    private var sectionedLayoutResult: ThumbnailSectionedLayout.Result?
     var deletedPlaceholderPaths: Set<String> = [] {
         didSet { needsDisplay = true }
     }
@@ -107,7 +115,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var referenceLayout: ReferenceGraphLayoutResult?
     private var referenceNodeFrames: [Int: NSRect] = [:]
 
-    var gridColumnCount: Int { max(1, isReferenceGraphMode ? 1 : metrics.columns) }
+    var gridColumnCount: Int {
+        if let sectionedLayoutResult {
+            return max(1, sectionedLayoutResult.columns)
+        }
+        return max(1, isReferenceGraphMode ? 1 : metrics.columns)
+    }
     private var isReferenceGraphMode: Bool {
         referenceGraph != nil && !imagePaths.isEmpty
     }
@@ -138,6 +151,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let referenceGraphNodeCount: Int
         let manualReferenceThumbSize: Bool
         let manualThumbnailSize: Bool
+        let duplicateSectionCount: Int
+        let duplicateSectionStarts: [Int]
+        let isDuplicateSectionMode: Bool
     }
 
     /// File path under the first mouse-down of a press–drag–click gesture (cleared on mouse up).
@@ -185,6 +201,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         if imagePaths.isEmpty {
             referenceLayout = nil
             referenceNodeFrames = [:]
+            sectionedLayoutResult = nil
             let viewport = emptyStateViewportSize()
             applyDocumentSize(
                 NSSize(
@@ -193,19 +210,58 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 )
             )
             needsDisplay = true
+            gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1, sectionedRowLayout: nil)
             return
         }
         if let graph = referenceGraph {
             reloadReferenceGraphLayout(graph: graph, viewportWidth: viewportWidth)
+            sectionedLayoutResult = nil
             return
         }
         referenceLayout = nil
         referenceNodeFrames = [:]
         let viewport = viewportSizeForLayout()
+        let sectionedDuplicate = isDuplicateSectionMode && !duplicateSections.isEmpty
         let cellSize = resolvedLayoutCellSize(
             viewportWidth: viewportWidth,
-            viewportHeight: viewport.height
+            viewportHeight: viewport.height,
+            sectionedDuplicateFilenames: sectionedDuplicate && showFilenames
         )
+        if sectionedDuplicate {
+            let layout = ThumbnailSectionedLayout.computeDuplicateLayout(
+                paths: imagePaths,
+                sections: duplicateSections,
+                viewportWidth: viewportWidth,
+                thumbnailSize: cellSize,
+                showFilename: showFilenames,
+                showImageSize: showImageSize,
+                currentImagePath: appState?.fileData.currentImagePath
+            )
+            sectionedLayoutResult = layout
+            metrics = ThumbnailLayout.metrics(
+                for: viewportWidth,
+                itemCount: imagePaths.count,
+                showFilename: showFilenames,
+                showImageSize: showImageSize,
+                cellSize: cellSize,
+                scrollbarWidth: verticalScrollbarReservedWidth()
+            )
+            let docHeight = max(layout.contentSize.height, viewport.height)
+            applyDocumentSize(
+                NSSize(
+                    width: max(layout.contentSize.width, viewport.width),
+                    height: docHeight
+                )
+            )
+            needsDisplay = true
+            scheduleLoadVisibleThumbnails(debounced: false)
+            gridDelegate?.thumbnailGridDidUpdateLayout(
+                columns: layout.columns,
+                sectionedRowLayout: layout.rowLayout
+            )
+            return
+        }
+        sectionedLayoutResult = nil
         metrics = ThumbnailLayout.metrics(
             for: viewportWidth,
             itemCount: imagePaths.count,
@@ -222,7 +278,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
         needsDisplay = true
         scheduleLoadVisibleThumbnails(debounced: false)
-        gridDelegate?.thumbnailGridDidUpdateLayout(columns: gridColumnCount)
+        gridDelegate?.thumbnailGridDidUpdateLayout(columns: gridColumnCount, sectionedRowLayout: nil)
     }
 
     private func reloadReferenceGraphLayout(graph: ReferenceGraph, viewportWidth: CGFloat) {
@@ -285,7 +341,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
         needsDisplay = true
         scheduleLoadVisibleThumbnails(debounced: false)
-        gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1)
+        gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1, sectionedRowLayout: nil)
     }
 
     /// Called when the user scrolls; reloads thumbnails for newly visible cells only.
@@ -294,11 +350,23 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         scheduleLoadVisibleThumbnails(debounced: true)
     }
 
-    /// Reload grid columns when the scroll view width changes (sidebar hide/show, window resize).
+    /// Reload grid columns when the scroll view size changes (sidebar hide/show, window resize).
     func noteContainerSizeChanged() {
-        let viewportWidth = viewportWidthForLayout()
-        if abs(viewportWidth - lastLayoutViewportWidth) > 0.5 {
-            reloadLayoutIfNeeded()
+        reloadLayoutIfNeeded()
+    }
+
+    /// Pushes column count and sectioned row map to `AppState` (keyboard ↑/↓ uses the row map).
+    func publishNavigationLayoutToAppState() {
+        if let layout = sectionedLayoutResult {
+            gridDelegate?.thumbnailGridDidUpdateLayout(
+                columns: layout.columns,
+                sectionedRowLayout: layout.rowLayout
+            )
+        } else {
+            gridDelegate?.thumbnailGridDidUpdateLayout(
+                columns: max(1, gridColumnCount),
+                sectionedRowLayout: nil
+            )
         }
     }
 
@@ -422,16 +490,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             )
         }
 
-        let indicesToPaint = ThumbnailLayout.indicesIntersecting(
-            dirtyRect,
-            metrics: metrics,
-            itemCount: imagePaths.count,
-            referenceNodeFrames: isReferenceGraphMode ? referenceNodeFrames : nil
-        )
+        let indicesToPaint = indicesIntersectingDocumentRect(dirtyRect)
+        if let sectionedLayoutResult {
+            for separator in sectionedLayoutResult.separators where separator.rect.intersects(dirtyRect) {
+                drawSectionSeparator(separator)
+            }
+        }
+
         for index in indicesToPaint {
             let cell = cellFrame(for: index)
 
-            let imageFrame = imageFrame(in: cell)
+            let imageFrame = imageFrame(in: cell, at: index)
             let borderRect = ThumbnailLayout.thumbnailBorderRect(in: imageFrame)
             let contentRect = ThumbnailLayout.imageContentRect(in: imageFrame)
             let path = imagePaths[index]
@@ -856,15 +925,24 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     func navigate(_ direction: ThumbnailNavigateDirection) {
         guard !imagePaths.isEmpty else { return }
-        let columns = gridColumnCount
-        let delta: Int
+        let base = highlightedListIndex() ?? currentIndex
         switch direction {
-        case .left: delta = -1
-        case .right: delta = 1
-        case .up: delta = -columns
-        case .down: delta = columns
+        case .left:
+            applySelectionDelta(-1, wrap: wrapAround)
+        case .right:
+            applySelectionDelta(1, wrap: wrapAround)
+        case .up, .down:
+            if let rowLayout = sectionedLayoutResult?.rowLayout {
+                let step = direction == .up ? -1 : 1
+                let next = rowLayout.verticalTarget(currentIndex: base, stepSign: step)
+                guard next != base else { return }
+                selectIndex(next, scroll: true)
+            } else {
+                let columns = gridColumnCount
+                let delta = direction == .up ? -columns : columns
+                applySelectionDelta(delta, wrap: false)
+            }
         }
-        applySelectionDelta(delta, wrap: wrapAround && (direction == .left || direction == .right))
     }
 
     func selectIndex(_ index: Int, scroll: Bool, notifyDelegate: Bool = true) {
@@ -953,23 +1031,42 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func cellFrame(for index: Int) -> NSRect {
+        if let rect = sectionedLayoutResult?.itemFrames[index] {
+            return rect
+        }
         if let rect = referenceNodeFrames[index] {
             return rect
         }
         return ThumbnailLayout.frame(for: index, metrics: metrics)
     }
 
-    private func imageFrame(in cell: NSRect) -> NSRect {
-        let overlay = ThumbnailLayout.overlayLabelHeight(
-            showFilename: showFilenames,
-            showImageSize: showImageSize
-        )
+    private func imageFrame(in cell: NSRect, at index: Int) -> NSRect {
+        let overlay: CGFloat
+        if let sectionedLayoutResult, let custom = sectionedLayoutResult.overlayHeights[index] {
+            overlay = custom
+        } else {
+            overlay = ThumbnailLayout.overlayLabelHeight(
+                showFilename: showFilenames,
+                showImageSize: showImageSize
+            )
+        }
         return NSRect(
             x: cell.minX,
             y: cell.minY,
             width: cell.width,
             height: max(0, cell.height - overlay)
         )
+    }
+
+    private func drawSectionSeparator(_ separator: ThumbnailSectionedLayout.SeparatorItem) {
+        let rect = separator.rect
+        NSColor.labelColor.withAlphaComponent(0.35).setStroke()
+        let path = NSBezierPath()
+        let lineY = rect.midY
+        path.move(to: NSPoint(x: rect.minX + 10, y: lineY))
+        path.line(to: NSPoint(x: rect.maxX - 10, y: lineY))
+        path.lineWidth = separator.isBold ? 2 : 1
+        path.stroke()
     }
 
     private func viewportWidthForLayout() -> CGFloat {
@@ -1082,7 +1179,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     /// Python `current_thumbnail_size` when auto; config `thumbnail_cell_size` when manual.
-    private func resolvedLayoutCellSize(viewportWidth: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+    private func resolvedLayoutCellSize(
+        viewportWidth: CGFloat,
+        viewportHeight: CGFloat,
+        sectionedDuplicateFilenames: Bool = false
+    ) -> CGFloat {
         let manual = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
         if manual {
             return CGFloat(
@@ -1090,10 +1191,21 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     ?? ThumbnailLayout.defaultCellSize
             )
         }
-        let overlay = ThumbnailLayout.overlayLabelHeight(
+        var overlay = ThumbnailLayout.overlayLabelHeight(
             showFilename: showFilenames,
             showImageSize: showImageSize
         )
+        if sectionedDuplicateFilenames {
+            overlay = max(
+                overlay,
+                ThumbnailSectionedLayout.maxOverlayHeightEstimate(
+                    paths: imagePaths,
+                    showFilename: showFilenames,
+                    showImageSize: showImageSize,
+                    thumbnailSize: ThumbnailLayout.defaultCellSize
+                )
+            )
+        }
         let optimal = ThumbnailGridLayoutService.calculateOptimalThumbnailSize(
             numImages: imagePaths.count,
             viewportWidth: viewportWidth,
@@ -1119,7 +1231,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             cellSize: cellSize,
             referenceGraphNodeCount: referenceGraph?.nodes.count ?? 0,
             manualReferenceThumbSize: manualRef,
-            manualThumbnailSize: manual
+            manualThumbnailSize: manual,
+            duplicateSectionCount: duplicateSections.count,
+            duplicateSectionStarts: isDuplicateSectionMode
+                ? duplicateSections.map(\.startIndex)
+                : [],
+            isDuplicateSectionMode: isDuplicateSectionMode
         )
     }
 
@@ -1130,21 +1247,34 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         backgroundLoadFollowUpWorkItem = nil
     }
 
-    private func visibleThumbnailIndices(in visibleRect: NSRect) -> [Int] {
+    private func indicesIntersectingDocumentRect(_ rect: NSRect, expandBy: CGFloat? = nil) -> [Int] {
+        let pad = expandBy ?? 0
+        let query = pad > 0 ? rect.insetBy(dx: -pad, dy: -pad) : rect
+        if let sectionedLayoutResult {
+            return (0..<imagePaths.count).filter { index in
+                guard let frame = sectionedLayoutResult.itemFrames[index] else { return false }
+                return frame.intersects(query)
+            }
+        }
         if isReferenceGraphMode {
-            let expanded = visibleRect.insetBy(dx: -metrics.cellWidth, dy: -metrics.cellHeight)
             return ThumbnailLayout.indicesIntersecting(
-                expanded,
+                query,
                 metrics: metrics,
                 itemCount: imagePaths.count,
                 referenceNodeFrames: referenceNodeFrames
             )
         }
-        return ThumbnailLayout.visibleIndices(
-            in: visibleRect,
+        return ThumbnailLayout.indicesIntersecting(
+            query,
             metrics: metrics,
-            itemCount: imagePaths.count
+            itemCount: imagePaths.count,
+            referenceNodeFrames: nil
         )
+    }
+
+    private func visibleThumbnailIndices(in visibleRect: NSRect) -> [Int] {
+        let pad = max(metrics.cellWidth, metrics.cellHeight)
+        return indicesIntersectingDocumentRect(visibleRect, expandBy: pad)
     }
 
     /// Adjacent row/column cells around the viewport (Python `_get_canvas_near_visible_indices`).
@@ -1152,6 +1282,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         visibleRect: NSRect,
         visible: Set<Int>
     ) -> [Int] {
+        if sectionedLayoutResult != nil {
+            let pad = max(metrics.cellWidth, metrics.cellHeight) * 2
+            return indicesIntersectingDocumentRect(visibleRect, expandBy: pad)
+                .filter { !visible.contains($0) }
+        }
         if isReferenceGraphMode {
             let expanded = visibleRect.insetBy(
                 dx: -metrics.cellWidth * 2,
@@ -1414,13 +1549,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
         var lines: [String] = []
         if showFilename {
-            lines.append(
-                ThumbnailLayout.overlayDisplayFilename(
-                    for: path,
-                    showExtensions: showExtensions,
-                    basenamesNeedingExtensions: basenamesNeedingExtensions
+            if isDuplicateSectionMode {
+                lines.append(ThumbnailSectionedLayout.duplicateFilenameOverlay(for: path))
+            } else {
+                lines.append(
+                    ThumbnailLayout.overlayDisplayFilename(
+                        for: path,
+                        showExtensions: showExtensions,
+                        basenamesNeedingExtensions: basenamesNeedingExtensions
+                    )
                 )
-            )
+            }
         }
         if showImageSize, let sizeText = dimensionText(for: path) {
             lines.append(sizeText)
@@ -1440,7 +1579,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
-        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.lineBreakMode = isDuplicateSectionMode ? .byWordWrapping : .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14),
             .foregroundColor: NSColor.labelColor,
@@ -1587,11 +1726,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 height: overlayHeight
             )
         }
-        let imageFrame = imageFrame(in: cell)
         return NSRect(
-            x: imageFrame.minX + 4,
-            y: imageFrame.minY + 4,
-            width: max(40, imageFrame.width - 8),
+            x: cell.minX + 4,
+            y: cell.minY + 4,
+            width: max(40, cell.width - 8),
             height: 22
         )
     }

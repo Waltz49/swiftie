@@ -126,7 +126,10 @@ extension AppState {
 
         if let file = snapshot.lastFile, FileManager.default.fileExists(atPath: file) {
             fileData.setCurrentImagePath(file)
-            DisplayedImagesSync.ensureActiveImageListed(fileData: fileData)
+            DisplayedImagesSync.ensureActiveImageListed(
+                fileData: fileData,
+                filterPattern: filterSettings.filterPattern
+            )
             if PhotosLibraryBrowseLoader.isPhotosLibraryPath(file) {
                 _ = PhotosLibraryBrowseLoader.requestAccessIfNeeded(for: file)
             }
