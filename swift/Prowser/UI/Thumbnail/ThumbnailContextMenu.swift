@@ -77,6 +77,14 @@ enum ThumbnailContextMenu {
         duplicate.target = MenuActions.shared
         duplicate.representedObject = paths
 
+        let findSimilar = menu.addItem(
+            withTitle: "Find Similar Images…",
+            action: #selector(MenuActions.findSimilarImages(_:)),
+            keyEquivalent: ""
+        )
+        NSMenuShortcutSupport.apply(display: "⌘K", to: findSimilar)
+        findSimilar.target = MenuActions.shared
+
         let showInDirectory = menu.addItem(
             withTitle: "Show in Directory",
             action: #selector(MenuActions.showInDirectory(_:)),
@@ -273,6 +281,11 @@ private final class MenuActions: NSObject {
         if !created.isEmpty {
             appState.status.show("Duplicated \(created.count) file(s)")
         }
+    }
+
+    @objc func findSimilarImages(_ sender: NSMenuItem) {
+        guard let appState else { return }
+        appState.searchOperations.presentSimilaritySearchDialog()
     }
 
     @objc func convertFormat(_ sender: NSMenuItem) {

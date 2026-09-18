@@ -157,6 +157,8 @@ struct SettingsWindowView: View {
             SlideshowSettingsTab()
         case .caches:
             CacheSettingsTab()
+        case .modelsSearch:
+            ModelsSearchSettingsTab()
         }
     }
 }

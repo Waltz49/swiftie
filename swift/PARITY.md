@@ -102,7 +102,7 @@ Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). L
 - [~] Copy pathname (⌘C)
 - [~] Copy image (⌃C, single selection)
 - [~] Duplicate file(s) (`FileOperationsService.duplicateFiles`)
-- [~] Find Similar Images… (⌘K)
+- [~] Find Similar Images… (⌘K) — native Core ML + consent download
 - [~] Show in Directory (⇧⌘H — `showImageInDirectory()`)
 - [~] Edit in \<external editor\> (⌘E; Pixelmator Pro multi-select exception deferred)
 - [~] Edit EXIF User Comment… (⇧⌘E)
@@ -121,7 +121,7 @@ Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). L
 Source: `files/file_tree_handler.py` `contextMenuEvent`. Menu in `FileTreeContextMenu.swift`.
 
 - [~] Rename… (F2, permission-checked)
-- [~] Search by Description… (⌘F) — `ClipSearchSheet` + `CLIPSearchBridge`
+- [~] Search by Text… (⌘F / ⌘⇧K) — `ClipSearchSheet` + native Core ML
 - [~] Search by Person… (⌘P)
 - [~] Copy Directory Path (⌘C)
 - [~] Open in Finder
@@ -229,7 +229,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [~] Extract Faces (⇧⌘P in Python Search menu)
 - [x] Find Duplicate Image Files — in directory
 - [x] Find Duplicate Image Files — recursive (Search menu, click only; no ⇧F — use tree context menu or tree focus + ⇧F)
-- [ ] Find Similar Image Files submenu (in directory / recursive — separate from ⌘K reorder)
+- [~] Find Similar Image Files submenu (pixel MSE; in directory / recursive)
 - [x] Show Image in Directory (⇧⌘H)
 - [~] Dynamic `aboutToShow` (`update_search_menu_states`)
 

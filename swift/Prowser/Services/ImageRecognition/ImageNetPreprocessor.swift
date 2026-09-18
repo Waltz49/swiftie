@@ -1,0 +1,87 @@
+import CoreGraphics
+import Foundation
+import ImageIO
+
+/// torchvision ResNet eval preprocessing: Resize 256, CenterCrop 224, ImageNet normalize.
+enum ImageNetPreprocessor {
+    private static let mean: [Float] = [0.485, 0.456, 0.406]
+    private static let std: [Float] = [0.229, 0.224, 0.225]
+
+    static func makeInputMultiArray(from path: String) -> [Float]? {
+        guard let cgImage = loadCGImage(path: path) else { return nil }
+        return makeInputMultiArray(from: cgImage)
+    }
+
+    static func makeInputMultiArray(from cgImage: CGImage) -> [Float]? {
+        let resized = resize(cgImage, shortSide: 256)
+        guard let cropped = centerCrop(resized, size: 224) else { return nil }
+        return normalizedCHW(cropped)
+    }
+
+    private static func loadCGImage(path: String) -> CGImage? {
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    private static func resize(_ image: CGImage, shortSide: Int) -> CGImage {
+        let w = image.width
+        let h = image.height
+        let scale = Float(shortSide) / Float(min(w, h))
+        let newW = Int(Float(w) * scale)
+        let newH = Int(Float(h) * scale)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: newW,
+            height: newH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: newW, height: newH))
+        return ctx.makeImage() ?? image
+    }
+
+    private static func centerCrop(_ image: CGImage, size: Int) -> CGImage? {
+        let w = image.width
+        let h = image.height
+        let x = max(0, (w - size) / 2)
+        let y = max(0, (h - size) / 2)
+        return image.cropping(to: CGRect(x: x, y: y, width: min(size, w), height: min(size, h)))
+    }
+
+    private static func normalizedCHW(_ image: CGImage) -> [Float]? {
+        let w = image.width
+        let h = image.height
+        let bytesPerPixel = 4
+        let bytesPerRow = w * bytesPerPixel
+        var raw = [UInt8](repeating: 0, count: h * bytesPerRow)
+        guard let ctx = CGContext(
+            data: &raw,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var out = [Float](repeating: 0, count: 3 * w * h)
+        for y in 0 ..< h {
+            for x in 0 ..< w {
+                let i = (y * w + x) * bytesPerPixel
+                let r = Float(raw[i]) / 255
+                let g = Float(raw[i + 1]) / 255
+                let b = Float(raw[i + 2]) / 255
+                let offset = y * w + x
+                out[offset] = (r - mean[0]) / std[0]
+                out[w * h + offset] = (g - mean[1]) / std[1]
+                out[2 * w * h + offset] = (b - mean[2]) / std[2]
+            }
+        }
+        return out
+    }
+}

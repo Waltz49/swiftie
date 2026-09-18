@@ -192,6 +192,24 @@ final class KeyboardHandlerController {
             return true
         }
 
+        let searchView = appState.fileData.currentViewMode == .thumbnail
+            || appState.fileData.currentViewMode == .browse
+            || appState.fileData.currentViewMode == .list
+        if searchView, hasCommand, !hasOption, !hasControl {
+            if hasShift, event.charactersIgnoringModifiers?.lowercased() == "k" {
+                appState.searchOperations.presentClipSearchDialog()
+                return true
+            }
+            if !hasShift, event.charactersIgnoringModifiers?.lowercased() == "k" {
+                appState.searchOperations.presentSimilaritySearchDialog()
+                return true
+            }
+            if !hasShift, event.charactersIgnoringModifiers?.lowercased() == "f" {
+                appState.searchOperations.presentClipSearchDialog()
+                return true
+            }
+        }
+
         // ⌘Return / ⌘⇧Return — collapse / expand file tree.
         if hasCommand, !hasOption, !hasControl,
            event.keyCode == 36 || event.keyCode == 76 {

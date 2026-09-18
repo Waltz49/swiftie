@@ -9,6 +9,35 @@ enum SelectionService {
         return appState.fileData.displayedImages.filter { selected.contains($0) }
     }
 
+    /// After ⌘K with multiple reference images: keep refs selected; active = last ref in similarity order (⇧→ extends).
+    static func restoreMultiSelectAfterSimilaritySearch(
+        appState: AppState,
+        orderedPaths: [String],
+        referencePaths: [String]
+    ) {
+        let refKeys = Set(
+            referencePaths.compactMap { FileDataModel.normalizePath($0) }
+        )
+        let refsInSortOrder = orderedPaths.filter { refKeys.contains($0) }
+        guard !refsInSortOrder.isEmpty else {
+            appState.selection.clear()
+            return
+        }
+
+        appState.selection.selectedFiles = Set(refsInSortOrder)
+        let firstIndex = orderedPaths.firstIndex(of: refsInSortOrder[0]) ?? 0
+        let lastPath = refsInSortOrder[refsInSortOrder.count - 1]
+        let lastIndex = orderedPaths.firstIndex(of: lastPath) ?? firstIndex
+
+        appState.fileData.setCurrentIndex(lastIndex)
+        appState.fileData.setCurrentImagePath(lastPath)
+        appState.selection.rangeAnchorIndex = firstIndex
+        appState.selection.lastClickedIndex = lastIndex
+        appState.selection.mostRecentSelectedPath = lastPath
+        appState.selection.resetCmdMulti()
+        appState.selection.emitSelectionChanged(highlightIndex: lastIndex)
+    }
+
     /// Python `SelectionManager.get_selected_files`: ordered selection, falling back to the highlighted image.
     static func selectedFilesOrCurrent(appState: AppState) -> [String] {
         let ordered = orderedSelectedFiles(appState: appState)

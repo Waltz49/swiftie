@@ -12,6 +12,7 @@ final class CancellableProgressPanelController {
     private let cancelButton: FocusableDialogButton
     private let cancelTarget = CancelTarget()
     private var keyboardMonitor: Any?
+    private var isClosed = false
     private(set) var cancelRequested = false
 
     init(title: String, labelText: String, maximum: Int) {
@@ -90,6 +91,8 @@ final class CancellableProgressPanelController {
     }
 
     func close() {
+        guard !isClosed else { return }
+        isClosed = true
         if let keyboardMonitor {
             NSEvent.removeMonitor(keyboardMonitor)
         }
@@ -98,14 +101,17 @@ final class CancellableProgressPanelController {
     }
 
     func setMaximum(_ maximum: Int) {
+        guard !isClosed else { return }
         indicator.maxValue = Double(max(1, maximum))
     }
 
     func setValue(_ value: Int) {
+        guard !isClosed else { return }
         indicator.doubleValue = Double(value)
     }
 
     func setLabel(_ text: String) {
+        guard !isClosed else { return }
         label.stringValue = text
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { RenamePrefixPlanner.elideMiddle(String($0), maxLen: Self.lineMaxChars) }
@@ -119,6 +125,7 @@ final class CancellableProgressPanelController {
     }
 
     func refresh() {
+        guard !isClosed else { return }
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.displayIfNeeded()
     }

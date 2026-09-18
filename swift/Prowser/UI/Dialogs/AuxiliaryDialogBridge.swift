@@ -19,5 +19,8 @@ struct AuxiliaryDialogBridge: View {
             .onChange(of: appState.showFilterDialog) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showMoveWorkFilesSheet) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showEditUserCommentSheet) { _, _ in appState.syncAuxiliaryDialogs() }
+            .onChange(of: appState.showSimilaritySearchSheet) { _, _ in appState.syncAuxiliaryDialogs() }
+            .onChange(of: appState.showClipSearchSheet) { _, _ in appState.syncAuxiliaryDialogs() }
+            .onChange(of: appState.showImageRecognitionCaveats) { _, _ in appState.syncAuxiliaryDialogs() }
     }
 }

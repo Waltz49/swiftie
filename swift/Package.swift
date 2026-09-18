@@ -22,6 +22,7 @@ let package = Package(
             exclude: ["Resources/Info.plist", "Resources/Prowser.entitlements"],
             resources: [
                 .process("Resources/Assets"),
+                .process("Resources/image_recognition_models.json"),
             ],
             linkerSettings: [
                 .linkedFramework("Photos"),

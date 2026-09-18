@@ -6,19 +6,22 @@ enum CacheManagementService {
     struct CacheTotals {
         var thumbnails: Int64
         var metadata: Int64
+        var imageRecognition: Int64
 
-        var total: Int64 { thumbnails + metadata }
+        var total: Int64 { thumbnails + metadata + imageRecognition }
     }
 
     struct ScrubResult {
         var thumbnailsRemoved: Int
+        var imageRecognitionRemoved: Int
         var bytesReclaimed: Int64
     }
 
     static func cacheTotals(paths: ProfilePaths) -> CacheTotals {
         CacheTotals(
             thumbnails: directorySize(paths.thumbnailCacheDirectory),
-            metadata: directorySize(paths.metadataCacheDirectory)
+            metadata: directorySize(paths.metadataCacheDirectory),
+            imageRecognition: directorySize(paths.imageRecognitionCacheDirectory)
         )
     }
 
@@ -26,17 +29,39 @@ enum CacheManagementService {
         removeContents(of: paths.thumbnailCacheDirectory)
     }
 
+    static func clearImageRecognitionCache(paths: ProfilePaths, includeDownloadedModels: Bool) throws -> Int {
+        let root = paths.imageRecognitionCacheDirectory
+        var removed = 0
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else {
+            return 0
+        }
+        for entry in entries {
+            if entry.lastPathComponent == "models", !includeDownloadedModels { continue }
+            if (try? fm.removeItem(at: entry)) != nil { removed += 1 }
+        }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        if includeDownloadedModels {
+            try? ModelDownloadService.removeAllDownloadedModels(profile: paths)
+        }
+        return removed
+    }
+
     static func clearAllCaches(paths: ProfilePaths) -> Int {
-        clearThumbnailCache(paths: paths)
+        let ir = (try? clearImageRecognitionCache(paths: paths, includeDownloadedModels: true)) ?? 0
+        return clearThumbnailCache(paths: paths)
             + removeContents(of: paths.metadataCacheDirectory)
+            + ir
     }
 
     static func scrubCaches(paths: ProfilePaths) -> ScrubResult {
         let before = cacheTotals(paths: paths)
         let thumbsRemoved = scrubThumbnailCache(paths.thumbnailCacheDirectory)
+        let irRemoved = scrubImageRecognitionCache(paths: paths)
         let after = cacheTotals(paths: paths)
         return ScrubResult(
             thumbnailsRemoved: thumbsRemoved,
+            imageRecognitionRemoved: irRemoved,
             bytesReclaimed: max(0, before.total - after.total)
         )
     }
@@ -45,7 +70,67 @@ enum CacheManagementService {
         [
             paths.thumbnailCacheDirectory.path,
             paths.metadataCacheDirectory.path,
+            paths.imageRecognitionCacheDirectory.path,
         ]
+    }
+
+    private static func scrubImageRecognitionCache(paths: ProfilePaths) -> Int {
+        let fm = FileManager.default
+        let root = paths.imageRecognitionCacheDirectory
+        var removed = 0
+        if let subdirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for subdir in subdirs {
+                let isDir = (try? subdir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                guard isDir else { continue }
+                removed += scrubFeatureCacheDirectory(subdir)
+            }
+        }
+        guard let files = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return removed }
+        for file in files where file.pathExtension == "fcache" {
+            guard let data = try? Data(contentsOf: file),
+                  let payload = try? JSONDecoder().decode(FeatureCacheScrubFile.self, from: data) else { continue }
+            let kept = payload.items.filter { FileManager.default.fileExists(atPath: $0.path) }
+            if kept.count != payload.items.count {
+                if kept.isEmpty {
+                    try? fm.removeItem(at: file)
+                } else if let newData = try? JSONEncoder().encode(FeatureCacheScrubFile(items: kept)) {
+                    try? newData.write(to: file, options: .atomic)
+                }
+                removed += payload.items.count - kept.count
+            }
+        }
+        return removed
+    }
+
+    private static func scrubFeatureCacheDirectory(_ directory: URL) -> Int {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return 0 }
+        var removed = 0
+        for file in files where file.pathExtension == "fcache" {
+            guard let data = try? Data(contentsOf: file),
+                  let payload = try? JSONDecoder().decode(FeatureCacheScrubFile.self, from: data) else { continue }
+            let kept = payload.items.filter { FileManager.default.fileExists(atPath: $0.path) }
+            if kept.count != payload.items.count {
+                if kept.isEmpty {
+                    try? fm.removeItem(at: file)
+                } else if let newData = try? JSONEncoder().encode(FeatureCacheScrubFile(items: kept)) {
+                    try? newData.write(to: file, options: .atomic)
+                }
+                removed += payload.items.count - kept.count
+            }
+        }
+        return removed
+    }
+
+    private struct FeatureCacheScrubItem: Codable {
+        let path: String
+        let mtime: Double?
+        let size: Int?
+        let feature: [Float]?
+    }
+
+    private struct FeatureCacheScrubFile: Codable {
+        let items: [FeatureCacheScrubItem]
     }
 
     private static func scrubThumbnailCache(_ directory: URL) -> Int {

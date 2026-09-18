@@ -75,6 +75,10 @@ struct KeyboardShortcutsHelpView: View {
                         ("Right-click", "Return to thumbnails"),
                         ("F5", "Find references to current image"),
                     ])
+                    shortcutSection("Search", rows: [
+                        ("⌘K", "Find similar images (CNN)"),
+                        ("⌘F / ⌘⇧K", "Search by text (CLIP)"),
+                    ])
                     shortcutSection("Thumbnail grid", rows: [
                         ("+ / − / 0", "Larger / smaller / reset cell size (list: row height)"),
                         ("⌘← → ↑ ↓", "Multi-select toggle"),

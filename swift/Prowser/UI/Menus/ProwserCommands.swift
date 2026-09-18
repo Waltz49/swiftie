@@ -192,6 +192,29 @@ struct ProwserCommands: Commands {
 
         CommandMenu("Search") {
             Group {
+                Button("Search for Similar Images…") {
+                    Task { @MainActor in appState.searchOperations.presentSimilaritySearchDialog() }
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Button("Search by Text…") {
+                    Task { @MainActor in appState.searchOperations.presentClipSearchDialog() }
+                }
+                .keyboardShortcut("f", modifiers: .command)
+
+                Divider()
+
+                Menu("Find Similar Image Files") {
+                    Button("Find in This Directory") {
+                        Task { @MainActor in appState.searchOperations.findSimilarImageFilesInDisplayed() }
+                    }
+                    Button("Find in This and Subdirectories") {
+                        Task { @MainActor in appState.searchOperations.findSimilarImageFilesRecursive() }
+                    }
+                }
+
+                Divider()
+
                 Button("Find Duplicate Image Files in Directory") {
                     Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
                 }
@@ -470,6 +493,13 @@ struct ProwserCommands: Commands {
 
                 Button("About Prowser") {
                     Task { @MainActor in appState.showAboutDialog() }
+                }
+
+                Button("Image Search (Native)…") {
+                    Task { @MainActor in
+                        appState.showImageRecognitionCaveats = true
+                        appState.syncAuxiliaryDialogs()
+                    }
                 }
             }
             .disabled(!allowBrowserShortcuts)

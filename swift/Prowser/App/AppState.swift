@@ -18,6 +18,8 @@ final class AppState {
     let fileOperations: FileOperationsService
     let exifOperations = ExifOperationsController()
     let searchOperations = SearchOperationsService()
+    let imageRecognition: ImageRecognitionService
+    let backgroundImageRecognition = BackgroundImageRecognitionController()
     let fileTreeOperations = FileTreeOperationsService()
     let renamePrefixService = RenamePrefixService()
     let status = StatusNotificationService()
@@ -42,6 +44,9 @@ final class AppState {
     var settingsOpenRequestToken = 0
     var requestedSettingsTab: SettingsTab = .general
     var showKeyboardHelp = false
+    var showImageRecognitionCaveats = false
+    var showSimilaritySearchSheet = false
+    var showClipSearchSheet = false
     var isAboutDialogVisible: Bool { aboutDialog.isVisible }
     var isSettingsDialogVisible: Bool { settingsDialog.isVisible }
     var showFindReferencesSheet = false
@@ -70,6 +75,9 @@ final class AppState {
             || showFindReferencesSheet
             || showReferenceGraphSheet
             || showKeyboardHelp
+            || showImageRecognitionCaveats
+            || showSimilaritySearchSheet
+            || showClipSearchSheet
             || isAboutDialogVisible
             || showMoveWorkFilesSheet
     }
@@ -160,6 +168,8 @@ final class AppState {
             viewMode: fileData.currentViewMode
         )
         let profilePaths = ProfilePaths(profilePath: launchOptions.profilePath)
+        imageRecognition = ImageRecognitionService(profile: profilePaths)
+        imageRecognition.rebind(config: config)
         thumbnailCache = ThumbnailCache(
             paths: profilePaths,
             ignoreExifRotation: config.ignoreExifRotation
@@ -175,6 +185,7 @@ final class AppState {
         fileOperations.bind(self)
         exifOperations.bind(self)
         searchOperations.bind(self)
+        backgroundImageRecognition.bind(self)
         fileTreeOperations.bind(self)
         renamePrefixService.bind(self)
         menuRefresh.bind(self)
@@ -1075,6 +1086,9 @@ final class AppState {
         static let exifBatchConfirmation = "exifBatchConfirmation"
         static let filter = "filter"
         static let moveWorkFiles = "moveWorkFiles"
+        static let similaritySearch = "similaritySearch"
+        static let clipSearch = "clipSearch"
+        static let imageRecognitionCaveats = "imageRecognitionCaveats"
     }
 
     func syncAuxiliaryDialogs() {
@@ -1192,6 +1206,42 @@ final class AppState {
             onClose: { [weak self] in self?.showMoveWorkFilesSheet = false }
         ) {
             MoveWorkFilesSheet()
+        }
+        syncDialog(
+            id: DialogID.similaritySearch,
+            show: showSimilaritySearchSheet,
+            title: "Find Similar Images",
+            defaultSize: NSSize(width: 480, height: 260),
+            minSize: NSSize(width: 440, height: 220),
+            focusTextOnShow: true,
+            onClose: { [weak self] in self?.showSimilaritySearchSheet = false }
+        ) {
+            SimilaritySearchSheet { [weak self] options in
+                self?.searchOperations.runSimilaritySearch(options: options)
+            }
+        }
+        syncDialog(
+            id: DialogID.clipSearch,
+            show: showClipSearchSheet,
+            title: "Search by Text",
+            defaultSize: NSSize(width: 500, height: 320),
+            minSize: NSSize(width: 460, height: 280),
+            focusTextOnShow: true,
+            onClose: { [weak self] in self?.showClipSearchSheet = false }
+        ) {
+            ClipSearchSheet { [weak self] options in
+                self?.searchOperations.runClipSearch(options: options)
+            }
+        }
+        syncDialog(
+            id: DialogID.imageRecognitionCaveats,
+            show: showImageRecognitionCaveats,
+            title: "Image Search (Native)",
+            defaultSize: NSSize(width: 560, height: 480),
+            minSize: NSSize(width: 520, height: 420),
+            onClose: { [weak self] in self?.showImageRecognitionCaveats = false }
+        ) {
+            ImageRecognitionCaveatsView()
         }
     }
 

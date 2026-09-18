@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case maps
     case slideshow
     case caches
+    case modelsSearch
 
     var id: String { rawValue }
 
@@ -28,6 +29,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .maps: return "Maps and Editor"
         case .slideshow: return "Slideshow"
         case .caches: return "Caches"
+        case .modelsSearch: return "Models for Search"
         }
     }
 
@@ -43,6 +45,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .maps: return "map"
         case .slideshow: return "play.rectangle"
         case .caches: return "externaldrive"
+        case .modelsSearch: return "magnifyingglass"
         }
     }
 
