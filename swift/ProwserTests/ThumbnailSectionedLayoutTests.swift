@@ -53,4 +53,20 @@ final class ThumbnailSectionedLayoutTests: XCTestCase {
             wide.rowLayout.rowToIndices
         )
     }
+
+    func testDuplicateOverlayWrapsFilenameWithSpaces() {
+        let font = NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14)
+        let path = "/tmp/scan/sub/My Vacation Photo 2024 (copy).jpg"
+        let lines = ThumbnailSectionedLayout.duplicateOverlayWrappedLines(
+            for: path,
+            font: font,
+            lineWrapWidth: 80
+        )
+        let filenameLines = lines.filter { $0.contains("Vacation") || $0.contains("2024") || $0.contains(".jpg") }
+        XCTAssertGreaterThan(filenameLines.count, 1, "Long spaced filename should wrap to multiple lines")
+        let joined = filenameLines.joined()
+        XCTAssertTrue(joined.contains("Vacation"))
+        XCTAssertTrue(joined.contains("2024"))
+        XCTAssertTrue(joined.contains(".jpg"))
+    }
 }

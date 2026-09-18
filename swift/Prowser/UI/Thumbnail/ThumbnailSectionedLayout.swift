@@ -86,6 +86,84 @@ enum ThumbnailSectionedLayout {
         return "\(displayDir)\n──────────\n\(filename)"
     }
 
+    /// Wrapped overlay lines for duplicate mode (port of Python `_wrap_filename_text`; no eliding).
+    static func duplicateOverlayWrappedLines(
+        for path: String,
+        font: NSFont,
+        lineWrapWidth: CGFloat
+    ) -> [String] {
+        let inner = max(1, lineWrapWidth)
+        return duplicateFilenameOverlay(for: path)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+            .flatMap { wrapFilenameText($0, maxWidth: inner, font: font) }
+    }
+
+    static func wrapFilenameText(_ text: String, maxWidth: CGFloat, font: NSFont) -> [String] {
+        if text.contains("\n") {
+            return text.split(separator: "\n", omittingEmptySubsequences: false).flatMap { part in
+                wrapFilenameText(String(part), maxWidth: maxWidth, font: font)
+            }
+        }
+        if measureAdvance(text, font: font) <= maxWidth {
+            return [text]
+        }
+
+        var lines: [String] = []
+        var currentLine = ""
+
+        func flushCurrent() {
+            guard !currentLine.isEmpty else { return }
+            lines.append(currentLine)
+            currentLine = ""
+        }
+
+        func appendToken(_ token: String) {
+            let test = currentLine + token
+            if measureAdvance(test, font: font) <= maxWidth {
+                currentLine = test
+                return
+            }
+            if !currentLine.isEmpty {
+                flushCurrent()
+                appendToken(token)
+                return
+            }
+            for char in token {
+                let testChar = currentLine + String(char)
+                if measureAdvance(testChar, font: font) <= maxWidth {
+                    currentLine = testChar
+                } else {
+                    flushCurrent()
+                    currentLine = String(char)
+                }
+            }
+        }
+
+        var currentWord = ""
+        for char in text {
+            if char == " " || char == "_" || char == "-" || char == "." {
+                if !currentWord.isEmpty {
+                    appendToken(currentWord)
+                    currentWord = ""
+                }
+                appendToken(String(char))
+            } else {
+                currentWord.append(char)
+            }
+        }
+        if !currentWord.isEmpty {
+            appendToken(currentWord)
+        }
+        flushCurrent()
+        return lines.isEmpty ? [text] : lines
+    }
+
+    private static func measureAdvance(_ text: String, font: NSFont) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
     static func computeDuplicateLayout(
         paths: [String],
         sections: [DuplicateGroupPresentation.DuplicateSection],
@@ -107,8 +185,11 @@ enum ThumbnailSectionedLayout {
         if showFilename {
             for path in paths {
                 let text = duplicateFilenameOverlay(for: path)
-                let width = measureTextWidth(text, font: font, maxWidth: maxTextWidth)
-                maxCellTextWidth = max(maxCellTextWidth, width)
+                for part in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                    let segment = String(part)
+                    guard !segment.isEmpty else { continue }
+                    maxCellTextWidth = max(maxCellTextWidth, measureAdvance(segment, font: font))
+                }
             }
         }
 
@@ -316,34 +397,26 @@ enum ThumbnailSectionedLayout {
         duplicateMode: Bool
     ) -> CGFloat {
         guard showFilename || showImageSize else { return 0 }
-        var lines: [String] = []
+        var lineCount = 0
         if showFilename {
-            lines.append(duplicateMode ? duplicateFilenameOverlay(for: path) : (path as NSString).lastPathComponent)
+            if duplicateMode {
+                lineCount += duplicateOverlayWrappedLines(
+                    for: path,
+                    font: font,
+                    lineWrapWidth: max(1, maxTextWidth - 8)
+                ).count
+            } else {
+                lineCount += 1
+            }
         }
         if showImageSize {
-            lines.append(" ") // placeholder height; grid measures dimensions separately when enabled
+            lineCount += 1
         }
-        var total: CGFloat = 0
-        for line in lines {
-            let height = measureTextHeight(line, font: font, maxWidth: maxTextWidth - 8)
-            total += max(ThumbnailLayout.labelHeight, height)
-        }
-        return total + 4
+        guard lineCount > 0 else { return 0 }
+        return CGFloat(lineCount) * ThumbnailLayout.labelHeight + 4
     }
 
     private static func measureTextWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> CGFloat {
-        let attr = [NSAttributedString.Key.font: font]
-        let full = (text as NSString).size(withAttributes: attr).width
-        return min(full, maxWidth)
-    }
-
-    private static func measureTextHeight(_ text: String, font: NSFont, maxWidth: CGFloat) -> CGFloat {
-        let attr = [NSAttributedString.Key.font: font]
-        let rect = (text as NSString).boundingRect(
-            with: NSSize(width: maxWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attr
-        )
-        return ceil(rect.height)
+        min(measureAdvance(text, font: font), maxWidth)
     }
 }

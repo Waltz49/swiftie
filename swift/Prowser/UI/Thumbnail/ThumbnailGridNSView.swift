@@ -533,6 +533,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             if showFilenames || showImageSize {
                 drawOverlay(
                     for: path,
+                    at: index,
                     in: cell,
                     showFilename: showFilenames,
                     showImageSize: showImageSize
@@ -1531,74 +1532,97 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func drawOverlay(
         for path: String,
+        at index: Int,
         in cell: NSRect,
         showFilename: Bool,
         showImageSize: Bool
     ) {
-        let overlayHeight = ThumbnailLayout.overlayLabelHeight(
-            showFilename: showFilename,
-            showImageSize: showImageSize
-        )
-        guard overlayHeight > 0 else { return }
+        let font = NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14)
+        let overlayBandHeight: CGFloat
+        if isDuplicateSectionMode, let custom = sectionedLayoutResult?.overlayHeights[index] {
+            overlayBandHeight = custom
+        } else {
+            overlayBandHeight = ThumbnailLayout.overlayLabelHeight(
+                showFilename: showFilename,
+                showImageSize: showImageSize
+            )
+        }
+        guard overlayBandHeight > 0 else { return }
 
         let labelRect = NSRect(
             x: cell.minX + 4,
-            y: cell.minY + cell.height - overlayHeight,
+            y: cell.minY + cell.height - overlayBandHeight,
             width: max(0, cell.width - 8),
-            height: overlayHeight
+            height: overlayBandHeight
         )
-        var lines: [String] = []
+
+        var wrappedLines: [String] = []
+        let innerTextWidth = max(1, labelRect.width - 8)
         if showFilename {
             if isDuplicateSectionMode {
-                lines.append(ThumbnailSectionedLayout.duplicateFilenameOverlay(for: path))
+                wrappedLines = ThumbnailSectionedLayout.duplicateOverlayWrappedLines(
+                    for: path,
+                    font: font,
+                    lineWrapWidth: innerTextWidth
+                )
             } else {
-                lines.append(
+                wrappedLines = [
                     ThumbnailLayout.overlayDisplayFilename(
                         for: path,
                         showExtensions: showExtensions,
                         basenamesNeedingExtensions: basenamesNeedingExtensions
-                    )
-                )
+                    ),
+                ]
             }
         }
         if showImageSize, let sizeText = dimensionText(for: path) {
-            lines.append(sizeText)
+            wrappedLines.append(sizeText)
         }
-        guard !lines.isEmpty else { return }
+        guard !wrappedLines.isEmpty else { return }
 
-        let textHeight = CGFloat(lines.count) * ThumbnailLayout.labelHeight
+        let lineHeight = ThumbnailLayout.labelHeight
+        let totalTextHeight = CGFloat(wrappedLines.count) * lineHeight
         let pillRect = NSRect(
             x: labelRect.minX,
             y: labelRect.minY,
             width: labelRect.width,
-            height: min(labelRect.height, textHeight + 4)
+            height: min(labelRect.height, totalTextHeight + 4)
         )
         let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: 4, yRadius: 4)
         overlayBoxColor.setFill()
         pillPath.fill()
 
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        paragraph.lineBreakMode = isDuplicateSectionMode ? .byWordWrapping : .byTruncatingTail
+        paragraph.alignment = .left
+        paragraph.lineBreakMode = .byClipping
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14),
+            .font: font,
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: paragraph,
         ]
         var y = pillRect.minY + 2
-        for line in lines {
-            let lineRect = NSRect(
-                x: pillRect.minX + 4,
-                y: y,
-                width: pillRect.width - 8,
-                height: ThumbnailLayout.labelHeight
-            )
-            (line as NSString).draw(
-                with: lineRect,
-                options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin],
-                attributes: attrs
-            )
-            y += ThumbnailLayout.labelHeight
+        for line in wrappedLines {
+            if isDuplicateSectionMode {
+                let lineWidth = (line as NSString).size(withAttributes: attrs).width
+                let drawX = pillRect.midX - lineWidth / 2
+                let drawY = y + (lineHeight - font.boundingRectForFont.height) / 2
+                (line as NSString).draw(at: NSPoint(x: drawX, y: drawY), withAttributes: attrs)
+            } else {
+                let lineRect = NSRect(
+                    x: pillRect.minX + 4,
+                    y: y,
+                    width: pillRect.width - 8,
+                    height: lineHeight
+                )
+                paragraph.alignment = .center
+                paragraph.lineBreakMode = .byTruncatingTail
+                (line as NSString).draw(
+                    with: lineRect,
+                    options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin],
+                    attributes: attrs
+                )
+            }
+            y += lineHeight
         }
     }
 
