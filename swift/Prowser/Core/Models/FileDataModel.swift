@@ -5,11 +5,17 @@ import Foundation
 @Observable
 @MainActor
 final class FileDataModel {
+    private let eventBridge: ModelEventBridge?
+
     private(set) var displayedImages: [String] = []
     private(set) var currentImagePath: String?
     private(set) var currentDirectory: String?
     private(set) var currentIndex: Int = 0
     private(set) var currentViewMode: ViewMode = .thumbnail
+
+    init(eventBridge: ModelEventBridge? = nil) {
+        self.eventBridge = eventBridge
+    }
 
     func getDisplayedImages() -> [String] { displayedImages }
 
@@ -31,12 +37,12 @@ final class FileDataModel {
         }
 
         if notify {
-            NotificationCenter.default.post(name: .prowserDisplayedImagesChanged, object: displayedImages)
+            eventBridge?.displayedImagesChanged(displayedImages)
             if currentIndex != oldIndex {
-                NotificationCenter.default.post(name: .prowserCurrentIndexChanged, object: currentIndex)
+                eventBridge?.currentIndexChanged(currentIndex)
             }
             if let currentImagePath {
-                NotificationCenter.default.post(name: .prowserCurrentImageChanged, object: currentImagePath)
+                eventBridge?.currentImageChanged(currentImagePath)
             }
         }
     }
@@ -44,16 +50,16 @@ final class FileDataModel {
     func setCurrentImagePath(_ path: String?) {
         guard let path else {
             currentImagePath = nil
-            NotificationCenter.default.post(name: .prowserCurrentImageChanged, object: nil)
+            eventBridge?.currentImageChanged(nil)
             return
         }
         guard let normalized = Self.normalizePath(path) else { return }
         currentImagePath = normalized
         if let index = displayedImages.firstIndex(of: normalized) {
             currentIndex = index
-            NotificationCenter.default.post(name: .prowserCurrentIndexChanged, object: index)
+            eventBridge?.currentIndexChanged(index)
         }
-        NotificationCenter.default.post(name: .prowserCurrentImageChanged, object: normalized)
+        eventBridge?.currentImageChanged(normalized)
     }
 
     func setCurrentIndex(_ index: Int) {
@@ -65,15 +71,17 @@ final class FileDataModel {
         let clamped = max(0, min(index, displayedImages.count - 1))
         currentIndex = clamped
         currentImagePath = displayedImages[clamped]
-        NotificationCenter.default.post(name: .prowserCurrentIndexChanged, object: clamped)
-        NotificationCenter.default.post(name: .prowserCurrentImageChanged, object: currentImagePath)
+        eventBridge?.currentIndexChanged(clamped)
+        eventBridge?.currentImageChanged(currentImagePath)
     }
 
     func setCurrentDirectory(_ path: String) {
         let normalized = Self.normalizePath(path)
         guard normalized != currentDirectory else { return }
         currentDirectory = normalized
-        NotificationCenter.default.post(name: .prowserDirectoryChanged, object: normalized)
+        if let normalized {
+            eventBridge?.directoryChanged(normalized)
+        }
     }
 
     func setViewMode(_ mode: ViewMode) {
@@ -82,7 +90,7 @@ final class FileDataModel {
             syncCurrentIndexFromPath()
         }
         currentViewMode = mode
-        NotificationCenter.default.post(name: .prowserViewModeChanged, object: mode.rawValue)
+        eventBridge?.viewModeChanged(mode.rawValue)
     }
 
     /// Align `currentIndex` with `currentImagePath` before showing the thumbnail grid.
@@ -91,7 +99,7 @@ final class FileDataModel {
               let index = displayedImages.firstIndex(of: path) else { return }
         guard index != currentIndex else { return }
         currentIndex = index
-        NotificationCenter.default.post(name: .prowserCurrentIndexChanged, object: index)
+        eventBridge?.currentIndexChanged(index)
     }
 
     static func normalizePath(_ path: String) -> String? {
@@ -110,12 +118,4 @@ final class FileDataModel {
               let parent = parentDirectory(of: file) else { return false }
         return parent == dir
     }
-}
-
-extension Notification.Name {
-    static let prowserDisplayedImagesChanged = Notification.Name("prowser.displayedImagesChanged")
-    static let prowserCurrentImageChanged = Notification.Name("prowser.currentImageChanged")
-    static let prowserCurrentIndexChanged = Notification.Name("prowser.currentIndexChanged")
-    static let prowserDirectoryChanged = Notification.Name("prowser.directoryChanged")
-    static let prowserViewModeChanged = Notification.Name("prowser.viewModeChanged")
 }

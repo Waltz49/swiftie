@@ -4,6 +4,8 @@ import Foundation
 @Observable
 @MainActor
 final class SelectionModel {
+    private let eventBridge: ModelEventBridge?
+
     var selectedFiles: Set<String> = []
     var rangeAnchorIndex: Int?
     var lastClickedIndex: Int?
@@ -11,6 +13,10 @@ final class SelectionModel {
     var cmdMultiOriginIndex: Int?
     var cmdMultiAxis: String?
     var cmdMultiSign: Int = 0
+
+    init(eventBridge: ModelEventBridge? = nil) {
+        self.eventBridge = eventBridge
+    }
 
     var multiSelectMode: Bool { selectedFiles.count > 1 }
 
@@ -21,10 +27,8 @@ final class SelectionModel {
     }
 
     func emitSelectionChanged(highlightIndex: Int? = nil) {
-        NotificationCenter.default.post(
-            name: .prowserSelectionChanged,
-            object: SelectionChange(selected: selectedFiles, highlightIndex: highlightIndex)
-        )
+        let change = SelectionChange(selected: selectedFiles, highlightIndex: highlightIndex)
+        eventBridge?.selectionChanged(change)
     }
 
     func clear() {
@@ -53,6 +57,5 @@ struct SelectionChange: Sendable {
 }
 
 extension Notification.Name {
-    static let prowserSelectionChanged = Notification.Name("prowser.selectionChanged")
     static let prowserOpenSettingsTab = Notification.Name("prowser.openSettingsTab")
 }

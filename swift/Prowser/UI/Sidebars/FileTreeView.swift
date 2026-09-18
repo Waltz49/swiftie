@@ -83,7 +83,7 @@ struct FileTreeView: NSViewRepresentable {
         private var excludedPaths: [String] = []
         fileprivate var rootPaths: [String] = []
 
-        private var settingsObserver: UUID?
+        private var eventSubscriptions: EventBusSubscriptionBag?
         private var lastFocusToken = 0
         private var lastCollapseUIToken = 0
         private var lastExpandToken = 0
@@ -95,7 +95,6 @@ struct FileTreeView: NSViewRepresentable {
         private var lastThemeID: String?
         private var pendingSingleClick: DispatchWorkItem?
         private var pendingHighlightSync: DispatchWorkItem?
-        private var currentImageObserver: NSObjectProtocol?
         private var expandedDirectoryPaths: Set<String> = []
         fileprivate var userIsNavigatingTree = false
         private var userNavigationReset: DispatchWorkItem?
@@ -407,37 +406,26 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func startObservingSettings() {
-            guard settingsObserver == nil else { return }
-            settingsObserver = UUID()
+            guard eventSubscriptions == nil else { return }
+            let bag = EventBusSubscriptionBag(bus: appState.eventBus)
+            eventSubscriptions = bag
             FileTreeFilter.setUpdateHandler { [weak self] discoveredPaths in
                 self?.refreshAfterDiscovery(discoveredPaths)
             }
-            _ = appState.eventBus.subscribe(.filterTreeModeChanged) { [weak self] _ in
-                Task { @MainActor in self?.reloadFilterResults(preserveExpansion: true) }
+            bag.subscribe(.filterTreeModeChanged) { [weak self] _ in
+                self?.reloadFilterResults(preserveExpansion: true)
             }
-            _ = appState.eventBus.subscribe(.filterPatternChanged) { [weak self] _ in
-                Task { @MainActor in self?.reloadFilterResults(preserveExpansion: true) }
+            bag.subscribe(.filterPatternChanged) { [weak self] _ in
+                self?.reloadFilterResults(preserveExpansion: true)
             }
-            if currentImageObserver == nil {
-                currentImageObserver = NotificationCenter.default.addObserver(
-                    forName: .prowserCurrentImageChanged,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    let coordinator = self
-                    Task { @MainActor in coordinator?.syncSelectionIfNeeded() }
-                }
+            bag.subscribe(.currentImageChanged) { [weak self] _ in
+                self?.syncSelectionIfNeeded()
             }
-            _ = appState.eventBus.subscribe(.directoryLoaded) { [weak self] _ in
-                Task { @MainActor in self?.syncSelectionIfNeeded() }
+            bag.subscribe(.directoryLoaded) { [weak self] _ in
+                self?.syncSelectionIfNeeded()
             }
-            NotificationCenter.default.addObserver(
-                forName: .prowserCurrentIndexChanged,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                let coordinator = self
-                Task { @MainActor in coordinator?.syncSelectionIfNeeded() }
+            bag.subscribe(.currentIndexChanged) { [weak self] _ in
+                self?.syncSelectionIfNeeded()
             }
         }
 

@@ -15,7 +15,7 @@ protocol ThumbnailGridDelegate: AnyObject {
     )
     func thumbnailGridDidOpenBrowse(path: String)
     /// Single-click browse activation (preview hidden). Fired on mouse up when the press was not a drag.
-    func thumbnailGridDidActivateBrowse()
+    func thumbnailGridDidActivateBrowse(path: String)
     func thumbnailGridDidReorder(path: String, insertionIndex: Int)
     func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void)
     func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
@@ -617,8 +617,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     return
                 }
                 gridDelegate?.thumbnailGridDidOpenBrowse(path: path)
-            } else {
-                gridDelegate?.thumbnailGridDidActivateBrowse()
+            } else if let path = browseActivationPath(at: point) {
+                gridDelegate?.thumbnailGridDidActivateBrowse(path: path)
             }
         }
         resetDragState()

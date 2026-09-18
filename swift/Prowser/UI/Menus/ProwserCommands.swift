@@ -324,10 +324,7 @@ struct ProwserCommands: Commands {
             Divider()
 
             Button("Open Home Directory") {
-                Task { @MainActor in
-                    let home = FileManager.default.homeDirectoryForCurrentUser.path
-                    appState.loadDirectory(home, saveHistory: true)
-                }
+                Task { @MainActor in appState.openHomeDirectory() }
             }
             .keyboardShortcut("h", modifiers: .control)
 

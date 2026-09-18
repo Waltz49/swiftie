@@ -45,15 +45,17 @@ struct BrowseView: NSViewRepresentable {
     final class Coordinator {
         let appState: AppState
         weak var view: BrowseImageNSView?
-        private var keyboardObserver: UUID?
+        private var eventSubscriptions: EventBusSubscriptionBag?
 
         init(appState: AppState) {
             self.appState = appState
         }
 
         func startObserving() {
-            guard keyboardObserver == nil else { return }
-            keyboardObserver = appState.eventBus.subscribe(.browseKeyboard) { [weak self] event in
+            guard eventSubscriptions == nil else { return }
+            let bag = EventBusSubscriptionBag(bus: appState.eventBus)
+            eventSubscriptions = bag
+            bag.subscribe(.browseKeyboard) { [weak self] event in
                 guard let self, case .browseAction(let action) = event.payload else { return }
                 switch action {
                 case .zoomIn: self.view?.zoomIn()

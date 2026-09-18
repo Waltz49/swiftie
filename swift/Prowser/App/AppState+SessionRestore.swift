@@ -4,17 +4,10 @@ import UniformTypeIdentifiers
 
 extension AppState {
     func observeViewModeChanges() {
-        _ = NotificationCenter.default.addObserver(
-            forName: .prowserViewModeChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let raw = notification.object as? String ?? ""
-                let newMode = ViewMode(rawValue: raw) ?? .thumbnail
-                self.handleViewModeTransition(to: newMode)
-            }
+        _ = eventBus.subscribe(.viewModeChanged) { [weak self] event in
+            guard let self, case .string(let raw) = event.payload else { return }
+            let newMode = ViewMode(rawValue: raw) ?? .thumbnail
+            self.handleViewModeTransition(to: newMode)
         }
     }
 

@@ -4,6 +4,7 @@ import SwiftUI
 struct StatusBarView: View {
     @Environment(AppState.self) private var appState
     @State private var refreshTrigger = 0
+    @State private var statusBarEventSink: StatusBarEventSink?
 
     var body: some View {
         let _ = refreshTrigger
@@ -34,20 +35,15 @@ struct StatusBarView: View {
         .frame(height: appState.effectiveStatusBarHeight)
         .clipped()
         .background(appState.theme.colors.statusBarBackground)
-        .onReceive(NotificationCenter.default.publisher(for: .prowserCurrentImageChanged)) { _ in
-            refreshTrigger += 1
+        .onAppear {
+            statusBarEventSink?.uninstall()
+            statusBarEventSink = StatusBarEventSink(appState: appState) {
+                refreshTrigger += 1
+            }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .prowserDisplayedImagesChanged)) { _ in
-            refreshTrigger += 1
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .prowserDirectoryChanged)) { _ in
-            refreshTrigger += 1
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .prowserViewModeChanged)) { _ in
-            refreshTrigger += 1
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .prowserFilterPatternChanged)) { _ in
-            refreshTrigger += 1
+        .onDisappear {
+            statusBarEventSink?.uninstall()
+            statusBarEventSink = nil
         }
     }
 
@@ -187,5 +183,32 @@ struct StatusBarView: View {
         case .trailing: return .right
         default: return .center
         }
+    }
+}
+
+@MainActor
+private final class StatusBarEventSink {
+    private var bag: EventBusSubscriptionBag?
+    private let onRefresh: () -> Void
+
+    init(appState: AppState, onRefresh: @escaping () -> Void) {
+        self.onRefresh = onRefresh
+        let bag = EventBusSubscriptionBag(bus: appState.eventBus)
+        self.bag = bag
+        let types: [AppEventType] = [
+            .currentImageChanged,
+            .displayedImagesChanged,
+            .directoryChanged,
+            .viewModeChanged,
+            .filterPatternChanged,
+            .settingsChanged,
+        ]
+        for type in types {
+            bag.subscribe(type) { [onRefresh] _ in onRefresh() }
+        }
+    }
+
+    func uninstall() {
+        bag = nil
     }
 }

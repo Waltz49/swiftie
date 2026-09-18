@@ -24,6 +24,8 @@ DMG_OUTPUT="/tmp/Prowser-swift.dmg"
 NERB_PROFILE=0
 NERB_PROFILE_PATH="/tmp/nerb"
 REGISTER_DEFAULTS=0
+FDA_WALKTHROUGH=0
+INSTALL_APP_PATH=""
 
 create_dmg() {
     local app_path="$1"
@@ -114,6 +116,8 @@ Options:
   --skip-build            Package existing .build artifacts (no swift build)
   --dmg [PATH]            Also create a min-size LZMA DMG (default: /tmp/Prowser-swift.dmg)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
+  --fda                   After build: reset optional TCC + open FDA Settings (see fda_walkthrough.sh)
+  --install PATH          Copy signed .app to PATH (e.g. /Applications/swift-prowser.app) for a stable FDA target
   --nerb                  Embed profile /tmp/nerb (same as -p /tmp/nerb at launch)
   -h, --help              Show this help
 EOF
@@ -149,6 +153,14 @@ while [[ $# -gt 0 ]]; do
         --reg)
             REGISTER_DEFAULTS=1
             shift
+            ;;
+        --fda)
+            FDA_WALKTHROUGH=1
+            shift
+            ;;
+        --install)
+            INSTALL_APP_PATH="$2"
+            shift 2
             ;;
         -h|--help)
             usage
@@ -257,6 +269,15 @@ sign_app_bundle() {
 ENTITLEMENTS="$SWIFT_ROOT/Prowser/Resources/Prowser.entitlements"
 sign_app_bundle "$OUTPUT" "$ENTITLEMENTS"
 
+if [[ -n "$INSTALL_APP_PATH" ]]; then
+    INSTALL_APP_PATH="$(cd "$(dirname "$INSTALL_APP_PATH")" && pwd)/$(basename "$INSTALL_APP_PATH")"
+    echo "Installing to $INSTALL_APP_PATH ..."
+    rm -rf "$INSTALL_APP_PATH"
+    ditto --norsrc --noextattr --noqtn "$OUTPUT" "$INSTALL_APP_PATH"
+    sign_app_bundle "$INSTALL_APP_PATH" "$ENTITLEMENTS"
+    OUTPUT="$INSTALL_APP_PATH"
+fi
+
 # Register with Launch Services so Finder Open With sees this bundle.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [[ -x "$LSREGISTER" ]]; then
@@ -273,7 +294,13 @@ echo ""
 echo "Privacy:"
 echo "  Full Disk Access is manual: System Settings → Privacy & Security → Full Disk Access → +"
 echo "  Choose this .app (listed as swift-prowser). Re-add after rebuild if access stops working."
+echo "  Helper:  $SWIFT_ROOT/Scripts/fda_walkthrough.sh --app \"$OUTPUT\" --reset"
+echo "  Or:      $SWIFT_ROOT/Scripts/build_app.sh --fda [--install /Applications/swift-prowser.app]"
 echo ""
+
+if [[ "$FDA_WALKTHROUGH" -eq 1 ]]; then
+    "$SWIFT_ROOT/Scripts/fda_walkthrough.sh" --app "$OUTPUT" --reset
+fi
 echo "Launch:"
 echo "  open \"$OUTPUT\""
 echo "  open -na \"$OUTPUT\" --args ~/Downloads/"

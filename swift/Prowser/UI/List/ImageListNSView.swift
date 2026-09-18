@@ -359,7 +359,7 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
             self.appState = appState
         }
 
-        private var selectionObserver: NSObjectProtocol?
+        private var eventSubscriptions: EventBusSubscriptionBag?
 
         func syncFromAppState() {
             guard let listView else { return }
@@ -377,14 +377,11 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
         }
 
         private func installSelectionObserverIfNeeded() {
-            guard selectionObserver == nil else { return }
-            selectionObserver = NotificationCenter.default.addObserver(
-                forName: .prowserSelectionChanged,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                let coordinator = self
-                Task { @MainActor in coordinator?.syncSelectionVisuals() }
+            guard eventSubscriptions == nil else { return }
+            let bag = EventBusSubscriptionBag(bus: appState.eventBus)
+            eventSubscriptions = bag
+            bag.subscribe(.selectionChanged) { [weak self] _ in
+                self?.syncSelectionVisuals()
             }
         }
 
@@ -419,13 +416,18 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
             if !shiftPressed, !cmdPressed, !ctrlPressed {
                 SelectionService.openBrowseFromThumbnailActivation(
                     appState: appState,
+                    path: path,
                     isDoubleClick: false
                 )
             }
         }
 
         func imageListDidOpenBrowse(index: Int, path: String) {
-            SelectionService.openBrowseForCurrentSelection(appState: appState)
+            SelectionService.openBrowseFromThumbnailActivation(
+                appState: appState,
+                path: path,
+                isDoubleClick: true
+            )
         }
 
         func imageListShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView) {}

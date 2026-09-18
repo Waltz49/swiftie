@@ -37,8 +37,12 @@ struct PreviewPaneView: View {
             Task { await reloadPreview(path: path) }
         }
         .onAppear {
+            appState.previewPaneInLayout = true
             restoreFromSessionCache()
             Task { await reloadPreview(path: appState.fileData.currentImagePath) }
+        }
+        .onDisappear {
+            appState.previewPaneInLayout = false
         }
     }
 

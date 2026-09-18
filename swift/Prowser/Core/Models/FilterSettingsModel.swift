@@ -5,12 +5,14 @@ import Foundation
 @MainActor
 final class FilterSettingsModel {
     private weak var config: AppConfig?
+    private let eventBridge: ModelEventBridge?
 
     private(set) var filterPattern: String = "*"
     private(set) var filteredTree: String = "images"
 
-    init(config: AppConfig?) {
+    init(config: AppConfig?, eventBridge: ModelEventBridge? = nil) {
         self.config = config
+        self.eventBridge = eventBridge
     }
 
     func bindConfig(_ config: AppConfig) {
@@ -29,7 +31,7 @@ final class FilterSettingsModel {
         filterPattern = normalized
         if persist { config?.updateSetting("filter_pattern", value: normalized) }
         if notify {
-            NotificationCenter.default.post(name: .prowserFilterPatternChanged, object: normalized)
+            eventBridge?.filterPatternChanged(normalized)
         }
     }
 
@@ -39,7 +41,7 @@ final class FilterSettingsModel {
         filteredTree = normalized
         if persist { config?.updateSetting("filtered_tree", value: normalized) }
         if notify {
-            NotificationCenter.default.post(name: .prowserFilterTreeModeChanged, object: normalized)
+            eventBridge?.filterTreeModeChanged(normalized)
         }
     }
 
@@ -48,9 +50,4 @@ final class FilterSettingsModel {
     static func normalizeFilterPattern(_ pattern: String?) -> String {
         FilterPatternFormatting.normalizeForMatching(pattern)
     }
-}
-
-extension Notification.Name {
-    static let prowserFilterPatternChanged = Notification.Name("prowser.filterPatternChanged")
-    static let prowserFilterTreeModeChanged = Notification.Name("prowser.filterTreeModeChanged")
 }

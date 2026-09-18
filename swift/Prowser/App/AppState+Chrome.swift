@@ -108,7 +108,15 @@ extension AppState {
     }
     /// Port of Python ``preview_widget.isVisible()`` for thumbnail click behavior.
     var isPreviewPaneVisible: Bool {
-        if fileData.currentViewMode == .browse { return false }
+        guard Self.previewPaneIsConfiguredVisible(config: config, viewMode: fileData.currentViewMode) else {
+            return false
+        }
+        return previewPaneInLayout
+    }
+
+    /// Settings + layout say the preview column should exist (not necessarily mounted yet).
+    static func previewPaneIsConfiguredVisible(config: AppConfig, viewMode: ViewMode) -> Bool {
+        if viewMode == .browse { return false }
         guard config.bool(forKey: "left_sidebar_visible", default: true) else { return false }
         return config.bool(forKey: "preview_visible", default: true)
     }

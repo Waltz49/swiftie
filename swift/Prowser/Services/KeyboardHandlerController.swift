@@ -148,6 +148,13 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ^H — open home directory (Python Tools menu Meta+H).
+        if hasControl, !hasCommand, !hasShift, !hasOption,
+           event.charactersIgnoringModifiers?.lowercased() == "h" {
+            appState.openHomeDirectory()
+            return true
+        }
+
         // ⌘; — swap browse image history first two (Last Image).
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers == ";" {
@@ -552,6 +559,9 @@ final class KeyboardHandlerController {
 
         if hasShift {
             return handleShiftLetter(event, appState: appState)
+        }
+        if hasControl {
+            return false
         }
         return handleLetter(event, appState: appState)
     }

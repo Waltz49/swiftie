@@ -70,17 +70,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         weak var scrollView: NSScrollView?
         private var boundsObserver: NSObjectProtocol?
         private var frameObserver: NSObjectProtocol?
-        private var layoutObserver: UUID?
-        private var navigateObserver: UUID?
-        private var viewModeObserver: NSObjectProtocol?
-        private var filterPatternObserver: NSObjectProtocol?
-        private var directoryObserver: NSObjectProtocol?
-        private var displayedImagesObserver: NSObjectProtocol?
-        private var settingsObserver: UUID?
-        private var thumbnailsInvalidatedObserver: UUID?
-        private var fileOperationObserver: UUID?
-        private var deletedPlaceholdersObserver: UUID?
-        private var selectionObserver: NSObjectProtocol?
+        private var eventSubscriptions: EventBusSubscriptionBag?
         private var lastSyncedIndex = -1
         private var lastSyncedDirectory: String?
         private var lastGridSyncFingerprint: GridSyncFingerprint?
@@ -117,91 +107,47 @@ struct ThumbnailGridView: NSViewRepresentable {
         }
 
         func startObserving(appState: AppState) {
-            guard navigateObserver == nil else { return }
-            navigateObserver = appState.eventBus.subscribe(.thumbnailNavigate) { [weak self] event in
+            guard eventSubscriptions == nil else { return }
+            let bag = EventBusSubscriptionBag(bus: appState.eventBus)
+            eventSubscriptions = bag
+            bag.subscribe(.thumbnailNavigate) { [weak self] event in
                 guard case .thumbnailDirection(let direction) = event.payload else { return }
-                Task { @MainActor in self?.handleNavigate(direction) }
+                self?.handleNavigate(direction)
             }
-            if viewModeObserver == nil {
-                viewModeObserver = NotificationCenter.default.addObserver(
-                    forName: .prowserViewModeChanged,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] notification in
-                    guard let mode = notification.object as? String else { return }
-                    let coordinator = self
-                    Task { @MainActor in
-                        coordinator?.applyThumbnailLoadingActive(mode == ViewMode.thumbnail.rawValue)
-                        if mode == ViewMode.thumbnail.rawValue {
-                            coordinator?.ensureHighlightedVisible()
-                        }
-                    }
+            bag.subscribe(.viewModeChanged) { [weak self] event in
+                guard let self, case .string(let mode) = event.payload else { return }
+                self.applyThumbnailLoadingActive(mode == ViewMode.thumbnail.rawValue)
+                if mode == ViewMode.thumbnail.rawValue {
+                    self.ensureHighlightedVisible()
                 }
             }
-            if filterPatternObserver == nil {
-                filterPatternObserver = NotificationCenter.default.addObserver(
-                    forName: .prowserFilterPatternChanged,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    let coordinator = self
-                    Task { @MainActor in coordinator?.syncFromAppState() }
-                }
+            bag.subscribe(.filterPatternChanged) { [weak self] _ in
+                self?.syncFromAppState()
             }
-            if directoryObserver == nil {
-                directoryObserver = NotificationCenter.default.addObserver(
-                    forName: .prowserDirectoryChanged,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    let coordinator = self
-                    Task { @MainActor in coordinator?.syncFromAppState() }
-                }
+            bag.subscribe(.directoryChanged) { [weak self] _ in
+                self?.syncFromAppState()
             }
-            if displayedImagesObserver == nil {
-                displayedImagesObserver = NotificationCenter.default.addObserver(
-                    forName: .prowserDisplayedImagesChanged,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    let coordinator = self
-                    Task { @MainActor in coordinator?.syncFromAppState() }
-                }
+            bag.subscribe(.displayedImagesChanged) { [weak self] _ in
+                self?.syncFromAppState()
             }
-            if thumbnailsInvalidatedObserver == nil {
-                thumbnailsInvalidatedObserver = appState.eventBus.subscribe(.thumbnailsInvalidated) { [weak self] event in
-                    guard case .strings(let paths) = event.payload else { return }
-                    Task { @MainActor in self?.handleThumbnailsInvalidated(paths) }
-                }
+            bag.subscribe(.thumbnailsInvalidated) { [weak self] event in
+                guard case .strings(let paths) = event.payload else { return }
+                self?.handleThumbnailsInvalidated(paths)
             }
-            if settingsObserver == nil {
-                settingsObserver = appState.eventBus.subscribe(.settingsChanged) { [weak self] _ in
-                    Task { @MainActor in self?.syncFromAppState() }
-                }
+            bag.subscribe(.settingsChanged) { [weak self] _ in
+                self?.syncFromAppState()
             }
-            if fileOperationObserver == nil {
-                fileOperationObserver = appState.eventBus.subscribe(.fileOperationComplete) { [weak self] _ in
-                    Task { @MainActor in self?.restoreKeyboardFocusAfterFileOperation() }
-                }
+            bag.subscribe(.fileOperationComplete) { [weak self] _ in
+                self?.restoreKeyboardFocusAfterFileOperation()
             }
             // Selection is not part of `GridSyncFingerprint`; keep this observer instead of full grid sync.
-            if selectionObserver == nil {
-                selectionObserver = NotificationCenter.default.addObserver(
-                    forName: .prowserSelectionChanged,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    let coordinator = self
-                    Task { @MainActor in
-                        coordinator?.syncSelectionVisualsIfNeeded()
-                        coordinator?.appState.refreshMenuState()
-                    }
-                }
+            bag.subscribe(.selectionChanged) { [weak self] _ in
+                guard let self else { return }
+                self.syncSelectionVisualsIfNeeded()
+                self.appState.refreshMenuState()
             }
-            if deletedPlaceholdersObserver == nil {
-                deletedPlaceholdersObserver = appState.eventBus.subscribe(.deletedPlaceholdersChanged) { [weak self] _ in
-                    Task { @MainActor in self?.syncDeletedPlaceholders() }
-                }
+            bag.subscribe(.deletedPlaceholdersChanged) { [weak self] _ in
+                self?.syncDeletedPlaceholders()
             }
         }
 
@@ -252,12 +198,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                     view?.noteContainerSizeChanged()
                 }
             }
-            if layoutObserver == nil {
-                layoutObserver = appState.eventBus.subscribe(.mainContentLayoutChanged) { [weak self] _ in
-                    Task { @MainActor in
-                        self?.gridView?.noteContainerSizeChanged()
-                    }
-                }
+            eventSubscriptions?.subscribe(.mainContentLayoutChanged) { [weak self] _ in
+                self?.gridView?.noteContainerSizeChanged()
             }
         }
 
@@ -267,21 +209,6 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
             if let frameObserver {
                 NotificationCenter.default.removeObserver(frameObserver)
-            }
-            if let viewModeObserver {
-                NotificationCenter.default.removeObserver(viewModeObserver)
-            }
-            if let filterPatternObserver {
-                NotificationCenter.default.removeObserver(filterPatternObserver)
-            }
-            if let directoryObserver {
-                NotificationCenter.default.removeObserver(directoryObserver)
-            }
-            if let displayedImagesObserver {
-                NotificationCenter.default.removeObserver(displayedImagesObserver)
-            }
-            if let selectionObserver {
-                NotificationCenter.default.removeObserver(selectionObserver)
             }
         }
 
@@ -463,9 +390,10 @@ struct ThumbnailGridView: NSViewRepresentable {
             )
         }
 
-        func thumbnailGridDidActivateBrowse() {
+        func thumbnailGridDidActivateBrowse(path: String) {
             SelectionService.openBrowseFromThumbnailActivation(
                 appState: appState,
+                path: path,
                 isDoubleClick: false
             )
         }

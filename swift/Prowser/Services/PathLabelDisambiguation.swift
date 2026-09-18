@@ -72,10 +72,17 @@ enum PathLabelDisambiguation {
 
     /// Keys are stored config/session path strings; values are short UI labels.
     static func disambiguate(storedPaths: [String]) -> [String: String] {
-        let keys = storedPaths.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        var seen = Set<String>()
+        let keys = storedPaths.filter { path in
+            guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            return seen.insert(path).inserted
+        }
         guard !keys.isEmpty else { return [:] }
 
-        var depths = Dictionary(uniqueKeysWithValues: keys.map { ($0, 1) })
+        var depths: [String: Int] = [:]
+        for key in keys {
+            depths[key] = 1
+        }
         var labels: [String: String] = [:]
 
         for _ in 0..<64 {

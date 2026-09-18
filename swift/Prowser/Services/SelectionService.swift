@@ -29,16 +29,6 @@ enum SelectionService {
         return indices
     }
 
-    static func updateCanvasSelection(appState: AppState) {
-        NotificationCenter.default.post(
-            name: .prowserSelectionChanged,
-            object: SelectionChange(
-                selected: appState.selection.selectedFiles,
-                highlightIndex: appState.fileData.currentIndex
-            )
-        )
-    }
-
     static func clearSelection(appState: AppState, preserveCurrentImage: Bool = false) {
         let displayed = appState.fileData.displayedImages
         let selected = appState.selection.selectedFiles
@@ -215,16 +205,19 @@ enum SelectionService {
     ) {
         if isDoubleClick {
             guard appState.isPreviewPaneVisible else { return }
-            if let path,
-               let index = appState.fileData.displayedImages.firstIndex(of: path),
-               appState.fileData.currentImagePath != path {
-                clearSelection(appState: appState)
-                selectThumbnail(appState: appState, index: index, addToSelection: false)
-            }
         } else {
             guard !appState.isPreviewPaneVisible else { return }
         }
+        syncThumbnailPathForBrowseActivation(appState: appState, path: path)
         openBrowseForCurrentSelection(appState: appState)
+    }
+
+    private static func syncThumbnailPathForBrowseActivation(appState: AppState, path: String?) {
+        guard let path,
+              let index = appState.fileData.displayedImages.firstIndex(of: path),
+              appState.fileData.currentImagePath != path else { return }
+        clearSelection(appState: appState)
+        selectThumbnail(appState: appState, index: index, addToSelection: false)
     }
 
     /// Return with multiple files selected — open a new specific-files level.

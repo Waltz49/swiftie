@@ -58,6 +58,7 @@ enum AppEventPayload {
     case bool(Bool)
     case thumbnailDirection(ThumbnailNavigateDirection)
     case browseAction(BrowseKeyboardAction)
+    case selectionChange(SelectionChange)
 }
 
 struct AppEvent: Sendable {
@@ -89,6 +90,40 @@ final class AppEventBus {
         guard let handlers = subscribers[type] else { return }
         for handler in handlers.values {
             handler(event)
+        }
+    }
+}
+
+/// Holds event-bus subscriptions and removes them when deallocated.
+@MainActor
+final class EventBusSubscriptionBag {
+    private let bus: AppEventBus
+    private var tokens: [(AppEventType, UUID)] = []
+
+    init(bus: AppEventBus) {
+        self.bus = bus
+    }
+
+    func subscribe(_ type: AppEventType, handler: @escaping AppEventBus.Handler) {
+        let token = bus.subscribe(type, handler: handler)
+        tokens.append((type, token))
+    }
+
+    func invalidate() {
+        for (type, token) in tokens {
+            bus.unsubscribe(type, token: token)
+        }
+        tokens.removeAll()
+    }
+
+    deinit {
+        let bus = self.bus
+        let tokens = self.tokens
+        guard Thread.isMainThread else { return }
+        MainActor.assumeIsolated {
+            for (type, token) in tokens {
+                bus.unsubscribe(type, token: token)
+            }
         }
     }
 }

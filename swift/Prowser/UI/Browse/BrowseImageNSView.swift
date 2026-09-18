@@ -24,6 +24,8 @@ final class BrowseImageNSView: NSView {
     private var preferredActualSize = false
     private var dragStart: CGPoint?
     private var scrollAtDragStart = CGPoint.zero
+    /// Pinch zoom anchor (Python `zoom_center_point` at gesture start).
+    private var magnifyAnchor: CGPoint?
     private var rotationDegrees: CGFloat = 0
     private var isFlippedHorizontally = false
     private var isFlippedVertically = false
@@ -413,8 +415,7 @@ final class BrowseImageNSView: NSView {
         if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
             let delta = event.deltaY
             let factor = delta > 0 ? scaleFactor * 1.1 : scaleFactor / 1.1
-            let point = convert(event.locationInWindow, from: nil)
-            applyZoom(factor: factor, anchor: point)
+            applyZoom(factor: factor, anchor: zoomAnchorPoint(for: event))
             return
         }
         if canPan() {
@@ -426,8 +427,14 @@ final class BrowseImageNSView: NSView {
     }
 
     override func magnify(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        applyZoom(factor: scaleFactor * (1.0 + event.magnification), anchor: point)
+        if event.phase == .began {
+            magnifyAnchor = zoomAnchorPoint(for: event)
+        }
+        let anchor = magnifyAnchor ?? zoomAnchorPoint(for: event)
+        applyZoom(factor: scaleFactor * (1.0 + event.magnification), anchor: anchor)
+        if event.phase == .ended || event.phase == .cancelled {
+            magnifyAnchor = nil
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -473,21 +480,36 @@ final class BrowseImageNSView: NSView {
         return NSRect(x: x, y: y, width: width, height: height)
     }
 
+    /// View coordinates of the point that should stay fixed while zooming (cursor / pinch center).
+    private func zoomAnchorPoint(for event: NSEvent) -> CGPoint {
+        if let window {
+            return convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        }
+        return convert(event.locationInWindow, from: nil)
+    }
+
     private func applyZoom(factor: CGFloat, anchor: CGPoint) {
         guard let image = sourceImage else { return }
         let clamped = min(max(factor, 0.05), 20.0)
         let before = imageDrawRect(for: image)
-        let relX = anchor.x - before.minX
-        let relY = anchor.y - before.minY
-        let ratio = clamped / max(scaleFactor, 0.0001)
+        guard before.width > 0, before.height > 0 else { return }
+
+        let fracX = min(max((anchor.x - before.minX) / before.width, 0), 1)
+        let fracY = min(max((anchor.y - before.minY) / before.height, 0), 1)
+
         scaleFactor = clamped
         if preferredActualSize {
             preferredActualSize = false
             isActualSize = false
             onActualSizeModeChanged?(false)
         }
-        scrollOffset.x += relX * (ratio - 1.0)
-        scrollOffset.y += relY * (ratio - 1.0)
+
+        let imageSize = image.size
+        let afterW = imageSize.width * scaleFactor
+        let afterH = imageSize.height * scaleFactor
+        // Keep the image pixel under `anchor` at the same view position (Python `zoom_at_point`).
+        scrollOffset.x = (bounds.width - afterW) / 2 - (anchor.x - fracX * afterW)
+        scrollOffset.y = (bounds.height - afterH) / 2 - (anchor.y - fracY * afterH)
         clampScroll()
         needsDisplay = true
     }
