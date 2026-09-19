@@ -69,6 +69,13 @@ final class FileTreeOperationsService {
         }
     }
 
+    func findSimilarImages(in directory: String) {
+        guard let appState else { return }
+        Task { @MainActor in
+            await SimilarImageFilesService.findInDirectory(appState: appState, directoryPath: directory)
+        }
+    }
+
     func clearCache(for directory: String) {
         guard let appState else { return }
         if FileTreePathRestrictions.isRootOrSystemVolume(directory) {

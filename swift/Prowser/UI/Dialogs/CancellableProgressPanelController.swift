@@ -16,6 +16,7 @@ final class CancellableProgressPanelController {
     private let cancelTarget = CancelTarget()
     private var keyboardMonitor: Any?
     private var isClosed = false
+    private let isIndeterminateMode: Bool
     private let cancelFlag = CancelFlag()
     private let showsTimeRemainingEstimate: Bool
     private var progressStartDate: Date?
@@ -32,9 +33,11 @@ final class CancellableProgressPanelController {
         labelText: String,
         maximum: Int,
         detailText: String? = nil,
-        mutedNoteColor: NSColor = .secondaryLabelColor
+        mutedNoteColor: NSColor = .secondaryLabelColor,
+        indeterminate: Bool = false
     ) {
         showsTimeRemainingEstimate = detailText != nil
+        isIndeterminateMode = indeterminate
         self.mutedNoteColor = mutedNoteColor
         let panelHeight: CGFloat = detailText == nil ? 120 : (showsTimeRemainingEstimate ? 172 : 156)
         panel = NSPanel(
@@ -72,9 +75,13 @@ final class CancellableProgressPanelController {
 
         indicator = NSProgressIndicator()
         indicator.style = .bar
-        indicator.isIndeterminate = false
+        indicator.isIndeterminate = indeterminate
         indicator.minValue = 0
-        indicator.maxValue = Double(max(1, maximum))
+        if indeterminate {
+            indicator.maxValue = 100
+        } else {
+            indicator.maxValue = Double(max(1, maximum))
+        }
         indicator.doubleValue = 0
         indicator.translatesAutoresizingMaskIntoConstraints = false
 
@@ -173,6 +180,9 @@ final class CancellableProgressPanelController {
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(cancelButton)
+        if isIndeterminateMode {
+            indicator.startAnimation(nil)
+        }
         refresh()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -207,12 +217,12 @@ final class CancellableProgressPanelController {
     }
 
     private func setMaximumOnMain(_ maximum: Int) {
-        guard !isClosed else { return }
+        guard !isClosed, !isIndeterminateMode else { return }
         indicator.maxValue = Double(max(1, maximum))
     }
 
     private func setValueOnMain(_ value: Int) {
-        guard !isClosed else { return }
+        guard !isClosed, !isIndeterminateMode else { return }
         indicator.doubleValue = Double(value)
     }
 

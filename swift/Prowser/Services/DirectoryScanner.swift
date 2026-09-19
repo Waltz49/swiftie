@@ -76,7 +76,7 @@ enum DirectoryScanner {
         return results.sorted()
     }
 
-    private static func isExcludedPath(_ path: String, excluded: [String]) -> Bool {
+    static func isExcludedPath(_ path: String, excluded: [String]) -> Bool {
         let resolved = URL(fileURLWithPath: path).standardizedFileURL.path
         for excl in excluded {
             let exclResolved = URL(fileURLWithPath: excl).standardizedFileURL.path
@@ -107,7 +107,7 @@ enum DirectoryScanner {
         return storedPattern + "*"
     }
 
-    private static func normalizeExtensionToken(_ ext: String) -> String {
+    static func normalizeExtensionToken(_ ext: String) -> String {
         let lower = ext.lowercased()
         if lower.hasPrefix(".") { return String(lower.dropFirst()) }
         return lower

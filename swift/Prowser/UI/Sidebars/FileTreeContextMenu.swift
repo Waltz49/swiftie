@@ -54,6 +54,13 @@ enum FileTreeContextMenu {
         )
         addAction(
             menu,
+            title: "Find VisuallySimilar Image Files",
+            enabled: !restricted,
+            representedObject: directoryPath,
+            action: #selector(FileTreeMenuActions.findSimilarImages(_:))
+        )
+        addAction(
+            menu,
             title: "Clear Cache",
             enabled: !restricted,
             representedObject: directoryPath,
@@ -121,6 +128,11 @@ final class FileTreeMenuActions: NSObject {
     @objc func findDuplicates(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
         appState.fileTreeOperations.findDuplicateImages(in: path)
+    }
+
+    @objc func findSimilarImages(_ sender: NSMenuItem) {
+        guard let appState, let path = sender.representedObject as? String else { return }
+        appState.fileTreeOperations.findSimilarImages(in: path)
     }
 
     @objc func clearCache(_ sender: NSMenuItem) {
