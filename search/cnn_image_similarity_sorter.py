@@ -2896,6 +2896,9 @@ class CNNImageSimilaritySorter:
             similarity = 1.0 if path in valid_ref_set else float(sims[idx].item())
             scored.append((similarity, path))
         scored.sort(reverse=True, key=lambda tup: tup[0])
+        from search.similarity_search_log import log_similarity_top_scores
+
+        log_similarity_top_scores("CNN", scored, main_window=self.main_window)
         return [p for _, p in scored]
 
     def _load_clip_model(self):
@@ -3396,6 +3399,7 @@ class CNNImageSimilaritySorter:
             highest_score_overall = None  # Track highest score even if filtered out
             comparison_count = 0
             total_comparisons = len([p for p in candidates if p in features])
+            all_scored = []
             for path in candidates:
                 if path not in features:
                     continue
@@ -3406,6 +3410,7 @@ class CNNImageSimilaritySorter:
                 
                 # Use cosine similarity (dot product since features are normalized)
                 similarity = torch.dot(text_features, features[path]).item()
+                all_scored.append((similarity, path))
                 
                 # Increment comparison count immediately after comparison (counts all comparisons, not just found)
                 comparison_count += 1
@@ -3448,6 +3453,19 @@ class CNNImageSimilaritySorter:
             
             scored.sort(reverse=True, key=lambda tup: tup[0])
             sorted_images = [p for _, p in scored]
+
+            from search.similarity_search_log import log_similarity_search, log_similarity_top_scores
+
+            feat_count = len(features)
+            log_similarity_search(
+                f"CLIP text features indexed={feat_count} compared={len(all_scored)} "
+                f"matched={len(scored)} threshold={similarity_threshold}",
+                main_window=self.main_window,
+            )
+            all_scored.sort(reverse=True, key=lambda tup: tup[0])
+            log_similarity_top_scores("CLIP text (all)", all_scored, main_window=self.main_window)
+            if scored:
+                log_similarity_top_scores("CLIP text (matched)", scored, main_window=self.main_window)
             
             # Get highest score for return value
             # Use highest_score_overall if no images passed threshold, otherwise use highest from scored
@@ -3625,6 +3643,14 @@ class CNNImageSimilaritySorter:
                     pass
             return displayed_images
 
+        from search.similarity_search_log import log_similarity_search
+
+        log_similarity_search(
+            f"CNN reorder candidates={total} refs={len(valid_ref_paths)} "
+            f"metric={self.similarity_metric} resnet={getattr(self, '_resnet_model_param', 'resnet18')}",
+            main_window=self.main_window,
+        )
+
         # Only cache the sorted results if displayed_images candidates and ref_image_path did not change;
         # Otherwise, if only the reference image changes, reuse feature vectors and recompute only similarity/sorting.
 
@@ -3700,6 +3726,18 @@ class CNNImageSimilaritySorter:
             processed_count=processed_count,
             total_steps=total_steps,
             progress_dialog=progress_dialog,
+        )
+
+        feat_ok = sum(1 for p in candidates if features.get(p) is not None)
+        sample_dim = None
+        for p in candidates:
+            feat = features.get(p)
+            if feat is not None:
+                sample_dim = feat.numel()
+                break
+        log_similarity_search(
+            f"CNN features indexed={feat_ok}/{len(candidates)} dim={sample_dim}",
+            main_window=self.main_window,
         )
 
         # If all images were cached, update progress to show completion

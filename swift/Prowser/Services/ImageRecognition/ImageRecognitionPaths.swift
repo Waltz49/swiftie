@@ -32,4 +32,15 @@ enum ImageRecognitionPaths {
             return !isModelInstalled(profile: profile, entry: entry)
         }
     }
+
+    /// True when CLIP and ResNet Core ML bundles for current settings are on disk (background UI gate).
+    @MainActor
+    static func backgroundIndexingAvailable(profile: ProfilePaths, config: AppConfig) -> Bool {
+        let resnet = config.string(forKey: "resnet_model", default: "resnet18")
+        let clip = config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        let resnetIDs = ModelManifest.resnetBundleIDs(for: resnet)
+        let clipIDs = ModelManifest.clipBundleIDs(for: clip)
+        return missingModelIDs(profile: profile, ids: resnetIDs).isEmpty
+            && missingModelIDs(profile: profile, ids: clipIDs).isEmpty
+    }
 }

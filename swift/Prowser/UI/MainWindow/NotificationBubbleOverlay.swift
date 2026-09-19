@@ -5,7 +5,8 @@ struct NotificationBubbleOverlay: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let bubbles = appState.status.bubbles
+        @Bindable var status = appState.status
+        let bubbles = status.bubbles
         let bottomPadding: CGFloat = appState.effectiveStatusBarHeight > 0 ? 30 : 12
         VStack(alignment: .leading, spacing: 6) {
             ForEach(bubbles) { bubble in

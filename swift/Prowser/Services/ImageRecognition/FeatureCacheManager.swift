@@ -79,7 +79,11 @@ final class FeatureCacheManager: @unchecked Sendable {
         defer { lock.unlock() }
         loadDirectoryIfNeeded(cacheType: .cnn, path: path)
         if let entry = cnnCache[key], entry.mtime == mtime, entry.size == size {
-            return entry.feature
+            guard let feat = entry.feature else { return nil }
+            let expected = ModelManifest.resnetFeatureDimension(for: resnetModelSafe)
+            guard feat.count == expected else { return nil }
+            guard Self.isPlausibleCNNFeature(feat) else { return nil }
+            return feat
         }
         return nil
     }
@@ -256,8 +260,22 @@ final class FeatureCacheManager: @unchecked Sendable {
         let size: Int
     }
 
+    /// Reject CNN cache entries from older broken Core ML reads (sparse garbage, huge L2 norm).
+    private static func isPlausibleCNNFeature(_ feat: [Float]) -> Bool {
+        guard !feat.isEmpty else { return false }
+        var sumSq: Float = 0
+        var nonzero = 0
+        for x in feat {
+            sumSq += x * x
+            if abs(x) > 1e-6 { nonzero += 1 }
+        }
+        let norm = sqrt(sumSq)
+        return norm > 5 && norm < 60 && nonzero > 100
+    }
+
     private func cacheKey(_ path: String) -> String {
-        URL(fileURLWithPath: path).standardizedFileURL.path
+        ImageRecognitionPath.normalize(path)
+            ?? URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     private func directoryHash(_ path: String) -> String {

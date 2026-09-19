@@ -32,7 +32,7 @@ enum VisionFeaturePrintExtractor: Sendable {
     }
 
     private static func featurePrint(path: String) throws -> VNFeaturePrintObservation {
-        guard let cgImage = loadCGImage(path: path) else { throw ExtractorError.imageLoadFailed }
+        guard let cgImage = ImageRecognitionImageLoader.loadCGImage(path: path) else { throw ExtractorError.imageLoadFailed }
         let request = VNGenerateImageFeaturePrintRequest()
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         try handler.perform([request])
@@ -40,11 +40,5 @@ enum VisionFeaturePrintExtractor: Sendable {
             throw ExtractorError.noFeaturePrint
         }
         return observation
-    }
-
-    private static func loadCGImage(path: String) -> CGImage? {
-        let url = URL(fileURLWithPath: path)
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 }

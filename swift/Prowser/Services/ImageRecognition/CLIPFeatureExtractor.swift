@@ -141,9 +141,13 @@ final class CLIPFeatureExtractor: @unchecked Sendable {
     }
 
     private func runText(model: MLModel, tokenIDs: [Int]) throws -> [Float]? {
-        let shape: [NSNumber] = [1, tokenIDs.count as NSNumber]
+        let length = 77
+        let shape: [NSNumber] = [1, length as NSNumber]
         guard let array = try? MLMultiArray(shape: shape, dataType: .int32) else { return nil }
-        for i in 0 ..< tokenIDs.count { array[i] = NSNumber(value: tokenIDs[i]) }
+        for i in 0 ..< length {
+            let value = i < tokenIDs.count ? tokenIDs[i] : 49407
+            array[i] = NSNumber(value: value)
+        }
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": array])
         let out = try model.prediction(from: provider)
         return firstVector(in: out)
@@ -152,25 +156,9 @@ final class CLIPFeatureExtractor: @unchecked Sendable {
     private func firstVector(in out: MLFeatureProvider) -> [Float]? {
         for name in out.featureNames {
             if let feat = out.featureValue(for: name)?.multiArrayValue {
-                return multiArrayToFloat(feat)
+                return MLMultiArrayHelpers.readFloats(feat)
             }
         }
         return nil
-    }
-
-    private func multiArrayToFloat(_ array: MLMultiArray) -> [Float] {
-        let count = array.count
-        var out = [Float](repeating: 0, count: count)
-        switch array.dataType {
-        case .float32:
-            let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)
-            for i in 0 ..< count { out[i] = ptr[i] }
-        case .double:
-            let ptr = array.dataPointer.bindMemory(to: Double.self, capacity: count)
-            for i in 0 ..< count { out[i] = Float(ptr[i]) }
-        default:
-            for i in 0 ..< count { out[i] = array[i].floatValue }
-        }
-        return out
     }
 }

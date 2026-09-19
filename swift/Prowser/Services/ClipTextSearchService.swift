@@ -26,6 +26,22 @@ enum ClipTextSearchService {
         }
 
         let clipName = appState.config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        let searchDir = options.useCustomDirectory ? options.customDirectory : SearchImagePathCollector.currentSearchDirectory(appState: appState)
+        SimilaritySearchLog.logScope(
+            config: appState.config,
+            kind: "CLIP text",
+            candidateCount: paths.count,
+            recursive: options.recursive,
+            searchDirectory: searchDir,
+            filterPattern: appState.filterSettings.filterPattern,
+            searchDepth: appState.config.int(forKey: "search_depth", default: 4),
+            referencePaths: [],
+            extra: "threshold=\(String(format: "%.2f", options.threshold)) clip=\(clipName) prompt=\(options.prompt.prefix(120))"
+        )
+
+        appState.backgroundImageRecognition.suspendForForegroundSearch()
+        defer { appState.backgroundImageRecognition.resumeAfterForegroundSearch() }
+
         let modelIDs = ModelManifest.clipBundleIDs(for: clipName)
         do {
             try await ModelDownloadService.ensureModelsInstalled(
@@ -40,6 +56,7 @@ enum ClipTextSearchService {
             StyledMessageDialog.showWarning(title: "Search Failed", message: error.localizedDescription)
             return
         }
+        appState.refreshImageRecognitionForCurrentSettings()
 
         let panel = CancellableProgressPanelController(
             title: "Search by Text",
@@ -115,6 +132,27 @@ enum ClipTextSearchService {
                 )
                 return
             }
+
+            let indexedCount = paths.filter { imageFeatures[$0] != nil }.count
+            SimilaritySearchLog.logFeatureSummary(
+                config: appState.config,
+                kind: "CLIP text",
+                candidateCount: paths.count,
+                indexedCount: indexedCount,
+                featureDimension: textFeature.count,
+                modelLabel: clipName
+            )
+            SimilaritySearchLog.logTopCLIPScores(
+                config: appState.config,
+                paths: paths,
+                features: imageFeatures,
+                textFeature: textFeature,
+                threshold: threshold
+            )
+            SimilaritySearchLog.log(
+                appState.config,
+                "CLIP result count=\(ordered.count) threshold=\(String(format: "%.2f", threshold))"
+            )
 
             let filesChanged = Set(displayedSeed) != Set(ordered)
             ImageSearchResultPresentation.applyCustomOrderedList(

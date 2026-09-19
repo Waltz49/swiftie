@@ -23,6 +23,7 @@ enum AppEventType: String, Sendable {
     case browseKeyboard
     case mainContentLayoutChanged
     case thumbnailsInvalidated
+    case backgroundIndexingStateChanged
 }
 
 /// Browse-view keyboard actions (zoom, etc.).

@@ -187,6 +187,13 @@ final class AppState {
         exifOperations.bind(self)
         searchOperations.bind(self)
         backgroundImageRecognition.bind(self)
+        NotificationCenter.default.addObserver(
+            forName: .imageRecognitionModelsInstalled,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshImageRecognitionForCurrentSettings()
+        }
         fileTreeOperations.bind(self)
         renamePrefixService.bind(self)
         menuRefresh.bind(self)
@@ -706,9 +713,16 @@ final class AppState {
     }
 
 
+    /// Rebind CNN/CLIP caches and loaded Core ML models to current settings (no app restart).
+    func refreshImageRecognitionForCurrentSettings() {
+        imageRecognition.rebind(config: config)
+        backgroundImageRecognition.noteSearchModelsChanged()
+    }
+
     func loadDirectory(_ path: String, saveHistory: Bool = true) {
         setSpecificFilesActive(false)
         clearDeletedPlaceholders()
+        backgroundImageRecognition.notePriorityDirectory(path)
         directoryLoader.loadDirectory(path, saveHistory: saveHistory)
         menuRefresh.refreshAll()
     }

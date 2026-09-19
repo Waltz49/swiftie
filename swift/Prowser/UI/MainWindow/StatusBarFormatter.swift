@@ -71,15 +71,16 @@ enum StatusBarFormatter {
         displayedPaths: [String],
         directory: String?,
         filterPattern: String,
-        extensions: [String]
+        extensions: [String],
+        backgroundIndicatorPrefix: String = ""
     ) -> String {
         let displayedCount = displayedPaths.count
         let multipleDirs = multipleDirectoriesIndicator(displayedCount: displayedCount, paths: displayedPaths)
         guard let directory else {
             if displayedCount > 0 {
-                return "\(displayedCount)\(multipleDirs)"
+                return "\(backgroundIndicatorPrefix)\(displayedCount)\(multipleDirs)"
             }
-            return "No files"
+            return "\(backgroundIndicatorPrefix)No files"
         }
 
         let total = DirectoryScanner.scanDirectory(
@@ -89,9 +90,9 @@ enum StatusBarFormatter {
         ).count
 
         if total > 0 || displayedCount > 0 {
-            return "\(displayedCount) files (Directory)\(multipleDirs)"
+            return "\(backgroundIndicatorPrefix)\(displayedCount) files (Directory)\(multipleDirs)"
         }
-        return "No files"
+        return "\(backgroundIndicatorPrefix)No files"
     }
 
     private static func multipleDirectoriesIndicator(displayedCount: Int, paths: [String]) -> String {

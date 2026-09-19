@@ -403,6 +403,22 @@ def reorder_images_by_similarity(mw):
             displayed_images.append(source_img)
             displayed_images_set.add(source_img)
 
+    from search.similarity_search_log import log_similarity_scope, log_similarity_search
+
+    _scope_settings = mw.config.load_settings()
+    _ref_list = list(ref_image_path) if isinstance(ref_image_path, list) else ([ref_image_path] if ref_image_path else [])
+    log_similarity_scope(
+        kind="CNN",
+        main_window=mw,
+        candidate_count=len(displayed_images),
+        recursive=recursive,
+        search_directory=search_directory,
+        filter_pattern=getattr(mw, "filter_pattern", "*"),
+        search_depth=_scope_settings.get("search_depth", 4),
+        reference_paths=_ref_list,
+        extra=f"metric={similarity_metric} resnet={_scope_settings.get('resnet_model', 'resnet18')}",
+    )
+
     # Lazy initialize UI helper if needed
     mw._ensure_cnn_ui_helper_initialized()
     
@@ -439,6 +455,11 @@ def reorder_images_by_similarity(mw):
         
         new_displayed_images = dedupe_preserve_order(new_displayed_images)
         new_displayed_images = _apply_active_filter_to_results(mw, new_displayed_images)
+
+        log_similarity_search(
+            f"CNN result count={len(new_displayed_images)}",
+            main_window=mw,
+        )
 
         # Check if no matches found (only source images in results)
         if recursive and len(new_displayed_images) <= len(source_images_set):
@@ -929,6 +950,24 @@ def reorder_images_by_clip_search(mw):
     if not displayed_images:
         show_styled_warning(mw, "No Images Found", "No images found to search.")
         return
+
+    from search.similarity_search_log import log_similarity_scope, log_similarity_search
+
+    _clip_settings = mw.config.load_settings()
+    log_similarity_scope(
+        kind="CLIP text",
+        main_window=mw,
+        candidate_count=len(displayed_images),
+        recursive=recursive,
+        search_directory=search_directory,
+        filter_pattern=getattr(mw, "filter_pattern", "*"),
+        search_depth=_clip_settings.get("search_depth", 4),
+        reference_paths=[],
+        extra=(
+            f"threshold={threshold:.2f} clip={_clip_settings.get('clip_model_name', '')} "
+            f"prompt={text_prompt[:120]!r}"
+        ),
+    )
     
     # Suspend all background thumbnail loading immediately
     # Stop background loader
@@ -986,6 +1025,11 @@ def reorder_images_by_clip_search(mw):
             new_displayed_images, highest_score = result
         
         # Debug output
+        log_similarity_search(
+            f"CLIP result count={len(new_displayed_images)} highest={highest_score} "
+            f"threshold={threshold:.2f} adjusted={threshold_adjusted}",
+            main_window=mw,
+        )
         if mw.debug_mode:
             mode_str = "recursive" if recursive else "non-recursive"
             if threshold_adjusted:

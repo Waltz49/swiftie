@@ -86,12 +86,12 @@ struct ModelsSearchSettingsTab: View {
         .onChange(of: metric) { _, new in appState.config.updateSetting("similarity_metric", value: new) }
         .onChange(of: resnetModel) { _, new in
             appState.config.updateSetting("resnet_model", value: new)
-            appState.imageRecognition.rebind(config: appState.config)
+            appState.refreshImageRecognitionForCurrentSettings()
             promptDownloadIfNeeded(resnet: new, clip: nil)
         }
         .onChange(of: clipModel) { _, new in
             appState.config.updateSetting("clip_model_name", value: new)
-            appState.imageRecognition.rebind(config: appState.config)
+            appState.refreshImageRecognitionForCurrentSettings()
             promptDownloadIfNeeded(resnet: nil, clip: new)
         }
         .onChange(of: modelDownloadBaseURL) { _, new in
@@ -152,6 +152,7 @@ struct ModelsSearchSettingsTab: View {
                     )
                     statusMessage = "CLIP model ready."
                 }
+                appState.refreshImageRecognitionForCurrentSettings()
             } catch ModelDownloadError.userDeclined {
                 statusMessage = "Download cancelled."
             } catch {

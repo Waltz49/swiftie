@@ -23,14 +23,20 @@ enum SearchImagePathCollector {
         var seen = Set<String>()
 
         func add(_ path: String) {
-            let norm = URL(fileURLWithPath: path).standardizedFileURL.path
+            let norm = ImageRecognitionPath.normalize(path)
+                ?? URL(fileURLWithPath: path).standardizedFileURL.path
             guard seen.insert(norm).inserted else { return }
             paths.append(norm)
         }
 
+        func matchesActiveFilter(_ path: String, pattern: String) -> Bool {
+            let name = (path as NSString).lastPathComponent
+            return DirectoryScanner.matchesGlob(name, pattern: pattern)
+        }
+
         for p in includeDisplayed { add(p) }
 
-        let extensions = Set(appState.config.imageExtensions.map { AppConfig.normalizeExtension($0) })
+        let extensions = appState.config.imageExtensions
         let pattern = appState.filterSettings.filterPattern
         let excluded = PathExclusions.excludedPaths(config: appState.config)
         let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
@@ -40,7 +46,7 @@ enum SearchImagePathCollector {
             if recursive {
                 let scanned = DirectoryScanner.scanDirectoryRecursive(
                     at: dir,
-                    extensions: appState.config.imageExtensions,
+                    extensions: extensions,
                     filterPattern: pattern,
                     maxDepth: maxDepth,
                     excludedPaths: excluded,
@@ -48,21 +54,30 @@ enum SearchImagePathCollector {
                 )
                 for p in scanned { add(p) }
             } else {
-                addTopLevelImages(directory: dir, extensions: extensions, pattern: pattern, add: add)
+                let extSet = Set(extensions.map { AppConfig.normalizeExtension($0) })
+                addTopLevelImages(directory: dir, extensions: extSet, pattern: pattern, add: add)
             }
             return paths
         }
 
-        if recursive, let root = currentSearchDirectory(appState: appState) {
-            let scanned = DirectoryScanner.scanDirectoryRecursive(
-                at: root,
-                extensions: appState.config.imageExtensions,
-                filterPattern: pattern,
-                maxDepth: maxDepth,
-                excludedPaths: excluded,
-                includeHidden: showHidden
-            )
-            for p in scanned { add(p) }
+        if recursive {
+            // Python: when not using a custom search dir, seed with current displayed images (filtered).
+            if !useCustomDirectory {
+                for p in appState.fileData.displayedImages where matchesActiveFilter(p, pattern: pattern) {
+                    add(p)
+                }
+            }
+            if let root = currentSearchDirectory(appState: appState) {
+                let scanned = DirectoryScanner.scanDirectoryRecursive(
+                    at: root,
+                    extensions: extensions,
+                    filterPattern: pattern,
+                    maxDepth: maxDepth,
+                    excludedPaths: excluded,
+                    includeHidden: showHidden
+                )
+                for p in scanned { add(p) }
+            }
             return paths
         }
 

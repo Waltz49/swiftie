@@ -52,29 +52,73 @@ enum SimilarityOrdering {
         return dot / denom
     }
 
-    /// Order paths by increasing distance to reference feature(s) (mean distance when multiple refs).
+    /// Order by similarity to reference(s). Matches Python `_score_candidates_vectorized` + aggregate ref mean.
     static func orderBySimilarity(
         paths: [String],
         features: [String: [Float]],
         referencePaths: [String],
         metric: Metric
     ) -> [String] {
-        let refs = referencePaths.compactMap { features[$0] }
-        guard !refs.isEmpty else { return paths }
-
-        func score(for path: String) -> Float {
-            guard let feat = features[path] else { return .greatestFiniteMagnitude }
-            if refs.count == 1 {
-                return distance(feat, refs[0], metric: metric)
-            }
-            var total: Float = 0
-            for ref in refs {
-                total += distance(feat, ref, metric: metric)
-            }
-            return total / Float(refs.count)
+        let refKeys = Set(referencePaths.compactMap { ImageRecognitionPath.normalize($0) ?? $0 })
+        let refFeats: [[Float]] = referencePaths.compactMap { path in
+            let key = ImageRecognitionPath.normalize(path) ?? path
+            return features[key] ?? features[path]
         }
+        guard !refFeats.isEmpty else { return paths }
 
-        return paths.sorted { score(for: $0) < score(for: $1) }
+        let aggregate = aggregateReference(refFeats)
+        let validRefSet = refKeys
+
+        var scored: [(similarity: Float, path: String)] = []
+        var missing: [String] = []
+        for path in paths {
+            let key = ImageRecognitionPath.normalize(path) ?? path
+            guard let feat = features[key] ?? features[path] else {
+                missing.append(path)
+                continue
+            }
+            let sim: Float
+            if validRefSet.contains(key) || validRefSet.contains(path) {
+                sim = 1
+            } else {
+                sim = similarityScore(candidate: feat, reference: aggregate, metric: metric)
+            }
+            scored.append((sim, path))
+        }
+        scored.sort { $0.similarity > $1.similarity }
+        return scored.map(\.path) + missing
+    }
+
+    private static func aggregateReference(_ refFeats: [[Float]]) -> [Float] {
+        guard refFeats.count > 1 else { return refFeats[0] }
+        let dim = refFeats[0].count
+        var mean = [Float](repeating: 0, count: dim)
+        for ref in refFeats {
+            guard ref.count == dim else { continue }
+            for i in 0 ..< dim { mean[i] += ref[i] }
+        }
+        let n = Float(refFeats.count)
+        for i in 0 ..< dim { mean[i] /= n }
+        return mean
+    }
+
+    /// Higher = more similar (Python `_compute_similarity` / vectorized branch).
+    private static func similarityScore(candidate: [Float], reference: [Float], metric: Metric) -> Float {
+        guard candidate.count == reference.count, !candidate.isEmpty else { return -.greatestFiniteMagnitude }
+        switch metric {
+        case .cosine:
+            return cosineSimilarity(candidate, reference)
+        case .euclidean:
+            let dist = distance(candidate, reference, metric: .euclidean)
+            let featDim = Float(reference.count)
+            let normalized = featDim > 0 ? dist / sqrt(featDim) : dist
+            return -normalized
+        case .manhattan:
+            let dist = distance(candidate, reference, metric: .manhattan)
+            let featDim = Float(reference.count)
+            let normalized = featDim > 0 ? dist / featDim : dist
+            return -normalized
+        }
     }
 
     /// CLIP text search: filter by minimum cosine similarity, sort descending.
@@ -85,7 +129,8 @@ enum SimilarityOrdering {
         minimumSimilarity: Float
     ) -> [String] {
         let scored: [(String, Float)] = paths.compactMap { path in
-            guard let feat = features[path] else { return nil }
+            let key = ImageRecognitionPath.normalize(path) ?? path
+            guard let feat = features[key] ?? features[path] else { return nil }
             let sim = cosineSimilarity(feat, textFeature)
             guard sim >= minimumSimilarity else { return nil }
             return (path, sim)
@@ -100,7 +145,8 @@ enum SimilarityOrdering {
     ) -> Float? {
         var best: Float?
         for path in paths {
-            guard let feat = features[path] else { continue }
+            let key = ImageRecognitionPath.normalize(path) ?? path
+            guard let feat = features[key] ?? features[path] else { continue }
             let sim = cosineSimilarity(feat, textFeature)
             if best == nil || sim > best! { best = sim }
         }

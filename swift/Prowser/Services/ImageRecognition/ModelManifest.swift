@@ -64,6 +64,14 @@ enum ModelManifest {
         clipModelName.contains("large-patch14") ? 768 : 512
     }
 
+    /// Avg-pool embedding size for installed ResNet feature models.
+    static func resnetFeatureDimension(for resnetModel: String) -> Int {
+        switch resnetModel {
+        case "resnet50", "resnet101": return 2048
+        default: return 512
+        }
+    }
+
     private static func loadBundledCatalog() -> Catalog? {
         guard let url = Bundle.main.url(forResource: "image_recognition_models", withExtension: "json") else {
             return nil

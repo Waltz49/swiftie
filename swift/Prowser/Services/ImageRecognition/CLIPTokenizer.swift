@@ -43,7 +43,7 @@ struct CLIPTokenizer: Sendable {
             ids = Array(ids.prefix(contextLength - 1)) + [endToken]
         }
         while ids.count < contextLength {
-            ids.append(0)
+            ids.append(endToken)
         }
         return ids
     }

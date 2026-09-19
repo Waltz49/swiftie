@@ -8,7 +8,7 @@ enum DirectoryScanner {
         extensions: [String],
         filterPattern: String = "*"
     ) -> [String] {
-        let normalizedExtensions = Set(extensions.map { $0.lowercased() })
+        let normalizedExtensions = Set(extensions.map { normalizeExtensionToken($0) })
         let url = URL(fileURLWithPath: path)
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: url,
@@ -39,7 +39,7 @@ enum DirectoryScanner {
         excludedPaths: [String] = [],
         includeHidden: Bool = false
     ) -> [String] {
-        let normalizedExtensions = Set(extensions.map { $0.lowercased() })
+        let normalizedExtensions = Set(extensions.map { normalizeExtensionToken($0) })
         let root = URL(fileURLWithPath: path).standardizedFileURL
         var results: [String] = []
         var stack: [(URL, Int)] = [(root, 0)]
@@ -87,15 +87,6 @@ enum DirectoryScanner {
         return false
     }
 
-    /// Port of `ImageBrowserConfig.get_filter_pattern_for_matching` + `fnmatch.fnmatch(..., .lower())`.
-    static func patternForMatching(_ storedPattern: String) -> String {
-        if storedPattern == "*" || storedPattern.isEmpty { return "*" }
-        if storedPattern.contains("*") || storedPattern.contains("?") || storedPattern.contains("[") {
-            return storedPattern
-        }
-        return storedPattern + "*"
-    }
-
     /// Filename filter match (Python `sorting_manager.filter_images_by_pattern`).
     static func matchesGlob(_ filename: String, pattern: String) -> Bool {
         if pattern == "*" || pattern.isEmpty { return true }
@@ -105,5 +96,20 @@ enum DirectoryScanner {
                 fnmatch(patternPtr, namePtr, FNM_CASEFOLD) == 0
             }
         }
+    }
+
+    /// Port of `ImageBrowserConfig.get_filter_pattern_for_matching` + `fnmatch.fnmatch(..., .lower())`.
+    static func patternForMatching(_ storedPattern: String) -> String {
+        if storedPattern == "*" || storedPattern.isEmpty { return "*" }
+        if storedPattern.contains("*") || storedPattern.contains("?") || storedPattern.contains("[") {
+            return storedPattern
+        }
+        return storedPattern + "*"
+    }
+
+    private static func normalizeExtensionToken(_ ext: String) -> String {
+        let lower = ext.lowercased()
+        if lower.hasPrefix(".") { return String(lower.dropFirst()) }
+        return lower
     }
 }

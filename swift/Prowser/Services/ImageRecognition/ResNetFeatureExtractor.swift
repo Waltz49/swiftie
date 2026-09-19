@@ -84,31 +84,21 @@ final class ResNetFeatureExtractor: @unchecked Sendable {
 
     private func run(model: MLModel, input: [Float]) throws -> [Float]? {
         let side = 224
+        let expected = side * side * 3
+        guard input.count == expected else { return nil }
         let shape: [NSNumber] = [1, 3, side as NSNumber, side as NSNumber]
         guard let array = try? MLMultiArray(shape: shape, dataType: .float32) else { return nil }
-        for i in 0 ..< input.count {
-            array[i] = NSNumber(value: input[i])
-        }
+        MLMultiArrayHelpers.writeFloats(input, into: array)
         let provider = try MLDictionaryFeatureProvider(dictionary: ["input": array])
         let out = try model.prediction(from: provider)
         for name in out.featureNames {
             if let feat = out.featureValue(for: name)?.multiArrayValue {
-                return multiArrayToFloat(feat)
+                return MLMultiArrayHelpers.readFloats(feat)
             }
         }
         if let feat = out.featureValue(for: "features")?.multiArrayValue {
-            return multiArrayToFloat(feat)
+            return MLMultiArrayHelpers.readFloats(feat)
         }
         return nil
-    }
-
-    private func multiArrayToFloat(_ array: MLMultiArray) -> [Float] {
-        let count = array.count
-        var out = [Float](repeating: 0, count: count)
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)
-        for i in 0 ..< count {
-            out[i] = ptr[i]
-        }
-        return out
     }
 }

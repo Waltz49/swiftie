@@ -116,7 +116,8 @@ struct StatusBarView: View {
                     displayedPaths: displayed,
                     directory: appState.fileData.currentDirectory,
                     filterPattern: filterPattern,
-                    extensions: appState.config.imageExtensions
+                    extensions: appState.config.imageExtensions,
+                    backgroundIndicatorPrefix: appState.backgroundImageRecognition.fileCountIndicatorPrefix()
                 ),
                 sectionID: sectionID,
                 enabled: true,
@@ -202,6 +203,7 @@ private final class StatusBarEventSink {
             .viewModeChanged,
             .filterPatternChanged,
             .settingsChanged,
+            .backgroundIndexingStateChanged,
         ]
         for type in types {
             bag.subscribe(type) { [onRefresh] _ in onRefresh() }

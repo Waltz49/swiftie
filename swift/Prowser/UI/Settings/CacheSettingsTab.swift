@@ -8,6 +8,7 @@ struct CacheSettingsTab: View {
     @State private var sourceDirectories = ""
     @State private var backgroundEnabled = false
     @State private var gatherThumbnails = true
+    @State private var indexingAvailable = false
 
     var body: some View {
         ScrollView {
@@ -37,18 +38,23 @@ struct CacheSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
 
-                SettingsSection(title: "Background Processing") {
-                    Toggle("Enable idle search-data collection", isOn: $backgroundEnabled)
-                        .onChange(of: backgroundEnabled) { _, on in
-                            appState.config.updateSetting("background_clip_enabled", value: on)
-                            appState.backgroundImageRecognition.setEnabled(on)
-                        }
-                    Toggle("Also gather thumbnails", isOn: $gatherThumbnails)
-                        .disabled(!backgroundEnabled)
-                        .onChange(of: gatherThumbnails) { _, on in
-                            appState.config.updateSetting("background_clip_gather_thumbnails", value: on)
-                        }
-                    Text("Runs while idle; may use battery. Does not extract faces.")
+                if indexingAvailable {
+                    SettingsSection(title: "Background Processing") {
+                        Toggle("Enable idle search-data collection", isOn: $backgroundEnabled)
+                            .onChange(of: backgroundEnabled) { _, on in
+                                appState.backgroundImageRecognition.setEnabled(on)
+                            }
+                        Toggle("Also gather thumbnails", isOn: $gatherThumbnails)
+                            .disabled(!backgroundEnabled)
+                            .onChange(of: gatherThumbnails) { _, on in
+                                appState.config.updateSetting("background_clip_gather_thumbnails", value: on)
+                            }
+                        Text("Runs while idle; may use battery. Does not extract faces.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -73,8 +79,26 @@ struct CacheSettingsTab: View {
         .onAppear {
             refreshTotals()
             loadSourceDirectories()
-            backgroundEnabled = appState.config.bool(forKey: "background_clip_enabled", default: false)
-            gatherThumbnails = appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true)
+            reloadBackgroundSettings()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .imageRecognitionModelsInstalled)) { _ in
+            reloadBackgroundSettings()
+        }
+        .onChange(of: appState.backgroundImageRecognition.isProcessing) { _, _ in
+            reloadIndexingAvailability()
+        }
+    }
+
+    private func reloadBackgroundSettings() {
+        reloadIndexingAvailability()
+        backgroundEnabled = appState.config.bool(forKey: "background_clip_enabled", default: false)
+        gatherThumbnails = appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true)
+    }
+
+    private func reloadIndexingAvailability() {
+        indexingAvailable = BackgroundImageRecognitionController.indexingAvailable(appState: appState)
+        if !indexingAvailable {
+            appState.backgroundImageRecognition.applyEnabledFromSettings()
         }
     }
 
@@ -127,7 +151,8 @@ struct CacheSettingsTab: View {
                 paths: appState.config.profilePaths,
                 includeDownloadedModels: includeModels
             )
-            appState.imageRecognition.rebind(config: appState.config)
+            appState.refreshImageRecognitionForCurrentSettings()
+            reloadIndexingAvailability()
             statusMessage = "Cleared image recognition cache (\(removed) entries)."
             refreshTotals()
         } catch {
@@ -145,7 +170,8 @@ struct CacheSettingsTab: View {
     private func clearAll() {
         guard confirm("Clear All Caches", "This will clear thumbnail, metadata, and image recognition caches (including downloaded models).") else { return }
         let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths)
-        appState.imageRecognition.rebind(config: appState.config)
+        appState.refreshImageRecognitionForCurrentSettings()
+        reloadIndexingAvailability()
         statusMessage = "Cleared \(removed) cache entries."
         refreshTotals()
     }

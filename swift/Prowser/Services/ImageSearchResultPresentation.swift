@@ -62,7 +62,7 @@ enum ImageSearchResultPresentation {
         } else {
             syncGridHighlightToCurrentImage(appState: appState, paths: normalized)
         }
-        appState.status.show(statusMessage)
+        appState.status.show(statusMessage, duration: 5.0, alwaysShow: true)
         appState.menuRefresh.refreshAll()
     }
 

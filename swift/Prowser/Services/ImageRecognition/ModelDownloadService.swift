@@ -1,8 +1,13 @@
 import CryptoKit
 import Foundation
 
+extension Notification.Name {
+    static let imageRecognitionModelsInstalled = Notification.Name("ImageRecognitionModelsInstalled")
+}
+
 enum ModelDownloadError: Error, LocalizedError, Sendable {
     case userDeclined
+    case modelsNotInstalled
     case invalidURL
     case downloadFailed(String)
     case checksumMismatch
@@ -13,6 +18,7 @@ enum ModelDownloadError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .userDeclined: return "Download was not approved."
+        case .modelsNotInstalled: return "Search models are not installed."
         case .invalidURL: return "Invalid model download URL."
         case .downloadFailed(let msg): return msg
         case .checksumMismatch: return "Downloaded model failed verification."
@@ -41,11 +47,16 @@ enum ModelDownloadError: Error, LocalizedError, Sendable {
 /// Consent-gated download and install of Core ML model packages into the profile.
 @MainActor
 enum ModelDownloadService {
+    static func modelsInstalled(profile: ProfilePaths, modelIDs: [String]) -> Bool {
+        ImageRecognitionPaths.missingModelIDs(profile: profile, ids: modelIDs).isEmpty
+    }
+
     static func ensureModelsInstalled(
         profile: ProfilePaths,
         config: AppConfig,
         modelIDs: [String],
-        purpose: String
+        purpose: String,
+        allowDownloadPrompt: Bool = true
     ) async throws {
         let downloadBase = config.imageRecognitionModelDownloadBaseURL()
         await ModelManifest.refreshRemoteCatalog(profile: profile, downloadBaseURL: downloadBase)
@@ -53,6 +64,10 @@ enum ModelDownloadService {
 
         let missing = ImageRecognitionPaths.missingModelIDs(profile: profile, ids: modelIDs)
         guard !missing.isEmpty else { return }
+
+        if !allowDownloadPrompt {
+            throw ModelDownloadError.modelsNotInstalled
+        }
 
         let entries = missing.compactMap { ModelManifest.entry(id: $0) }
         guard entries.count == missing.count else { throw ModelDownloadError.missingManifestEntry }
@@ -179,6 +194,7 @@ enum ModelDownloadService {
             let doneProgress = Double(index + 1) / Double(entryCount)
             panel.update(value: Int(doneProgress * Double(progressScale)), label: entry.displayName)
         }
+        NotificationCenter.default.post(name: .imageRecognitionModelsInstalled, object: nil)
     }
 
     nonisolated private static func mapURLError(_ error: URLError) -> ModelDownloadError {

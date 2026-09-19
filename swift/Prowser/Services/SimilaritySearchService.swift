@@ -32,6 +32,25 @@ enum SimilaritySearchService {
             return
         }
 
+        let searchDir = options.useCustomDirectory ? options.customDirectory : SearchImagePathCollector.currentSearchDirectory(appState: appState)
+        let metricName = appState.config.string(forKey: "similarity_metric", default: "cosine")
+        let resnetForLog = appState.config.string(forKey: "resnet_model", default: "resnet18")
+        SimilaritySearchLog.logScope(
+            config: appState.config,
+            kind: "CNN",
+            candidateCount: paths.count,
+            recursive: options.recursive,
+            searchDirectory: searchDir,
+            filterPattern: appState.filterSettings.filterPattern,
+            searchDepth: appState.config.int(forKey: "search_depth", default: 4),
+            referencePaths: refs,
+            extra: "metric=\(metricName) resnet=\(resnetForLog)"
+        )
+
+        appState.backgroundImageRecognition.suspendForForegroundSearch()
+        defer { appState.backgroundImageRecognition.resumeAfterForegroundSearch() }
+        appState.refreshImageRecognitionForCurrentSettings()
+
         let panel = CancellableProgressPanelController(
             title: "Find Similar Images",
             labelText: "Preparing…",
@@ -58,7 +77,14 @@ enum SimilaritySearchService {
         }
 
         do {
-            let refKeys = refs.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+            let refKeys = refs.compactMap { ImageRecognitionPath.normalize($0) }
+            if refKeys.isEmpty {
+                StyledMessageDialog.showWarning(
+                    title: "Reference Not Found",
+                    message: "Could not resolve the reference image path for similarity search."
+                )
+                return
+            }
             let features: [String: [Float]]
             if useCoreML {
                 features = try await appState.imageRecognition.cnnFeatures(
@@ -82,6 +108,17 @@ enum SimilaritySearchService {
             }
             panel.close()
 
+            let refFeatureCount = refKeys.compactMap { features[$0] }.count
+            if refFeatureCount == 0 {
+                StyledMessageDialog.showWarning(
+                    title: "Reference Features Missing",
+                    message:
+                        "Could not compute CNN features for the reference image. "
+                        + "Try clearing the CNN feature cache in Settings → Caches and search again."
+                )
+                return
+            }
+
             let metric = SimilarityOrdering.Metric.fromSettings(
                 appState.config.string(forKey: "similarity_metric", default: "cosine")
             )
@@ -100,9 +137,41 @@ enum SimilaritySearchService {
                 return
             }
 
+            let indexedCount = paths.filter { features[$0] != nil }.count
+            let sampleDim = refKeys.compactMap { features[$0] }.first?.count
+            let backend = useCoreML ? "CoreML" : "Vision"
+            SimilaritySearchLog.logFeatureSummary(
+                config: appState.config,
+                kind: "CNN",
+                candidateCount: paths.count,
+                indexedCount: indexedCount,
+                featureDimension: sampleDim,
+                modelLabel: useCoreML ? resnet : "Vision",
+                metric: metric.rawValue
+            )
+            SimilaritySearchLog.logTopCNNScores(
+                config: appState.config,
+                paths: paths,
+                features: features,
+                referencePaths: refKeys,
+                metric: metric
+            )
+            SimilaritySearchLog.log(
+                appState.config,
+                "CNN result count=\(ordered.count) backend=\(backend)"
+            )
+
+            let resnetLabel = resnet.replacingOccurrences(of: "resnet", with: "ResNet")
             let statusMessage = useCoreML
-                ? "Similar images (\(ordered.count))"
-                : "Similar images (\(ordered.count), Vision)"
+                ? "Similar images (\(ordered.count) files, \(indexedCount) indexed, \(resnetLabel))"
+                : "Similar images (\(ordered.count) files, \(indexedCount) indexed, Vision)"
+            if indexedCount < max(3, paths.count / 4) {
+                appState.status.show(
+                    "Only \(indexedCount) of \(paths.count) images were indexed — clear CNN cache in Settings if this persists",
+                    duration: 6,
+                    alwaysShow: true
+                )
+            }
             let filesChanged = Set(displayedSeed) != Set(ordered)
             ImageSearchResultPresentation.applyCustomOrderedList(
                 appState: appState,

@@ -8,7 +8,7 @@ enum ImageNetPreprocessor {
     private static let std: [Float] = [0.229, 0.224, 0.225]
 
     static func makeInputMultiArray(from path: String) -> [Float]? {
-        guard let cgImage = loadCGImage(path: path) else { return nil }
+        guard let cgImage = ImageRecognitionImageLoader.loadCGImage(path: path) else { return nil }
         return makeInputMultiArray(from: cgImage)
     }
 
@@ -16,12 +16,6 @@ enum ImageNetPreprocessor {
         let resized = resize(cgImage, shortSide: 256)
         guard let cropped = centerCrop(resized, size: 224) else { return nil }
         return normalizedCHW(cropped)
-    }
-
-    private static func loadCGImage(path: String) -> CGImage? {
-        let url = URL(fileURLWithPath: path)
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     private static func resize(_ image: CGImage, shortSide: Int) -> CGImage {

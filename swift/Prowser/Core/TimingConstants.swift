@@ -17,4 +17,8 @@ enum TimingConstants {
     static let thumbnailBackgroundLoadBatchSize = 200
     /// Qt default `SH_ToolTip_WakeUpDelay` used by `IconGraphicTooltipFilter`.
     static let graphicButtonTooltipDelayMs = 700
+    /// Idle before background CLIP/CNN indexing (`BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS`).
+    static let backgroundClipIdleSeconds: TimeInterval = 5
+    /// Max images indexed per idle batch in background extraction.
+    static let backgroundClipBatchSize = 24
 }

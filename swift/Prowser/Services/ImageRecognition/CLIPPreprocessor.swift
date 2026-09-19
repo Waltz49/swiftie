@@ -7,7 +7,7 @@ enum CLIPPreprocessor {
     private static let std: [Float] = [0.26862954, 0.26130258, 0.27577711]
 
     static func makeImageInput(from path: String) -> [Float]? {
-        guard let cgImage = loadCGImage(path: path) else { return nil }
+        guard let cgImage = ImageRecognitionImageLoader.loadCGImage(path: path) else { return nil }
         return makeImageInput(from: cgImage)
     }
 
@@ -15,12 +15,6 @@ enum CLIPPreprocessor {
         let resized = ImageNetPreprocessor.resizePublic(cgImage, shortSide: 224)
         guard let cropped = centerCrop(resized, size: 224) else { return nil }
         return normalizedCHW(cropped)
-    }
-
-    private static func loadCGImage(path: String) -> CGImage? {
-        let url = URL(fileURLWithPath: path)
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     private static func centerCrop(_ image: CGImage, size: Int) -> CGImage? {

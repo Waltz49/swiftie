@@ -136,7 +136,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 
 - [~] Filter section menu: Edit…, No Filter (\*), saved filter presets with checkmarks
 - [~] Sort section menu: all sort modes + random + custom (mirrors keyboard sort keys)
-- [x] Image count section menu (background CLIP toggle); filename/dimensions display-only
+- [x] Image count section menu (background CLIP/CNN toggle when Core ML models installed; ●/○ idle indicator); filename/dimensions display-only
 - [x] Status bar peek-on-hover chrome behavior
 
 ## Settings tabs (⌘,)
@@ -154,7 +154,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [x] Face Recognition — `FaceRecognitionSettingsTab` (`--min` hidden)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
 - [x] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
-- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, face, scrub; background CLIP toggles)
+- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; idle CLIP/CNN indexing toggles when models installed)
 
 ## Menus — File
 

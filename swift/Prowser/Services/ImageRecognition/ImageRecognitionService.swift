@@ -5,6 +5,10 @@ import Foundation
 final class ImageRecognitionService {
     private let profile: ProfilePaths
     private var cacheManager: FeatureCacheManager?
+    private var boundResnetModel: String?
+    private var boundClipModel: String?
+    private var clipExtractor: CLIPFeatureExtractor?
+    private var resnetExtractor: ResNetFeatureExtractor?
 
     init(profile: ProfilePaths) {
         self.profile = profile
@@ -13,11 +17,39 @@ final class ImageRecognitionService {
     func rebind(config: AppConfig) {
         let resnet = config.string(forKey: "resnet_model", default: "resnet18")
         let clip = config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        if resnet != boundResnetModel {
+            boundResnetModel = resnet
+            resnetExtractor = nil
+        }
+        if clip != boundClipModel {
+            boundClipModel = clip
+            clipExtractor = nil
+        }
         cacheManager = FeatureCacheManager(
             cacheRoot: profile.imageRecognitionCacheDirectory,
             resnetModel: resnet,
             clipModelName: clip
         )
+    }
+
+    private func clipExtractor(for clipName: String) -> CLIPFeatureExtractor {
+        if let clipExtractor, boundClipModel == clipName {
+            return clipExtractor
+        }
+        let created = CLIPFeatureExtractor(clipModelName: clipName, profile: profile)
+        boundClipModel = clipName
+        clipExtractor = created
+        return created
+    }
+
+    private func resnetExtractor(for resnetModel: String) -> ResNetFeatureExtractor {
+        if let resnetExtractor, boundResnetModel == resnetModel {
+            return resnetExtractor
+        }
+        let created = ResNetFeatureExtractor(resnetModel: resnetModel, profile: profile)
+        boundResnetModel = resnetModel
+        resnetExtractor = created
+        return created
     }
 
     func flushCaches() {
@@ -87,11 +119,41 @@ final class ImageRecognitionService {
         return result
     }
 
+    func pathsNeedingCNN(paths: [String], config: AppConfig) -> [String] {
+        guard let cacheManager else { return paths }
+        var need: [String] = []
+        for path in paths {
+            guard let attrs = fileAttributes(path: path) else { continue }
+            if cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size) == nil {
+                need.append(path)
+            }
+        }
+        return need
+    }
+
+    func pathsNeedingCLIP(paths: [String], config: AppConfig) -> [String] {
+        guard let cacheManager else { return paths }
+        let expectedDim = ModelManifest.clipFeatureDimension(
+            for: config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        )
+        var need: [String] = []
+        for path in paths {
+            guard let attrs = fileAttributes(path: path) else { continue }
+            if let cached = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size),
+               cached.count == expectedDim {
+                continue
+            }
+            need.append(path)
+        }
+        return need
+    }
+
     func cnnFeatures(
         for paths: [String],
         config: AppConfig,
         progress: @escaping (Int, Int, String) -> Void,
-        shouldCancel: @escaping () -> Bool
+        shouldCancel: @escaping () -> Bool,
+        allowDownloadPrompt: Bool = true
     ) async throws -> [String: [Float]] {
         let resnet = config.string(forKey: "resnet_model", default: "resnet18")
         let modelIDs = ModelManifest.resnetBundleIDs(for: resnet)
@@ -99,17 +161,19 @@ final class ImageRecognitionService {
             profile: profile,
             config: config,
             modelIDs: modelIDs,
-            purpose: "Download is required for Search for Similar Images (⌘K) and background indexing."
+            purpose: "Download is required for Search for Similar Images (⌘K) and background indexing.",
+            allowDownloadPrompt: allowDownloadPrompt
         )
         guard let cacheManager else { throw ResNetFeatureExtractorError.inferenceFailed }
         let batch = min(32, max(8, config.int(forKey: "cnn_feature_batch_size", default: 16)))
-        let extractor = ResNetFeatureExtractor(resnetModel: resnet, profile: profile)
+        let extractor = resnetExtractor(for: resnet)
 
         var needExtract: [String] = []
         var result: [String: [Float]] = [:]
         for path in paths {
             guard let attrs = fileAttributes(path: path) else { continue }
-            if let cached = cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size) {
+            if let cached = cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size),
+               cached.count == ModelManifest.resnetFeatureDimension(for: resnet) {
                 result[path] = cached
             } else {
                 needExtract.append(path)
@@ -153,7 +217,8 @@ final class ImageRecognitionService {
         for paths: [String],
         config: AppConfig,
         progress: @escaping (Int, Int, String) -> Void,
-        shouldCancel: @escaping () -> Bool
+        shouldCancel: @escaping () -> Bool,
+        allowDownloadPrompt: Bool = true
     ) async throws -> [String: [Float]] {
         let clipName = config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
         let expectedDim = ModelManifest.clipFeatureDimension(for: clipName)
@@ -162,10 +227,11 @@ final class ImageRecognitionService {
             profile: profile,
             config: config,
             modelIDs: modelIDs,
-            purpose: "Download is required for Search by Text (⌘F) and background indexing."
+            purpose: "Download is required for Search by Text (⌘F) and background indexing.",
+            allowDownloadPrompt: allowDownloadPrompt
         )
         guard let cacheManager else { throw CLIPFeatureExtractorError.inferenceFailed }
-        let extractor = CLIPFeatureExtractor(clipModelName: clipName, profile: profile)
+        let extractor = clipExtractor(for: clipName)
 
         var needExtract: [String] = []
         var result: [String: [Float]] = [:]
@@ -208,7 +274,7 @@ final class ImageRecognitionService {
             modelIDs: modelIDs,
             purpose: "Download is required to encode text for Search by Text (⌘F)."
         )
-        let extractor = CLIPFeatureExtractor(clipModelName: clipName, profile: profile)
+        let extractor = clipExtractor(for: clipName)
         return try await Task.detached {
             try extractor.extractTextFeature(prompt: prompt)
         }.value

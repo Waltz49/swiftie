@@ -114,6 +114,7 @@ struct SettingsWindowView: View {
     private func settingsOK() {
         rememberSettingsTab()
         appState.theme.commitSettingsOK()
+        appState.refreshImageRecognitionForCurrentSettings()
         appState.eventBus.emit(.settingsChanged)
         dismissAction = .committed
         dismissOpenThemeColorPanel(commit: true)
@@ -131,6 +132,7 @@ struct SettingsWindowView: View {
     private func revertSettingsUnlessCommitted() {
         guard dismissAction != .committed else { return }
         appState.theme.cancelSettingsSession()
+        appState.refreshImageRecognitionForCurrentSettings()
         appState.eventBus.emit(.settingsChanged)
     }
 

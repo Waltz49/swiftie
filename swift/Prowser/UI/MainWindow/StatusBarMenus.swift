@@ -76,6 +76,7 @@ enum StatusBarMenus {
     }
 
     static func showFileCountMenu(appState: AppState, relativeTo view: NSView) {
+        guard BackgroundImageRecognitionController.indexingAvailable(appState: appState) else { return }
         let menu = NSMenu()
         let enabled = appState.config.bool(forKey: "background_clip_enabled", default: false)
         let title = enabled ? "Turn off Background Extracts" : "Turn on Background Extracts"

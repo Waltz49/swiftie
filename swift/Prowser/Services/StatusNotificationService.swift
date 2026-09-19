@@ -40,9 +40,7 @@ final class StatusNotificationService {
 
         Task { @MainActor in
             withAnimation(.easeInOut(duration: 0.25)) {
-                if let index = bubbles.firstIndex(where: { $0.id == bubble.id }) {
-                    bubbles[index].opacity = 0.9
-                }
+                setBubbleOpacity(id: bubble.id, opacity: 0.9)
             }
         }
 
@@ -54,11 +52,17 @@ final class StatusNotificationService {
         dismissTasks[bubble.id] = dismissTask
     }
 
+    /// Reassign `bubbles` so `@Observable` publishes (in-place struct mutation does not refresh SwiftUI).
+    private func setBubbleOpacity(id: UUID, opacity: Double) {
+        guard let index = bubbles.firstIndex(where: { $0.id == id }) else { return }
+        var next = bubbles
+        next[index].opacity = opacity
+        bubbles = next
+    }
+
     private func fadeOutAndRemove(_ id: UUID) async {
         withAnimation(.easeInOut(duration: 0.35)) {
-            if let index = bubbles.firstIndex(where: { $0.id == id }) {
-                bubbles[index].opacity = 0
-            }
+            setBubbleOpacity(id: id, opacity: 0)
         }
         try? await Task.sleep(nanoseconds: 350_000_000)
         bubbles.removeAll { $0.id == id }
