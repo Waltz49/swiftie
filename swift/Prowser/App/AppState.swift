@@ -1256,7 +1256,7 @@ final class AppState {
             minSize: NSSize(width: 520, height: 420),
             onClose: { [weak self] in self?.showImageRecognitionCaveats = false }
         ) {
-            ImageRecognitionCaveatsView()
+            ImageRecognitionCaveatsView(profilePaths: config.profilePaths)
         }
     }
 

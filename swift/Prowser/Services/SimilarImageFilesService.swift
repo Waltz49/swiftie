@@ -211,11 +211,11 @@ enum SimilarImageFilesService {
     private static func noGroupsMessage(_ scope: NoGroupsMessage) -> String {
         switch scope {
         case .displayed:
-            return "No groups of visually similar images were found (same oriented dimensions; compared at 128px width)."
+            return "No groups of visually similar images were found (compared at 128px width, same aspect ratio)."
         case .folder:
-            return "No groups of visually similar images were found under this folder (same oriented dimensions; compared at 128px width)."
+            return "No groups of visually similar images were found under this folder (compared at 128px width, same aspect ratio)."
         case .recursive:
-            return "No groups of visually similar images were found in directory and subdirectories."
+            return "No groups of visually similar images were found in directory and subdirectories (compared at 128px width, same aspect ratio)."
         }
     }
 

@@ -127,7 +127,7 @@ Source: `files/file_tree_handler.py` `contextMenuEvent`. Menu in `FileTreeContex
 - [~] Open in Finder
 - [~] Show All Images inc. Subdirs (⇧A)
 - [x] Find Duplicate Image Files (⇧F — file tree keyboard focus only; highlighted folder)
-- [x] Find Visually Similar Image Files (tree context menu — pixel MSE; distinct from ⌘K CNN search)
+- [x] Find Visually Similar Image Files (tree context menu — pixel MSE; distinct from ⌘K CNN search). **Swift:** buckets by 128px-wide compare aspect (cross-resolution resizes with same aspect); **Python** still buckets by exact oriented pixel size.
 - [~] Clear Cache (folder subtree)
 
 ### Status bar

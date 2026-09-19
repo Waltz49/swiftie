@@ -10,8 +10,10 @@ final class CancellableProgressPanelController {
 
     private let panel: NSPanel
     private let label: NSTextField
+    private let longCompareNoteLabel: NSTextField?
     private let timeRemainingLabel: NSTextField?
     private let indicator: NSProgressIndicator
+    private let bucketIndicator: NSProgressIndicator?
     private let cancelButton: FocusableDialogButton
     private let cancelTarget = CancelTarget()
     private var keyboardMonitor: Any?
@@ -28,18 +30,30 @@ final class CancellableProgressPanelController {
     /// Invoked on the main thread when the user cancels (after the cancel flag is set).
     var onCancel: (() -> Void)?
 
+    /// Shown on the second line during long similar-image bucket compares (see `setLongCompareNoteVisible`).
+    static let longCompareNoteMessage =
+        "Comparison in progress. Progress has not stalled."
+
     init(
         title: String,
         labelText: String,
         maximum: Int,
         detailText: String? = nil,
         mutedNoteColor: NSColor = .secondaryLabelColor,
-        indeterminate: Bool = false
+        indeterminate: Bool = false,
+        showsLongCompareNoteLine: Bool = false,
+        showsBucketProgressLine: Bool = false
     ) {
         showsTimeRemainingEstimate = detailText != nil
         isIndeterminateMode = indeterminate
         self.mutedNoteColor = mutedNoteColor
-        let panelHeight: CGFloat = detailText == nil ? 120 : (showsTimeRemainingEstimate ? 172 : 156)
+        var panelHeight: CGFloat = detailText == nil ? 120 : (showsTimeRemainingEstimate ? 172 : 156)
+        if showsLongCompareNoteLine {
+            panelHeight += 22
+        }
+        if showsBucketProgressLine {
+            panelHeight += 22
+        }
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 440, height: panelHeight),
             styleMask: [.titled],
@@ -73,6 +87,21 @@ final class CancellableProgressPanelController {
         }
         timeRemainingLabel = timeRemaining
 
+        let longCompareNote: NSTextField?
+        if showsLongCompareNoteLine {
+            let note = NSTextField(wrappingLabelWithString: Self.longCompareNoteMessage)
+            note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            note.textColor = mutedNoteColor
+            note.lineBreakMode = .byWordWrapping
+            note.maximumNumberOfLines = 2
+            note.translatesAutoresizingMaskIntoConstraints = false
+            note.isHidden = true
+            longCompareNote = note
+        } else {
+            longCompareNote = nil
+        }
+        longCompareNoteLabel = longCompareNote
+
         indicator = NSProgressIndicator()
         indicator.style = .bar
         indicator.isIndeterminate = indeterminate
@@ -84,6 +113,22 @@ final class CancellableProgressPanelController {
         }
         indicator.doubleValue = 0
         indicator.translatesAutoresizingMaskIntoConstraints = false
+
+        let bucketBar: NSProgressIndicator?
+        if showsBucketProgressLine {
+            let bar = NSProgressIndicator()
+            bar.style = .bar
+            bar.isIndeterminate = false
+            bar.minValue = 0
+            bar.maxValue = 1
+            bar.doubleValue = 0
+            bar.isHidden = true
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bucketBar = bar
+        } else {
+            bucketBar = nil
+        }
+        bucketIndicator = bucketBar
 
         let cancelButton = FocusableDialogButton(title: "Cancel", target: cancelTarget, action: #selector(CancelTarget.tapped))
         cancelButton.bezelStyle = .rounded
@@ -99,19 +144,27 @@ final class CancellableProgressPanelController {
         let content = NSView()
         content.wantsLayer = true
         content.addSubview(label)
+        if let longCompareNote {
+            content.addSubview(longCompareNote)
+        }
         if let timeRemaining {
             content.addSubview(timeRemaining)
         }
         content.addSubview(indicator)
+        if let bucketBar {
+            content.addSubview(bucketBar)
+        }
         content.addSubview(cancelButton)
 
         let progressTopAnchor: NSLayoutYAxisAnchor
         if let timeRemaining {
             progressTopAnchor = timeRemaining.bottomAnchor
+        } else if let longCompareNote {
+            progressTopAnchor = longCompareNote.bottomAnchor
         } else {
             progressTopAnchor = label.bottomAnchor
         }
-        let progressTopSpacing: CGFloat = timeRemaining == nil ? 10 : 6
+        let progressTopSpacing: CGFloat = (timeRemaining == nil && longCompareNote == nil) ? 10 : 6
 
         var constraints: [NSLayoutConstraint] = [
             label.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
@@ -125,14 +178,34 @@ final class CancellableProgressPanelController {
             cancelButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
         ]
 
-        if let timeRemaining {
+        if let bucketBar {
             constraints += [
-                timeRemaining.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+                bucketBar.topAnchor.constraint(equalTo: indicator.bottomAnchor, constant: 8),
+                bucketBar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+                bucketBar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            ]
+        }
+
+        if let longCompareNote {
+            constraints += [
+                longCompareNote.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+                longCompareNote.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+                longCompareNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            ]
+        }
+
+        if let timeRemaining {
+            let timeTop = longCompareNote?.bottomAnchor ?? label.bottomAnchor
+            let timeTopSpacing: CGFloat = longCompareNote == nil ? 4 : 4
+            constraints += [
+                timeRemaining.topAnchor.constraint(equalTo: timeTop, constant: timeTopSpacing),
                 timeRemaining.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
                 timeRemaining.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
                 timeRemaining.heightAnchor.constraint(equalToConstant: 16),
             ]
         }
+
+        let progressBottomAnchor: NSLayoutYAxisAnchor = bucketBar?.bottomAnchor ?? indicator.bottomAnchor
 
         if let detailText {
             let detail = NSTextField(wrappingLabelWithString: detailText)
@@ -143,13 +216,13 @@ final class CancellableProgressPanelController {
             detail.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(detail)
             constraints += [
-                detail.topAnchor.constraint(equalTo: indicator.bottomAnchor, constant: 10),
+                detail.topAnchor.constraint(equalTo: progressBottomAnchor, constant: 10),
                 detail.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
                 detail.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
                 detail.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             ]
         } else {
-            constraints.append(indicator.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16))
+            constraints.append(progressBottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16))
         }
 
         NSLayoutConstraint.activate(constraints)
@@ -214,6 +287,33 @@ final class CancellableProgressPanelController {
         Task { @MainActor in
             self.updateOnMain(value: value, label: text)
         }
+    }
+
+    func setLongCompareNoteVisible(_ visible: Bool) {
+        guard let longCompareNoteLabel else { return }
+        longCompareNoteLabel.stringValue = Self.longCompareNoteMessage
+        longCompareNoteLabel.isHidden = !visible
+        refreshOnMain()
+    }
+
+    func setBucketProgressHidden(_ hidden: Bool) {
+        guard let bucketIndicator else { return }
+        bucketIndicator.isHidden = hidden
+        refreshOnMain()
+    }
+
+    nonisolated func updateBucket(value: Int, maximum: Int) {
+        Task { @MainActor in
+            self.updateBucketOnMain(value: value, maximum: maximum)
+        }
+    }
+
+    private func updateBucketOnMain(value: Int, maximum: Int) {
+        guard !isClosed, let bucketIndicator else { return }
+        bucketIndicator.isHidden = false
+        bucketIndicator.maxValue = Double(max(1, maximum))
+        bucketIndicator.doubleValue = Double(min(max(0, value), maximum))
+        refreshOnMain()
     }
 
     private func setMaximumOnMain(_ maximum: Int) {

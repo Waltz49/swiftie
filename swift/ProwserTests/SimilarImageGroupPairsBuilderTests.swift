@@ -32,6 +32,19 @@ final class SimilarImageGroupPairsBuilderTests: XCTestCase {
         XCTAssertGreaterThan(mse, SimilarImageGroupPairsBuilder.mseThreshold)
     }
 
+    func testCompareBucketKeySameAspectDifferentResolution() {
+        let a = SimilarImageGroupPairsBuilder.compareBucketKey(orientedWidth: 4000, orientedHeight: 3000)
+        let b = SimilarImageGroupPairsBuilder.compareBucketKey(orientedWidth: 800, orientedHeight: 600)
+        XCTAssertEqual(a, b)
+        XCTAssertEqual(a, "128x96")
+    }
+
+    func testCompareBucketKeyDifferentAspect() {
+        let landscape = SimilarImageGroupPairsBuilder.compareBucketKey(orientedWidth: 1920, orientedHeight: 1080)
+        let portrait = SimilarImageGroupPairsBuilder.compareBucketKey(orientedWidth: 1080, orientedHeight: 1920)
+        XCTAssertNotEqual(landscape, portrait)
+    }
+
     func testDigestUnionGroupsIdenticalArrays() {
         let rgb = (0 ..< 30).map { Float($0) / 30 }
         let loaded = [
