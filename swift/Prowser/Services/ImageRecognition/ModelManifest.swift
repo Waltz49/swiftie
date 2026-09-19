@@ -18,7 +18,10 @@ enum ModelManifest {
         let id: String
         let displayName: String
         let kind: ModelKind
+        /// Optional absolute `https://` or `file://` URL. When empty, use `downloadFile` + base URL or `_mirror/`.
         let downloadURL: String
+        /// Zip file name on the download server or in `models/_mirror/`.
+        let downloadFile: String?
         let approximateDownloadBytes: Int64
         let artifacts: [Artifact]
         let recommendedBatchSize: Int
@@ -30,31 +33,15 @@ enum ModelManifest {
         let models: [ModelEntry]
     }
 
-    static let catalog: Catalog = {
+    static var bundledCatalog: Catalog {
         if let loaded = loadBundledCatalog() {
             return loaded
         }
         return embeddedFallbackCatalog
-    }()
+    }
 
     static func entry(id: String) -> ModelEntry? {
-        catalog.models.first { $0.id == id }
-    }
-
-    /// True when the manifest points at a real HTTPS host (not placeholder `example.invalid`).
-    static func isRemoteDownloadAvailable(for entry: ModelEntry) -> Bool {
-        guard let url = URL(string: entry.downloadURL),
-              url.scheme == "https",
-              let host = url.host?.lowercased(),
-              !host.isEmpty else { return false }
-        if host == "example.invalid" || host.hasSuffix(".invalid") { return false }
-        return true
-    }
-
-    static func isRemoteDownloadAvailable(modelIDs: [String]) -> Bool {
-        let entries = modelIDs.compactMap { entry(id: $0) }
-        guard entries.count == modelIDs.count, !entries.isEmpty else { return false }
-        return entries.allSatisfy { isRemoteDownloadAvailable(for: $0) }
+        activeCatalog().models.first { $0.id == id }
     }
 
     static func resnetBundleIDs(for resnetModel: String) -> [String] {
@@ -70,6 +57,11 @@ enum ModelManifest {
             return ["clip_vit_l14_image", "clip_vit_l14_text"]
         }
         return ["clip_vit_b32_image", "clip_vit_b32_text"]
+    }
+
+    /// Joint CLIP embedding size (`projection_dim`); must match cached features and both towers.
+    static func clipFeatureDimension(for clipModelName: String) -> Int {
+        clipModelName.contains("large-patch14") ? 768 : 512
     }
 
     private static func loadBundledCatalog() -> Catalog? {
@@ -88,7 +80,8 @@ enum ModelManifest {
                 id: "resnet18_feature",
                 displayName: "ResNet18 (image similarity)",
                 kind: .resnetCNN,
-                downloadURL: "https://example.invalid/prowser/models/resnet18_feature.zip",
+                downloadURL: "",
+                downloadFile: "resnet18_feature.zip",
                 approximateDownloadBytes: 48_000_000,
                 artifacts: [Artifact(fileName: "ResNet18Feature.mlpackage", sha256: "", byteSize: 0)],
                 recommendedBatchSize: 16,
@@ -98,7 +91,8 @@ enum ModelManifest {
                 id: "resnet50_feature",
                 displayName: "ResNet50 (image similarity)",
                 kind: .resnetCNN,
-                downloadURL: "https://example.invalid/prowser/models/resnet50_feature.zip",
+                downloadURL: "",
+                downloadFile: "resnet50_feature.zip",
                 approximateDownloadBytes: 98_000_000,
                 artifacts: [Artifact(fileName: "ResNet50Feature.mlpackage", sha256: "", byteSize: 0)],
                 recommendedBatchSize: 12,
@@ -108,7 +102,8 @@ enum ModelManifest {
                 id: "resnet101_feature",
                 displayName: "ResNet101 (image similarity)",
                 kind: .resnetCNN,
-                downloadURL: "https://example.invalid/prowser/models/resnet101_feature.zip",
+                downloadURL: "",
+                downloadFile: "resnet101_feature.zip",
                 approximateDownloadBytes: 170_000_000,
                 artifacts: [Artifact(fileName: "ResNet101Feature.mlpackage", sha256: "", byteSize: 0)],
                 recommendedBatchSize: 8,
@@ -118,7 +113,8 @@ enum ModelManifest {
                 id: "clip_vit_b32_image",
                 displayName: "CLIP ViT-B/32 (image tower)",
                 kind: .clipImage,
-                downloadURL: "https://example.invalid/prowser/models/clip_vit_b32_image.zip",
+                downloadURL: "",
+                downloadFile: "clip_vit_b32_image.zip",
                 approximateDownloadBytes: 180_000_000,
                 artifacts: [Artifact(fileName: "CLIPViTB32Image.mlpackage", sha256: "", byteSize: 0)],
                 recommendedBatchSize: 16,
@@ -128,9 +124,14 @@ enum ModelManifest {
                 id: "clip_vit_b32_text",
                 displayName: "CLIP ViT-B/32 (text tower)",
                 kind: .clipText,
-                downloadURL: "https://example.invalid/prowser/models/clip_vit_b32_text.zip",
+                downloadURL: "",
+                downloadFile: "clip_vit_b32_text.zip",
                 approximateDownloadBytes: 120_000_000,
-                artifacts: [Artifact(fileName: "CLIPViTB32Text.mlpackage", sha256: "", byteSize: 0)],
+                artifacts: [
+                    Artifact(fileName: "CLIPViTB32Text.mlpackage", sha256: "", byteSize: 0),
+                    Artifact(fileName: "clip_vocab.json", sha256: "", byteSize: 0),
+                    Artifact(fileName: "clip_merges.txt", sha256: "", byteSize: 0),
+                ],
                 recommendedBatchSize: 1,
                 performanceNote: nil
             ),
@@ -138,7 +139,8 @@ enum ModelManifest {
                 id: "clip_vit_l14_image",
                 displayName: "CLIP ViT-L/14 (image tower)",
                 kind: .clipImage,
-                downloadURL: "https://example.invalid/prowser/models/clip_vit_l14_image.zip",
+                downloadURL: "",
+                downloadFile: "clip_vit_l14_image.zip",
                 approximateDownloadBytes: 900_000_000,
                 artifacts: [Artifact(fileName: "CLIPViTL14Image.mlpackage", sha256: "", byteSize: 0)],
                 recommendedBatchSize: 8,
@@ -148,9 +150,14 @@ enum ModelManifest {
                 id: "clip_vit_l14_text",
                 displayName: "CLIP ViT-L/14 (text tower)",
                 kind: .clipText,
-                downloadURL: "https://example.invalid/prowser/models/clip_vit_l14_text.zip",
+                downloadURL: "",
+                downloadFile: "clip_vit_l14_text.zip",
                 approximateDownloadBytes: 450_000_000,
-                artifacts: [Artifact(fileName: "CLIPViTL14Text.mlpackage", sha256: "", byteSize: 0)],
+                artifacts: [
+                    Artifact(fileName: "CLIPViTL14Text.mlpackage", sha256: "", byteSize: 0),
+                    Artifact(fileName: "clip_vocab.json", sha256: "", byteSize: 0),
+                    Artifact(fileName: "clip_merges.txt", sha256: "", byteSize: 0),
+                ],
                 recommendedBatchSize: 1,
                 performanceNote: "Large download; pair with ViT-L/14 image tower."
             ),

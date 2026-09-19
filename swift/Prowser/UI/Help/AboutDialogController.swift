@@ -66,7 +66,7 @@ final class AboutDialogController: NSObject, NSWindowDelegate {
         presentAuxiliary(
             title: "License",
             html: AboutHTMLContent.licenseHTML(settings: appState.config.rawSettings()),
-            defaultSize: NSSize(width: 640, height: 420)
+            defaultSize: NSSize(width: 720, height: 560)
         )
     }
 

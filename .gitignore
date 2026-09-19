@@ -7,6 +7,7 @@ __pycache__/
 *.pyc
 venv/
 venv_image_browser/
+venv_model_export/
 
 # Local media (app assets are whitelisted below)
 *.backup
@@ -30,3 +31,4 @@ profile.stats
 
 # Editor
 .cursor/
+venv_model_export/bin/activate

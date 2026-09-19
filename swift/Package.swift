@@ -23,6 +23,7 @@ let package = Package(
             resources: [
                 .process("Resources/Assets"),
                 .process("Resources/image_recognition_models.json"),
+                .process("Resources/waltzremote_search_models.cer"),
             ],
             linkerSettings: [
                 .linkedFramework("Photos"),

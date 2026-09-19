@@ -3,6 +3,9 @@ import Foundation
 /// Apply CNN/CLIP search results to app state (port of `similarity_reorder.py` finish paths).
 @MainActor
 enum ImageSearchResultPresentation {
+    /// Shown under the progress bar while CLIP/CNN features are computed or loaded from cache.
+    static let searchIndexingDetailText =
+        "Reading images and caching search metadata on this Mac. Your image files are not copied or stored by this process."
     static func applyCustomOrderedList(
         appState: AppState,
         orderedPaths: [String],
@@ -56,8 +59,19 @@ enum ImageSearchResultPresentation {
         appState.thumbnailGridHost?.reloadLayoutIfNeeded()
         if restoreMultiSelect {
             appState.thumbnailGridHost?.scrollToSelectionAfterLayout()
+        } else {
+            syncGridHighlightToCurrentImage(appState: appState, paths: normalized)
         }
         appState.status.show(statusMessage)
         appState.menuRefresh.refreshAll()
+    }
+
+    private static func syncGridHighlightToCurrentImage(appState: AppState, paths: [String]) {
+        guard appState.fileData.currentViewMode == .thumbnail,
+              let grid = appState.thumbnailGridHost,
+              let path = appState.fileData.currentImagePath,
+              let index = paths.firstIndex(of: path) else { return }
+        grid.selectIndex(index, scroll: true, notifyDelegate: false)
+        grid.scrollToSelectionAfterLayout()
     }
 }

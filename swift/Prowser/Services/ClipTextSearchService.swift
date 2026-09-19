@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 
 @MainActor
 enum ClipTextSearchService {
@@ -23,10 +25,28 @@ enum ClipTextSearchService {
             return
         }
 
+        let clipName = appState.config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        let modelIDs = ModelManifest.clipBundleIDs(for: clipName)
+        do {
+            try await ModelDownloadService.ensureModelsInstalled(
+                profile: appState.config.profilePaths,
+                config: appState.config,
+                modelIDs: modelIDs,
+                purpose: "Download is required for Search by Text (⌘F) and background indexing."
+            )
+        } catch ModelDownloadError.userDeclined {
+            return
+        } catch {
+            StyledMessageDialog.showWarning(title: "Search Failed", message: error.localizedDescription)
+            return
+        }
+
         let panel = CancellableProgressPanelController(
             title: "Search by Text",
             labelText: "Encoding prompt…",
-            maximum: paths.count
+            maximum: paths.count,
+            detailText: ImageSearchResultPresentation.searchIndexingDetailText,
+            mutedNoteColor: NSColor(appState.theme.colors.dialogMutedText)
         )
         panel.show()
 
@@ -47,6 +67,18 @@ enum ClipTextSearchService {
                 shouldCancel: { panel.cancelRequested }
             )
             panel.close()
+
+            if let samplePath = paths.first,
+               let imageDim = imageFeatures[samplePath]?.count,
+               imageDim != textFeature.count {
+                StyledMessageDialog.showWarning(
+                    title: "CLIP Feature Mismatch",
+                    message:
+                        "Image features (\(imageDim)) and text features (\(textFeature.count)) use different sizes. "
+                        + "Reinstall updated CLIP models and clear the CLIP feature cache in Settings → Caches, then search again."
+                )
+                return
+            }
             if panel.cancelRequested {
                 appState.imageRecognition.flushCaches()
                 appState.status.show("Text search cancelled")
@@ -88,7 +120,7 @@ enum ClipTextSearchService {
             ImageSearchResultPresentation.applyCustomOrderedList(
                 appState: appState,
                 orderedPaths: ordered,
-                currentImagePath: appState.fileData.currentImagePath,
+                currentImagePath: ordered.first,
                 statusMessage: "Text search (\(ordered.count) images)",
                 saveHistory: filesChanged || options.recursive
             )

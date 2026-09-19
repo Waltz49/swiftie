@@ -74,7 +74,8 @@ final class ResNetFeatureExtractor: @unchecked Sendable {
         let url = ImageRecognitionPaths.artifactURL(profile: profile, modelID: modelID, fileName: artifactName)
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
-        let model = try MLModel(contentsOf: url, configuration: config)
+        let loadURL = try CoreMLModelCompilation.ensureCompiled(at: url)
+        let model = try MLModel(contentsOf: loadURL, configuration: config)
         lock.lock()
         loadedModel = model
         lock.unlock()

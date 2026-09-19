@@ -38,6 +38,13 @@ enum AboutHTMLContent {
     <li><b>ImageIO</b> (thumbnails, EXIF, image decode) — <a href="https://developer.apple.com/documentation/imageio">developer.apple.com/documentation/imageio</a></li>
     <li><b>Core Graphics</b> (resize, display) — <a href="https://developer.apple.com/documentation/coregraphics">developer.apple.com/documentation/coregraphics</a></li>
     <li><b>libwebp</b> / <b>Swift-WebP</b> — <a href="https://developers.google.com/speed/webp">developers.google.com/speed/webp</a></li>
+    <li><b>Core ML</b> (optional search model inference) — <a href="https://developer.apple.com/documentation/coreml">developer.apple.com/documentation/coreml</a></li>
+    </ul>
+    <h2>Optional search models (download)</h2>
+    <p class="note">ResNet and CLIP Core ML packages may download on first use (Settings → Models). License terms are in the License window.</p>
+    <ul>
+    <li><a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a> / <a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a> (CLIP, <a href="https://github.com/openai/CLIP/blob/main/LICENSE">MIT License</a>)</li>
+    <li>PyTorch torchvision ResNet-18/50/101 ImageNet weights (<a href="https://github.com/pytorch/vision/blob/main/LICENSE">BSD 3-Clause License</a>)</li>
     </ul>
     </body>
     </html>
@@ -59,6 +66,11 @@ enum AboutHTMLContent {
     table.params th { background-color: __TABLE_HEADER_BG__; font-weight: bold; }
     table.params td.param { width: 28%; font-weight: bold; white-space: nowrap; }
     .terms p { margin: 0.65em 0; }
+    .model-block { margin: 1em 0 1.2em 0; padding-top: 0.5em; border-top: 1px solid __BORDER_COLOR__; }
+    .model-block h3 { font-size: 13px; margin: 0.6em 0 0.35em 0; }
+    .license-text { font-size: 11px; line-height: 1.4; color: __NOTE_COLOR__; margin: 0.5em 0; }
+    .license-text p { margin: 0.35em 0; }
+    a { color: __LINK_COLOR__; text-decoration: none; }
     </style>
     </head>
     <body>
@@ -115,6 +127,34 @@ enum AboutHTMLContent {
     EXPRESS OR IMPLIED, INCLUDING (WITHOUT LIMITATION) WARRANTIES OF
     MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND
     TITLE.</p>
+    </div>
+    <h2>Optional downloadable search models (Core ML)</h2>
+    <p>The Swift app may download optional Core ML packages for similar-image search (⌘K) and text search (⌘F). Those packages are converted from third-party weights. Using them is subject to the licenses below, in addition to the Business Source License for Prowser itself.</p>
+    <div class="model-block">
+    <h3>OpenAI CLIP (ViT-B/32 and ViT-L/14)</h3>
+    <p><b>Models:</b> <a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a>,
+    <a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a> (image tower, text tower, tokenizer vocabulary/merges).</p>
+    <p><b>Source:</b> <a href="https://github.com/openai/CLIP">github.com/openai/CLIP</a></p>
+    <p><b>License:</b> <a href="https://github.com/openai/CLIP/blob/main/LICENSE">MIT License</a> (full text at github.com/openai/CLIP)</p>
+    <div class="license-text">
+    <p>Copyright &copy; 2021 OpenAI</p>
+    <p>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</p>
+    <p>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</p>
+    <p>THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
+    </div>
+    </div>
+    <div class="model-block">
+    <h3>PyTorch torchvision ResNet (ImageNet-1K pretrained)</h3>
+    <p><b>Models:</b> ResNet-18, ResNet-50, and ResNet-101 feature backbones (default ImageNet-1K weights), exported as Core ML feature extractors.</p>
+    <p><b>Source:</b> <a href="https://github.com/pytorch/vision">github.com/pytorch/vision</a> —
+    <a href="https://pytorch.org/vision/stable/models.html">pytorch.org/vision/stable/models.html</a></p>
+    <p><b>License:</b> <a href="https://github.com/pytorch/vision/blob/main/LICENSE">BSD 3-Clause License</a> (torchvision; full text on GitHub)</p>
+    <div class="license-text">
+    <p>Copyright &copy; Soumith Chintala 2016, All rights reserved.</p>
+    <p>Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.</p>
+    <p>THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</p>
+    <p>Pretrained ImageNet weights are subject to the terms under which they were trained and distributed via the torchvision model zoo.</p>
+    </div>
     </div>
     </body>
     </html>

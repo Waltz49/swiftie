@@ -97,6 +97,7 @@ final class ImageRecognitionService {
         let modelIDs = ModelManifest.resnetBundleIDs(for: resnet)
         try await ModelDownloadService.ensureModelsInstalled(
             profile: profile,
+            config: config,
             modelIDs: modelIDs,
             purpose: "Download is required for Search for Similar Images (⌘K) and background indexing."
         )
@@ -155,9 +156,11 @@ final class ImageRecognitionService {
         shouldCancel: @escaping () -> Bool
     ) async throws -> [String: [Float]] {
         let clipName = config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        let expectedDim = ModelManifest.clipFeatureDimension(for: clipName)
         let modelIDs = ModelManifest.clipBundleIDs(for: clipName)
         try await ModelDownloadService.ensureModelsInstalled(
             profile: profile,
+            config: config,
             modelIDs: modelIDs,
             purpose: "Download is required for Search by Text (⌘F) and background indexing."
         )
@@ -168,7 +171,8 @@ final class ImageRecognitionService {
         var result: [String: [Float]] = [:]
         for path in paths {
             guard let attrs = fileAttributes(path: path) else { continue }
-            if let cached = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size) {
+            if let cached = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size),
+               cached.count == expectedDim {
                 result[path] = cached
             } else {
                 needExtract.append(path)
@@ -200,6 +204,7 @@ final class ImageRecognitionService {
         let modelIDs = ModelManifest.clipBundleIDs(for: clipName)
         try await ModelDownloadService.ensureModelsInstalled(
             profile: profile,
+            config: config,
             modelIDs: modelIDs,
             purpose: "Download is required to encode text for Search by Text (⌘F)."
         )

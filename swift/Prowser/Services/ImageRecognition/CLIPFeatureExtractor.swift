@@ -126,7 +126,8 @@ final class CLIPFeatureExtractor: @unchecked Sendable {
         )
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
-        return try MLModel(contentsOf: url, configuration: config)
+        let loadURL = try CoreMLModelCompilation.ensureCompiled(at: url)
+        return try MLModel(contentsOf: loadURL, configuration: config)
     }
 
     private func runImage(model: MLModel, input: [Float]) throws -> [Float]? {
@@ -151,13 +152,25 @@ final class CLIPFeatureExtractor: @unchecked Sendable {
     private func firstVector(in out: MLFeatureProvider) -> [Float]? {
         for name in out.featureNames {
             if let feat = out.featureValue(for: name)?.multiArrayValue {
-                let count = feat.count
-                var vector = [Float](repeating: 0, count: count)
-                let ptr = feat.dataPointer.bindMemory(to: Float.self, capacity: count)
-                for i in 0 ..< count { vector[i] = ptr[i] }
-                return vector
+                return multiArrayToFloat(feat)
             }
         }
         return nil
+    }
+
+    private func multiArrayToFloat(_ array: MLMultiArray) -> [Float] {
+        let count = array.count
+        var out = [Float](repeating: 0, count: count)
+        switch array.dataType {
+        case .float32:
+            let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)
+            for i in 0 ..< count { out[i] = ptr[i] }
+        case .double:
+            let ptr = array.dataPointer.bindMemory(to: Double.self, capacity: count)
+            for i in 0 ..< count { out[i] = Float(ptr[i]) }
+        default:
+            for i in 0 ..< count { out[i] = array[i].floatValue }
+        }
+        return out
     }
 }

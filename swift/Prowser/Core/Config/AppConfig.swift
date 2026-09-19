@@ -334,6 +334,26 @@ final class AppConfig {
         stringValue(key) ?? defaultValue
     }
 
+    /// Active search-model download folder (user override or `ImageRecognitionDownloadDefaults.defaultBaseURL`).
+    func imageRecognitionModelDownloadBaseURL() -> String {
+        let raw = string(forKey: ImageRecognitionDownloadDefaults.settingsOverrideKey, default: "")
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+        }
+        return ImageRecognitionDownloadDefaults.defaultBaseURL
+    }
+
+    func clearImageRecognitionModelDownloadBaseURLOverride() {
+        updateSetting(ImageRecognitionDownloadDefaults.settingsOverrideKey, value: nil)
+    }
+
+    var imageRecognitionModelDownloadBaseURLOverride: String? {
+        let raw = string(forKey: ImageRecognitionDownloadDefaults.settingsOverrideKey, default: "")
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     func stringArray(forKey key: String) -> [String] {
         (readSettings()[key] as? [String]) ?? []
     }
@@ -607,6 +627,8 @@ final class AppConfig {
             "resnet_model": "resnet18",
             "clip_model_name": "openai/clip-vit-base-patch32",
             "clip_similarity_threshold": 0.20,
+            "clip_prompt": "",
+            "clip_recursive": false,
             "cnn_recursive": false,
             "cnn_search_dir_enabled": false,
             "cnn_search_dir": "",

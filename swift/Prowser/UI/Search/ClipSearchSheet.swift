@@ -59,7 +59,8 @@ struct ClipSearchSheet: View {
     }
 
     private func loadDefaults() {
-        recursive = appState.config.bool(forKey: "cnn_recursive", default: false)
+        prompt = appState.config.string(forKey: "clip_prompt", default: "")
+        recursive = appState.config.bool(forKey: "clip_recursive", default: false)
         useCustomDirectory = appState.config.bool(forKey: "clip_search_dir_enabled", default: false)
         customDirectory = appState.config.string(forKey: "clip_search_dir", default: "")
         threshold = appState.config.double(forKey: "clip_similarity_threshold", default: 0.20)
@@ -81,7 +82,8 @@ struct ClipSearchSheet: View {
     private func submit() {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        appState.config.updateSetting("cnn_recursive", value: recursive)
+        appState.config.updateSetting("clip_prompt", value: trimmed)
+        appState.config.updateSetting("clip_recursive", value: recursive)
         appState.config.updateSetting("clip_search_dir_enabled", value: useCustomDirectory)
         appState.config.updateSetting("clip_search_dir", value: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines))
         appState.config.updateSetting("clip_similarity_threshold", value: threshold)

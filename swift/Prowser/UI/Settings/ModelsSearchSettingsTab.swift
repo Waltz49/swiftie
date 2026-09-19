@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -7,6 +8,11 @@ struct ModelsSearchSettingsTab: View {
     @State private var resnetModel = "resnet18"
     @State private var clipModel = "openai/clip-vit-base-patch32"
     @State private var statusMessage = ""
+    @State private var modelDownloadBaseURL = ""
+
+    private var usingDefaultDownloadURL: Bool {
+        appState.config.imageRecognitionModelDownloadBaseURLOverride == nil
+    }
 
     var body: some View {
         ScrollView {
@@ -43,6 +49,33 @@ struct ModelsSearchSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
 
+                SettingsSection(title: "Model delivery") {
+                    Text("Download base URL")
+                        .font(.subheadline.weight(.semibold))
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        TextField("https://…", text: $modelDownloadBaseURL)
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            resetDownloadBaseURLToDefault()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Reset to default download URL")
+                        .disabled(usingDefaultDownloadURL && modelDownloadBaseURL == ImageRecognitionDownloadDefaults.defaultBaseURL)
+                    }
+                    Text(
+                        "Search models download automatically on first use (after you approve). "
+                            + "Default: \(ImageRecognitionDownloadDefaults.defaultBaseURL). "
+                            + "Local fallback: …/image_recognition/models/_mirror/."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Button("Open models folder in Finder") {
+                        openModelsFolder()
+                    }
+                }
+
                 if !statusMessage.isEmpty {
                     Text(statusMessage).font(.caption).foregroundStyle(.secondary)
                 }
@@ -61,12 +94,40 @@ struct ModelsSearchSettingsTab: View {
             appState.imageRecognition.rebind(config: appState.config)
             promptDownloadIfNeeded(resnet: nil, clip: new)
         }
+        .onChange(of: modelDownloadBaseURL) { _, new in
+            let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed == ImageRecognitionDownloadDefaults.defaultBaseURL {
+                appState.config.clearImageRecognitionModelDownloadBaseURLOverride()
+            } else {
+                appState.config.updateSetting(
+                    ImageRecognitionDownloadDefaults.settingsOverrideKey,
+                    value: trimmed
+                )
+            }
+        }
     }
 
     private func loadFromConfig() {
         metric = appState.config.string(forKey: "similarity_metric", default: "cosine")
         resnetModel = appState.config.string(forKey: "resnet_model", default: "resnet18")
         clipModel = appState.config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        modelDownloadBaseURL = appState.config.imageRecognitionModelDownloadBaseURL()
+        ModelManifest.loadUserCatalog(profile: appState.config.profilePaths)
+    }
+
+    private func resetDownloadBaseURLToDefault() {
+        appState.config.clearImageRecognitionModelDownloadBaseURLOverride()
+        modelDownloadBaseURL = ImageRecognitionDownloadDefaults.defaultBaseURL
+        statusMessage = "Download URL reset to default."
+    }
+
+    private func openModelsFolder() {
+        let url = ImageRecognitionPaths.modelsRoot(profile: appState.config.profilePaths)
+        try? FileManager.default.createDirectory(
+            at: url.appendingPathComponent("_mirror", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        NSWorkspace.shared.open(url)
     }
 
     private func promptDownloadIfNeeded(resnet: String?, clip: String?) {
@@ -76,6 +137,7 @@ struct ModelsSearchSettingsTab: View {
                     let ids = ModelManifest.resnetBundleIDs(for: resnet)
                     try await ModelDownloadService.ensureModelsInstalled(
                         profile: appState.config.profilePaths,
+                        config: appState.config,
                         modelIDs: ids,
                         purpose: "Download the selected ResNet model for image similarity search."
                     )
@@ -84,6 +146,7 @@ struct ModelsSearchSettingsTab: View {
                     let ids = ModelManifest.clipBundleIDs(for: clip)
                     try await ModelDownloadService.ensureModelsInstalled(
                         profile: appState.config.profilePaths,
+                        config: appState.config,
                         modelIDs: ids,
                         purpose: "Download the selected CLIP model for text search."
                     )

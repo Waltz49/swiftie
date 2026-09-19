@@ -168,6 +168,7 @@ final class AppState {
             viewMode: fileData.currentViewMode
         )
         let profilePaths = ProfilePaths(profilePath: launchOptions.profilePath)
+        ModelManifest.loadUserCatalog(profile: profilePaths)
         imageRecognition = ImageRecognitionService(profile: profilePaths)
         imageRecognition.rebind(config: config)
         thumbnailCache = ThumbnailCache(

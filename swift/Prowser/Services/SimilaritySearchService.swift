@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 
 @MainActor
 enum SimilaritySearchService {
@@ -33,7 +35,9 @@ enum SimilaritySearchService {
         let panel = CancellableProgressPanelController(
             title: "Find Similar Images",
             labelText: "Preparing…",
-            maximum: paths.count
+            maximum: paths.count,
+            detailText: ImageSearchResultPresentation.searchIndexingDetailText,
+            mutedNoteColor: NSColor(appState.theme.colors.dialogMutedText)
         )
         panel.show()
 
@@ -42,7 +46,11 @@ enum SimilaritySearchService {
         let profile = appState.config.profilePaths
         let missingResnet = ImageRecognitionPaths.missingModelIDs(profile: profile, ids: modelIDs)
         let useCoreML = missingResnet.isEmpty
-            || ModelManifest.isRemoteDownloadAvailable(modelIDs: missingResnet)
+            || ModelManifest.isDownloadAvailable(
+                profile: profile,
+                downloadBaseURL: appState.config.imageRecognitionModelDownloadBaseURL(),
+                modelIDs: missingResnet
+            )
 
         let reportProgress: (Int, Int, String) -> Void = { cur, max, label in
             panel.setMaximum(max)
