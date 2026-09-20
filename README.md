@@ -177,4 +177,4 @@ By default, the app uses threads when bundled into an app, and processes when ru
 
 ## License
 
-See [LICENSE](LICENSE) (Business Source License).
+See [LICENSE](LICENSE) (Business Source License). The same file and **About → License** / **Credits** list third-party components (including dlib face recognition, optional model downloads, CLIP, and ResNet weights).

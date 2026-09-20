@@ -61,25 +61,39 @@ Contact: <a href="mailto:sillysotsoftware@yahoo.com">sillysotsoftware@yahoo.com<
 <li><b>PyTorch</b> &amp; <b>torchvision</b> (CNN similarity, pretrained ResNet weights) — <a href="https://pytorch.org/">pytorch.org</a></li>
 <li><b>Hugging Face Transformers</b> (CLIP text/image models) — <a href="https://github.com/huggingface/transformers">GitHub: huggingface/transformers</a></li>
 <li><b>face_recognition</b> — <a href="https://github.com/ageitgey/face_recognition">GitHub: ageitgey/face_recognition</a>
-  (uses <b>dlib</b> — <a href="http://dlib.net/">dlib.net</a>)</li>
-<li>Pretrained dlib shape predictor / face recognition models bundled via the
-  <b>face_recognition_models</b> package — <a href="https://github.com/ageitgey/face_recognition_models">GitHub: ageitgey/face_recognition_models</a></li>
+  (<a href="https://github.com/ageitgey/face_recognition/blob/master/LICENSE">MIT License</a>;
+  uses <b>dlib</b> — <a href="http://dlib.net/">dlib.net</a>,
+  <a href="https://github.com/davisking/dlib/blob/master/dlib/LICENSE.txt">Boost Software License 1.0</a>)</li>
+<li>Pretrained dlib shape predictor / face recognition models via the
+  <b>face_recognition_models</b> package — <a href="https://github.com/ageitgey/face_recognition_models">GitHub: ageitgey/face_recognition_models</a>
+  (<a href="https://github.com/ageitgey/face_recognition_models/blob/master/LICENSE">CC0 1.0</a>)</li>
 </ul>
 
 <h2>Models (may download on first use)</h2>
 <p class="note">CLIP weights are fetched via Hugging Face Hub (cache: typically <code>~/.cache/huggingface</code>).<br>
-ResNet ImageNet checkpoints are typically cached under <code>~/.cache/torch</code>.</p>
+ResNet ImageNet checkpoints are typically cached under <code>~/.cache/torch</code>.<br>
+Face model license terms are in the License window.</p>
 
 <h3>Hugging Face — CLIP (settings may use either)</h3>
 <ul>
-<li><a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a> (default)</li>
-<li><a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a></li>
+<li><a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a> (default;
+  <a href="https://github.com/openai/CLIP/blob/main/LICENSE">MIT License</a>)</li>
+<li><a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a>
+  (<a href="https://github.com/openai/CLIP/blob/main/LICENSE">MIT License</a>)</li>
+</ul>
+
+<h3>PyTorch torchvision ResNet (ImageNet-1K)</h3>
+<ul>
+<li>ResNet-18 / ResNet-50 / ResNet-101 pretrained weights (<a href="https://github.com/pytorch/vision/blob/main/LICENSE">BSD 3-Clause License</a>)</li>
 </ul>
 
 <h3>Face recognition (dlib / face_recognition)</h3>
-<p>Detector and 128-D embedding weights are provided by the
+<p>Detector and 128-D embedding weights (<code>shape_predictor_5_face_landmarks.dat</code>,
+<code>dlib_face_recognition_resnet_model_v1.dat</code>) are provided by the
 <a href="https://github.com/ageitgey/face_recognition_models">face_recognition_models</a> distribution
-(not hosted on Hugging Face). Credit: Davis King (dlib) and Adam Geitgey (face_recognition ecosystem).</p>
+(not hosted on Hugging Face;
+<a href="https://github.com/ageitgey/face_recognition_models/blob/master/LICENSE">CC0 1.0</a>).
+Credit: Davis King (dlib) and Adam Geitgey (face_recognition ecosystem).</p>
 
 </body>
 </html>
@@ -108,6 +122,11 @@ table.params th, table.params td {
 table.params th { background-color: __TABLE_HEADER_BG__; font-weight: bold; }
 table.params td.param { width: 28%; font-weight: bold; white-space: nowrap; }
 .terms p { margin: 0.65em 0; }
+.model-block { margin: 1em 0 1.2em 0; padding-top: 0.5em; border-top: 1px solid __BORDER_COLOR__; }
+.model-block h3 { font-size: 13px; margin: 0.6em 0 0.35em 0; }
+.license-text { font-size: 11px; line-height: 1.4; color: __NOTE_COLOR__; margin: 0.5em 0; }
+.license-text p { margin: 0.35em 0; }
+a { color: __LINK_COLOR__; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -171,6 +190,84 @@ EXPRESS OR IMPLIED, INCLUDING (WITHOUT LIMITATION) WARRANTIES OF
 MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND
 TITLE.</p>
 </div>
+
+<h2>Third-party components (face recognition, optional models)</h2>
+<p>Face recognition and optional model downloads use third-party libraries and
+weights. Using them is subject to the licenses below, in addition to the
+Business Source License for Prowser itself.</p>
+
+<div class="model-block">
+<h3>dlib (face detection and embeddings)</h3>
+<p><b>Use:</b> The Python build uses dlib through the optional <code>face_recognition</code>
+package. The Swift build may statically link dlib when <code>Vendor/dlib-install</code> is built.</p>
+<p><b>Source:</b> <a href="https://github.com/davisking/dlib">github.com/davisking/dlib</a> —
+<a href="http://dlib.net/">dlib.net</a></p>
+<p><b>License:</b> <a href="https://github.com/davisking/dlib/blob/master/dlib/LICENSE.txt">Boost Software License 1.0</a></p>
+<div class="license-text">
+<p>Boost Software License - Version 1.0 - August 17th, 2003</p>
+<p>Permission is hereby granted, free of charge, to any person or organization obtaining a copy of the software and accompanying documentation covered by this license (the &quot;Software&quot;) to use, reproduce, display, distribute, execute, and transmit the Software, and to prepare derivative works of the Software, and to permit third-parties to whom the Software is furnished to do so, all subject to the following: The copyright notices in the Software and this entire statement, including the above license grant, this restriction and the following disclaimer, must be included in all copies of the Software, in whole or in part, and all derivative works of the Software, unless such copies or derivative works are solely in the form of machine-executable object code generated by a source language processor.</p>
+<p>THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
+</div>
+</div>
+
+<div class="model-block">
+<h3>face_recognition (Python optional dependency)</h3>
+<p><b>Source:</b> <a href="https://github.com/ageitgey/face_recognition">github.com/ageitgey/face_recognition</a></p>
+<p><b>License:</b> <a href="https://github.com/ageitgey/face_recognition/blob/master/LICENSE">MIT License</a></p>
+<div class="license-text">
+<p>Copyright &copy; 2021, Adam Geitgey</p>
+<p>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</p>
+<p>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</p>
+<p>THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
+</div>
+</div>
+
+<div class="model-block">
+<h3>dlib face recognition model weights</h3>
+<p><b>Models:</b> <code>shape_predictor_5_face_landmarks.dat</code>,
+<code>dlib_face_recognition_resnet_model_v1.dat</code></p>
+<p><b>Use:</b> Python installs these via <code>face_recognition_models</code>. Swift downloads
+<code>dlib_face_models.zip</code> on first use.</p>
+<p><b>Source:</b> <a href="https://github.com/ageitgey/face_recognition_models">github.com/ageitgey/face_recognition_models</a></p>
+<p><b>License:</b> <a href="https://creativecommons.org/publicdomain/zero/1.0/legalcode">CC0 1.0 Universal</a>
+(<a href="https://github.com/ageitgey/face_recognition_models/blob/master/LICENSE">deed on GitHub</a>)</p>
+<div class="license-text">
+<p>The person who associated a work with this deed has dedicated the work to the public domain by waiving all of his or her rights to the work worldwide under copyright law, including all related and neighboring rights, to the extent allowed by law. You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission. Credit: Davis King (dlib) and Adam Geitgey (face_recognition ecosystem).</p>
+</div>
+</div>
+
+<h2>Optional search models (download)</h2>
+<p>This app may download or cache third-party model weights for similar-image search,
+text search, and related features. Using them is subject to the licenses below.</p>
+
+<div class="model-block">
+<h3>OpenAI CLIP (ViT-B/32 and ViT-L/14)</h3>
+<p><b>Models:</b> <a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a>,
+<a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a></p>
+<p><b>Source:</b> <a href="https://github.com/openai/CLIP">github.com/openai/CLIP</a></p>
+<p><b>License:</b> <a href="https://github.com/openai/CLIP/blob/main/LICENSE">MIT License</a></p>
+<div class="license-text">
+<p>Copyright &copy; 2021 OpenAI</p>
+<p>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</p>
+<p>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</p>
+<p>THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</p>
+</div>
+</div>
+
+<div class="model-block">
+<h3>PyTorch torchvision ResNet (ImageNet-1K pretrained)</h3>
+<p><b>Models:</b> ResNet-18, ResNet-50, and ResNet-101 backbones (default ImageNet-1K weights).</p>
+<p><b>Source:</b> <a href="https://github.com/pytorch/vision">github.com/pytorch/vision</a> —
+<a href="https://pytorch.org/vision/stable/models.html">pytorch.org/vision/stable/models.html</a></p>
+<p><b>License:</b> <a href="https://github.com/pytorch/vision/blob/main/LICENSE">BSD 3-Clause License</a> (torchvision)</p>
+<div class="license-text">
+<p>Copyright &copy; Soumith Chintala 2016, All rights reserved.</p>
+<p>Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.</p>
+<p>THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</p>
+<p>Pretrained ImageNet weights are subject to the terms under which they were trained and distributed via the torchvision model zoo.</p>
+</div>
+</div>
+
 </body>
 </html>
 """
@@ -190,6 +287,7 @@ def _themed_busl_license_html() -> str:
     th = get_active_theme()
     return (
         _BUSL_LICENSE_HTML
+        .replace("__LINK_COLOR__", th.accent_color_hex)
         .replace("__NOTE_COLOR__", th.text_disabled_hex)
         .replace("__BORDER_COLOR__", th.border_default_hex)
         .replace("__TABLE_HEADER_BG__", th.dialog_background_hex)
