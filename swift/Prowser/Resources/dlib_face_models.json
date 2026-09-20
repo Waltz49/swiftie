@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "bundleId": "dlib_face_models",
+  "displayName": "dlib face recognition models",
+  "downloadFile": "dlib_face_models.zip",
+  "approximateDownloadBytes": 31000000,
+  "artifacts": [
+    {
+      "fileName": "shape_predictor_5_face_landmarks.dat",
+      "sha256": "",
+      "byteSize": 9969393
+    },
+    {
+      "fileName": "dlib_face_recognition_resnet_model_v1.dat",
+      "sha256": "",
+      "byteSize": 21440102
+    }
+  ]
+}

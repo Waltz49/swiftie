@@ -19,6 +19,8 @@ final class AppState {
     let exifOperations = ExifOperationsController()
     let searchOperations = SearchOperationsService()
     let imageRecognition: ImageRecognitionService
+    let faceCache: FaceCacheService
+    let knownFaces: KnownFacesStore
     let backgroundImageRecognition = BackgroundImageRecognitionController()
     let fileTreeOperations = FileTreeOperationsService()
     let renamePrefixService = RenamePrefixService()
@@ -43,10 +45,13 @@ final class AppState {
     var userRequestedTreeClearWork: DispatchWorkItem?
     var settingsOpenRequestToken = 0
     var requestedSettingsTab: SettingsTab = .general
+    /// Set when opening Settings → Face Recognition for ⇧⌘P Extract Faces (Python `auto_extract_faces`).
+    var pendingAutoExamineFaces = false
     var showKeyboardHelp = false
     var showImageRecognitionCaveats = false
     var showSimilaritySearchSheet = false
     var showClipSearchSheet = false
+    var showPersonSearchSheet = false
     var isAboutDialogVisible: Bool { aboutDialog.isVisible }
     var isSettingsDialogVisible: Bool { settingsDialog.isVisible }
     var showFindReferencesSheet = false
@@ -78,6 +83,7 @@ final class AppState {
             || showImageRecognitionCaveats
             || showSimilaritySearchSheet
             || showClipSearchSheet
+            || showPersonSearchSheet
             || isAboutDialogVisible
             || showMoveWorkFilesSheet
     }
@@ -171,6 +177,8 @@ final class AppState {
         ModelManifest.loadUserCatalog(profile: profilePaths)
         imageRecognition = ImageRecognitionService(profile: profilePaths)
         imageRecognition.rebind(config: config)
+        faceCache = FaceCacheService(profile: profilePaths)
+        knownFaces = KnownFacesStore(profile: profilePaths)
         thumbnailCache = ThumbnailCache(
             paths: profilePaths,
             ignoreExifRotation: config.ignoreExifRotation
@@ -953,6 +961,9 @@ final class AppState {
     func openSettingsWindow(tab explicitTab: SettingsTab? = nil, userInfo: [String: Any] = [:]) {
         let tab = SettingsTab.resolvedOpenTab(explicit: explicitTab)
         requestedSettingsTab = tab
+        if userInfo["autoExamineFaces"] as? Bool == true {
+            pendingAutoExamineFaces = true
+        }
         var info = userInfo
         info["tab"] = tab.rawValue
         NotificationCenter.default.post(
@@ -1103,6 +1114,7 @@ final class AppState {
         static let moveWorkFiles = "moveWorkFiles"
         static let similaritySearch = "similaritySearch"
         static let clipSearch = "clipSearch"
+        static let personSearch = "personSearch"
         static let imageRecognitionCaveats = "imageRecognitionCaveats"
     }
 
@@ -1246,6 +1258,21 @@ final class AppState {
         ) {
             ClipSearchSheet { [weak self] options in
                 self?.searchOperations.runClipSearch(options: options)
+            }
+        }
+        syncDialog(
+            id: DialogID.personSearch,
+            show: showPersonSearchSheet,
+            title: "Search by person",
+            defaultSize: NSSize(width: 500, height: 360),
+            minSize: NSSize(width: 460, height: 320),
+            onClose: { [weak self] in self?.showPersonSearchSheet = false }
+        ) {
+            PersonSearchSheet { [weak self] options in
+                guard let self else { return }
+                Task { @MainActor in
+                    await PersonSearchService.run(appState: self, options: options)
+                }
             }
         }
         syncDialog(

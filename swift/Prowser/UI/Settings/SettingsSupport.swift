@@ -14,6 +14,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case slideshow
     case caches
     case modelsSearch
+    case faceRecognition
 
     var id: String { rawValue }
 
@@ -30,6 +31,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .slideshow: return "Slideshow"
         case .caches: return "Caches"
         case .modelsSearch: return "Models for Search"
+        case .faceRecognition: return "Face Recognition"
         }
     }
 
@@ -46,11 +48,15 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .slideshow: return "play.rectangle"
         case .caches: return "externaldrive"
         case .modelsSearch: return "magnifyingglass"
+        case .faceRecognition: return "person.crop.circle"
         }
     }
 
-    static func visibleTabs() -> [SettingsTab] {
-        SettingsTab.allCases
+    static func visibleTabs(minBundle: Bool = false) -> [SettingsTab] {
+        if minBundle {
+            return SettingsTab.allCases.filter { $0 != .faceRecognition }
+        }
+        return SettingsTab.allCases
     }
 
     /// Session-only; updated when Settings closes with OK or Cancel (Python `_last_tab_id`).

@@ -21,9 +21,11 @@ final class CancellableProgressPanelController {
     private let isIndeterminateMode: Bool
     private let cancelFlag = CancelFlag()
     private let showsTimeRemainingEstimate: Bool
+    private let usesExtractionBasedTimeEstimate: Bool
     private var progressStartDate: Date?
     private var etaTimer: Timer?
     private let etaTimerTarget = ETATimerTarget()
+    private let extractionTimeEstimator = ExtractionTimeEstimator()
     private let mutedNoteColor: NSColor
     /// Readable from background extraction tasks (CLIP/CNN).
     nonisolated var cancelRequested: Bool { cancelFlag.isCancelled }
@@ -42,12 +44,21 @@ final class CancellableProgressPanelController {
         mutedNoteColor: NSColor = .secondaryLabelColor,
         indeterminate: Bool = false,
         showsLongCompareNoteLine: Bool = false,
-        showsBucketProgressLine: Bool = false
+        showsBucketProgressLine: Bool = false,
+        showsTimeRemainingEstimate: Bool? = nil,
+        usesExtractionBasedTimeEstimate: Bool = false
     ) {
-        showsTimeRemainingEstimate = detailText != nil
+        let showETA = showsTimeRemainingEstimate ?? (detailText != nil)
+        self.showsTimeRemainingEstimate = showETA
+        self.usesExtractionBasedTimeEstimate = usesExtractionBasedTimeEstimate
         isIndeterminateMode = indeterminate
         self.mutedNoteColor = mutedNoteColor
-        var panelHeight: CGFloat = detailText == nil ? 120 : (showsTimeRemainingEstimate ? 172 : 156)
+        var panelHeight: CGFloat = 120
+        if detailText != nil {
+            panelHeight = showETA ? 172 : 156
+        } else if showETA {
+            panelHeight = 156
+        }
         if showsLongCompareNoteLine {
             panelHeight += 22
         }
@@ -74,7 +85,7 @@ final class CancellableProgressPanelController {
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let timeRemaining: NSTextField?
-        if showsTimeRemainingEstimate {
+        if showETA {
             let eta = NSTextField(labelWithString: "")
             eta.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             eta.textColor = mutedNoteColor
@@ -308,6 +319,16 @@ final class CancellableProgressPanelController {
         }
     }
 
+    /// Images still needing face extraction (for extraction-based ETA on Cache Faces).
+    nonisolated func setRemainingExtractionsForEstimate(_ count: Int) {
+        extractionTimeEstimator.setRemaining(count)
+    }
+
+    /// Record one face-encoding duration (seconds); keeps the last 100 samples.
+    nonisolated func recordExtractionDuration(_ seconds: TimeInterval) {
+        extractionTimeEstimator.record(seconds)
+    }
+
     private func updateBucketOnMain(value: Int, maximum: Int) {
         guard !isClosed, let bucketIndicator else { return }
         bucketIndicator.isHidden = false
@@ -347,13 +368,22 @@ final class CancellableProgressPanelController {
             timeRemainingLabel.stringValue = ""
             return
         }
-        let completed = indicator.doubleValue
-        let total = indicator.maxValue
-        guard completed > 0, total > completed else {
+        let remaining: TimeInterval?
+        if usesExtractionBasedTimeEstimate {
+            remaining = extractionTimeEstimator.estimatedSecondsRemaining()
+        } else {
+            let completed = indicator.doubleValue
+            let total = indicator.maxValue
+            guard completed > 0, total > completed else {
+                timeRemainingLabel.stringValue = ""
+                return
+            }
+            remaining = (elapsed / completed) * (total - completed)
+        }
+        guard let remaining, remaining > 0 else {
             timeRemainingLabel.stringValue = ""
             return
         }
-        let remaining = (elapsed / completed) * (total - completed)
         timeRemainingLabel.stringValue = "About \(Self.formatDuration(remaining)) remaining"
         refreshOnMain()
     }
@@ -411,6 +441,39 @@ final class CancellableProgressPanelController {
 
         @MainActor @objc func tick() {
             owner?.refreshTimeRemainingEstimate()
+        }
+    }
+
+    private final class ExtractionTimeEstimator: @unchecked Sendable {
+        private let lock = NSLock()
+        private var samples: [TimeInterval] = []
+        private var extractionsRemaining = 0
+        private static let maxSamples = 100
+
+        func setRemaining(_ count: Int) {
+            lock.lock()
+            extractionsRemaining = max(0, count)
+            lock.unlock()
+        }
+
+        func record(_ duration: TimeInterval) {
+            lock.lock()
+            samples.append(duration)
+            if samples.count > Self.maxSamples {
+                samples.removeFirst(samples.count - Self.maxSamples)
+            }
+            if extractionsRemaining > 0 {
+                extractionsRemaining -= 1
+            }
+            lock.unlock()
+        }
+
+        func estimatedSecondsRemaining() -> TimeInterval? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard extractionsRemaining > 0, !samples.isEmpty else { return nil }
+            let avg = samples.reduce(0, +) / Double(samples.count)
+            return avg * Double(extractionsRemaining)
         }
     }
 }

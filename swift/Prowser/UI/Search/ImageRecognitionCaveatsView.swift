@@ -18,7 +18,8 @@ struct ImageRecognitionCaveatsView: View {
 
         **Differences from the Python app**
         • Rankings may differ slightly from the PySide6 app even with the same model names.
-        • Feature caches live under \(imageRecCache) and are not shared with ~/.prowser.
+        • Swift CNN/CLIP/Vision caches live under \(imageRecCache) (`cache/swift_native/…`) and are not shared with Python `.npz` caches.
+        • Face embeddings use the shared `cache/image_recognition/face_cache/` tree when both apps use the same profile root.
         • Downloaded model files are stored under \(modelsFolder).
 
         **Recommended on 16 GB Apple Silicon**

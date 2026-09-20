@@ -30,6 +30,9 @@ struct CacheSettingsTab: View {
                     HStack(spacing: 8) {
                         cacheButton("Clear Thumbs") { clearThumbnails() }
                         cacheButton("Clear Image Rec") { clearImageRecognition() }
+                        if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                            cacheButton("Clear Face") { clearFaceCache() }
+                        }
                         cacheButton("Scrub") { scrubCaches() }
                     }
                     Button("Clear All") { clearAll() }
@@ -129,6 +132,16 @@ struct CacheSettingsTab: View {
         guard confirm("Clear Thumbnail Cache", "This will clear only the thumbnail cache.") else { return }
         let removed = CacheManagementService.clearThumbnailCache(paths: appState.config.profilePaths)
         statusMessage = "Removed \(removed) cached thumbnails."
+        refreshTotals()
+    }
+
+    private func clearFaceCache() {
+        guard confirm(
+            "Clear Face Cache",
+            "Clear cached face encodings (for Search by person) and face sample thumbnails (Settings → Face Recognition tab)."
+        ) else { return }
+        CacheManagementService.clearFaceCache(paths: appState.config.profilePaths)
+        statusMessage = "Cleared face cache and sample thumbnails."
         refreshTotals()
     }
 

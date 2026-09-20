@@ -202,6 +202,23 @@ struct ProwserCommands: Commands {
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
+                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                    Button("Search by Person…") {
+                        Task { @MainActor in appState.searchOperations.presentPersonSearchDialog() }
+                    }
+                    .keyboardShortcut("p", modifiers: .command)
+
+                    Button("Quick Person Search") {
+                        Task { @MainActor in appState.searchOperations.runQuickPersonSearch() }
+                    }
+                    .keyboardShortcut("p", modifiers: [.command, .control])
+
+                    Button("Extract Faces") {
+                        Task { @MainActor in appState.searchOperations.extractFaces() }
+                    }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                }
+
                 Divider()
 
                 Menu("Find Similar Image Files") {
@@ -354,6 +371,13 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
+
+            if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                Button("Cache Subdirectories' Faces") {
+                    Task { @MainActor in appState.searchOperations.cacheFaces() }
+                }
+                .keyboardShortcut("=", modifiers: .command)
+            }
 
             DeleteExifDateMenuButton(appState: appState)
 

@@ -4,6 +4,10 @@ import Foundation
 struct ProfilePaths: Sendable {
     static let defaultProfileDirectoryName = ".swift-prowser"
 
+    /// Swift-only caches (Core ML features, Vision, dlib `.dat` downloads) live here so a shared
+    /// profile root with the Python app does not mix incompatible `.npz` / `.fcache` trees.
+    static let swiftNativeCacheComponent = "swift_native"
+
     let prowserHome: URL
 
     init(profilePath: String?) {
@@ -24,6 +28,9 @@ struct ProfilePaths: Sendable {
     }
 
     var settingsFile: URL { dataDirectory.appendingPathComponent("settings.json") }
+    var knownFacesFile: URL { dataDirectory.appendingPathComponent("known_faces.json") }
+    /// Cross-process marker while a foreground face scan runs (Python `face_gathering_coordinator`).
+    var foregroundFaceScanActiveMarker: URL { dataDirectory.appendingPathComponent("foreground_face_scan_active") }
     var instanceLockFile: URL { dataDirectory.appendingPathComponent("instance.lock") }
 
     var cacheDirectory: URL {
@@ -50,8 +57,33 @@ struct ProfilePaths: Sendable {
         return url
     }
 
-    var imageRecognitionCacheDirectory: URL {
+    /// Python-compatible image recognition root (`~/.prowser/cache/image_recognition/`). Swift only
+    /// writes the shared `face_cache/` subtree here — never CNN/CLIP `.npz` files.
+    var pythonCompatibleImageRecognitionCacheDirectory: URL {
         let url = cacheDirectory.appendingPathComponent("image_recognition", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Shared per-image face embeddings + sample thumbs (Python `faces/face_cache.py`).
+    var sharedFaceCacheDirectory: URL {
+        let url = pythonCompatibleImageRecognitionCacheDirectory
+            .appendingPathComponent("face_cache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Swift-native CNN/CLIP/Vision feature caches and Core ML / dlib model installs.
+    var imageRecognitionCacheDirectory: URL {
+        let url = cacheDirectory
+            .appendingPathComponent(Self.swiftNativeCacheComponent, isDirectory: true)
+            .appendingPathComponent("image_recognition", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    var dlibModelsDirectory: URL {
+        let url = imageRecognitionCacheDirectory.appendingPathComponent("dlib_models", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

@@ -1,5 +1,28 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
+
+let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+let dlibInstallLib = packageDir.appendingPathComponent("Vendor/dlib-install/lib/libdlib.a")
+let dlibInstallInclude = packageDir.appendingPathComponent("Vendor/dlib-install/include")
+let hasVendorDlib = FileManager.default.fileExists(atPath: dlibInstallLib.path)
+
+var dlibBridgeCXX: [CXXSetting] = [
+    .headerSearchPath("include"),
+    // dlib requires C++14+; SPM C++ targets default to an older dialect without this flag.
+    .unsafeFlags(["-std=c++17"], .when(platforms: [.macOS])),
+]
+var dlibBridgeLinker: [LinkerSetting] = []
+if hasVendorDlib {
+    dlibBridgeCXX.append(.headerSearchPath("../Vendor/dlib-install/include", .when(platforms: [.macOS])))
+    dlibBridgeLinker = [
+        .linkedLibrary("c++"),
+        .linkedFramework("Accelerate"),
+        .unsafeFlags([
+            dlibInstallLib.path,
+        ], .when(platforms: [.macOS])),
+    ]
+}
 
 let package = Package(
     name: "Prowser",
@@ -12,9 +35,22 @@ let package = Package(
         .package(url: "https://github.com/SDWebImage/libwebp-Xcode.git", from: "1.5.0"),
     ],
     targets: [
+        .target(
+            name: "ProwserDlibBridgeCore",
+            path: "ProwserDlibBridgeCore",
+            publicHeadersPath: "include",
+            cxxSettings: dlibBridgeCXX,
+            linkerSettings: dlibBridgeLinker
+        ),
+        .target(
+            name: "ProwserDlibBridge",
+            dependencies: ["ProwserDlibBridgeCore"],
+            path: "ProwserDlibBridge"
+        ),
         .executableTarget(
             name: "Prowser",
             dependencies: [
+                "ProwserDlibBridge",
                 .product(name: "WebP", package: "Swift-WebP"),
                 .product(name: "libwebp", package: "libwebp-Xcode"),
             ],
@@ -23,10 +59,12 @@ let package = Package(
             resources: [
                 .process("Resources/Assets"),
                 .process("Resources/image_recognition_models.json"),
+                .process("Resources/dlib_face_models.json"),
                 .process("Resources/waltzremote_search_models.cer"),
             ],
             linkerSettings: [
                 .linkedFramework("Photos"),
+                .linkedFramework("Accelerate"),
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",

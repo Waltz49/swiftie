@@ -29,6 +29,10 @@ enum CacheManagementService {
         removeContents(of: paths.thumbnailCacheDirectory)
     }
 
+    static func clearFaceCache(paths: ProfilePaths) {
+        FaceCacheService(profile: paths).clearAll()
+    }
+
     static func clearImageRecognitionCache(paths: ProfilePaths, includeDownloadedModels: Bool) throws -> Int {
         let root = paths.imageRecognitionCacheDirectory
         var removed = 0
@@ -71,6 +75,7 @@ enum CacheManagementService {
             paths.thumbnailCacheDirectory.path,
             paths.metadataCacheDirectory.path,
             paths.imageRecognitionCacheDirectory.path,
+            paths.sharedFaceCacheDirectory.path,
         ]
     }
 

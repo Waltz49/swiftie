@@ -11,6 +11,11 @@
 #   ./Scripts/build_app.sh --dmg /tmp/Prowser.dmg
 #   ./Scripts/build_app.sh --nerb          # embed -p /tmp/nerb (PROWSER_PROFILE)
 #   ./Scripts/build_app.sh --reg           # default opener for jpg/jpeg/png/webp
+#   ./Scripts/build_app.sh --skip-dlib     # skip Vendor/dlib-install (face stub only)
+#
+# Builds ProwserDlibBridgeCore + Swift app via `swift build`. When
+# Vendor/dlib-install/lib/libdlib.a is missing, runs build_dlib_macos.sh first
+# (requires git + cmake). Face .dat models are still downloaded on first use.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +24,7 @@ SWIFT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="${HOME}/tmp/prowser_swift.app"
 CONFIG=release
 SKIP_BUILD=0
+SKIP_DLIB=0
 CREATE_DMG=0
 DMG_OUTPUT="/tmp/Prowser-swift.dmg"
 NERB_PROFILE=0
@@ -106,6 +112,31 @@ if failed { exit(1) }
 EOF
 }
 
+ensure_native_dlib() {
+    local lib="$SWIFT_ROOT/Vendor/dlib-install/lib/libdlib.a"
+    if [[ -f "$lib" ]]; then
+        echo "Native dlib: $lib"
+        return 0
+    fi
+    if [[ "$SKIP_DLIB" -eq 1 ]]; then
+        echo "Skipping dlib build (--skip-dlib); ProwserDlibBridgeCore will compile without face encoding until Vendor/dlib-install exists."
+        return 0
+    fi
+    for cmd in cmake git; do
+        if ! command -v "$cmd" >/dev/null; then
+            echo "error: '$cmd' is required to build dlib (face recognition)." >&2
+            echo "  Install Xcode Command Line Tools and cmake (e.g. brew install cmake), or use --skip-dlib." >&2
+            exit 1
+        fi
+    done
+    echo "Building native dlib (Vendor/dlib-install missing)..."
+    "$SCRIPT_DIR/build_dlib_macos.sh"
+    if [[ ! -f "$lib" ]]; then
+        echo "error: dlib install failed; expected $lib" >&2
+        exit 1
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [options]
@@ -114,6 +145,7 @@ Options:
   -o, --output PATH       App bundle path (default: ~/tmp/prowser_swift.app)
   --debug                 Build debug configuration instead of release
   --skip-build            Package existing .build artifacts (no swift build)
+  --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
   --dmg [PATH]            Also create a min-size LZMA DMG (default: /tmp/Prowser-swift.dmg)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
   --fda                   After build: reset optional TCC + open FDA Settings (see fda_walkthrough.sh)
@@ -135,6 +167,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-build)
             SKIP_BUILD=1
+            shift
+            ;;
+        --skip-dlib)
+            SKIP_DLIB=1
             shift
             ;;
         --dmg)
@@ -178,6 +214,7 @@ OUTPUT="$(cd "$(dirname "$OUTPUT")" && pwd)/$(basename "$OUTPUT")"
 
 cd "$SWIFT_ROOT"
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
+    ensure_native_dlib
     echo "Building Prowser ($CONFIG)..."
     if [[ "$CONFIG" == "release" ]]; then
         swift build -c release -Xswiftc -Osize -Xlinker -dead_strip
@@ -287,6 +324,11 @@ fi
 echo "Done: $OUTPUT"
 echo "  app size:      $(du -sh "$OUTPUT" | awk '{print $1}')"
 echo "  binary:        $APP_MACOS/Prowser ($(du -h "$APP_MACOS/Prowser" | awk '{print $1}'))"
+if [[ -f "$SWIFT_ROOT/Vendor/dlib-install/lib/libdlib.a" ]]; then
+    echo "  face library:  dlib linked (models still download on first use)"
+else
+    echo "  face library:  stub only (rebuild without --skip-dlib for native face encoding)"
+fi
 if [[ "$NERB_PROFILE" -eq 1 ]]; then
     echo "  profile:       $NERB_PROFILE_PATH  (-p $NERB_PROFILE_PATH)"
 fi

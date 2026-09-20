@@ -19,7 +19,7 @@ struct SettingsWindowView: View {
     var body: some View {
         VStack(spacing: 0) {
             NavigationSplitView {
-                List(SettingsTab.visibleTabs(), selection: $selectedTab) { tab in
+                List(SettingsTab.visibleTabs(minBundle: appState.launchOptions.minBundle), selection: $selectedTab) { tab in
                     Label(tab.title, systemImage: tab.systemImage)
                         .tag(tab)
                 }
@@ -161,6 +161,8 @@ struct SettingsWindowView: View {
             CacheSettingsTab()
         case .modelsSearch:
             ModelsSearchSettingsTab()
+        case .faceRecognition:
+            FaceRecognitionSettingsTab()
         }
     }
 }

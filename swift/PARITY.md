@@ -122,7 +122,7 @@ Source: `files/file_tree_handler.py` `contextMenuEvent`. Menu in `FileTreeContex
 
 - [~] Rename… (F2, permission-checked)
 - [~] Search by Text… (⌘F / ⌘⇧K) — `ClipSearchSheet` + native Core ML
-- [~] Search by Person… (⌘P)
+- [x] Search by Person… (⌘P) — native dlib + shared `face_cache`
 - [~] Copy Directory Path (⌘C)
 - [~] Open in Finder
 - [~] Show All Images inc. Subdirs (⇧A)
@@ -151,7 +151,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [x] Maps and Editor — `MapsEditorSettingsTab` (map app, external editor)
 - [~] Slideshow (`SlideshowSettingsTab` — core timing fields)
 - [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
-- [x] Face Recognition — `FaceRecognitionSettingsTab` (`--min` hidden)
+- [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
 - [x] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
 - [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; idle CLIP/CNN indexing toggles when models installed)
@@ -224,7 +224,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 - [~] Find Similar Image Files… (⌘K — CNN worker)
 - [x] Search by Text… (⌘F / ⌘⇧K — CLIP reorder)
-- [~] Search by Person… (⌘P)
+- [x] Search by Person… (⌘P) — native dlib + shared `face_cache`
 - [x] Quick Person Search (⌃⌘P)
 - [~] Extract Faces (⇧⌘P in Python Search menu)
 - [x] Find Duplicate Image Files — in directory
