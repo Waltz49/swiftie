@@ -282,8 +282,6 @@ private final class FaceAssignCanvasView: NSView, NSTextFieldDelegate {
         let field = NSTextField(frame: labelRect)
         field.isBordered = true
         field.isBezeled = true
-        field.drawsBackground = true
-        field.backgroundColor = .controlBackgroundColor
         field.font = .systemFont(ofSize: 13)
         field.delegate = self
         let isPlaceholder = st.displayName.isEmpty || st.displayName == FaceAssignPlaceholder.add
@@ -292,7 +290,32 @@ private final class FaceAssignCanvasView: NSView, NSTextFieldDelegate {
         addSubview(field)
         editField = field
         field.becomeFirstResponder()
+        applyEditFieldAppearance(field)
         field.currentEditor()?.selectedRange = NSRange(location: 0, length: field.stringValue.utf16.count)
+    }
+
+    private func applyEditFieldAppearance(_ field: NSTextField) {
+        field.drawsBackground = true
+        field.backgroundColor = .black
+        field.textColor = .white
+        if let placeholder = field.placeholderString, !placeholder.isEmpty {
+            field.placeholderAttributedString = NSAttributedString(
+                string: placeholder,
+                attributes: [
+                    .foregroundColor: NSColor.gray,
+                    .font: field.font ?? .systemFont(ofSize: 13),
+                ]
+            )
+        }
+        guard let editor = field.currentEditor() as? NSTextView else { return }
+        editor.drawsBackground = true
+        editor.backgroundColor = .black
+        editor.textColor = .white
+        editor.insertionPointColor = .white
+        editor.selectedTextAttributes = [
+            .backgroundColor: NSColor.selectedTextBackgroundColor,
+            .foregroundColor: NSColor.white,
+        ]
     }
 
     private func commitEdit(emitFocus: Bool) {
@@ -305,6 +328,11 @@ private final class FaceAssignCanvasView: NSView, NSTextFieldDelegate {
         editingIndex = nil
         needsDisplay = true
         if emitFocus { window?.makeFirstResponder(self) }
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        applyEditFieldAppearance(field)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
