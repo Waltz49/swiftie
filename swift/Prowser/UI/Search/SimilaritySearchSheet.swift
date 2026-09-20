@@ -22,7 +22,6 @@ struct SimilaritySearchSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Find images similar to the selected image(s):")
                 .fixedSize(horizontal: false, vertical: true)
-            Toggle("Search in subdirectories", isOn: $recursive)
             HStack(spacing: 8) {
                 Toggle("", isOn: $useCustomDirectory)
                     .labelsHidden()
@@ -33,6 +32,9 @@ struct SimilaritySearchSheet: View {
                 Button("…") { browseDirectory() }
                     .disabled(!useCustomDirectory)
             }
+            Toggle("Search in subdirectories", isOn: $recursive)
+                .padding(.leading, 28)
+                .disabled(!useCustomDirectory)
             HStack {
                 Spacer()
                 Button("Cancel") { closeDialog() }
@@ -45,7 +47,14 @@ struct SimilaritySearchSheet: View {
         .frame(minWidth: 440)
         .onAppear { loadDefaults() }
         .onChange(of: customDirectory) { _, _ in validateDirectory() }
-        .onChange(of: useCustomDirectory) { _, _ in validateDirectory() }
+        .onChange(of: useCustomDirectory) { _, enabled in
+            if enabled {
+                recursive = appState.config.bool(forKey: "cnn_recursive", default: false)
+            } else {
+                recursive = false
+            }
+            validateDirectory()
+        }
     }
 
     private func loadDefaults() {
@@ -54,6 +63,9 @@ struct SimilaritySearchSheet: View {
         customDirectory = appState.config.string(forKey: "cnn_search_dir", default: "")
         if customDirectory.isEmpty, let dir = SearchImagePathCollector.currentSearchDirectory(appState: appState) {
             customDirectory = dir
+        }
+        if !useCustomDirectory {
+            recursive = false
         }
         validateDirectory()
     }
@@ -74,11 +86,12 @@ struct SimilaritySearchSheet: View {
     }
 
     private func submit() {
-        appState.config.updateSetting("cnn_recursive", value: recursive)
+        let effectiveRecursive = useCustomDirectory && recursive
+        appState.config.updateSetting("cnn_recursive", value: effectiveRecursive)
         appState.config.updateSetting("cnn_search_dir_enabled", value: useCustomDirectory)
         appState.config.updateSetting("cnn_search_dir", value: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines))
         let options = SimilaritySearchOptions(
-            recursive: recursive,
+            recursive: effectiveRecursive,
             useCustomDirectory: useCustomDirectory,
             customDirectory: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         )

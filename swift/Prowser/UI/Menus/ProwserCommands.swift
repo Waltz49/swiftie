@@ -29,6 +29,11 @@ struct ProwserCommands: Commands {
             .keyboardShortcut("q", modifiers: .command)
         }
 
+        // Empty SwiftUI's auto View menu (toolbar) so it does not compete with our View menu.
+        CommandGroup(replacing: .toolbar) {
+            Divider()
+        }
+
         CommandMenu(MenuBarTitles.edit) {
             Group {
                 ExternalEditorButton(appState: appState)
@@ -190,64 +195,6 @@ struct ProwserCommands: Commands {
             .disabled(!allowBrowserShortcuts)
         }
 
-        CommandMenu("Search") {
-            Group {
-                Button("Search for Similar Images…") {
-                    Task { @MainActor in appState.searchOperations.presentSimilaritySearchDialog() }
-                }
-                .keyboardShortcut("k", modifiers: .command)
-
-                Button("Search by Text…") {
-                    Task { @MainActor in appState.searchOperations.presentClipSearchDialog() }
-                }
-                .keyboardShortcut("f", modifiers: .command)
-
-                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                    Button("Search by Person…") {
-                        Task { @MainActor in appState.searchOperations.presentPersonSearchDialog() }
-                    }
-                    .keyboardShortcut("p", modifiers: .command)
-
-                    Button("Quick Person Search") {
-                        Task { @MainActor in appState.searchOperations.runQuickPersonSearch() }
-                    }
-                    .keyboardShortcut("p", modifiers: [.command, .control])
-
-                    Button("Extract Faces") {
-                        Task { @MainActor in appState.searchOperations.extractFaces() }
-                    }
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
-                }
-
-                Divider()
-
-                Menu("Find Similar Image Files") {
-                    Button("Find in This Directory") {
-                        Task { @MainActor in appState.searchOperations.findSimilarImageFilesInDisplayed() }
-                    }
-                    Button("Find in This and Subdirectories") {
-                        Task { @MainActor in appState.searchOperations.findSimilarImageFilesRecursive() }
-                    }
-                }
-
-                Divider()
-
-                Button("Find Duplicate Image Files in Directory") {
-                    Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
-                }
-
-                Button("Find Duplicate Image Files (Recursive)") {
-                    Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
-                }
-
-                Button("Show Image in Directory") {
-                    Task { @MainActor in appState.showImageInDirectory() }
-                }
-                .keyboardShortcut("h", modifiers: [.command, .shift])
-            }
-            .disabled(!allowBrowserShortcuts)
-        }
-
         CommandMenu(MenuBarTitles.view) {
             Group {
                 Button("Enter Image Viewer") {
@@ -327,6 +274,64 @@ struct ProwserCommands: Commands {
             Divider()
 
             ThemeMenuContent(appState: appState, applyTheme: applyTheme)
+            }
+            .disabled(!allowBrowserShortcuts)
+        }
+
+        CommandMenu("Search") {
+            Group {
+                Button("Search for Similar Images…") {
+                    Task { @MainActor in appState.searchOperations.presentSimilaritySearchDialog() }
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Button("Search by Text…") {
+                    Task { @MainActor in appState.searchOperations.presentClipSearchDialog() }
+                }
+                .keyboardShortcut("f", modifiers: .command)
+
+                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                    Button("Search by Person…") {
+                        Task { @MainActor in appState.searchOperations.presentPersonSearchDialog() }
+                    }
+                    .keyboardShortcut("p", modifiers: .command)
+
+                    Button("Quick Person Search") {
+                        Task { @MainActor in appState.searchOperations.runQuickPersonSearch() }
+                    }
+                    .keyboardShortcut("p", modifiers: [.command, .control])
+
+                    Button("Extract Faces") {
+                        Task { @MainActor in appState.searchOperations.extractFaces() }
+                    }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                }
+
+                Divider()
+
+                Menu("Find Similar Image Files") {
+                    Button("Find in This Directory") {
+                        Task { @MainActor in appState.searchOperations.findSimilarImageFilesInDisplayed() }
+                    }
+                    Button("Find in This and Subdirectories") {
+                        Task { @MainActor in appState.searchOperations.findSimilarImageFilesRecursive() }
+                    }
+                }
+
+                Divider()
+
+                Button("Find Duplicate Image Files in Directory") {
+                    Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
+                }
+
+                Button("Find Duplicate Image Files (Recursive)") {
+                    Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
+                }
+
+                Button("Show Image in Directory") {
+                    Task { @MainActor in appState.showImageInDirectory() }
+                }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
             }
             .disabled(!allowBrowserShortcuts)
         }

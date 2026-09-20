@@ -33,7 +33,6 @@ struct ClipSearchSheet: View {
                     .monospacedDigit()
                     .frame(width: 44, alignment: .trailing)
             }
-            Toggle("Search in subdirectories", isOn: $recursive)
             HStack(spacing: 8) {
                 Toggle("", isOn: $useCustomDirectory)
                     .labelsHidden()
@@ -44,6 +43,9 @@ struct ClipSearchSheet: View {
                 Button("…") { browseDirectory() }
                     .disabled(!useCustomDirectory)
             }
+            Toggle("Search in subdirectories", isOn: $recursive)
+                .padding(.leading, 28)
+                .disabled(!useCustomDirectory)
             HStack {
                 Spacer()
                 Button("Cancel") { closeDialog() }
@@ -56,6 +58,13 @@ struct ClipSearchSheet: View {
         .padding(20)
         .frame(minWidth: 460)
         .onAppear { loadDefaults() }
+        .onChange(of: useCustomDirectory) { _, enabled in
+            if enabled {
+                recursive = appState.config.bool(forKey: "clip_recursive", default: false)
+            } else {
+                recursive = false
+            }
+        }
     }
 
     private func loadDefaults() {
@@ -66,6 +75,9 @@ struct ClipSearchSheet: View {
         threshold = appState.config.double(forKey: "clip_similarity_threshold", default: 0.20)
         if customDirectory.isEmpty, let dir = SearchImagePathCollector.currentSearchDirectory(appState: appState) {
             customDirectory = dir
+        }
+        if !useCustomDirectory {
+            recursive = false
         }
     }
 
@@ -83,14 +95,15 @@ struct ClipSearchSheet: View {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         appState.config.updateSetting("clip_prompt", value: trimmed)
-        appState.config.updateSetting("clip_recursive", value: recursive)
+        let effectiveRecursive = useCustomDirectory && recursive
+        appState.config.updateSetting("clip_recursive", value: effectiveRecursive)
         appState.config.updateSetting("clip_search_dir_enabled", value: useCustomDirectory)
         appState.config.updateSetting("clip_search_dir", value: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines))
         appState.config.updateSetting("clip_similarity_threshold", value: threshold)
         closeDialog()
         onSubmit(ClipSearchOptions(
             prompt: trimmed,
-            recursive: recursive,
+            recursive: effectiveRecursive,
             useCustomDirectory: useCustomDirectory,
             customDirectory: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines),
             threshold: threshold

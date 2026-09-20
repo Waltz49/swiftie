@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didBecomePrimary = false
     private var launchCompleted = false
     private var pendingOpenFlush: DispatchWorkItem?
+    private var menuBarDedupObserver: NSObjectProtocol?
 
     override init() {
         launchOptions = LaunchOptions.parse()
@@ -65,9 +66,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         applyApplicationIcon()
         NSApp.activate(ignoringOtherApps: true)
-        scheduleMenuBarDeduplication()
+        installMenuBarDeduplication()
         installMainWindowGuard()
         applyLaunchOptions()
+    }
+
+    func applicationWillUpdate(_ notification: Notification) {
+        guard isPrimary else { return }
+        scheduleMenuBarDeduplication()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -220,6 +226,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func isMainBrowserWindow(_ window: NSWindow) -> Bool {
         BrowserWindowIdentity.isMainBrowserWindow(window)
+    }
+
+    private func installMenuBarDeduplication() {
+        scheduleMenuBarDeduplication()
+        guard menuBarDedupObserver == nil else { return }
+        menuBarDedupObserver = NotificationCenter.default.addObserver(
+            forName: NSMenu.didAddItemNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard self?.isPrimary == true else { return }
+                guard let menu = note.object as? NSMenu, menu === NSApp.mainMenu else { return }
+                self?.scheduleMenuBarDeduplication()
+            }
+        }
     }
 
     private func scheduleMenuBarDeduplication() {
