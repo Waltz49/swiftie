@@ -39,15 +39,15 @@ enum FacePickDialog {
             ])
 
             var resumed = false
-            func finish(_ value: FaceEngine.FaceDetection?) {
+            @MainActor func finish(_ value: FaceEngine.FaceDetection?) {
                 guard !resumed else { return }
                 resumed = true
                 panel.close()
                 continuation.resume(returning: value)
             }
 
-            imageView.onPick = { finish($0) }
-            let cancelTarget = BlockTarget { finish(nil) }
+            imageView.onPick = { det in Task { @MainActor in finish(det) } }
+            let cancelTarget = BlockTarget { Task { @MainActor in finish(nil) } }
             retainedTargets.append(cancelTarget)
             imageView.retainedActionTargets = retainedTargets
             cancel.target = cancelTarget

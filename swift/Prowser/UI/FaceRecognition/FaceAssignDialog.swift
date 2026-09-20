@@ -20,7 +20,7 @@ enum FaceAssignDialog {
         return await withCheckedContinuation { continuation in
             var resumed = false
             var panel: NSPanel!
-            func finish(_ value: [FaceAssignResult]?) {
+            @MainActor func finish(_ value: [FaceAssignResult]?) {
                 guard !resumed else { return }
                 resumed = true
                 panel.close()
@@ -84,7 +84,7 @@ enum FaceAssignDialog {
             ])
 
             let session = FaceAssignDialogSession(
-                onCancel: { finish(nil) },
+                onCancel: { Task { @MainActor in finish(nil) } },
                 onOK: {
                     canvas.finishPendingEdit()
                     let results: [FaceAssignResult] = faceStates.compactMap { st in
@@ -99,7 +99,7 @@ enum FaceAssignDialog {
                         )
                         return
                     }
-                    finish(results)
+                    Task { @MainActor in finish(results) }
                 }
             )
             canvas.retainedActionTargets = [session]

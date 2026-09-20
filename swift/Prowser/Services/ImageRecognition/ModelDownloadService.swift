@@ -129,11 +129,6 @@ enum ModelDownloadService {
 
         let isCancelled: @Sendable () -> Bool = { panel.cancelRequested }
         let entryCount = entries.count
-        let byteFormatter: ByteCountFormatter = {
-            let f = ByteCountFormatter()
-            f.countStyle = .file
-            return f
-        }()
         let downloadProgressThrottle = DownloadProgressThrottle()
         let reportLabel: @Sendable (String) -> Void = { text in
             panel.update(label: text)
@@ -164,10 +159,10 @@ enum ModelDownloadService {
                     entryFraction = 0
                 }
                 let overall = (Double(index) + entryFraction) / Double(entryCount)
-                let writtenText = byteFormatter.string(fromByteCount: written)
+                let writtenText = ByteCountFormatter.string(fromByteCount: written, countStyle: .file)
                 let label: String
                 if expected > 0 {
-                    let expectedText = byteFormatter.string(fromByteCount: expected)
+                    let expectedText = ByteCountFormatter.string(fromByteCount: expected, countStyle: .file)
                     let percent = Int((entryFraction * 100).rounded())
                     label = "Downloading \(entry.displayName)… \(writtenText) of \(expectedText) (\(percent)%)"
                 } else {

@@ -73,7 +73,7 @@ final class FaceCacheService: @unchecked Sendable {
         }
         lock.lock()
         var index = loadIndex()
-        var entry = IndexEntry(mtime: m!, size: s!, md5: md5)
+        let entry = IndexEntry(mtime: m!, size: s!, md5: md5)
         index[key] = entry
         indexMemory = index
         writesSincePersist += 1

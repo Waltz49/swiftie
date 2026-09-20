@@ -200,7 +200,10 @@ final class AppState {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshImageRecognitionForCurrentSettings()
+            guard let appState = self else { return }
+            Task { @MainActor in
+                appState.refreshImageRecognitionForCurrentSettings()
+            }
         }
         fileTreeOperations.bind(self)
         renamePrefixService.bind(self)

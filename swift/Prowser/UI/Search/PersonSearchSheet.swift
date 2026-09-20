@@ -344,13 +344,14 @@ private struct PersonSearchFaceThumb: View {
                 thumb = nil
                 return
             }
-            thumb = await Task.detached(priority: .utility) {
-                FaceSampleThumbnailService.thumbnail(
+            let pngData = await Task.detached(priority: .utility) {
+                FaceSampleThumbnailService.thumbnailPNGData(
                     profile: profile,
                     imagePath: imagePath,
                     embedding: embedding
                 )
             }.value
+            thumb = pngData.flatMap { NSImage(data: $0) }
         }
     }
 

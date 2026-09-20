@@ -151,7 +151,8 @@ enum ImageRecognitionModelDownloadSession {
             guard host == ImageRecognitionModelDownloadSession.pinnedHost,
                   let pinnedData = pinnedCertificateData,
                   let pinnedCert = SecCertificateCreateWithData(nil, pinnedData as CFData),
-                  let serverCert = SecTrustGetCertificateAtIndex(serverTrust, 0) else {
+                  let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
+                  let serverCert = chain.first else {
                 completionHandler(.performDefaultHandling, nil)
                 return
             }

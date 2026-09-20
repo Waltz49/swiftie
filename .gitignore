@@ -20,6 +20,9 @@ venv_model_export/
 *.png
 !assets/*.png
 !background.png
+!swift/Scripts/DmgAssets/
+!swift/Scripts/DmgAssets/background.png
+!swift/Scripts/DmgAssets/source_folder.heic
 *.pxd
 *.webp
 !assets/*.webp

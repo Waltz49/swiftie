@@ -88,7 +88,7 @@ final class ImageRecognitionService {
 
         if !needExtract.isEmpty {
             let pending = needExtract
-            let extracted = try await Task.detached {
+            let extracted = await Task.detached {
                 var out: [String: [Float]] = [:]
                 let total = pending.count
                 for (index, path) in pending.enumerated() {

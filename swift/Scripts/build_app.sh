@@ -9,6 +9,7 @@
 #   ./Scripts/build_app.sh --debug
 #   ./Scripts/build_app.sh --dmg
 #   ./Scripts/build_app.sh --dmg /tmp/Prowser.dmg
+#     (--dmg needs Finder + SetFile for background/layout; see Scripts/create_styled_dmg.sh)
 #   ./Scripts/build_app.sh --nerb          # embed -p /tmp/nerb (PROWSER_PROFILE)
 #   ./Scripts/build_app.sh --reg           # default opener for jpg/jpeg/png/webp
 #   ./Scripts/build_app.sh --skip-dlib     # skip Vendor/dlib-install (face stub only)
@@ -36,26 +37,8 @@ INSTALL_APP_PATH=""
 create_dmg() {
     local app_path="$1"
     local dmg_path="$2"
-    local staging
-    staging="$(mktemp -d "${TMPDIR:-/tmp}/prowser_dmg_staging.XXXXXX")"
-
-    dmg_path="$(cd "$(dirname "$dmg_path")" && pwd)/$(basename "$dmg_path")"
-    echo "Creating min-size DMG $dmg_path ..."
-    # Skip resource forks / quarantine xattrs so they are not stored in the image.
-    ditto --norsrc --noextattr --noqtn "$app_path" "$staging/swift-prowser.app"
-    ln -s /Applications "$staging/Applications"
-    find "$staging" -name '.DS_Store' -delete 2>/dev/null || true
-    rm -f "$dmg_path"
-    # ULMO (LZMA) is smaller than UDZO/UDBZ for this bundle.
-    hdiutil create \
-        -volname "swift-prowser" \
-        -srcfolder "$staging" \
-        -ov \
-        -fs HFS+ \
-        -format ULMO \
-        "$dmg_path"
-    rm -rf "$staging"
-    echo "DMG: $dmg_path ($(du -h "$dmg_path" | awk '{print $1}'))"
+    echo "Creating styled installer DMG ..."
+    "$SCRIPT_DIR/create_styled_dmg.sh" "$app_path" "$dmg_path"
     open "$dmg_path"
 }
 
@@ -146,7 +129,7 @@ Options:
   --debug                 Build debug configuration instead of release
   --skip-build            Package existing .build artifacts (no swift build)
   --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
-  --dmg [PATH]            Also create a min-size LZMA DMG (default: /tmp/Prowser-swift.dmg)
+  --dmg [PATH]            Also create styled LZMA (ULMO) installer DMG (default: /tmp/Prowser-swift.dmg)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
   --fda                   After build: reset optional TCC + open FDA Settings (see fda_walkthrough.sh)
   --install PATH          Copy signed .app to PATH (e.g. /Applications/swift-prowser.app) for a stable FDA target

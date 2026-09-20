@@ -61,7 +61,7 @@ enum QuickPersonSearchService {
             )
             return
         }
-        appState.knownFaces.replaceAllSamples(subjectID: subjectID, samples: samples)
+        _ = appState.knownFaces.replaceAllSamples(subjectID: subjectID, samples: samples)
 
         appState.config.updateSetting("find_person_subject_id", value: subjectID)
         appState.showPersonSearchSheet = true

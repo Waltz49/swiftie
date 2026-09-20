@@ -31,6 +31,23 @@ enum FaceSampleThumbnailService {
         return built
     }
 
+    /// PNG bytes for UI loading off the main actor (`Data` is `Sendable`; `NSImage` is not).
+    static func thumbnailPNGData(
+        profile: ProfilePaths,
+        imagePath: String,
+        embedding: [Double]
+    ) -> Data? {
+        guard let image = thumbnail(profile: profile, imagePath: imagePath, embedding: embedding) else {
+            return nil
+        }
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return png
+    }
+
     private static func buildThumbnail(
         imagePath: String,
         embedding: [Double],

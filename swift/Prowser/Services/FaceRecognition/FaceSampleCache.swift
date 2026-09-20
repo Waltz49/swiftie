@@ -69,7 +69,6 @@ enum FaceSampleCache {
         lock.lock()
         defer { lock.unlock() }
         let fm = FileManager.default
-        let root = sampleThumbsRoot(profile: profile)
         try? fm.createDirectory(at: imagesDirectory(profile: profile), withIntermediateDirectories: true)
         try? fm.createDirectory(at: byFaceKeyDirectory(profile: profile), withIntermediateDirectories: true)
 

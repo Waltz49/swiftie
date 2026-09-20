@@ -24,6 +24,47 @@ if hasVendorDlib {
     ]
 }
 
+let packageTargets: [Target] = [
+    .target(
+        name: "ProwserDlibBridgeCore",
+        path: "ProwserDlibBridgeCore",
+        publicHeadersPath: "include",
+        cxxSettings: dlibBridgeCXX,
+        linkerSettings: dlibBridgeLinker
+    ),
+    .target(
+        name: "ProwserDlibBridge",
+        dependencies: ["ProwserDlibBridgeCore"],
+        path: "ProwserDlibBridge"
+    ),
+    .executableTarget(
+        name: "Prowser",
+        dependencies: [
+            "ProwserDlibBridge",
+            .product(name: "WebP", package: "Swift-WebP"),
+            .product(name: "libwebp", package: "libwebp-Xcode"),
+        ],
+        path: "Prowser",
+        exclude: ["Resources/Info.plist", "Resources/Prowser.entitlements"],
+        resources: [
+            .process("Resources/Assets"),
+            .process("Resources/image_recognition_models.json"),
+            .process("Resources/dlib_face_models.json"),
+            .process("Resources/waltzremote_search_models.cer"),
+        ],
+        linkerSettings: [
+            .linkedFramework("Photos"),
+            .linkedFramework("Accelerate"),
+            .unsafeFlags([
+                "-Xlinker", "-sectcreate",
+                "-Xlinker", "__TEXT",
+                "-Xlinker", "__info_plist",
+                "-Xlinker", "Prowser/Resources/Info.plist",
+            ]),
+        ]
+    ),
+]
+
 let package = Package(
     name: "Prowser",
     platforms: [.macOS(.v14)],
@@ -34,49 +75,5 @@ let package = Package(
         .package(url: "https://github.com/ainame/Swift-WebP.git", from: "0.5.0"),
         .package(url: "https://github.com/SDWebImage/libwebp-Xcode.git", from: "1.5.0"),
     ],
-    targets: [
-        .target(
-            name: "ProwserDlibBridgeCore",
-            path: "ProwserDlibBridgeCore",
-            publicHeadersPath: "include",
-            cxxSettings: dlibBridgeCXX,
-            linkerSettings: dlibBridgeLinker
-        ),
-        .target(
-            name: "ProwserDlibBridge",
-            dependencies: ["ProwserDlibBridgeCore"],
-            path: "ProwserDlibBridge"
-        ),
-        .executableTarget(
-            name: "Prowser",
-            dependencies: [
-                "ProwserDlibBridge",
-                .product(name: "WebP", package: "Swift-WebP"),
-                .product(name: "libwebp", package: "libwebp-Xcode"),
-            ],
-            path: "Prowser",
-            exclude: ["Resources/Info.plist", "Resources/Prowser.entitlements"],
-            resources: [
-                .process("Resources/Assets"),
-                .process("Resources/image_recognition_models.json"),
-                .process("Resources/dlib_face_models.json"),
-                .process("Resources/waltzremote_search_models.cer"),
-            ],
-            linkerSettings: [
-                .linkedFramework("Photos"),
-                .linkedFramework("Accelerate"),
-                .unsafeFlags([
-                    "-Xlinker", "-sectcreate",
-                    "-Xlinker", "__TEXT",
-                    "-Xlinker", "__info_plist",
-                    "-Xlinker", "Prowser/Resources/Info.plist",
-                ]),
-            ]
-        ),
-        .testTarget(
-            name: "ProwserTests",
-            dependencies: ["Prowser"],
-            path: "ProwserTests"
-        ),
-    ]
+    targets: packageTargets
 )

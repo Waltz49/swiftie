@@ -11,9 +11,8 @@ enum FaceCacheNormalization {
     static func candidateIndexKeys(path: String) -> [String] {
         var keys: [String] = []
         let expanded = (path as NSString).expandingTildeInPath
-        if let resolved = try? URL(fileURLWithPath: expanded).standardizedFileURL.path {
-            keys.append(resolved)
-        }
+        let resolved = URL(fileURLWithPath: expanded).standardizedFileURL.path
+        keys.append(resolved)
         let real = (expanded as NSString).resolvingSymlinksInPath
         if !keys.contains(real) { keys.append(real) }
         return keys
