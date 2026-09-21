@@ -5,7 +5,6 @@ protocol ImageListHeaderDelegate: AnyObject {
     func listHeaderDidRequestSort(for column: ImageListColumnID)
     func listHeaderDidToggleColumnVisibility(_ column: ImageListColumnID, visible: Bool)
     func listHeaderSortIndicator(for column: ImageListColumnID) -> (active: Bool, reversed: Bool)
-    func listHeaderDirectoryAnnotation(forNameColumnWidth: CGFloat) -> String?
     func listHeaderIsColumnVisible(_ column: ImageListColumnID) -> Bool
     func listHeaderDidRequestDefaultColumnOrder()
     func listHeaderNoteColumnDragEnded()
@@ -97,20 +96,6 @@ final class ImageListTableHeaderView: NSTableHeaderView {
         showColumnVisibilityMenu(with: event)
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard let tableView, let headerDelegate else { return }
-        for (index, tableColumn) in tableView.tableColumns.enumerated() {
-            guard let colID = ImageListColumnID(rawValue: tableColumn.identifier.rawValue) else { continue }
-            let headerRect = headerRect(ofColumn: index)
-            guard headerRect.intersects(dirtyRect) else { continue }
-            if colID == .name,
-               let directory = headerDelegate.listHeaderDirectoryAnnotation(forNameColumnWidth: headerRect.width) {
-                drawDirectoryAnnotation(directory, in: headerRect)
-            }
-        }
-    }
-
     private func showColumnVisibilityMenu(with event: NSEvent) {
         guard let headerDelegate else { return }
         let menu = NSMenu()
@@ -148,38 +133,4 @@ final class ImageListTableHeaderView: NSTableHeaderView {
         headerDelegate.listHeaderDidToggleColumnVisibility(column, visible: !visible)
     }
 
-    private func drawDirectoryAnnotation(_ text: String, in headerRect: NSRect) {
-        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        let color = NSColor(calibratedRed: 0.78, green: 0.78, blue: 0.98, alpha: 1)
-        let margin: CGFloat = 30
-        let maxWidth = max(20, headerRect.width - margin - 60)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .right
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: paragraph,
-        ]
-        let elided = (text as NSString).boundingRect(
-            with: NSSize(width: maxWidth, height: headerRect.height),
-            options: [.usesLineFragmentOrigin],
-            attributes: attributes
-        )
-        let drawRect = NSRect(
-            x: headerRect.minX,
-            y: headerRect.minY,
-            width: headerRect.width - margin,
-            height: headerRect.height
-        )
-        let fitted = NSMutableAttributedString(
-            string: text,
-            attributes: attributes
-        )
-        if elided.width > maxWidth {
-            fitted.mutableString.setString(
-                "…" + String(text.suffix(max(8, Int(maxWidth / 7))))
-            )
-        }
-        fitted.draw(with: drawRect, options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin])
-    }
 }

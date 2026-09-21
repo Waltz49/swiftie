@@ -16,13 +16,47 @@ enum ImageListRowFormatting {
         paths: [String],
         metadataCache: MetadataCacheService?
     ) -> [String: ImageListRowData] {
-        let showFullPath = shouldShowFullPath(for: paths)
+        let nameDisplay = nameColumnDisplay(for: paths)
         var map: [String: ImageListRowData] = [:]
         map.reserveCapacity(paths.count)
         for path in paths {
-            map[path] = rowData(for: path, showFullPath: showFullPath, metadataCache: metadataCache)
+            map[path] = rowData(for: path, nameDisplay: nameDisplay, metadataCache: metadataCache)
         }
         return map
+    }
+
+    static let singleDirectoryBannerPrefix = "Single Directory: "
+    static let multipleDirectoriesBannerPrefix = "Multiple Directories: "
+
+    struct DirectoryBannerContent: Equatable {
+        enum Kind: Equatable {
+            case singleDirectory(directory: String)
+            case multipleDirectories(commonRoot: String)
+            case plain(String)
+        }
+
+        let kind: Kind
+    }
+
+    static func listHeaderDirectoryBannerContent(for paths: [String]) -> DirectoryBannerContent? {
+        guard !paths.isEmpty else { return nil }
+        var directories = Set<String>()
+        for path in paths {
+            let dir = parentDirectoryPath(path)
+            directories.insert(dir)
+        }
+        if directories.count == 1, let only = directories.first {
+            return DirectoryBannerContent(
+                kind: .singleDirectory(
+                    directory: InformationFormatting.normalizePathForDisplay(only)
+                )
+            )
+        }
+        if let root = minimumCommonParentDirectory(for: paths) {
+            let displayRoot = InformationFormatting.normalizePathForDisplay(root)
+            return DirectoryBannerContent(kind: .multipleDirectories(commonRoot: displayRoot))
+        }
+        return DirectoryBannerContent(kind: .plain("Multiple Directories"))
     }
 
     static func formatListFileSize(bytes: Int64) -> String {
@@ -58,19 +92,28 @@ enum ImageListRowFormatting {
         return "0x0"
     }
 
+    private enum NameColumnDisplay: Equatable {
+        case basename
+        case relativeToCommonRoot(String)
+        case fullPath
+    }
+
     private static func rowData(
         for path: String,
-        showFullPath: Bool,
+        nameDisplay: NameColumnDisplay,
         metadataCache: MetadataCacheService?
     ) -> ImageListRowData {
         let bytes = metadataCache?.fileSize(path: path)
             ?? (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
             ?? 0
         let name: String
-        if showFullPath {
-            name = InformationFormatting.normalizePathForDisplay(path)
-        } else {
+        switch nameDisplay {
+        case .basename:
             name = (path as NSString).lastPathComponent
+        case .relativeToCommonRoot(let root):
+            name = pathRelativeToDirectory(path, directory: root)
+        case .fullPath:
+            name = InformationFormatting.normalizePathForDisplay(path)
         }
         return ImageListRowData(
             permissions: formatPermissions(at: path),
@@ -92,14 +135,62 @@ enum ImageListRowFormatting {
         return name
     }
 
-    private static func shouldShowFullPath(for paths: [String]) -> Bool {
+    private static func nameColumnDisplay(for paths: [String]) -> NameColumnDisplay {
+        guard !paths.isEmpty else { return .basename }
+        if !pathsSpanMultipleDirectories(paths) { return .basename }
+        if let root = minimumCommonParentDirectory(for: paths) {
+            return .relativeToCommonRoot(root)
+        }
+        return .fullPath
+    }
+
+    private static func pathsSpanMultipleDirectories(_ paths: [String]) -> Bool {
         guard let first = paths.first else { return false }
-        let firstDir = URL(fileURLWithPath: first).deletingLastPathComponent().path
+        let firstDir = parentDirectoryPath(first)
         for path in paths.dropFirst() {
-            let dir = URL(fileURLWithPath: path).deletingLastPathComponent().path
-            if dir != firstDir { return true }
+            if parentDirectoryPath(path) != firstDir { return true }
         }
         return false
+    }
+
+    /// Longest shared parent directory when files span multiple folders; nil if only `/` is shared.
+    static func minimumCommonParentDirectory(for paths: [String]) -> String? {
+        guard paths.count >= 2, pathsSpanMultipleDirectories(paths) else { return nil }
+        var common = parentDirectoryPath(paths[0])
+        for path in paths.dropFirst() {
+            common = posixCommonPath(common, parentDirectoryPath(path))
+        }
+        if common == "/" || common.isEmpty {
+            return nil
+        }
+        return common
+    }
+
+    private static func parentDirectoryPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+    }
+
+    private static func posixCommonPath(_ path1: String, _ path2: String) -> String {
+        let standardized1 = (path1 as NSString).standardizingPath
+        let standardized2 = (path2 as NSString).standardizingPath
+        let components1 = (standardized1 as NSString).pathComponents
+        let components2 = (standardized2 as NSString).pathComponents
+        var shared: [String] = []
+        for (left, right) in zip(components1, components2) where left == right {
+            shared.append(left)
+        }
+        if shared.isEmpty { return "/" }
+        return NSString.path(withComponents: shared)
+    }
+
+    private static func pathRelativeToDirectory(_ filePath: String, directory: String) -> String {
+        let file = URL(fileURLWithPath: filePath).standardizedFileURL.path
+        var dir = URL(fileURLWithPath: directory).standardizedFileURL.path
+        if !dir.hasSuffix("/") { dir += "/" }
+        guard file.hasPrefix(dir) else {
+            return InformationFormatting.normalizePathForDisplay(filePath)
+        }
+        return String(file.dropFirst(dir.count))
     }
 
     private static func posixPermissionString(_ mode: Int) -> String {

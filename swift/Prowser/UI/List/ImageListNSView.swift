@@ -28,9 +28,11 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
 
     private let scrollView = NSScrollView()
     private let tableView = ImageListTableView(frame: .zero)
+    private let directoryBannerView = ImageListDirectoryBannerView(frame: .zero)
     private let headerView = ImageListTableHeaderView(frame: .zero)
     private var columnMoveObserver: NSObjectProtocol?
     private var clipBoundsObserver: NSObjectProtocol?
+    private var directoryBannerHeightConstraint: NSLayoutConstraint?
     private var headerHeightConstraint: NSLayoutConstraint?
     private var headerLeadingConstraint: NSLayoutConstraint?
 
@@ -40,7 +42,7 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
             tableView.host = self
             tableView.reloadData()
             syncSelection()
-            headerView.needsDisplay = true
+            updateDirectoryBanner()
             if isCommentsColumnVisible {
                 scheduleCommentDataLoad(paths: imagePaths)
             }
@@ -318,15 +320,23 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
         scrollView.contentView.automaticallyAdjustsContentInsets = false
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.documentView = tableView
+        directoryBannerView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
+        addSubview(directoryBannerView)
         addSubview(headerView)
 
+        let bannerHeight = directoryBannerView.heightAnchor.constraint(equalToConstant: 0)
         let headerHeight = headerView.heightAnchor.constraint(equalToConstant: rowHeight)
         let headerLeading = headerView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        directoryBannerHeightConstraint = bannerHeight
         headerHeightConstraint = headerHeight
         headerLeadingConstraint = headerLeading
         NSLayoutConstraint.activate([
-            headerView.topAnchor.constraint(equalTo: topAnchor),
+            directoryBannerView.topAnchor.constraint(equalTo: topAnchor),
+            directoryBannerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            directoryBannerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bannerHeight,
+            headerView.topAnchor.constraint(equalTo: directoryBannerView.bottomAnchor),
             headerLeading,
             headerHeight,
             headerView.widthAnchor.constraint(equalTo: tableView.widthAnchor),
@@ -365,6 +375,21 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
         }
 
         rebuildTableColumns()
+        updateDirectoryBanner()
+    }
+
+    private func updateDirectoryBanner() {
+        let content = ImageListRowFormatting.listHeaderDirectoryBannerContent(for: imagePaths)
+        directoryBannerView.content = content
+        let height: CGFloat
+        if content != nil {
+            height = ImageListDirectoryBannerView.preferredHeight
+        } else {
+            height = 0
+        }
+        directoryBannerHeightConstraint?.constant = height
+        directoryBannerView.isHidden = height == 0
+        directoryBannerView.needsDisplay = true
     }
 
     func placeHeaderAboveTable() {
@@ -613,19 +638,6 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
             active = sortMode == mode
         }
         return (active, sortReversed)
-    }
-
-    func listHeaderDirectoryAnnotation(forNameColumnWidth: CGFloat) -> String? {
-        guard !imagePaths.isEmpty else { return nil }
-        var directories = Set<String>()
-        for path in imagePaths {
-            let dir = URL(fileURLWithPath: path).deletingLastPathComponent().path
-            directories.insert(dir)
-        }
-        if directories.count == 1, let only = directories.first {
-            return InformationFormatting.normalizePathForDisplay(only)
-        }
-        return "Multiple directories"
     }
 
     func listHeaderIsColumnVisible(_ column: ImageListColumnID) -> Bool {
