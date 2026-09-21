@@ -9,6 +9,8 @@ enum StatusBarFormatter {
             return reversed ? "Custom ↓" : "Custom ↑"
         case .name:
             return reversed ? "Name ↓" : "Name ↑"
+        case .ext:
+            return reversed ? "Ext ↓" : "Ext ↑"
         case .size, .filesize:
             return reversed ? "Size ↓" : "Size ↑"
         case .random:

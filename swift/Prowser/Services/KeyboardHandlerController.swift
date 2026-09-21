@@ -1119,7 +1119,10 @@ final class KeyboardHandlerController {
         case .left, .up: delta = -1
         case .right, .down: delta = 1
         }
-        _ = navigateLinear(appState: appState, delta: delta, images: images)
+        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
+        let currentIndex = resolvedCurrentIndex(appState: appState, images: images)
+        let next = nextIndex(currentIndex, delta: delta, count: images.count, wrap: wrap)
+        appState.fileData.setCurrentImagePath(images[next])
     }
 
     private func navigateLinear(appState: AppState, direction: ThumbnailNavigateDirection, images: [String]) {
@@ -1131,8 +1134,8 @@ final class KeyboardHandlerController {
         let paths = images ?? appState.fileData.displayedImages
         guard !paths.isEmpty else { return false }
         let wrap = appState.config.bool(forKey: "wrap_around", default: true)
-        let next = nextIndex(appState.fileData.currentIndex, delta: delta, count: paths.count, wrap: wrap)
-        appState.fileData.setCurrentIndex(next)
+        let currentIndex = resolvedCurrentIndex(appState: appState, images: paths)
+        let next = nextIndex(currentIndex, delta: delta, count: paths.count, wrap: wrap)
         appState.fileData.setCurrentImagePath(paths[next])
         return true
     }
@@ -1172,6 +1175,7 @@ final class KeyboardHandlerController {
         appState.selection.rangeAnchorIndex = nil
         appState.fileData.setCurrentIndex(0)
         appState.fileData.setCurrentImagePath(first)
+        appState.listViewHost?.revealActiveRow(force: true)
     }
 
     private func jumpToLast(appState: AppState) {
@@ -1181,6 +1185,7 @@ final class KeyboardHandlerController {
         appState.selection.rangeAnchorIndex = nil
         appState.fileData.setCurrentIndex(images.count - 1)
         appState.fileData.setCurrentImagePath(last)
+        appState.listViewHost?.revealActiveRow(force: true)
     }
 
     private func selectRangeToFirst(appState: AppState) {

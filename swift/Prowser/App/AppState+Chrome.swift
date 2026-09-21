@@ -454,10 +454,14 @@ extension AppState {
     func applyCurrentSort() {
         let current = fileData.currentImagePath
         let options = SortingService.Options.from(config: config)
+        let commentRanks = options.mode == .comments
+            ? listViewHost?.commentColumnSortRanks()
+            : nil
         let sorted = SortingService.sorted(
             fileData.displayedImages,
             options: options,
-            metadataCache: metadataCache
+            metadataCache: metadataCache,
+            commentRanks: commentRanks
         )
         metadataCache.saveIfNeeded()
         fileData.setDisplayedImages(sorted)
@@ -479,6 +483,8 @@ extension AppState {
             return "Sort mode set to Size (\(direction))"
         case .name:
             return reversed ? "Sort mode set to Name (Z-A)" : "Sort mode set to Name (A-Z)"
+        case .ext:
+            return reversed ? "Sort mode set to Extension (Z-A)" : "Sort mode set to Extension (A-Z)"
         case .date:
             let direction = reversed ? "Oldest first" : "Newest first"
             return "Sort mode set to Date (\(direction))"
@@ -492,6 +498,10 @@ extension AppState {
             return "Sort mode set to Custom"
         case .random:
             return "Random Sort"
+        case .comments:
+            return reversed
+                ? "Sort mode set to Comments (blank first)"
+                : "Sort mode set to Comments (🔥 first)"
         default:
             return "Sort mode set to \(mode.displayName)"
         }

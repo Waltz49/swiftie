@@ -6,6 +6,7 @@ struct ImageListRowData: Equatable, Sendable {
     var sizeText: String
     var dimensionsText: String
     var nameText: String
+    var extensionText: String
 }
 
 /// Row text/formatting for the list view. Port of `view_manager.update_list_view` field formatting.
@@ -76,8 +77,19 @@ enum ImageListRowFormatting {
             dateText: formatDate(path: path, metadataCache: metadataCache),
             sizeText: formatListFileSize(bytes: bytes),
             dimensionsText: formatDimensions(path: path, metadataCache: metadataCache),
-            nameText: name
+            nameText: name,
+            extensionText: (path as NSString).pathExtension
         )
+    }
+
+    static func nameOmittingExtension(_ name: String, path: String) -> String {
+        let ext = (path as NSString).pathExtension
+        guard !ext.isEmpty else { return name }
+        let suffix = "." + ext
+        if name.count > suffix.count, name.suffix(suffix.count).caseInsensitiveCompare(suffix) == .orderedSame {
+            return String(name.dropLast(suffix.count))
+        }
+        return name
     }
 
     private static func shouldShowFullPath(for paths: [String]) -> Bool {

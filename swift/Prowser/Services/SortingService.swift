@@ -21,7 +21,8 @@ enum SortingService {
     static func sorted(
         _ paths: [String],
         options: Options,
-        metadataCache: MetadataCacheService? = nil
+        metadataCache: MetadataCacheService? = nil,
+        commentRanks: [String: Int]? = nil
     ) -> [String] {
         switch options.mode {
         case .random:
@@ -36,22 +37,18 @@ enum SortingService {
             return PrsortIO.applyCustomOrder(paths: paths, directory: directory)
         case .size:
             return sortBySize(paths, reversed: options.reversed, metadataCache: metadataCache)
+        case .comments:
+            return sortByComments(paths, reversed: options.reversed, ranks: commentRanks ?? [:])
         default:
             let descending = sortDescending(mode: options.mode, reversed: options.reversed)
             let keyed = paths.map {
                 ( $0, sortKey(for: $0, mode: options.mode, useExifDate: options.useExifDate, metadataCache: metadataCache) )
             }
             let sortedKeys = keyed.sorted { lhs, rhs in
-                switch (lhs.1, rhs.1) {
-                case let (.string(a), .string(b)):
-                    return descending ? a > b : a < b
-                case let (.number(a), .number(b)):
-                    return descending ? a > b : a < b
-                case let (.size(a), .size(b)):
-                    return descending ? a > b : a < b
-                default:
-                    return descending ? lhs.0 > rhs.0 : lhs.0 < rhs.0
+                if let ordered = comparePrimary(lhs.1, rhs.1, descending: descending) {
+                    return ordered
                 }
+                return fileNameComesBefore(lhs.0, rhs.0)
             }
             return sortedKeys.map(\.0)
         }
@@ -61,13 +58,30 @@ enum SortingService {
     /// but `reverse=is_reversed` for name/dimensions/permissions.
     private static func sortDescending(mode: SortMode, reversed: Bool) -> Bool {
         switch mode {
-        case .name, .dimensions, .permissions, .duplicates:
+        case .name, .ext, .dimensions, .permissions, .duplicates:
             return reversed
+        case .comments:
+            return !reversed
         case .date, .size, .filesize, .exifDate, .exifYear:
             return !reversed
         default:
             return reversed
         }
+    }
+
+    private static func sortByComments(
+        _ paths: [String],
+        reversed: Bool,
+        ranks: [String: Int]
+    ) -> [String] {
+        let descending = sortDescending(mode: .comments, reversed: reversed)
+        let keyed = paths.map { ($0, ranks[$0] ?? ImageListCommentStatusCache.shared.sortRank(for: $0)) }
+        return keyed.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 {
+                return descending ? lhs.1 > rhs.1 : lhs.1 < rhs.1
+            }
+            return fileNameComesBefore(lhs.0, rhs.0)
+        }.map(\.0)
     }
 
     private static func sortBySize(
@@ -87,14 +101,13 @@ enum SortingService {
             if lhs.1.widthKey != rhs.1.widthKey {
                 return descending ? lhs.1.widthKey > rhs.1.widthKey : lhs.1.widthKey < rhs.1.widthKey
             }
-            return descending ? lhs.1.path > rhs.1.path : lhs.1.path < rhs.1.path
+            return fileNameComesBefore(lhs.0, rhs.0)
         }.map(\.0)
     }
 
     private struct SizeSortTuple {
         var area: Int64
         var widthKey: Int
-        var path: String
     }
 
     private static func sizeSortTuple(
@@ -106,7 +119,32 @@ enum SortingService {
         let area = dims.map { Int64($0.width * $0.height) } ?? 0
         let width = dims?.width ?? 0
         let widthKey = reversed ? -width : width
-        return SizeSortTuple(area: area, widthKey: widthKey, path: path.lowercased())
+        return SizeSortTuple(area: area, widthKey: widthKey)
+    }
+
+    /// Filename including extension; used as the tie-breaker for every sort mode.
+    private static func fileNameSortKey(_ path: String) -> String {
+        (path as NSString).lastPathComponent.lowercased()
+    }
+
+    private static func fileNameComesBefore(_ lhs: String, _ rhs: String) -> Bool {
+        fileNameSortKey(lhs) < fileNameSortKey(rhs)
+    }
+
+    private static func comparePrimary(_ lhs: SortKey, _ rhs: SortKey, descending: Bool) -> Bool? {
+        switch (lhs, rhs) {
+        case let (.string(a), .string(b)):
+            guard a != b else { return nil }
+            return descending ? a > b : a < b
+        case let (.number(a), .number(b)):
+            guard a != b else { return nil }
+            return descending ? a > b : a < b
+        case let (.size(a), .size(b)):
+            guard a != b else { return nil }
+            return descending ? a > b : a < b
+        default:
+            return nil
+        }
     }
 
     private enum SortKey {
@@ -129,6 +167,8 @@ enum SortingService {
         switch mode {
         case .name:
             return .string((path as NSString).lastPathComponent.lowercased())
+        case .ext:
+            return .string((path as NSString).pathExtension.lowercased())
         case .filesize, .size:
             if let cache = metadataCache {
                 return .size(cache.fileSize(path: path))

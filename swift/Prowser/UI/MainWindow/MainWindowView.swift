@@ -90,11 +90,17 @@ struct ContentStackView: View {
                 .allowsHitTesting(fileData.currentViewMode == .thumbnail)
                 .zIndex(fileData.currentViewMode == .thumbnail ? 1 : 0)
 
+            // Keep list mounted (Qt stacked widget parity) so scroll survives browse.
+            ImageListView()
+                .opacity(fileData.currentViewMode == .list ? 1 : 0)
+                .allowsHitTesting(fileData.currentViewMode == .list)
+                .zIndex(fileData.currentViewMode == .list ? 1 : 0)
+
             switch fileData.currentViewMode {
             case .thumbnail:
                 EmptyView()
             case .list:
-                ImageListView()
+                EmptyView()
             case .browse:
                 BrowseView()
             case .slideshow:

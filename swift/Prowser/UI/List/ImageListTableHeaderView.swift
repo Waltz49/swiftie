@@ -4,10 +4,10 @@ import AppKit
 protocol ImageListHeaderDelegate: AnyObject {
     func listHeaderDidRequestSort(for column: ImageListColumnID)
     func listHeaderDidToggleColumnVisibility(_ column: ImageListColumnID, visible: Bool)
-    func listHeaderDidReorderColumns()
     func listHeaderSortIndicator(for column: ImageListColumnID) -> (active: Bool, reversed: Bool)
     func listHeaderDirectoryAnnotation(forNameColumnWidth: CGFloat) -> String?
     func listHeaderIsColumnVisible(_ column: ImageListColumnID) -> Bool
+    func listHeaderDidRequestDefaultColumnOrder()
     func listHeaderNoteColumnDragEnded()
 }
 
@@ -16,20 +16,39 @@ protocol ImageListHeaderDelegate: AnyObject {
 final class ImageListTableHeaderView: NSTableHeaderView {
     weak var headerDelegate: ImageListHeaderDelegate?
 
+    /// List header matches row height; AppKit `tile()` must not shrink it.
+    var pinnedHeight: CGFloat = 48 {
+        didSet {
+            guard abs(oldValue - pinnedHeight) > 0.5 else { return }
+            var f = frame
+            f.size.height = pinnedHeight
+            super.frame = f
+        }
+    }
+
+    override var frame: NSRect {
+        get { super.frame }
+        set {
+            var adjusted = newValue
+            if pinnedHeight > 0 {
+                adjusted.size.height = pinnedHeight
+            }
+            super.frame = adjusted
+        }
+    }
+
     private var pressLocation: NSPoint?
     private var pressedColumnIndex = -1
     private var suppressClickSort = false
+    private var handledSortClick = false
 
     private let clickDragThreshold: CGFloat = 4
 
     override func mouseDown(with event: NSEvent) {
         pressLocation = convert(event.locationInWindow, from: nil)
-        pressedColumnIndex = tableView?.column(at: pressLocation ?? .zero) ?? -1
+        pressedColumnIndex = column(at: pressLocation ?? .zero)
+        handledSortClick = false
         super.mouseDown(with: event)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        super.mouseDragged(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -40,7 +59,6 @@ final class ImageListTableHeaderView: NSTableHeaderView {
         super.mouseUp(with: event)
 
         guard event.buttonNumber == 0,
-              !suppressClickSort,
               let tableView,
               let start = pressLocation else { return }
         let end = convert(event.locationInWindow, from: nil)
@@ -50,10 +68,10 @@ final class ImageListTableHeaderView: NSTableHeaderView {
             return
         }
 
-        let columnIndex = pressedColumnIndex >= 0 ? pressedColumnIndex : tableView.column(at: end)
+        let columnIndex = pressedColumnIndex >= 0 ? pressedColumnIndex : column(at: end)
         guard columnIndex >= 0, columnIndex < tableView.tableColumns.count else { return }
         let colID = ImageListColumnID(rawValue: tableView.tableColumns[columnIndex].identifier.rawValue)
-        if let colID, colID.sortMode != nil {
+        if let colID, colID.sortMode != nil, claimSortClick() {
             headerDelegate?.listHeaderDidRequestSort(for: colID)
             needsDisplay = true
         }
@@ -61,10 +79,18 @@ final class ImageListTableHeaderView: NSTableHeaderView {
 
     func noteColumnMovedByUser() {
         suppressClickSort = true
+        handledSortClick = true
         headerDelegate?.listHeaderNoteColumnDragEnded()
         DispatchQueue.main.async { [weak self] in
             self?.suppressClickSort = false
         }
+    }
+
+    /// True if this header click should trigger a sort (first claimant wins).
+    func claimSortClick() -> Bool {
+        if suppressClickSort || handledSortClick { return false }
+        handledSortClick = true
+        return true
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -78,10 +104,6 @@ final class ImageListTableHeaderView: NSTableHeaderView {
             guard let colID = ImageListColumnID(rawValue: tableColumn.identifier.rawValue) else { continue }
             let headerRect = headerRect(ofColumn: index)
             guard headerRect.intersects(dirtyRect) else { continue }
-            let indicator = headerDelegate.listHeaderSortIndicator(for: colID)
-            if indicator.active {
-                drawSortCaret(in: headerRect, column: tableColumn, reversed: indicator.reversed)
-            }
             if colID == .name,
                let directory = headerDelegate.listHeaderDirectoryAnnotation(forNameColumnWidth: headerRect.width) {
                 drawDirectoryAnnotation(directory, in: headerRect)
@@ -92,8 +114,7 @@ final class ImageListTableHeaderView: NSTableHeaderView {
     private func showColumnVisibilityMenu(with event: NSEvent) {
         guard let headerDelegate else { return }
         let menu = NSMenu()
-        for column in ImageListColumnID.defaultOrder {
-            guard column.canHide else { continue }
+        for column in ImageListColumnID.columnSelectorMenuOrder {
             let visible = headerDelegate.listHeaderIsColumnVisible(column)
             let mark = visible ? "✓" : " "
             let item = NSMenuItem(
@@ -105,7 +126,19 @@ final class ImageListTableHeaderView: NSTableHeaderView {
             item.representedObject = column
             menu.addItem(item)
         }
+        menu.addItem(.separator())
+        let resetItem = NSMenuItem(
+            title: "Use Default Order",
+            action: #selector(useDefaultColumnOrder(_:)),
+            keyEquivalent: ""
+        )
+        resetItem.target = self
+        menu.addItem(resetItem)
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    @objc private func useDefaultColumnOrder(_ sender: NSMenuItem) {
+        headerDelegate?.listHeaderDidRequestDefaultColumnOrder()
     }
 
     @objc private func toggleColumnVisibility(_ sender: NSMenuItem) {
@@ -113,39 +146,6 @@ final class ImageListTableHeaderView: NSTableHeaderView {
               let headerDelegate else { return }
         let visible = headerDelegate.listHeaderIsColumnVisible(column)
         headerDelegate.listHeaderDidToggleColumnVisibility(column, visible: !visible)
-    }
-
-    private func drawSortCaret(in headerRect: NSRect, column: NSTableColumn, reversed: Bool) {
-        let title = column.title
-        guard !title.isEmpty else { return }
-        let font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
-        let titleSize = (title as NSString).size(withAttributes: attributes)
-        let alignment = column.headerCell.alignment
-        var caretX = headerRect.minX + 4
-        switch alignment {
-        case .center:
-            caretX = headerRect.midX + titleSize.width / 2 + 4
-        case .right:
-            caretX = headerRect.maxX - titleSize.width - 8
-        default:
-            caretX = headerRect.minX + titleSize.width + 8
-        }
-        let caretY = headerRect.midY
-        let path = NSBezierPath()
-        path.lineWidth = 1.5
-        NSColor.white.setStroke()
-        let half: CGFloat = 3
-        if reversed {
-            path.move(to: NSPoint(x: caretX - half, y: caretY - half))
-            path.line(to: NSPoint(x: caretX, y: caretY + half))
-            path.line(to: NSPoint(x: caretX + half, y: caretY - half))
-        } else {
-            path.move(to: NSPoint(x: caretX - half, y: caretY + half))
-            path.line(to: NSPoint(x: caretX, y: caretY - half))
-            path.line(to: NSPoint(x: caretX + half, y: caretY + half))
-        }
-        path.stroke()
     }
 
     private func drawDirectoryAnnotation(_ text: String, in headerRect: NSRect) {

@@ -138,6 +138,62 @@ enum ExifService {
         return record.description
     }
 
+    /// Lightweight read of description / user-comment fields only (list view comments column).
+    static func readUserDescription(path: String) -> String? {
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return nil
+        }
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        return userDescription(exif: exif, tiff: tiff)
+    }
+
+    /// Port of Prowser generation EXIF layout (`format_image_exif_prompt` / mflux JSON).
+    static func isProwserFormattedUserComment(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if parseMfluxMetadataJSON(trimmed) != nil { return true }
+        guard hasPromptSection(trimmed), hasImageModelSection(trimmed) else { return false }
+        return true
+    }
+
+    private static func hasImageModelSection(_ text: String) -> Bool {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let lower = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if lower == "image model" || lower == "image model:" {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func hasPromptSection(_ text: String) -> Bool {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let lower = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if lower == "prompt" || lower == "prompt:" {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func parseMfluxMetadataJSON(_ text: String) -> [String: Any]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first, first == "{" || first == "[" else { return nil }
+        guard let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if json["mflux_version"] != nil { return json }
+        if json["prompt"] != nil,
+           json.keys.contains(where: { ["seed", "steps", "model", "quantize"].contains($0) }) {
+            return json
+        }
+        return nil
+    }
+
     /// Python/piexif-backed user description (matches information sidebar in Qt app).
     @MainActor
     static func userDescription(path: String) async -> String? {

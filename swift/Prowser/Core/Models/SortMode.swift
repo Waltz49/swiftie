@@ -10,6 +10,8 @@ enum SortMode: String, CaseIterable, Sendable {
     case filesize
     case dimensions
     case permissions
+    case comments
+    case ext
     case custom
     case random
     case duplicates
@@ -24,6 +26,8 @@ enum SortMode: String, CaseIterable, Sendable {
         case .filesize: return "File Size"
         case .dimensions: return "Dimensions"
         case .permissions: return "Permissions"
+        case .comments: return "Comments"
+        case .ext: return "Extension"
         case .custom: return "Custom"
         case .random: return "Random"
         case .duplicates: return "Duplicates"
