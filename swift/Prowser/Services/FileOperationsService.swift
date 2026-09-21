@@ -165,7 +165,10 @@ final class FileOperationsService {
 
         let editorName = appState.config.string(forKey: "image_editor_app", default: "Preview")
         guard let appURL = Self.applicationURL(named: editorName) else {
-            showAlert("Editor Not Found", "Could not find application “\(editorName)” in /Applications.")
+            showAlert(
+                "Editor Not Found",
+                "Could not find application “\(editorName)” in /Applications or /System/Applications."
+            )
             return
         }
 
@@ -712,6 +715,7 @@ final class FileOperationsService {
         guard !trimmed.isEmpty else { return nil }
         let candidates = [
             "/Applications/\(trimmed).app",
+            "/System/Applications/\(trimmed).app",
             "~/Applications/\(trimmed).app",
         ]
         for candidate in candidates {
