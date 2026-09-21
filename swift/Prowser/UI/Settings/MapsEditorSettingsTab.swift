@@ -33,7 +33,7 @@ struct MapsEditorSettingsTab: View {
                             ))
                         }
                     }
-                    Text("Used for Edit in … context menu and ⌃E.")
+                    Text("Used for Edit in … context menu and ⌘E.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

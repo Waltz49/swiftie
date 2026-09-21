@@ -183,7 +183,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Copy Image (⌘C in Swift; Python ⌃C copies image)
 - [x] Copy user comment
 - [~] Lock / Unlock files (⌘L / ⇧⌘L — in Edit menu; Python also in Tools)
-- [~] Edit with external editor (⌃E)
+- [x] Edit with external editor (⌘E)
 - [x] Rename with Custom Prefix… (⌘N) — `RenamePrefixSheet` + `RenamePrefixService`/`RenamePrefixPlanner` (names, 3-phase plan, dates, .prsort locks, metadata migration; CNN/CLIP/face MD5 feature hand-off not ported)
 - [~] Convert Image Format… (⌘M)
 - [x] Resize… (⌘⇧Z)
@@ -302,7 +302,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [~] Lock / unlock files (⌘L / ⇧⌘L)
 - [x] Undo delete (⌘Z)
 - [~] Undo move
-- [~] External editor (⌃E)
+- [x] External editor (⌘E)
 - [~] Find references dialog (`FindReferencesSheet`)
 - [x] Show image in directory (specific-files workflow)
 - [x] Move work files dialog

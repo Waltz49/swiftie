@@ -70,7 +70,7 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 |-----|--------|
 | Cmd+C | Copy image path to clipboard |
 | ⌃C | Copy image pixels to clipboard |
-| ⌃E | Edit in external editor |
+| ⌘E | Edit in external editor |
 | Cmd+Backspace / Cmd+Delete | Delete selected files (move to Trash) |
 | Cmd+Z | Undo file deletion |
 | Cmd+N | Rename with custom prefix |
@@ -195,7 +195,7 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 |-----|--------|
 | Cmd+C | Copy image path |
 | ⌃C | Copy image pixels |
-| ⌃E | Edit in external editor |
+| ⌘E | Edit in external editor |
 | Cmd+Backspace / Cmd+Delete | Delete current file |
 | Cmd+Z | Undo deletion |
 | Cmd+L | Lock files (when locking enabled) |
@@ -324,5 +324,5 @@ Screen-size copy actions are in **Tools → Create Screen Size Copy…** (no def
 - **⌃** is the physical Control key (`Meta+` in Qt).
 - Some shortcuts are context-sensitive (view mode, settings, or feature flags).
 - **Cmd+L** locks files (when locking is enabled). **Cmd+;** is Last Image in browse view.
-- **⌃E** opens the external editor; **E** alone jumps to the last image in browse view.
+- **⌘E** opens the external editor; **E** alone jumps to the last image in browse view.
 - The in-app help dialog (F1) is built from runtime bindings and may differ slightly from this file.

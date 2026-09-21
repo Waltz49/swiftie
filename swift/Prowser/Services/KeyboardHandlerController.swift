@@ -192,6 +192,13 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘E — edit in external editor (Python Qt Ctrl+E → ⌘E on macOS).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "e" {
+            appState.fileOperations.openWithExternalEditor()
+            return true
+        }
+
         let searchView = appState.fileData.currentViewMode == .thumbnail
             || appState.fileData.currentViewMode == .browse
             || appState.fileData.currentViewMode == .list

@@ -732,7 +732,7 @@ private struct ExternalEditorButton: View {
         Button("Edit with \(appState.config.string(forKey: "image_editor_app", default: "Preview"))") {
             appState.fileOperations.openWithExternalEditor()
         }
-        .keyboardShortcut("e", modifiers: .control)
+        .keyboardShortcut("e", modifiers: .command)
     }
 }
 

@@ -111,6 +111,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("^1–^9", "Open favorite directory"),
                     ])
                     shortcutSection("Tools", rows: [
+                        ("⌘E", "Edit in external editor"),
                         ("⌘G", "Show GPS location on map"),
                         ("⇧⌘E", "Edit EXIF user comment"),
                     ])
