@@ -99,11 +99,11 @@ enum ImageListColumnID: String, CaseIterable, Codable, Sendable {
 
     var textAlignment: NSTextAlignment {
         switch self {
-        case .permissions, .size, .dimensions, .comments, .ext:
+        case .permissions, .size, .dimensions, .comments:
             return .center
         case .date:
             return .right
-        case .name, .thumbnail:
+        case .name, .thumbnail, .ext:
             return .left
         }
     }

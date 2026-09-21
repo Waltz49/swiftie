@@ -441,8 +441,9 @@ private actor ThumbnailDecodePool {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return nil
         }
+        let displayImage = ThumbnailTransparencyCompositor.compositeOntoCheckerboardIfNeeded(cgImage)
         return ThumbnailCache.GeneratedThumbnail(
-            image: cgImage,
+            image: displayImage,
             originalWidth: dims.width,
             originalHeight: dims.height
         )
