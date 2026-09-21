@@ -90,7 +90,7 @@ To use a different profile directory:
 
 The `-p` path uses the same layout as `~/.prowser/` below.
 
-New files created by AI go to `~/Downloads` by default; change that in the settings dialog (**Image creation directory**).
+New files created by AI go to `~/Downloads` by default; change that in the Preferences dialog (**Image creation directory**).
 
 ### Profile layout
 

@@ -34,6 +34,7 @@ enum StyledMessageDialog {
     static func present(
         title: String,
         message: String,
+        secondaryMessage: String? = nil,
         style: NSAlert.Style = .informational,
         icon: IconKind? = nil,
         buttons: [Button] = [Button("OK")],
@@ -51,6 +52,7 @@ enum StyledMessageDialog {
         let controller = StyledMessagePanelController(
             title: title,
             message: message,
+            secondaryMessage: secondaryMessage,
             icon: iconKind,
             buttons: leftToRight,
             defaultButtonIndex: defaultVisualIndex,
@@ -129,6 +131,7 @@ enum StyledMessageDialog {
     static func showConfirm(
         title: String,
         message: String,
+        secondaryMessage: String? = nil,
         confirmTitle: String,
         cancelTitle: String = "Cancel",
         defaultCancel: Bool = true
@@ -137,6 +140,7 @@ enum StyledMessageDialog {
         let index = present(
             title: title,
             message: message,
+            secondaryMessage: secondaryMessage,
             style: .warning,
             icon: .warning,
             buttons: [Button(cancelTitle, role: .dismissive), Button(confirmTitle)],
@@ -252,6 +256,7 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     init(
         title: String,
         message: String,
+        secondaryMessage: String?,
         icon: StyledMessageDialog.IconKind,
         buttons: [StyledMessageDialog.Button],
         defaultButtonIndex: Int?,
@@ -288,6 +293,16 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
         messageLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         messageLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
         messageColumn.addArrangedSubview(messageLabel)
+
+        if let secondaryMessage, !secondaryMessage.isEmpty {
+            let secondaryLabel = NSTextField(wrappingLabelWithString: secondaryMessage)
+            secondaryLabel.isSelectable = true
+            secondaryLabel.lineBreakMode = .byWordWrapping
+            secondaryLabel.textColor = .secondaryLabelColor
+            secondaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            secondaryLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
+            messageColumn.addArrangedSubview(secondaryLabel)
+        }
 
         if let accessoryView {
             accessoryView.translatesAutoresizingMaskIntoConstraints = false

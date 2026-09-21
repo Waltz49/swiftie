@@ -642,16 +642,21 @@ final class FileOperationsService {
     }
 
     private func confirmDelete(paths: [String]) -> Bool {
+        let deleteSettingsNote = "Delete confirmations can be turned off in the Preferences' General tab (⌘,)"
         let message: String
+        let secondaryMessage: String?
         if paths.count == 1 {
             let name = (paths[0] as NSString).lastPathComponent
             message = "Are you sure you want to delete this file?\n\n\(name)"
+            secondaryMessage = deleteSettingsNote
         } else {
             message = "Are you sure you want to delete these \(paths.count) files?"
+            secondaryMessage = deleteSettingsNote
         }
         return StyledMessageDialog.showConfirm(
             title: "Delete Files",
             message: message,
+            secondaryMessage: secondaryMessage,
             confirmTitle: "Delete"
         )
     }

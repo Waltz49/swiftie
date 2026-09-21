@@ -53,9 +53,9 @@ class WhyWasThisWrittenDialog(MarkdownDialog):
 
 # Workflow for Organizing Files in a Directory with Locking *(experimental)*
 
-When locking is enabled in the Settings dialog, you can lock files to keep them in a specific order. Locked files are always grouped together at the top of the display, according to their locked sequence. This lets you arrange thumbnails using drag and drop, and ensures their order is preserved. The general workflow is: group the files you want together (using search functions and drag-and-drop), lock your changes, and repeat as needed, then rename the files to permanenty preserve their order.
+When locking is enabled in the Preferences' General tab (⌘,), you can lock files to keep them in a specific order. Locked files are always grouped together at the top of the display, according to their locked sequence. This lets you arrange thumbnails using drag and drop, and ensures their order is preserved. The general workflow is: group the files you want together (using search functions and drag-and-drop), lock your changes, and repeat as needed, then rename the files to permanenty preserve their order.
 
-- Enable locking by checking the "Allow Thumbnail Locking" checkbox in the Settings dialog.
+- Enable locking by checking the "Allow Thumbnail Locking" checkbox in the Preferences' General tab (⌘,).
 - In thumbnail view, lock the files that are ordered the way you want them by selecting them and pressing **Cmd-L**. To unlock files, select them and press **Shift-Cmd-L**. You can lock or unlock multiple files at once using multiselect.
 - Use search functions (**Cmd-K** or **Cmd-F**) and drag and drop to arrange the thumbnails in your preferred order. 
 - If you want to rename the files, use Quick rename (**Shift-Cmd-M**) or Custom rename (**Cmd-N**) to rename files in their current order.
