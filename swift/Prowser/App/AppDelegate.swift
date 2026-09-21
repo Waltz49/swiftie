@@ -292,7 +292,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let savedSpace = restore?["last_macos_space_mode"] as? Bool
         WindowFullscreen.applyLaunchPreference(
             noFullscreen: launchOptions.noFullscreen,
-            restoreState: appState.config.restoreState,
             savedMacOSSpace: savedSpace
         )
 

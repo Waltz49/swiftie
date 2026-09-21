@@ -432,9 +432,22 @@ struct ThumbnailGridView: NSViewRepresentable {
             )
         }
 
-        func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void) {
+        func thumbnailGridNeedsThumbnail(
+            path: String,
+            size: Int,
+            priority: ThumbnailLoadPriority,
+            queueOrder: Int,
+            backgroundLoadSession: UInt64?,
+            completion: @escaping (NSImage?) -> Void
+        ) {
             Task { @MainActor in
-                let result = await appState.thumbnailCache.generateThumbnailResult(for: path, size: size)
+                let result = await appState.thumbnailCache.generateThumbnailResult(
+                    for: path,
+                    size: size,
+                    priority: priority,
+                    queueOrder: queueOrder,
+                    backgroundLoadSession: backgroundLoadSession
+                )
                 let image = result.map {
                     NSImage(cgImage: $0.image, size: NSSize(width: $0.image.width, height: $0.image.height))
                 }

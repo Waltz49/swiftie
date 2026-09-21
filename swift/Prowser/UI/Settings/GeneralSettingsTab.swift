@@ -19,7 +19,6 @@ struct GeneralSettingsTab: View {
                 CollapsibleSettingsSection(title: "Behavior", stateKey: "general", isExpanded: $generalExpanded) {
                     Toggle("Confirm delete (⌘Delete)", isOn: boolBinding("confirm_delete", default: true))
                     Toggle("Wrap around when navigating", isOn: boolBinding("wrap_around", default: true))
-                    Toggle("Restore state on launch", isOn: restoreStateBinding)
                     Toggle("Debug mode", isOn: boolBinding("debug_mode"))
                     Toggle(
                         "Peek status bar when cursor nears bottom",
@@ -120,13 +119,6 @@ struct GeneralSettingsTab: View {
         let ms = appState.config.int(forKey: "browse_image_history_save_after_ms", default: 3000)
         if ms == 0 { return "Immediate" }
         return "\(ms) ms"
-    }
-
-    private var restoreStateBinding: Binding<Bool> {
-        Binding(
-            get: { appState.config.restoreState },
-            set: { appState.config.setRestoreStateEnabled($0); settingsChanged() }
-        )
     }
 
     private var exifRotationBinding: Binding<Bool> {

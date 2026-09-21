@@ -51,7 +51,6 @@ final class AppConfig {
         return url
     }
 
-    var restoreState: Bool { restoreStateDict()["enabled"] as? Bool ?? true }
     var lastDirectory: String? {
         if let dir = restoreStateDict()["last_directory"] as? String, !dir.isEmpty {
             return dir
@@ -66,9 +65,8 @@ final class AppConfig {
         var lastMacOSSpaceMode: Bool?
     }
 
-    /// Python `get_restore_state` (nil when disabled or no usable paths).
+    /// Python `get_restore_state` (nil when no usable paths).
     func getRestoreState() -> RestoreStateSnapshot? {
-        guard restoreState else { return nil }
         let dict = restoreStateDict()
         var lastFile = dict["last_file"] as? String
         if let file = lastFile, file.isEmpty || !FileManager.default.fileExists(atPath: file) {
@@ -146,12 +144,6 @@ final class AppConfig {
         }
     }
 
-    func setRestoreStateEnabled(_ enabled: Bool) {
-        var restore = restoreStateDict()
-        restore["enabled"] = enabled
-        updateSetting("restore_state", value: restore)
-    }
-
     func updateRestoreMacOSSpaceMode(_ enabled: Bool) {
         var restore = restoreStateDict()
         restore["last_macos_space_mode"] = enabled
@@ -160,7 +152,7 @@ final class AppConfig {
 
     func clearRestoreState() {
         var restore = restoreStateDict()
-        restore["enabled"] = false
+        restore["enabled"] = true
         restore["last_file"] = NSNull()
         restore["last_directory"] = NSNull()
         restore["last_view_mode"] = "thumbnail"
@@ -471,14 +463,17 @@ final class AppConfig {
 
     private func migrateRestoreStateIfNeeded() {
         if settings["restore_state"] is Bool {
-            let enabled = settings["restore_state"] as? Bool ?? true
             settings["restore_state"] = [
-                "enabled": enabled,
+                "enabled": true,
                 "last_file": NSNull(),
                 "last_directory": settings["last_directory"] as Any? ?? NSNull(),
                 "last_view_mode": "thumbnail",
                 "last_macos_space_mode": NSNull(),
             ]
+        }
+        if var dict = settings["restore_state"] as? [String: Any] {
+            dict["enabled"] = true
+            settings["restore_state"] = dict
         }
     }
 

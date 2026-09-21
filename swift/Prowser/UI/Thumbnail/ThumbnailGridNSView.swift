@@ -17,7 +17,14 @@ protocol ThumbnailGridDelegate: AnyObject {
     /// Single-click browse activation (preview hidden). Fired on mouse up when the press was not a drag.
     func thumbnailGridDidActivateBrowse(path: String)
     func thumbnailGridDidReorder(path: String, insertionIndex: Int)
-    func thumbnailGridNeedsThumbnail(path: String, size: Int, completion: @escaping (NSImage?) -> Void)
+    func thumbnailGridNeedsThumbnail(
+        path: String,
+        size: Int,
+        priority: ThumbnailLoadPriority,
+        queueOrder: Int,
+        backgroundLoadSession: UInt64?,
+        completion: @escaping (NSImage?) -> Void
+    )
     func thumbnailGridShowContextMenu(for event: NSEvent, clickedIndex: Int, in view: NSView)
     func thumbnailGridDidApplyFilter(label: String)
     func thumbnailGridDidUpdateLayout(columns: Int, sectionedRowLayout: ThumbnailSectionedLayout.RowLayout?)
@@ -344,10 +351,23 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1, sectionedRowLayout: nil)
     }
 
-    /// Called when the user scrolls; reloads thumbnails for newly visible cells only.
+    /// Called when the user scrolls; prioritize viewport thumbnails over off-screen batches.
     func noteVisibleRectChanged() {
         suspendBackgroundThumbnailLoading()
-        scheduleLoadVisibleThumbnails(debounced: true)
+        loadVisibleThumbnails(scheduleBackground: false)
+        scheduleBackgroundThumbnailLoadingAfterScrollSettles()
+    }
+
+    private func scheduleBackgroundThumbnailLoadingAfterScrollSettles() {
+        visibleLoadDebounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.handleScrollSettledThumbnailLoad()
+        }
+        visibleLoadDebounceWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double(TimingConstants.thumbnailScrollLoadDebounceMs) / 1000.0,
+            execute: work
+        )
     }
 
     /// Reload grid columns when the scroll view size changes (sidebar hide/show, window resize).
@@ -425,7 +445,26 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func suspendBackgroundThumbnailLoading() {
         backgroundLoadingSuspended = true
+        backgroundLoadSession += 1
         cancelPendingBackgroundBatches()
+        if let appState {
+            let cache = appState.thumbnailCache
+            Task {
+                await cache.clearQueuedThumbnailRequests(maxPriority: .nearVisible)
+            }
+        }
+    }
+
+    /// Top-to-bottom, then left-to-right (flipped document coordinates).
+    private func thumbnailIndicesInVisualOrder(_ indices: [Int]) -> [Int] {
+        indices.sorted { lhs, rhs in
+            let left = cellFrame(for: lhs)
+            let right = cellFrame(for: rhs)
+            if abs(left.minY - right.minY) > 0.5 {
+                return left.minY < right.minY
+            }
+            return left.minX < right.minX
+        }
     }
 
     func updateEmptyStateContext() {
@@ -1328,14 +1367,29 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         return nearVisible.sorted()
     }
 
-    private func requestThumbnailLoad(for path: String, isBackground: Bool = false) {
+    private func requestThumbnailLoad(
+        for path: String,
+        priority: ThumbnailLoadPriority,
+        queueOrder: Int = ThumbnailQueueOrdering.background,
+        backgroundLoadSession: UInt64? = nil,
+        isBackground: Bool = false
+    ) {
         guard thumbnailLoadingActive else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
         if isBackground, backgroundLoadingSuspended { return }
-        if thumbnails[path] != nil || loadingPaths.contains(path) { return }
+        if thumbnails[path] != nil { return }
+        if isBackground {
+            if loadingPaths.contains(path) { return }
+        }
         loadingPaths.insert(path)
         let pixelSize = thumbnailGenerationPixelSize()
-        gridDelegate?.thumbnailGridNeedsThumbnail(path: path, size: pixelSize) { [weak self] image in
+        gridDelegate?.thumbnailGridNeedsThumbnail(
+            path: path,
+            size: pixelSize,
+            priority: priority,
+            queueOrder: queueOrder,
+            backgroundLoadSession: backgroundLoadSession
+        ) { [weak self] image in
             Task { @MainActor in
                 guard let self else { return }
                 self.loadingPaths.remove(path)
@@ -1361,7 +1415,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
         cancelPendingBackgroundBatches()
         let work = DispatchWorkItem { [weak self] in
-            self?.queueBackgroundThumbnailBatch(indices: backgroundIndices, session: session)
+            guard let self, let appState = self.appState else { return }
+            Task { @MainActor in
+                await appState.thumbnailCache.noteBackgroundLoadSession(session)
+                self.queueBackgroundThumbnailBatch(
+                    indices: backgroundIndices,
+                    session: session,
+                    submitOffset: 0
+                )
+            }
         }
         backgroundLoadWorkItem = work
         DispatchQueue.main.asyncAfter(
@@ -1370,30 +1432,44 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
-    private func queueBackgroundThumbnailBatch(indices: [Int], session: UInt64) {
+    private func queueBackgroundThumbnailBatch(indices: [Int], session: UInt64, submitOffset: Int = 0) {
         guard session == backgroundLoadSession else { return }
         guard thumbnailLoadingActive else { return }
         guard !backgroundLoadingSuspended else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
 
         let batchSize = TimingConstants.thumbnailBackgroundLoadBatchSize
-        let batch = indices.prefix(batchSize)
-        let remaining = Array(indices.dropFirst(batchSize))
-
-        for index in batch {
-            if backgroundLoadingSuspended { break }
-            requestThumbnailLoad(for: imagePaths[index], isBackground: true)
+        let batchEnd = min(indices.count, batchSize)
+        guard submitOffset < batchEnd else {
+            let remaining = Array(indices.dropFirst(batchSize))
+            guard !remaining.isEmpty, !backgroundLoadingSuspended else { return }
+            let followUp = DispatchWorkItem { [weak self] in
+                self?.queueBackgroundThumbnailBatch(indices: remaining, session: session)
+            }
+            backgroundLoadFollowUpWorkItem = followUp
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + Double(TimingConstants.thumbnailBackgroundLoadBatchDelayMs) / 1000.0,
+                execute: followUp
+            )
+            return
         }
 
-        guard !remaining.isEmpty, !backgroundLoadingSuspended else { return }
+        let index = indices[submitOffset]
+        requestThumbnailLoad(
+            for: imagePaths[index],
+            priority: .background,
+            backgroundLoadSession: session,
+            isBackground: true
+        )
 
-        let followUp = DispatchWorkItem { [weak self] in
-            self?.queueBackgroundThumbnailBatch(indices: remaining, session: session)
+        let nextOffset = submitOffset + 1
+        let stagger = DispatchWorkItem { [weak self] in
+            self?.queueBackgroundThumbnailBatch(indices: indices, session: session, submitOffset: nextOffset)
         }
-        backgroundLoadFollowUpWorkItem = followUp
+        backgroundLoadWorkItem = stagger
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + Double(TimingConstants.thumbnailBackgroundLoadBatchDelayMs) / 1000.0,
-            execute: followUp
+            deadline: .now() + Double(TimingConstants.thumbnailBackgroundLoadChunkDelayMs) / 1000.0,
+            execute: stagger
         )
     }
 
@@ -1425,17 +1501,38 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         visibleLoadRetryWorkItem = nil
         let visibleSet = Set(visibleIndices)
         let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
+        let orderedVisible = thumbnailIndicesInVisualOrder(visibleIndices)
+        let orderedNear = thumbnailIndicesInVisualOrder(nearVisible)
+        let pixelSize = thumbnailGenerationPixelSize()
 
-        for index in visibleIndices.sorted() {
-            requestThumbnailLoad(for: imagePaths[index], isBackground: false)
+        guard let appState else { return }
+        let visiblePaths = orderedVisible.map { imagePaths[$0] }
+        let nearPaths = orderedNear.map { imagePaths[$0] }
+        let scheduleBackgroundAfterLoad = scheduleBackground
+        Task { @MainActor in
+            await appState.thumbnailCache.reprioritizeForViewport(
+                size: pixelSize,
+                orderedVisiblePaths: visiblePaths,
+                orderedNearPaths: nearPaths
+            )
+            for (order, index) in orderedVisible.enumerated() {
+                self.requestThumbnailLoad(
+                    for: self.imagePaths[index],
+                    priority: .visible,
+                    queueOrder: order
+                )
+            }
+            for (order, index) in orderedNear.enumerated() {
+                self.requestThumbnailLoad(
+                    for: self.imagePaths[index],
+                    priority: .nearVisible,
+                    queueOrder: order
+                )
+            }
+            guard scheduleBackgroundAfterLoad, !self.backgroundLoadingSuspended else { return }
+            let excluded = visibleSet.union(nearVisible)
+            self.scheduleBackgroundThumbnailLoading(excluded: excluded, session: self.backgroundLoadSession)
         }
-        for index in nearVisible {
-            requestThumbnailLoad(for: imagePaths[index], isBackground: false)
-        }
-
-        guard scheduleBackground, !backgroundLoadingSuspended else { return }
-        let excluded = visibleSet.union(nearVisible)
-        scheduleBackgroundThumbnailLoading(excluded: excluded, session: backgroundLoadSession)
     }
 
     private func thumbnailRect(for index: Int) -> NSRect {

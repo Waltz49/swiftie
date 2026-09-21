@@ -22,7 +22,20 @@ actor ThumbnailCache {
     private let memoryLimit = 12_000
     private let statCacheMaxAge: TimeInterval = 60
     private let statCacheMaxEntries = 10_000
-    private var inflightGenerations: [String: Task<GeneratedThumbnail?, Never>] = [:]
+    private struct InflightGeneration {
+        let id: UInt64
+        let imagePath: String
+        let task: Task<GeneratedThumbnail?, Never>
+        let priority: ThumbnailLoadPriority
+        let queueOrder: Int
+    }
+
+    private var inflightGenerations: [String: InflightGeneration] = [:]
+    private var inflightSequence: UInt64 = 0
+    /// Bumped when viewport reprioritizes or background queue is cleared; stale work is dropped after acquire/decode.
+    private var decodeQueueGeneration: UInt64 = 0
+    /// Last background batch session accepted from the thumbnail grid (`backgroundLoadSession`).
+    private var acceptedBackgroundLoadSession: UInt64 = 0
     private let decodePool = ThumbnailDecodePool(maxConcurrent: 4)
 
     init(paths: ProfilePaths, ignoreExifRotation: Bool) {
@@ -99,11 +112,21 @@ actor ThumbnailCache {
     }
 
     /// Returns `CGImage` so callers on `@MainActor` can build `NSImage` without crossing a non-Sendable boundary.
-    func generateThumbnail(for imagePath: String, size: Int) async -> CGImage? {
-        await generateThumbnailResult(for: imagePath, size: size)?.image
+    func generateThumbnail(
+        for imagePath: String,
+        size: Int,
+        priority: ThumbnailLoadPriority = .default
+    ) async -> CGImage? {
+        await generateThumbnailResult(for: imagePath, size: size, priority: priority)?.image
     }
 
-    func generateThumbnailResult(for imagePath: String, size: Int) async -> GeneratedThumbnail? {
+    func generateThumbnailResult(
+        for imagePath: String,
+        size: Int,
+        priority: ThumbnailLoadPriority = .default,
+        queueOrder: Int = ThumbnailQueueOrdering.background,
+        backgroundLoadSession: UInt64? = nil
+    ) async -> GeneratedThumbnail? {
         let memoryKey = memoryKey(for: imagePath, size: size)
         if let cached = cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size) {
             return cached
@@ -112,26 +135,105 @@ actor ThumbnailCache {
             return scaled
         }
 
-        if let existing = inflightGenerations[memoryKey] {
-            return await existing.value
+        if priority == .background, let session = backgroundLoadSession,
+           session != acceptedBackgroundLoadSession {
+            return nil
         }
 
+        if let existing = inflightGenerations[memoryKey] {
+            let lowerPriority = priority.rawValue < existing.priority.rawValue
+            let samePriorityLaterInQueue = priority.rawValue == existing.priority.rawValue
+                && queueOrder >= existing.queueOrder
+            if lowerPriority || samePriorityLaterInQueue {
+                return await existing.task.value
+            }
+            existing.task.cancel()
+            inflightGenerations.removeValue(forKey: memoryKey)
+        }
+
+        let enqueuedGeneration = decodeQueueGeneration
         let ignoreExif = ignoreExifRotation
+        inflightSequence += 1
+        let generationID = inflightSequence
         let task = Task<GeneratedThumbnail?, Never> {
             await decodePool.generate(
                 imagePath: imagePath,
                 size: size,
-                ignoreExifRotation: ignoreExif
+                ignoreExifRotation: ignoreExif,
+                priority: priority,
+                queueOrder: queueOrder
             )
         }
-        inflightGenerations[memoryKey] = task
+        inflightGenerations[memoryKey] = InflightGeneration(
+            id: generationID,
+            imagePath: imagePath,
+            task: task,
+            priority: priority,
+            queueOrder: queueOrder
+        )
         let generated = await task.value
-        inflightGenerations.removeValue(forKey: memoryKey)
+        if inflightGenerations[memoryKey]?.id == generationID {
+            inflightGenerations.removeValue(forKey: memoryKey)
+        }
 
+        guard enqueuedGeneration == decodeQueueGeneration else { return nil }
+        if priority == .background, let session = backgroundLoadSession,
+           session != acceptedBackgroundLoadSession {
+            return nil
+        }
         guard let generated else { return nil }
         let image = NSImage(cgImage: generated.image, size: NSSize(width: generated.image.width, height: generated.image.height))
         try? await storeThumbnailOffDiskIO(image, for: imagePath, size: size, memoryKey: memoryKey)
         return generated
+    }
+
+    /// Drop pending decodes at or below `maxPriority` (Python `clear_queued_thumbnail_requests(max_priority:)`).
+    func clearQueuedThumbnailRequests(maxPriority: ThumbnailLoadPriority) async {
+        decodeQueueGeneration += 1
+        let limit = maxPriority.rawValue
+        for (key, entry) in inflightGenerations where entry.priority.rawValue <= limit {
+            entry.task.cancel()
+            inflightGenerations.removeValue(forKey: key)
+        }
+        await decodePool.cancelWaiters(withPriorityAtMost: limit)
+    }
+
+    /// Cancel off-viewport and stale-priority work, then callers queue viewport paths top-down.
+    func reprioritizeForViewport(
+        size: Int,
+        orderedVisiblePaths: [String],
+        orderedNearPaths: [String]
+    ) async {
+        decodeQueueGeneration += 1
+        let visibleSet = Set(orderedVisiblePaths)
+        let nearSet = Set(orderedNearPaths)
+        let keepSet = visibleSet.union(nearSet)
+
+        for (key, entry) in inflightGenerations {
+            let path = entry.imagePath
+            let shouldCancel: Bool
+            if visibleSet.contains(path) {
+                shouldCancel = entry.priority.rawValue < ThumbnailLoadPriority.visible.rawValue
+            } else if nearSet.contains(path) {
+                shouldCancel = entry.priority.rawValue < ThumbnailLoadPriority.nearVisible.rawValue
+            } else {
+                shouldCancel = entry.priority.rawValue <= ThumbnailLoadPriority.nearVisible.rawValue
+            }
+            if shouldCancel {
+                entry.task.cancel()
+                inflightGenerations.removeValue(forKey: key)
+            }
+        }
+
+        await decodePool.reprioritizeWaitersForViewport(
+            visiblePaths: visibleSet,
+            nearPaths: nearSet,
+            keepPaths: keepSet
+        )
+    }
+
+    func noteBackgroundLoadSession(_ session: UInt64) {
+        acceptedBackgroundLoadSession = session
     }
 
     private func storeThumbnailOffDiskIO(
@@ -376,17 +478,38 @@ actor ThumbnailCache {
 // MARK: - Off-actor decode / disk I/O (Python worker threads)
 
 private actor ThumbnailDecodePool {
+    private struct WaitEntry {
+        let imagePath: String
+        let priority: ThumbnailLoadPriority
+        let queueOrder: Int
+        let sequence: UInt64
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
     private let maxConcurrent: Int
     private var active = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var activeBackgroundDecodes = 0
+    private var waiters: [WaitEntry] = []
+    private var waiterSequence: UInt64 = 0
 
     init(maxConcurrent: Int) {
         self.maxConcurrent = max(1, maxConcurrent)
     }
 
-    func generate(imagePath: String, size: Int, ignoreExifRotation: Bool) async -> ThumbnailCache.GeneratedThumbnail? {
-        await acquire()
-        defer { release() }
+    func generate(
+        imagePath: String,
+        size: Int,
+        ignoreExifRotation: Bool,
+        priority: ThumbnailLoadPriority,
+        queueOrder: Int
+    ) async -> ThumbnailCache.GeneratedThumbnail? {
+        do {
+            try await acquire(imagePath: imagePath, priority: priority, queueOrder: queueOrder)
+        } catch {
+            return nil
+        }
+        defer { release(priority: priority) }
+        if Task.isCancelled { return nil }
         return ThumbnailDecodePool.decodeThumbnail(
             imagePath: imagePath,
             size: size,
@@ -394,29 +517,116 @@ private actor ThumbnailDecodePool {
         )
     }
 
-    func writeJPEG(_ data: Data, to url: URL) async throws {
-        await acquire()
-        defer { release() }
-        try data.write(to: url, options: .atomic)
+    func cancelWaiters(withPriorityAtMost maxPriority: Int) {
+        cancelWaiters { $0.priority.rawValue <= maxPriority }
     }
 
-    private func acquire() async {
-        if active < maxConcurrent {
-            active += 1
-            return
+    func reprioritizeWaitersForViewport(
+        visiblePaths: Set<String>,
+        nearPaths: Set<String>,
+        keepPaths: Set<String>
+    ) {
+        cancelWaiters { entry in
+            if keepPaths.contains(entry.imagePath) {
+                if visiblePaths.contains(entry.imagePath) {
+                    return entry.priority.rawValue < ThumbnailLoadPriority.visible.rawValue
+                }
+                if nearPaths.contains(entry.imagePath) {
+                    return entry.priority.rawValue < ThumbnailLoadPriority.nearVisible.rawValue
+                }
+            }
+            return entry.priority.rawValue <= ThumbnailLoadPriority.nearVisible.rawValue
         }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
+    }
+
+    private func cancelWaiters(where shouldCancel: (WaitEntry) -> Bool) {
+        var kept: [WaitEntry] = []
+        for entry in waiters {
+            if shouldCancel(entry) {
+                entry.continuation.resume(throwing: CancellationError())
+            } else {
+                kept.append(entry)
+            }
+        }
+        waiters = kept
+    }
+
+    private func acquire(imagePath: String, priority: ThumbnailLoadPriority, queueOrder: Int) async throws {
+        try Task.checkCancellation()
+        while !canTakeDecodeSlot(priority: priority) {
+            waiterSequence += 1
+            let sequence = waiterSequence
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                waiters.append(
+                    WaitEntry(
+                        imagePath: imagePath,
+                        priority: priority,
+                        queueOrder: queueOrder,
+                        sequence: sequence,
+                        continuation: continuation
+                    )
+                )
+                sortWaiters()
+            }
+            try Task.checkCancellation()
         }
         active += 1
+        if priority == .background {
+            activeBackgroundDecodes += 1
+        }
     }
 
-    private func release() {
-        active -= 1
-        if let next = waiters.first {
-            waiters.removeFirst()
-            next.resume()
+    private func canTakeDecodeSlot(priority: ThumbnailLoadPriority) -> Bool {
+        if active >= maxConcurrent { return false }
+        if priority == .background {
+            let highPriorityWaiting = waiters.contains {
+                $0.priority.rawValue >= ThumbnailLoadPriority.nearVisible.rawValue
+            }
+            if highPriorityWaiting,
+               activeBackgroundDecodes >= ThumbnailDecodeLimits.maxConcurrentBackgroundDecodes {
+                return false
+            }
         }
+        return true
+    }
+
+    private func release(priority: ThumbnailLoadPriority) {
+        active -= 1
+        if priority == .background {
+            activeBackgroundDecodes = max(0, activeBackgroundDecodes - 1)
+        }
+        guard active < maxConcurrent, !waiters.isEmpty else { return }
+        sortWaiters()
+        for index in waiters.indices {
+            let candidate = waiters[index]
+            if canTakeDecodeSlot(priority: candidate.priority) {
+                let next = waiters.remove(at: index)
+                active += 1
+                if next.priority == .background {
+                    activeBackgroundDecodes += 1
+                }
+                next.continuation.resume()
+                return
+            }
+        }
+    }
+
+    private func sortWaiters() {
+        waiters.sort { lhs, rhs in
+            if lhs.priority.rawValue != rhs.priority.rawValue {
+                return lhs.priority.rawValue > rhs.priority.rawValue
+            }
+            if lhs.queueOrder != rhs.queueOrder {
+                return lhs.queueOrder < rhs.queueOrder
+            }
+            return lhs.sequence < rhs.sequence
+        }
+    }
+
+    func writeJPEG(_ data: Data, to url: URL) async throws {
+        try await acquire(imagePath: "", priority: .default, queueOrder: ThumbnailQueueOrdering.background)
+        defer { release(priority: .default) }
+        try data.write(to: url, options: .atomic)
     }
 
     private static func decodeThumbnail(

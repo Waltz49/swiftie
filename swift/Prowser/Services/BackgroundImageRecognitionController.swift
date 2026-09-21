@@ -259,7 +259,11 @@ final class BackgroundImageRecognitionController {
         if appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true) {
             for path in paths {
                 if shouldCancel() { return }
-                _ = await appState.thumbnailCache.generateThumbnail(for: path, size: 256)
+                _ = await appState.thumbnailCache.generateThumbnail(
+                    for: path,
+                    size: 256,
+                    priority: .background
+                )
             }
         }
     }

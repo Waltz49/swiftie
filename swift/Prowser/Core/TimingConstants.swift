@@ -10,11 +10,13 @@ enum TimingConstants {
     /// Retry when viewport layout is not ready (`_restart_canvas_thumbnail_loading_for_visible`).
     static let thumbnailVisibleLoadRetryMs = 50
     /// Delay before first background thumbnail batch (`_restart_canvas_thumbnail_loading_for_visible`).
-    static let thumbnailBackgroundLoadInitialDelayMs = 100
+    static let thumbnailBackgroundLoadInitialDelayMs = 150
     /// Pause between background thumbnail batches (Python `MAX_BACKGROUND_BATCH` follow-up).
-    static let thumbnailBackgroundLoadBatchDelayMs = 500
-    /// Max thumbnails queued per background batch (Python `MAX_BACKGROUND_BATCH`).
-    static let thumbnailBackgroundLoadBatchSize = 200
+    static let thumbnailBackgroundLoadBatchDelayMs = 250
+    /// Max paths submitted per background batch (Swift caps async fan-out; Python queues to a worker heap).
+    static let thumbnailBackgroundLoadBatchSize = 8
+    /// Stagger within a batch so scroll/reprioritize can cancel before the whole batch is queued.
+    static let thumbnailBackgroundLoadChunkDelayMs = 40
     /// Qt default `SH_ToolTip_WakeUpDelay` used by `IconGraphicTooltipFilter`.
     static let graphicButtonTooltipDelayMs = 700
     /// Idle before background CLIP/CNN indexing (`BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS`).
