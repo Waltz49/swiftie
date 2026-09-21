@@ -145,6 +145,62 @@ private struct CollapsibleSettingsSectionHeader: NSViewRepresentable {
     }
 }
 
+/// Expand / collapse all controls for settings tabs (`settings_dialog.py` `_make_collapsible_sections_toolbar`).
+struct CollapsibleSettingsSectionsToolbar: View {
+    let onExpandAll: () -> Void
+    let onCollapseAll: () -> Void
+
+    private let buttonSize: CGFloat = 16
+    private let iconSize: CGFloat = 12
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Spacer(minLength: 0)
+            AppAssetIconButton(
+                normalName: "series_plus_icon",
+                hoverName: "series_plus_icon_hover",
+                size: buttonSize,
+                iconSize: iconSize,
+                tooltip: "Expand all sections",
+                action: onExpandAll
+            )
+            AppAssetIconButton(
+                normalName: "series_minus_icon",
+                hoverName: "series_minus_icon_hover",
+                size: buttonSize,
+                iconSize: iconSize,
+                tooltip: "Collapse all sections",
+                action: onCollapseAll
+            )
+        }
+        .padding(.top, 5)
+        .padding(.trailing, 35)
+    }
+}
+
+/// Settings tab with collapsible groups: toolbar above scroll (`setup_app_settings_tab` layout).
+struct SettingsCollapsibleTabLayout<Content: View>: View {
+    let onExpandAll: () -> Void
+    let onCollapseAll: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            CollapsibleSettingsSectionsToolbar(
+                onExpandAll: onExpandAll,
+                onCollapseAll: onCollapseAll
+            )
+            ScrollView {
+                content()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
 /// Expandable settings section — port of `CollapsibleThemeGroup`.
 struct CollapsibleSettingsSection<Content: View>: View {
     let title: String

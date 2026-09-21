@@ -4,13 +4,26 @@ import SwiftUI
 struct SlideshowSettingsTab: View {
     @Environment(AppState.self) private var appState
     @State private var overlapPercent = 100
+    @State private var startupExpanded = true
+    @State private var preset0Expanded = true
+    @State private var preset9Expanded = true
+    @State private var playbackExpanded = true
+
+    private static let groupsStorageKey = "slideshow_settings_groups_expanded"
 
     var body: some View {
-        ScrollView {
+        SettingsCollapsibleTabLayout(
+            onExpandAll: { setAllGroupsExpanded(true) },
+            onCollapseAll: { setAllGroupsExpanded(false) }
+        ) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Slideshow").font(.title2)
 
-                SettingsSection(title: "Slideshow Configuration (startup defaults)") {
+                CollapsibleSettingsSection(
+                    title: "Slideshow Configuration (startup defaults)",
+                    stateKey: "startup_defaults",
+                    isExpanded: $startupExpanded
+                ) {
                     Text("Values used when slideshow starts (S key). Keys 1–8 adjust these live during slideshow.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -64,10 +77,22 @@ struct SlideshowSettingsTab: View {
                     .frame(maxWidth: 200)
                 }
 
-                SlideshowPresetEditor(title: "Preset 0 (key 0)", configKey: "slideshow_preset_0", presetKey: "0")
-                SlideshowPresetEditor(title: "Preset 9 (key 9)", configKey: "slideshow_preset_9", presetKey: "9")
+                SlideshowPresetEditor(
+                    title: "Preset 0 (key 0)",
+                    configKey: "slideshow_preset_0",
+                    presetKey: "0",
+                    stateKey: "preset_0",
+                    isExpanded: $preset0Expanded
+                )
+                SlideshowPresetEditor(
+                    title: "Preset 9 (key 9)",
+                    configKey: "slideshow_preset_9",
+                    presetKey: "9",
+                    stateKey: "preset_9",
+                    isExpanded: $preset9Expanded
+                )
 
-                SettingsSection(title: "Playback") {
+                CollapsibleSettingsSection(title: "Playback", stateKey: "playback", isExpanded: $playbackExpanded) {
                     Toggle("Back and forth", isOn: boolBinding("slideshow_back_and_forth"))
                 }
 
@@ -93,13 +118,49 @@ struct SlideshowSettingsTab: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear { loadOverlap() }
+        .onAppear { load() }
         .onChange(of: appState.config.int(forKey: "slideshow_transition_speed", default: 1300)) { _, _ in
             persistOverlap()
         }
+        .onChange(of: startupExpanded) { _, value in
+            persistGroupExpanded("startup_defaults", expanded: value)
+        }
+        .onChange(of: preset0Expanded) { _, value in
+            persistGroupExpanded("preset_0", expanded: value)
+        }
+        .onChange(of: preset9Expanded) { _, value in
+            persistGroupExpanded("preset_9", expanded: value)
+        }
+        .onChange(of: playbackExpanded) { _, value in
+            persistGroupExpanded("playback", expanded: value)
+        }
+    }
+
+    private func load() {
+        loadOverlap()
+        let groups = appState.config.settingsGroupsExpanded(storageKey: Self.groupsStorageKey)
+        startupExpanded = groups["startup_defaults"] ?? true
+        preset0Expanded = groups["preset_0"] ?? true
+        preset9Expanded = groups["preset_9"] ?? true
+        playbackExpanded = groups["playback"] ?? true
+    }
+
+    private func setAllGroupsExpanded(_ expanded: Bool) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            startupExpanded = expanded
+            preset0Expanded = expanded
+            preset9Expanded = expanded
+            playbackExpanded = expanded
+        }
+    }
+
+    private func persistGroupExpanded(_ groupKey: String, expanded: Bool) {
+        appState.config.setSettingsGroupExpanded(
+            storageKey: Self.groupsStorageKey,
+            groupKey: groupKey,
+            expanded: expanded
+        )
     }
 
     private func loadOverlap() {

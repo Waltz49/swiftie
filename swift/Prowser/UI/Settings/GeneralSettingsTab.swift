@@ -9,7 +9,10 @@ struct GeneralSettingsTab: View {
     @State private var imageViewingExpanded = true
 
     var body: some View {
-        ScrollView {
+        SettingsCollapsibleTabLayout(
+            onExpandAll: { setAllGroupsExpanded(true) },
+            onCollapseAll: { setAllGroupsExpanded(false) }
+        ) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("General").font(.title2)
 
@@ -82,8 +85,6 @@ struct GeneralSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
             filterDraft = FilterPatternFormatting.forEditing(appState.filterSettings.filterPattern)
@@ -100,6 +101,14 @@ struct GeneralSettingsTab: View {
         }
         .onChange(of: imageViewingExpanded) { _, value in
             appState.config.setSettingsGroupExpanded(storageKey: "general_settings_groups_expanded", groupKey: "image_viewing", expanded: value)
+        }
+    }
+
+    private func setAllGroupsExpanded(_ expanded: Bool) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            generalExpanded = expanded
+            thumbnailsExpanded = expanded
+            imageViewingExpanded = expanded
         }
     }
 

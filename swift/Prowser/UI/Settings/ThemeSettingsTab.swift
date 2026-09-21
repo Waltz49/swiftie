@@ -20,7 +20,10 @@ struct ThemeSettingsTab: View {
     ]
 
     var body: some View {
-        ScrollView {
+        SettingsCollapsibleTabLayout(
+            onExpandAll: { setAllGroupsExpanded(true) },
+            onCollapseAll: { setAllGroupsExpanded(false) }
+        ) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Theme")
                     .font(.title2)
@@ -29,8 +32,6 @@ struct ThemeSettingsTab: View {
                 presetSection
                 colorSections(editID: editThemeID)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(SettingsDialogChrome.background)
         .onAppear {
@@ -358,6 +359,15 @@ struct ThemeSettingsTab: View {
         let groups = appState.config.settingsGroupsExpanded(storageKey: "theme_settings_groups_expanded")
         for key in ThemeKeys.collapseGroupKeys {
             groupExpanded[key] = groups[key] ?? true
+        }
+    }
+
+    private func setAllGroupsExpanded(_ expanded: Bool) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            for key in ThemeKeys.collapseGroupKeys {
+                groupExpanded[key] = expanded
+                appState.theme.setCollapseGroupExpanded(key, expanded: expanded)
+            }
         }
     }
 

@@ -51,7 +51,10 @@ struct DirectoriesSettingsTab: View {
     }
 
     var body: some View {
-        ScrollView {
+        SettingsCollapsibleTabLayout(
+            onExpandAll: { setAllGroupsExpanded(true) },
+            onCollapseAll: { setAllGroupsExpanded(false) }
+        ) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Directories").font(.title2)
 
@@ -155,8 +158,6 @@ struct DirectoriesSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { load() }
         .onChange(of: rootExpanded) { _, value in
@@ -173,6 +174,16 @@ struct DirectoriesSettingsTab: View {
         }
         .onChange(of: ignoreExpanded) { _, value in
             appState.config.setSettingsGroupExpanded(storageKey: "directories_settings_groups_expanded", groupKey: "ignore_directories", expanded: value)
+        }
+    }
+
+    private func setAllGroupsExpanded(_ expanded: Bool) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            rootExpanded = expanded
+            scanningExpanded = expanded
+            depthExpanded = expanded
+            filesExpanded = expanded
+            ignoreExpanded = expanded
         }
     }
 

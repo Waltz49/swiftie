@@ -6,6 +6,8 @@ struct SlideshowPresetEditor: View {
     let title: String
     let configKey: String
     let presetKey: String
+    let stateKey: String
+    @Binding var isExpanded: Bool
 
     @State private var name = ""
     @State private var rate = 3500
@@ -17,7 +19,7 @@ struct SlideshowPresetEditor: View {
     @State private var persistTask: Task<Void, Never>?
 
     var body: some View {
-        SettingsSection(title: title) {
+        CollapsibleSettingsSection(title: title, stateKey: stateKey, isExpanded: $isExpanded) {
             TextField("Name", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 240)
