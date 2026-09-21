@@ -225,6 +225,9 @@ enum SelectionService {
             fileData: appState.fileData,
             filterPattern: appState.filterSettings.filterPattern
         )
+        if appState.fileData.currentViewMode == .list {
+            appState.returnToListViewAfterBrowse = true
+        }
         appState.fileData.setViewMode(.browse)
     }
 

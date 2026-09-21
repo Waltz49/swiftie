@@ -646,6 +646,8 @@ final class AppConfig {
             "slideshow2_high_quality_scaling": false,
             "slideshow3_speed": 1,
             "list_view_row_height": 48,
+            "list_view_column_order": "thumbnail,permissions,date,size,dimensions,name",
+            "list_view_hidden_columns": "",
             "background_clip_enabled": false,
             "background_clip_gather_thumbnails": true,
             "background_clip_extract_faces": false,

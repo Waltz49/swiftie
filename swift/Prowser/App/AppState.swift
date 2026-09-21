@@ -62,6 +62,8 @@ final class AppState {
     var slideshow2ViewportSize = CGSize(width: 800, height: 600)
     var statusBarPeekActive = false
     var browseReturnThumbnailState: BrowseReturnThumbnailState?
+    /// When set, closing browse returns to list view (Python `_return_to_list_view`).
+    var returnToListViewAfterBrowse = false
     var lastViewMode: ViewMode = .thumbnail
     var showFilterDialog = false
     var showConvertFormatSheet = false
@@ -355,10 +357,9 @@ final class AppState {
 
     func reverseSortOrder() {
         let mode = SortMode(rawValue: config.string(forKey: "sort_mode", default: "date")) ?? .date
-        if fileData.currentViewMode == .list {
-            fileData.setViewMode(.thumbnail)
-        }
-        guard fileData.currentViewMode == .thumbnail || fileData.currentViewMode == .browse else { return }
+        guard fileData.currentViewMode == .thumbnail
+            || fileData.currentViewMode == .browse
+            || fileData.currentViewMode == .list else { return }
         guard !fileData.displayedImages.isEmpty else { return }
 
         if mode == .random {
@@ -372,12 +373,10 @@ final class AppState {
         config.updateSetting("sort_reversed", value: reversed)
         applyCurrentSort()
         status.show("Sort order reversed")
+        refreshListViewSortHeader()
     }
 
     func applyRandomSort() {
-        if fileData.currentViewMode == .list {
-            fileData.setViewMode(.thumbnail)
-        }
         let wasRandom = config.string(forKey: "sort_mode", default: "date") == SortMode.random.rawValue
         config.updateSetting("sort_mode", value: SortMode.random.rawValue)
         applyCurrentSort()

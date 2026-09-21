@@ -1223,10 +1223,7 @@ final class KeyboardHandlerController {
 
     private func returnToThumbnails(appState: AppState) -> Bool {
         resetBrowseDoubleTap()
-        if let path = appState.fileData.currentImagePath {
-            appState.fileData.setCurrentImagePath(path)
-        }
-        appState.fileData.setViewMode(.thumbnail)
+        appState.closeBrowseView()
         return true
     }
 

@@ -15,10 +15,17 @@ extension AppState {
         refreshMenuState()
         let previous = lastViewMode
         if previous != .browse && newMode == .browse {
+            if previous == .list {
+                returnToListViewAfterBrowse = true
+            }
             prepareBrowseReturnStateIfNeeded()
         }
-        if previous == .browse && newMode == .thumbnail {
-            restoreBrowseReturnStateIfNeeded()
+        if previous == .browse && (newMode == .thumbnail || newMode == .list) {
+            if newMode == .thumbnail {
+                restoreBrowseReturnStateIfNeeded()
+            } else {
+                browseReturnThumbnailState = nil
+            }
             ensureCurrentDirectoryAlignedWithActiveImage()
             reconcileUserRequestedTreeDirectoryWithActiveImage()
             syncFileTreeToActiveImage()

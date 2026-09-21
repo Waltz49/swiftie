@@ -121,12 +121,17 @@ extension AppState {
         return config.bool(forKey: "preview_visible", default: true)
     }
 
-    /// Exit browse mode and return to thumbnail view (port of ``close_browse_view``).
+    /// Exit browse mode (port of ``close_browse_view`` / ``close_browse_view_action``).
     func closeBrowseView() {
         if let path = fileData.currentImagePath {
             fileData.setCurrentImagePath(path)
         }
-        fileData.setViewMode(.thumbnail)
+        if returnToListViewAfterBrowse {
+            returnToListViewAfterBrowse = false
+            fileData.setViewMode(.list)
+        } else {
+            fileData.setViewMode(.thumbnail)
+        }
     }
 
     /// True when at least one left sidebar pane is open.
@@ -391,10 +396,9 @@ extension AppState {
     }
 
     func applySortMode(_ mode: SortMode, reversed: Bool) {
-        if fileData.currentViewMode == .list {
-            fileData.setViewMode(.thumbnail)
-        }
-        guard fileData.currentViewMode == .thumbnail || fileData.currentViewMode == .browse else { return }
+        guard fileData.currentViewMode == .thumbnail
+            || fileData.currentViewMode == .browse
+            || fileData.currentViewMode == .list else { return }
         guard !fileData.displayedImages.isEmpty else { return }
 
         config.updateSetting("sort_mode", value: mode.rawValue)
@@ -408,6 +412,41 @@ extension AppState {
         applyCurrentSort()
         status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
         menuRefresh.refreshAll()
+        refreshListViewSortHeader()
+    }
+
+    /// List header click — port of `ListHeaderWidget.mousePressEvent` / `set_sort_mode`.
+    func applyListColumnHeaderSort(_ mode: SortMode, toggleReverse: Bool) {
+        guard fileData.currentViewMode == .list else {
+            applySortMode(mode, reversed: false)
+            return
+        }
+        guard !fileData.displayedImages.isEmpty else { return }
+        let current = SortMode(rawValue: config.string(forKey: "sort_mode", default: "date")) ?? .date
+        if toggleReverse, current == mode {
+            config.updateSetting("sort_reversed", value: !config.bool(forKey: "sort_reversed", default: false))
+        } else {
+            config.updateSetting("sort_mode", value: mode.rawValue)
+            config.updateSetting("sort_reversed", value: false)
+        }
+        if mode != .exifDate && mode != .exifYear && mode != .duplicates {
+            clearDeletedPlaceholders()
+        }
+        if mode != .duplicates {
+            duplicateSections = []
+        }
+        applyCurrentSort()
+        let reversed = config.bool(forKey: "sort_reversed", default: false)
+        status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
+        menuRefresh.refreshAll()
+        refreshListViewSortHeader()
+    }
+
+    func refreshListViewSortHeader() {
+        guard let listViewHost else { return }
+        let mode = SortMode(rawValue: config.string(forKey: "sort_mode", default: "date")) ?? .date
+        let reversed = config.bool(forKey: "sort_reversed", default: false)
+        listViewHost.updateSortIndicators(mode: mode, reversed: reversed)
     }
 
     /// Re-sort the current displayed list in place (Python `apply_current_sort`).
