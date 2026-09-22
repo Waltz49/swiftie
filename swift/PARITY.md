@@ -21,7 +21,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 
 ## View modes
 
-- [~] Thumbnail grid (`ThumbnailGridNSView` — cache-backed, selection, arrow/return keyboard nav + wrap-around + menu sync + drag-reorder → `.prsort`, browse-exit scroll restore)
+- [~] Thumbnail grid (`ThumbnailGridNSView` — cache-backed, selection, arrow/return keyboard nav + wrap-around + menu sync + drag-reorder → `.prsort`, browse-exit scroll restore; ⌘X session filter via `exclude_directories` + `ThumbnailExcludeService`)
 - [~] List view (`ImageListView` with thumbnails)
 - [~] Browse (`BrowseImageNSView` — zoom, pan, pinch, checkerboard, actual size toggle A + persist across images)
 - [~] Slideshow (multiple images — `SlideshowView`, Tools → Slideshow / S key)
@@ -30,7 +30,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 
 ## Left sidebar panes
 
-- [~] File tree (`FileTreeView` — lazy NSOutlineView, root dirs from settings)
+- [~] File tree (`FileTreeView` — lazy NSOutlineView, root dirs from settings; filtered-tree disclosure + discovery batching perf pass; expansion preserved across settings-driven reload)
 - [~] Preview (`PreviewPaneView` — click opens browse)
 - [~] Chat (`ChatPaneView` + `ChatController` via `ChatBridge`; persistence when preserve enabled)
 - [x] Jobs — N/A on left; Python jobs pane is on the right sidebar only (Swift: `RightSidebarView` / `JobQueuePanelView`)
@@ -139,22 +139,24 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [x] Image count section menu (background CLIP/CNN toggle when Core ML models installed; ●/○ idle indicator); filename/dimensions display-only
 - [x] Status bar peek-on-hover chrome behavior
 
-## Settings tabs (⌘,)
+## Settings tabs (⌘, — window title **Prowser Preferences**)
+
+Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceControls`). Path fields: `~/…` display, expand on save, shorten on blur (`SettingsPathTextField` / `SettingsPathValidation`).
 
 - [~] General (`GeneralSettingsTab`)
-- [~] Favorites (`FavoritesSettingsTab`)
-- [~] Directories (`DirectoriesSettingsTab`)
+- [~] Favorites (`FavoritesSettingsTab` — 9 slots, ~/ display, path validation)
+- [~] Directories (`DirectoriesSettingsTab` — root grid column-major sort, ignore dirs, temp files)
 - [~] File Types (`ExtensionsSettingsTab`)
-- [~] Destinations (`DestinationsSettingsTab`)
-- [~] Excludes (`ExcludesSettingsTab`)
+- [~] Destinations (`DestinationsSettingsTab` — 9 slots, ~/ display, path validation)
+- [x] Excludes (`ExcludesSettingsTab` — 9 enabled rules → `exclude_directories`; thumbnail ⌘X filter, not tree `ignore_directories`; directory ✓/✗ indicator)
 - [x] Theme (`ThemeSettingsTab` + `ThemeService` — full color editor, custom themes, browse transparency)
 - [x] Maps and Editor — `MapsEditorSettingsTab` (map app, external editor)
 - [~] Slideshow (`SlideshowSettingsTab` — core timing fields)
 - [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
-- [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden)
+- [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden; remove installed models + cache coordination)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
 - [x] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
-- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; idle CLIP/CNN indexing toggles when models installed)
+- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; face model artifacts excluded from generic cache clear when appropriate; idle CLIP/CNN indexing toggles when models installed)
 
 ## Menus — File
 
@@ -164,7 +166,7 @@ Source: `status_bar_config.py`. Sort/filter/date menus in `StatusBarMenus.swift`
 - [~] Favorites submenu (^1–9 slots)
 - [~] Back / Forward (⌘[ / ⌘])
 - [~] Move to submenu (destinations 1–9, last drop — currently under File; Python uses top-level Move/Copy menu)
-- [x] Settings… (⌘,)
+- [x] Settings… (⌘, — **Prowser Preferences** window)
 - [~] Reveal in Finder (⇧⌘R)
 - [~] Move to Trash (⌘Delete; `confirm_delete`)
 - [~] Refresh (⌘R)
@@ -249,6 +251,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 ## Menus — Tools
 
 - [x] Quick Mass Rename… (⌘⇧M)
+- [x] Exclude Thumbs from View (⌘X — thumbnail view only; visible when enabled `exclude_directories` rules; `ThumbnailExcludeService`)
 - [x] Backup Custom Sort / Restore Custom Sort
 - [~] Lock / Unlock (see Edit)
 - [x] EXIF and Dates submenu (reset dates, edit/delete user comment, delete EXIF date)
@@ -266,7 +269,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 ## Dynamic menu & shortcut infrastructure
 
-- [~] `aboutToShow` handlers refresh labels, checkmarks, enabled state (`MenuRefreshState` + dynamic SwiftUI menu buttons)
+- [~] Dynamic `aboutToShow` handlers refresh labels, checkmarks, enabled state (`MenuRefreshState` + dynamic SwiftUI menu buttons; exclude ⌘X visibility on view mode + exclude rules)
 - [ ] Window-level QAction shortcuts for focus-independent keys (Python adds actions to `main_window`)
 - [ ] Menu section headers (UI Elements, Thumbnail Control, etc. — `TextSeparator` widgets)
 - [ ] Edit menu macOS system-item stripping (`_clean_edit_menu_periodically`)
@@ -368,6 +371,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | Key | Python | Swift |
 |-----|--------|-------|
 | `theme_settings_groups_expanded`, `general_settings_groups_expanded`, `directories_settings_groups_expanded` | done | done (`CollapsibleSettingsSection`) |
+| Path field display (`~/` in UI, expanded paths in JSON) | done | done (`SettingsPathValidation`, picker helpers) |
 | `settings_dialog_size` fallback | done | partial (geometry hex only) |
 | `edit_exif_usercomment_splitter_sizes`, instructions fields | done | partial (geometry + instructions; no splitter) |
 
@@ -376,8 +380,8 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | Key | Python | Swift |
 |-----|--------|-------|
 | `root_directories`, `favorite_directories`, `move_destinations` | done | done |
-| `exclude_directories`, `ignore_directories` | done | done |
-| `image_creation_directory`, `temporary_files_directory` | done | done (settings + `AppConfig.temporaryFilesDirectory`) |
+| `exclude_directories`, `ignore_directories` | done | done (`exclude_directories` = thumbnail ⌘X rules; `ignore_directories` = scan/tree skip on Directories tab) |
+| `image_creation_directory`, `temporary_files_directory` | done | partial (temp path in Directories tab; `image_creation_directory` in JSON only — no Swift settings field; image-gen UI not ported) |
 | `ui_theme`, `*_theme_colors`, `custom_themes`, `browse_transparency_settings` | done | done |
 | `shift_cmd_depth` | done | done (`FileTreeView` ⌘⇧↩ expand) |
 
@@ -408,7 +412,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 
 | Cache | Python | Swift |
 |-------|--------|-------|
-| Thumbnail MD5 cache | done | done |
+| Thumbnail MD5 cache | done | done (load priority / restore-state pass Sep 2026) |
 | Metadata JSON cache | done | done |
 | `.prsort` custom order | done | done |
 
@@ -441,6 +445,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] ⌘1–9 destinations, ^1–^9 favorites, / help, ⌘K similar search
 - [~] ⌘+arrow multiselect, ⇧-range select, ⇧Home/End range
 - [~] Thumbnail cell size +/- / 0; list row height +/- / 0; Page Up/Down
+- [x] ⌘X exclude thumbs from view (Tools; thumbnail mode + enabled exclude rules)
 - [~] Slideshow keys (mode 1–3 partial; overlap/presets 7/8/0/9 ported for mode 1)
 - [~] F2 rename, F12 list toggle, ⌘Return tree collapse/expand
 - [~] F3 browse image history; ⇧Space browse space mode toggle
@@ -493,7 +498,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 | Search: similar, CLIP, person, duplicates, show in dir | done | Quick Person Search (⌃⌘P) |
 | Move/Copy top-level menu | partial | Folded into File → Move to |
 | Image: create/edit/expand/infill, job queue | partial | Fast-open ⇧⌥/; Check LoRAs + Downloading Models help added |
-| Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting |
+| Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting; Exclude Thumbs (⌘X) |
 | Tools: Debug | partial | Check LoRAs headless runner; full Qt probe UI stays Python |
 | Help: shortcuts, about, docs | partial | About complete; PF Keys / Hidden Gems placeholders |
 
@@ -502,6 +507,8 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 - Resize appears in thumbnail **context menu** (Swift-only; Python Edit menu only).
 - Resize resampling uses Core Graphics interpolation (Python: Pillow); filter names match, output may differ slightly.
 - Image-gen submit still delegates final dim alignment to Python `buildPayload`; Swift UI now mirrors live limit math.
+- Preferences window uses **Prowser Preferences** title; menu item remains **Settings…** (⌘,).
+- `exclude_directories` rules filter the **current** thumbnail list (session `displayed_images`); they do not remove paths from disk or from tree scans (`ignore_directories` is separate).
 
 ## Remaining gate items (manual sign-off)
 
