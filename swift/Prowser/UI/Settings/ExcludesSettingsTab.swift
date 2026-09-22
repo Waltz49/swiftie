@@ -20,8 +20,7 @@ struct ExcludesSettingsTab: View {
 
                 ForEach($entries) { entry in
                     HStack {
-                        Toggle("", isOn: entry.enabled)
-                            .labelsHidden()
+                        SettingsPreferenceSwitch(isOn: entry.enabled)
                         TextField("Path", text: entry.path)
                             .textFieldStyle(.roundedBorder)
                         Button("Choose…") {

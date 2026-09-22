@@ -48,8 +48,6 @@ enum FaceModelDownloadService {
 
         Files are stored at:
         \(installPath)
-
-        To remove them later: Settings → Caches → Clear Face, or delete the folder above.
         """
 
         let choice = StyledMessageDialog.present(

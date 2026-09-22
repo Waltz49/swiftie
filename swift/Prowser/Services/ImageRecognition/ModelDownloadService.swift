@@ -1,3 +1,4 @@
+import AppKit
 import CryptoKit
 import Foundation
 
@@ -56,7 +57,8 @@ enum ModelDownloadService {
         config: AppConfig,
         modelIDs: [String],
         purpose: String,
-        allowDownloadPrompt: Bool = true
+        allowDownloadPrompt: Bool = true,
+        parentWindow: NSWindow? = nil
     ) async throws {
         let downloadBase = config.imageRecognitionModelDownloadBaseURL()
         await ModelManifest.refreshRemoteCatalog(profile: profile, downloadBaseURL: downloadBase)
@@ -100,8 +102,6 @@ enum ModelDownloadService {
 
         Files are stored at:
         \(installPath)
-
-        To remove them later: Settings → Caches → Clear Image Rec, or delete the models folder above.
         """
 
         let choice = StyledMessageDialog.present(
@@ -114,7 +114,8 @@ enum ModelDownloadService {
                 StyledMessageDialog.Button("Download"),
             ],
             defaultButtonIndex: 1,
-            escapeButtonIndex: 0
+            escapeButtonIndex: 0,
+            parentWindow: parentWindow
         )
         guard choice == 1 else { throw ModelDownloadError.userDeclined }
 

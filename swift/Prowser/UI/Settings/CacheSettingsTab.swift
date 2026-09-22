@@ -44,18 +44,27 @@ struct CacheSettingsTab: View {
 
                 if indexingAvailable {
                     SettingsSection(title: "Background Processing") {
-                        Toggle("Enable idle search-data collection", isOn: $backgroundEnabled)
+                        SettingsPreferencePanel {
+                            SettingsPreferenceToggleRow(
+                                title: "Enable idle search-data collection",
+                                isOn: $backgroundEnabled
+                            )
                             .onChange(of: backgroundEnabled) { _, on in
                                 appState.backgroundImageRecognition.setEnabled(on)
                             }
-                        Toggle("Also gather thumbnails", isOn: $gatherThumbnails)
+                            SettingsPreferenceToggleRow(
+                                title: "Also gather thumbnails",
+                                isOn: $gatherThumbnails
+                            )
                             .disabled(!backgroundEnabled)
                             .onChange(of: gatherThumbnails) { _, on in
                                 appState.config.updateSetting("background_clip_gather_thumbnails", value: on)
                             }
+                        }
                         Text("Runs while idle; may use battery. Does not extract faces.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
                     }
                 } else {
                     Text("Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection.")

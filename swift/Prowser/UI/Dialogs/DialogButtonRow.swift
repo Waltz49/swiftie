@@ -132,6 +132,7 @@ struct DialogButtonRow<Leading: View>: View {
     /// Returns `true` when the key event was consumed.
     @MainActor
     private func handle(_ event: NSEvent) -> Bool {
+        if NSApp.modalWindow != nil { return false }
         let textFocused = (event.window?.firstResponder).map(KeyboardHandlerController.isTextEditingResponder) ?? false
         if let responder = event.window?.firstResponder, Self.isAdjustableControlResponder(responder) {
             focusedID = nil

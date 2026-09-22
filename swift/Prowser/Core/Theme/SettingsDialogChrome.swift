@@ -20,6 +20,13 @@ enum SettingsDialogChrome {
             : .black
     }
 
+    /// Primary option label in preference rows (`macPreferenceRowTitle` / dialog `text_hex`).
+    static var rowTitle: Color {
+        isDarkAppearance()
+            ? Color(hex: "#e2e2e2") ?? groupBoxTitle
+            : Color(hex: "#1a1a1a") ?? .black
+    }
+
     static var secondaryText: Color {
         isDarkAppearance()
             ? Color(hex: "#888888") ?? .gray
@@ -34,7 +41,24 @@ enum SettingsDialogChrome {
 
     static var border: Color {
         isDarkAppearance()
-            ? Color(hex: "#444444") ?? Color(white: 0.27)
-            : Color(hex: "#c0c0c0") ?? .gray
+            ? Color(hex: "#606060") ?? Color(white: 0.38)
+            : Color(hex: "#b0b0b0") ?? .gray
+    }
+
+    /// Group box title (`settings_dialog_theme.py` `header_hex`).
+    static var groupBoxTitle: Color {
+        isDarkAppearance()
+            ? Color(hex: "#f0f0f0") ?? .white
+            : Color(hex: "#1a1a1a") ?? .black
+    }
+
+    static var switchTrackOn: Color {
+        Color(hex: "#29b94d") ?? Color(red: 0.16, green: 0.73, blue: 0.30)
+    }
+
+    static var switchTrackOff: Color {
+        isDarkAppearance()
+            ? Color(hex: "#636366") ?? Color(white: 0.40)
+            : Color(hex: "#E9E9EA") ?? Color(white: 0.92)
     }
 }

@@ -17,37 +17,32 @@ struct PrefixPostfixSheet: View {
 
             Table(entries) {
                 TableColumn("T") { entry in
-                    Toggle("", isOn: binding(for: entry.id, key: .useWithText))
-                        .labelsHidden()
+                    SettingsPreferenceSwitch(isOn: binding(for: entry.id, key: .useWithText))
                         .disabled(!entry.active)
                 }
-                .width(28)
+                .width(44)
                 TableColumn("I") { entry in
-                    Toggle("", isOn: binding(for: entry.id, key: .useWithImages))
-                        .labelsHidden()
+                    SettingsPreferenceSwitch(isOn: binding(for: entry.id, key: .useWithImages))
                         .disabled(!entry.active)
                 }
-                .width(28)
+                .width(44)
                 TableColumn("<") { entry in
-                    Toggle("", isOn: binding(for: entry.id, key: .isPrefix))
-                        .labelsHidden()
+                    SettingsPreferenceSwitch(isOn: binding(for: entry.id, key: .isPrefix))
                         .disabled(!entry.active)
                 }
-                .width(28)
+                .width(44)
                 TableColumn(">") { entry in
-                    Toggle("", isOn: binding(for: entry.id, key: .isPostfix))
-                        .labelsHidden()
+                    SettingsPreferenceSwitch(isOn: binding(for: entry.id, key: .isPostfix))
                         .disabled(!entry.active)
                 }
-                .width(28)
+                .width(44)
                 TableColumn("Text") { entry in
                     Text(entry.text).lineLimit(2)
                 }
                 TableColumn("On") { entry in
-                    Toggle("", isOn: binding(for: entry.id, key: .active))
-                        .labelsHidden()
+                    SettingsPreferenceSwitch(isOn: binding(for: entry.id, key: .active))
                 }
-                .width(36)
+                .width(44)
                 TableColumn("") { entry in
                     HStack {
                         Button("Edit") { editingEntry = entry }

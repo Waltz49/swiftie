@@ -87,8 +87,9 @@ final class CollapsibleSectionHeaderButton: NSButton {
         setButtonType(.momentaryChange)
         isBordered = false
         alignment = .left
-        imagePosition = .imageLeading
-        font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        imagePosition = .noImage
+        font = NSFont.boldSystemFont(ofSize: 13)
+        contentTintColor = NSColor(SettingsDialogChrome.groupBoxTitle)
         refreshTitle()
     }
 
@@ -101,9 +102,10 @@ final class CollapsibleSectionHeaderButton: NSButton {
     override var canBecomeKeyView: Bool { isEnabled && !isHidden }
 
     private func refreshTitle() {
-        let symbol = sectionExpanded ? "chevron.down" : "chevron.right"
-        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        title = " \(sectionTitle)"
+        let prefix = sectionExpanded
+            ? SettingsCollapsibleTitlePrefix.expanded
+            : SettingsCollapsibleTitlePrefix.collapsed
+        title = "\(prefix)\(sectionTitle)"
     }
 }
 
@@ -209,26 +211,33 @@ struct CollapsibleSettingsSection<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CollapsibleSettingsSectionHeader(
-                title: title,
-                stateKey: stateKey,
-                isExpanded: isExpanded,
-                toggle: {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        isExpanded.toggle()
-                    }
-                }
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help(isExpanded ? "Press ← to collapse section" : "Press → to expand section")
-
+        Group {
             if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
+                SettingsOutlinedGroupBox {
+                    CollapsibleSettingsSectionHeader(
+                        title: title,
+                        stateKey: stateKey,
+                        isExpanded: true,
+                        toggle: { toggleExpanded() }
+                    )
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(height: 20)
+                    .padding(.horizontal, 4)
+                    .background(SettingsDialogChrome.background)
+                    .help("Press ← to collapse section")
+                } content: {
                     content()
                 }
-                .padding(.top, 8)
-                .padding(.leading, 18)
+            } else {
+                CollapsibleSettingsSectionHeader(
+                    title: title,
+                    stateKey: stateKey,
+                    isExpanded: false,
+                    toggle: { toggleExpanded() }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 24)
+                .help("Press → to expand section")
             }
         }
         .padding(.vertical, 4)
@@ -244,6 +253,12 @@ struct CollapsibleSettingsSection<Content: View>: View {
         }
         .onDisappear {
             CollapsibleSettingsSectionKeyboard.unregister(stateKey: stateKey)
+        }
+    }
+
+    private func toggleExpanded() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isExpanded.toggle()
         }
     }
 }

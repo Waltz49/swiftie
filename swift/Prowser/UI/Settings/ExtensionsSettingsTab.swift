@@ -9,24 +9,21 @@ struct ExtensionsSettingsTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("File Types").font(.title2)
-                Text("Select which extensions are recognized as images.")
-                    .foregroundStyle(.secondary)
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), alignment: .leading)], alignment: .leading) {
-                    ForEach(ThemeDefaults.knownExtensionList, id: \.self) { ext in
-                        Toggle(ext, isOn: Binding(
-                            get: { enabledExtensions.contains(ext) },
-                            set: { on in
-                                if on { enabledExtensions.insert(ext) } else { enabledExtensions.remove(ext) }
-                                persist()
-                            }
-                        ))
+                SettingsOutlinedGroupBox(title: { settingsOutlinedGroupBoxTitle("Image File Extensions") }) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Select which file extensions should be recognized as image files.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(SettingsDialogChrome.secondaryText)
+                            .padding(.horizontal, 8)
+
+                        extensionToggleGrid
                     }
                 }
 
-                Text("Only enable extensions you need; large lists can affect performance.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("Adding many extensions may affect performance. Only enable extensions you need to access.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(SettingsDialogChrome.secondaryText)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,6 +33,31 @@ struct ExtensionsSettingsTab: View {
         }
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             reloadFromConfig()
+        }
+    }
+
+    @ViewBuilder
+    private var extensionToggleGrid: some View {
+        let extensions = ThemeDefaults.knownExtensionList
+        let columns = SettingsColumnMajorGrid.columns(
+            items: extensions,
+            columnCount: SettingsColumnMajorGrid.columnCount(itemCount: extensions.count, preferredColumns: 3)
+        )
+        SettingsPreferenceCompactToggleColumnGrid(
+            columns: columns,
+            columnRowTitles: { $0 }
+        ) { ext in
+            SettingsPreferenceCompactToggleRow(
+                title: ext,
+                tooltip: "Recognize \(ext) files as images",
+                isOn: Binding(
+                    get: { enabledExtensions.contains(ext) },
+                    set: { on in
+                        if on { enabledExtensions.insert(ext) } else { enabledExtensions.remove(ext) }
+                        persist()
+                    }
+                )
+            )
         }
     }
 

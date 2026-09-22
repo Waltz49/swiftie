@@ -93,7 +93,13 @@ struct SlideshowSettingsTab: View {
                 )
 
                 CollapsibleSettingsSection(title: "Playback", stateKey: "playback", isExpanded: $playbackExpanded) {
-                    Toggle("Back and forth", isOn: boolBinding("slideshow_back_and_forth"))
+                    SettingsPreferencePanel {
+                        SettingsPreferenceToggleRow(
+                            title: "Back and forth",
+                            tooltip: "After the last image, play backward through the set instead of wrapping.",
+                            isOn: boolBinding("slideshow_back_and_forth")
+                        )
+                    }
                 }
 
                 Text(

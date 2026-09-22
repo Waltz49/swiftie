@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Tab order matches `settings_dialog.py` `tab_widget.addTab` for ported tabs.
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
     case favorites
@@ -12,9 +13,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case theme
     case maps
     case slideshow
-    case caches
     case modelsSearch
     case faceRecognition
+    case caches
 
     var id: String { rawValue }
 
@@ -244,12 +245,11 @@ struct SettingsSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        GroupBox(title) {
+        SettingsOutlinedGroupBox(title: { settingsOutlinedGroupBoxTitle(title) }) {
             VStack(alignment: .leading, spacing: 10) {
                 content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
         }
     }
 }

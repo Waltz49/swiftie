@@ -303,7 +303,7 @@ struct ThemeSettingsTab: View {
             )
             Text("or")
                 .foregroundStyle(SettingsDialogChrome.secondaryText)
-            Toggle("Use Checkerboard", isOn: Binding(
+            SettingsPreferenceSwitch(isOn: Binding(
                 get: { useDiamonds },
                 set: { newValue in
                     appState.theme.setBrowseTransparency(themeID: editID, key: "use_diamonds", value: newValue, persist: false)
@@ -311,6 +311,8 @@ struct ThemeSettingsTab: View {
                     notifyThemeChanged()
                 }
             ))
+            Text("Use Checkerboard")
+                .foregroundStyle(SettingsDialogChrome.text)
         }
 
         HStack(spacing: 12) {

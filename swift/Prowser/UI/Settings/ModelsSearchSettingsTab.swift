@@ -107,6 +107,10 @@ struct ModelsSearchSettingsTab: View {
         }
     }
 
+    private static var preferencesWindow: NSWindow? {
+        NSApp.windows.first { $0.identifier?.rawValue == "prowser.settings" }
+    }
+
     private func loadFromConfig() {
         metric = appState.config.string(forKey: "similarity_metric", default: "cosine")
         resnetModel = appState.config.string(forKey: "resnet_model", default: "resnet18")
@@ -139,7 +143,8 @@ struct ModelsSearchSettingsTab: View {
                         profile: appState.config.profilePaths,
                         config: appState.config,
                         modelIDs: ids,
-                        purpose: "Download the selected ResNet model for image similarity search."
+                        purpose: "Download the selected ResNet model for image similarity search.",
+                        parentWindow: Self.preferencesWindow
                     )
                 }
                 if let clip {
@@ -148,7 +153,8 @@ struct ModelsSearchSettingsTab: View {
                         profile: appState.config.profilePaths,
                         config: appState.config,
                         modelIDs: ids,
-                        purpose: "Download the selected CLIP model for text search."
+                        purpose: "Download the selected CLIP model for text search.",
+                        parentWindow: Self.preferencesWindow
                     )
                     statusMessage = "CLIP model ready."
                 }

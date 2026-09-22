@@ -14,6 +14,7 @@ struct DirectoriesSettingsTab: View {
     @State private var depthExpanded = true
     @State private var filesExpanded = true
     @State private var ignoreExpanded = true
+    @FocusState private var focusedIgnoreEntryID: UUID?
 
     struct IgnoreEntry: Identifiable {
         let id = UUID()
@@ -96,14 +97,33 @@ struct DirectoriesSettingsTab: View {
                 }
 
                 CollapsibleSettingsSection(title: "Scanning Options", stateKey: "scanning_options", isExpanded: $scanningExpanded) {
-                    Toggle("Process hidden directories", isOn: boolBinding("show_hidden_directories"))
-                    Toggle("Always show directories starting with 'work'", isOn: boolBinding("always_show_work"))
-                    Toggle("Follow symlinks in tree", isOn: boolBinding("follow_symlinks"))
+                    SettingsPreferencePanel {
+                        SettingsPreferenceToggleRow(
+                            title: "Process hidden directories",
+                            subtitle: "Process hidden directories in searches and other operations.",
+                            tooltip: "Process directories starting with a period in searches and file operations.",
+                            isOn: boolBinding("show_hidden_directories")
+                        )
+                        SettingsPreferenceToggleRow(
+                            title: "Always show directories that start with 'work'",
+                            subtitle: "Show an empty directories in tree starting with 'work'.",
+                            tooltip: "Always show directories that start with 'work...' in the file tree.",
+                            isOn: boolBinding("always_show_work")
+                        )
+                        SettingsPreferenceToggleRow(
+                            title: "Follow symlinks",
+                            subtitle: "Including system volumes",
+                            tooltip: "Follow symbolic and hard links when scanning directories in the tree view.",
+                            isOn: boolBinding("follow_symlinks")
+                        )
+                    }
                 }
 
                 CollapsibleSettingsSection(title: "Directory Search Depths", stateKey: "depth", isExpanded: $depthExpanded) {
-                    depthStepper(title: "⇧⌘↩ depth", key: "shift_cmd_depth", defaultValue: 4)
-                    depthStepper(title: "Search depth", key: "search_depth", defaultValue: 4)
+                    SettingsPreferencePanel {
+                        depthStepper(title: "⇧⌘↩ depth", key: "shift_cmd_depth", defaultValue: 4)
+                        depthStepper(title: "Search depth", key: "search_depth", defaultValue: 4)
+                    }
                 }
 
                 CollapsibleSettingsSection(
@@ -129,12 +149,15 @@ struct DirectoriesSettingsTab: View {
                 CollapsibleSettingsSection(title: "Ignore Directories", stateKey: "ignore_directories", isExpanded: $ignoreExpanded) {
                     ForEach($ignoreEntries) { entry in
                         HStack {
-                            Toggle("", isOn: entry.enabled)
-                                .labelsHidden()
+                            SettingsPreferenceSwitch(isOn: entry.enabled)
                                 .onChange(of: entry.wrappedValue.enabled) { _, _ in persistIgnoreDirectories() }
                             TextField("Path", text: entry.path)
                                 .textFieldStyle(.roundedBorder)
-                                .onSubmit { persistIgnoreDirectories() }
+                                .focused($focusedIgnoreEntryID, equals: entry.id)
+                                .onSubmit {
+                                    expandIgnorePath(entryID: entry.id)
+                                    persistIgnoreDirectories()
+                                }
                             Button("Choose…") {
                                 let index = ignoreEntries.firstIndex(where: { $0.id == entry.id })
                                 guard let index else { return }
@@ -150,6 +173,11 @@ struct DirectoriesSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .onChange(of: focusedIgnoreEntryID) { previousID, newID in
+            guard let previousID, previousID != newID else { return }
+            expandIgnorePath(entryID: previousID)
+            persistIgnoreDirectories()
         }
         .onAppear { load() }
         .onChange(of: rootExpanded) { _, value in
@@ -175,30 +203,31 @@ struct DirectoriesSettingsTab: View {
             paths: filesystemRootDirectories,
             columnCount: Self.rootDirectoryGridColumnCount(itemCount: filesystemRootDirectories.count)
         )
-        HStack(alignment: .top, spacing: 12) {
-            ForEach(Array(columns.enumerated()), id: \.offset) { _, columnPaths in
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(columnPaths, id: \.self) { path in
-                        rootDirectoryToggle(path: path)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        SettingsPreferenceCompactToggleColumnGrid(
+            columns: columns,
+            columnRowTitles: { ($0 as NSString).lastPathComponent }
+        ) { path in
+            rootDirectoryToggle(path: path)
         }
     }
 
     private func rootDirectoryToggle(path: String) -> some View {
-        Toggle((path as NSString).lastPathComponent, isOn: Binding(
-            get: { rootDirectories.contains(path) },
-            set: { enabled in
-                if enabled {
-                    if !rootDirectories.contains(path) { rootDirectories.append(path) }
-                } else {
-                    rootDirectories.removeAll { $0 == path }
+        SettingsPreferenceCompactToggleRow(
+            title: (path as NSString).lastPathComponent,
+            tooltip: path,
+            expandLabel: true,
+            isOn: Binding(
+                get: { rootDirectories.contains(path) },
+                set: { enabled in
+                    if enabled {
+                        if !rootDirectories.contains(path) { rootDirectories.append(path) }
+                    } else {
+                        rootDirectories.removeAll { $0 == path }
+                    }
+                    persistRoots()
                 }
-                persistRoots()
-            }
-        ))
+            )
+        )
     }
 
     private func setAllGroupsExpanded(_ expanded: Bool) {
@@ -212,8 +241,7 @@ struct DirectoriesSettingsTab: View {
     }
 
     private func depthStepper(title: String, key: String, defaultValue: Int) -> some View {
-        HStack {
-            Text(title)
+        SettingsPreferenceFormRow(label: title) {
             Stepper(
                 value: Binding(
                     get: { appState.config.int(forKey: key, default: defaultValue) },
@@ -225,6 +253,8 @@ struct DirectoriesSettingsTab: View {
                 in: 1...10
             ) {
                 Text("\(appState.config.int(forKey: key, default: defaultValue))")
+                    .font(.system(size: 13))
+                    .foregroundStyle(SettingsDialogChrome.rowTitle)
                     .monospacedDigit()
                     .frame(width: 24)
             }
@@ -275,11 +305,21 @@ struct DirectoriesSettingsTab: View {
         settingsChanged()
     }
 
+    private func expandIgnorePath(entryID: UUID) {
+        guard let index = ignoreEntries.firstIndex(where: { $0.id == entryID }) else { return }
+        let trimmed = ignoreEntries[index].path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let expanded = SettingsPathValidation.expandedPath(trimmed)
+        if expanded != ignoreEntries[index].path {
+            ignoreEntries[index].path = expanded
+        }
+    }
+
     private func persistIgnoreDirectories() {
         let entries: [[String: Any]] = ignoreEntries.map { entry in
             let path = entry.path.trimmingCharacters(in: .whitespacesAndNewlines)
             return [
-                "path": path.isEmpty ? NSNull() : (path as NSString).expandingTildeInPath,
+                "path": path.isEmpty ? NSNull() : SettingsPathValidation.expandedPath(path),
                 "enabled": entry.enabled,
             ] as [String: Any]
         }
