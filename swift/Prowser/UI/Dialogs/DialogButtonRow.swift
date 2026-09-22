@@ -50,6 +50,10 @@ struct DialogButtonRow<Leading: View>: View {
     let leadingButtons: [DialogButton]
     /// Focus the default (or first) button when the dialog appears.
     var focusDefaultOnAppear = false
+    /// When false, Return does not activate the default button unless a footer button already has SwiftUI focus.
+    var allowReturnActivatesDefault = true
+    /// When false, the default button does not register SwiftUI `.defaultAction` (avoids accidental OK with content buttons).
+    var useSwiftUIDefaultActionShortcut = true
     var layout: DialogButtonRowLayout = .standard
     @ViewBuilder var leading: () -> Leading
 
@@ -60,12 +64,16 @@ struct DialogButtonRow<Leading: View>: View {
         _ buttons: [DialogButton],
         leadingButtons: [DialogButton] = [],
         focusDefaultOnAppear: Bool = false,
+        allowReturnActivatesDefault: Bool = true,
+        useSwiftUIDefaultActionShortcut: Bool = true,
         layout: DialogButtonRowLayout = .standard,
         @ViewBuilder leading: @escaping () -> Leading = { EmptyView() }
     ) {
         self.buttons = buttons
         self.leadingButtons = leadingButtons
         self.focusDefaultOnAppear = focusDefaultOnAppear
+        self.allowReturnActivatesDefault = allowReturnActivatesDefault
+        self.useSwiftUIDefaultActionShortcut = useSwiftUIDefaultActionShortcut
         self.layout = layout
         self.leading = leading
     }
@@ -102,7 +110,7 @@ struct DialogButtonRow<Leading: View>: View {
         Button(button.title) {
             button.action()
         }
-        .keyboardShortcut(button.isDefault ? .defaultAction : nil)
+        .keyboardShortcut(button.isDefault && useSwiftUIDefaultActionShortcut ? .defaultAction : nil)
         .disabled(!button.isEnabled)
         .focusable(button.isEnabled)
         .focused($focusedID, equals: button.id)
@@ -157,7 +165,10 @@ struct DialogButtonRow<Leading: View>: View {
                 button.action()
                 return true
             }
-            if event.keyCode != 49, let def = enabledButtons.first(where: \.isDefault) {
+            if event.keyCode != 49,
+               allowReturnActivatesDefault,
+               let def = enabledButtons.first(where: \.isDefault),
+               Self.shouldReturnActivateDefaultButton(event: event) {
                 def.action()
                 return true
             }
@@ -165,6 +176,17 @@ struct DialogButtonRow<Leading: View>: View {
         default:
             return false
         }
+    }
+
+    /// Return activates the default footer button only when no other control should consume it.
+    @MainActor
+    private static func shouldReturnActivateDefaultButton(event: NSEvent) -> Bool {
+        if NSApp.modalWindow != nil { return false }
+        guard let responder = event.window?.firstResponder else { return true }
+        if responder is NSButton { return false }
+        if isAdjustableControlResponder(responder) { return false }
+        if KeyboardHandlerController.isTextEditingResponder(responder) { return false }
+        return true
     }
 
     /// Sliders, steppers, pickers, etc. — arrow keys adjust values, not footer button focus.

@@ -370,6 +370,108 @@ final class AppConfig {
         return raw?.isEmpty == false ? raw! : ThemeDefaults.defaultRootDirectories
     }
 
+    /// Top-level `/` entries offered as toggles on the Directories tab (not user-added custom paths).
+    static func filesystemRootDirectoryPaths() -> [String] {
+        let excluded: Set<String> = [
+            ".nofollow", ".resolve", ".vol", ".Trashes", ".fseventsd",
+            ".Spotlight-V100", ".DocumentRevisions-V100", ".MobileBackups",
+            ".PKInstallSandboxManager-SystemSoftware", ".file",
+        ]
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: "/") else { return [] }
+        return entries
+            .filter { entry in
+                var isDir: ObjCBool = false
+                let path = "/\(entry)"
+                return FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                    && isDir.boolValue
+                    && !excluded.contains(entry)
+            }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { "/\($0)" }
+    }
+
+    static func standardizedRootDirectoryPath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.path
+    }
+
+    /// User-added custom roots first, then standard `/` toggles; drops duplicate paths (by standardized path).
+    static func orderRootDirectoriesForFileTree(_ paths: [String]) -> [String] {
+        let filesystemRoots = Set(filesystemRootDirectoryPaths().map { standardizedRootDirectoryPath($0) })
+        var seen = Set<String>()
+        var custom: [String] = []
+        var standard: [String] = []
+        for path in paths {
+            let normalized = standardizedRootDirectoryPath(path)
+            guard seen.insert(normalized).inserted else { continue }
+            if filesystemRoots.contains(normalized) {
+                standard.append(path)
+            } else {
+                custom.append(path)
+            }
+        }
+        custom.sort { comparePathsForFileTreeSort($0, $1) }
+        standard.sort { comparePathsForFileTreeSort($0, $1) }
+        return custom + standard
+    }
+
+    static func caseInsensitiveFileTreeName(_ path: String) -> String {
+        let name = (path as NSString).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+
+    static func comparePathsForFileTreeSort(_ lhs: String, _ rhs: String) -> Bool {
+        caseInsensitiveFileTreeName(lhs).localizedCaseInsensitiveCompare(caseInsensitiveFileTreeName(rhs)) == .orderedAscending
+    }
+
+    /// True for top-level `/` toggles on the Directories tab (not user-added custom paths).
+    static func isFilesystemRootTogglePath(_ path: String) -> Bool {
+        let filesystemRoots = Set(filesystemRootDirectoryPaths().map { standardizedRootDirectoryPath($0) })
+        return filesystemRoots.contains(standardizedRootDirectoryPath(path))
+    }
+
+    func rootDirectoriesForFileTree() -> [String] {
+        Self.orderRootDirectoriesForFileTree(rootDirectories())
+    }
+
+    /// Settings keys that affect file tree roots, filtering, or image discovery (Python `tree_settings_changed` + filters/extensions).
+    static let treeRelatedSettingsKeys: [String] = [
+        "root_directories",
+        "show_hidden_directories",
+        "always_show_work",
+        "follow_symlinks",
+        "ignore_directories",
+        "search_depth",
+        "shift_cmd_depth",
+        "filter_pattern",
+        "filtered_tree",
+        "image_extensions",
+    ]
+
+    /// True when any tree-related value differs between session open and current draft (call before commit).
+    func treeRelatedSettingsChangedInCurrentSession() -> Bool {
+        guard let snap = settingsSnapshot, let draft = settingsDraft else { return false }
+        for key in Self.treeRelatedSettingsKeys {
+            if !Self.settingsValuesEqual(snap[key], draft[key]) { return true }
+        }
+        return false
+    }
+
+    static func settingsValuesEqual(_ lhs: Any?, _ rhs: Any?) -> Bool {
+        if lhs == nil && rhs == nil { return true }
+        if lhs == nil || rhs == nil { return false }
+        guard let leftData = settingsValueFingerprint(lhs),
+              let rightData = settingsValueFingerprint(rhs) else {
+            return String(describing: lhs!) == String(describing: rhs!)
+        }
+        return leftData == rightData
+    }
+
+    private static func settingsValueFingerprint(_ value: Any?) -> Data? {
+        guard let value else { return Data([0x00]) }
+        guard JSONSerialization.isValidJSONObject(["v": value]) else { return nil }
+        return try? JSONSerialization.data(withJSONObject: ["v": value], options: [.sortedKeys])
+    }
+
     func favoriteDirectories() -> [String?] {
         optionalStringArray(forKey: "favorite_directories", count: 9)
     }

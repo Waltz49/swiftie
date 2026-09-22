@@ -28,12 +28,6 @@ struct DirectoriesSettingsTab: View {
     /// Top-level directories under `/` for root toggles (refreshed from the filesystem in `load()`).
     @State private var filesystemRootDirectories: [String] = []
 
-    private static let excludedRootDirectoryNames: Set<String> = [
-        ".nofollow", ".resolve", ".vol", ".Trashes", ".fseventsd",
-        ".Spotlight-V100", ".DocumentRevisions-V100", ".MobileBackups",
-        ".PKInstallSandboxManager-SystemSoftware", ".file",
-    ]
-
     /// Column count that keeps row heights as equal as possible (matches Python settings grid: 3 or 4 columns).
     private static func rootDirectoryGridColumnCount(itemCount: Int) -> Int {
         guard itemCount > 0 else { return 1 }
@@ -54,21 +48,6 @@ struct DirectoriesSettingsTab: View {
                 return index < count ? paths[index] : nil
             }
         }
-    }
-
-    private static func scanFilesystemRootDirectories() -> [String] {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: "/") else { return [] }
-        return entries
-            .filter { entry in
-                var isDir: ObjCBool = false
-                let path = "/\(entry)"
-                return fm.fileExists(atPath: path, isDirectory: &isDir)
-                    && isDir.boolValue
-                    && !excludedRootDirectoryNames.contains(entry)
-            }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            .map { "/\($0)" }
     }
 
     private var defaultTempPath: String {
@@ -253,7 +232,7 @@ struct DirectoriesSettingsTab: View {
     }
 
     private func load() {
-        filesystemRootDirectories = Self.scanFilesystemRootDirectories()
+        filesystemRootDirectories = AppConfig.filesystemRootDirectoryPaths()
         rootDirectories = appState.config.rootDirectories()
         let imageCreation = appState.config.imageCreationDirectory()
         imageCreationEnabled = imageCreation.enabled

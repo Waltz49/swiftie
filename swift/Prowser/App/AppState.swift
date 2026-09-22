@@ -116,6 +116,8 @@ final class AppState {
     var fileTreeCollapseUIToken = 0
     var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
+    /// Next `fileTreeReloadToken` bump should keep expanded rows (settings OK with tree-related changes).
+    var fileTreeReloadPreservesExpansion = false
     var fileOpsTargetPaths: [String] = []
     /// Session-only last file-tree drop destination for ⌘0 / ⌥⌘0 (Python `_last_drop_location`).
     var lastDropLocation: String?
@@ -659,6 +661,38 @@ final class AppState {
         }
     }
 
+    func removeFacialRecognitionModels() {
+        guard FaceEngine.isBridgeLinked() else {
+            status.show("Face recognition is not available in this build")
+            return
+        }
+        let installPath = config.profilePaths.dlibModelsDirectory.path
+        guard StyledMessageDialog.showConfirm(
+            title: "Remove Face Recognition Models",
+            message: """
+            Delete downloaded dlib face model files from:
+            \(installPath)
+
+            Person search and face caching will prompt to download them again.
+            """,
+            confirmTitle: "Remove",
+            defaultCancel: true
+        ) else { return }
+        do {
+            let removed = try FaceModelDownloadService.removeInstalledModels(profile: config.profilePaths)
+            if removed > 0 {
+                status.show("Removed \(removed) face model file(s)")
+            } else {
+                status.show("No face recognition models were installed")
+            }
+        } catch {
+            StyledMessageDialog.showWarning(
+                title: "Remove Face Recognition Models",
+                message: error.localizedDescription
+            )
+        }
+    }
+
     func showAboutDialog() {
         aboutDialog.show(appState: self)
     }
@@ -908,14 +942,13 @@ final class AppState {
     }
 
     func collapseFileTreeToHome() {
-        fileTreeCollapseUIToken += 1
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        loadDirectory(home, saveHistory: true)
+        collapseFileTree()
     }
 
-    /// ⌘Return — collapse tree UI and highlight home (Python `collapse_file_tree`).
+    /// ⌘Return — collapse tree, expand/select home (custom root if set), focus tree, open ~.
     func collapseFileTree() {
         fileTreeCollapseUIToken += 1
+        requestFileTreeFocus()
     }
 
     /// ⌘⇧Return — expand tree to the current directory.

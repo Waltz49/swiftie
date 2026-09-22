@@ -36,6 +36,7 @@ struct CacheSettingsTab: View {
                         cacheButton("Scrub") { scrubCaches() }
                     }
                     Button("Clear All") { clearAll() }
+                        .buttonStyle(.bordered)
                     Text("This may temporarily slow down the application as caches are rebuilt.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -117,6 +118,11 @@ struct CacheSettingsTab: View {
 
     private func cacheButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
+            .buttonStyle(.bordered)
+    }
+
+    private var preferencesWindow: NSWindow? {
+        KeyboardHandlerController.visiblePreferencesWindow()
     }
 
     private func refreshTotals() {
@@ -146,23 +152,14 @@ struct CacheSettingsTab: View {
     }
 
     private func clearImageRecognition() {
-        let alsoModels = StyledMessageDialog.present(
-            title: "Clear Image Recognition Cache",
-            message: "Remove CNN/CLIP feature caches. Also delete downloaded Core ML model files?",
-            buttons: [
-                StyledMessageDialog.Button("Cancel", role: .dismissive),
-                StyledMessageDialog.Button("Features Only"),
-                StyledMessageDialog.Button("Features + Models"),
-            ],
-            defaultButtonIndex: 1,
-            escapeButtonIndex: 0
-        )
-        guard let alsoModels, alsoModels > 0 else { return }
-        let includeModels = alsoModels == 2
+        guard confirm(
+            "Clear Image Recognition Cache",
+            "This will clear all cached CNN and CLIP feature data. Features will be recalculated as needed, which may temporarily slow similarity searches."
+        ) else { return }
         do {
             let removed = try CacheManagementService.clearImageRecognitionCache(
                 paths: appState.config.profilePaths,
-                includeDownloadedModels: includeModels
+                includeDownloadedModels: false
             )
             appState.refreshImageRecognitionForCurrentSettings()
             reloadIndexingAvailability()
@@ -181,7 +178,10 @@ struct CacheSettingsTab: View {
     }
 
     private func clearAll() {
-        guard confirm("Clear All Caches", "This will clear thumbnail, metadata, and image recognition caches (including downloaded models).") else { return }
+        guard confirm(
+            "Clear All Caches",
+            "This will clear thumbnail, metadata, and image recognition feature caches. Downloaded search models are not removed. Caches will rebuild as needed, which may temporarily slow performance."
+        ) else { return }
         let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths)
         appState.refreshImageRecognitionForCurrentSettings()
         reloadIndexingAvailability()
@@ -195,7 +195,8 @@ struct CacheSettingsTab: View {
             message: message,
             confirmTitle: "Clear",
             cancelTitle: "Cancel",
-            defaultCancel: true
+            defaultCancel: true,
+            parentWindow: preferencesWindow
         )
     }
 }

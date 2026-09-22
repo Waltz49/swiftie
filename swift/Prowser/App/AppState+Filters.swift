@@ -18,4 +18,12 @@ extension AppState {
         FileTreeFilter.invalidateCache()
         fileTreeReloadToken += 1
     }
+
+    /// After preferences OK when directories, filters, or extensions changed — rebuild tree, keep expansion/highlight.
+    func refreshFileTreeAfterSettingsCommit() {
+        filterSettings.loadFromConfig()
+        FileTreeFilter.invalidateCache()
+        fileTreeReloadPreservesExpansion = true
+        fileTreeReloadToken += 1
+    }
 }

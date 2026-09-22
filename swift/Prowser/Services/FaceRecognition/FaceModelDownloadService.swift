@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ProwserDlibBridge
 
 extension Notification.Name {
     static let faceModelsInstalled = Notification.Name("FaceModelsInstalled")
@@ -149,6 +150,23 @@ enum FaceModelDownloadService {
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw ModelDownloadError.unzipFailed }
+    }
+
+    /// Delete installed dlib `.dat` files and unload from memory (debug / reinstall testing).
+    static func removeInstalledModels(profile: ProfilePaths) throws -> Int {
+        ProwserDlibBridge.unloadModels()
+        let fm = FileManager.default
+        let dir = profile.dlibModelsDirectory
+        var removed = 0
+        for artifact in FaceModelManifest.catalog.artifacts {
+            let path = dir.appendingPathComponent(artifact.fileName)
+            if fm.fileExists(atPath: path.path) {
+                try fm.removeItem(at: path)
+                removed += 1
+            }
+        }
+        try? fm.removeItem(at: dir.appendingPathComponent("_unpack", isDirectory: true))
+        return removed
     }
 
     private static func findFile(named name: String, under root: URL) -> URL? {

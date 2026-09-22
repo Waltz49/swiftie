@@ -68,7 +68,9 @@ struct FileTreeView: NSViewRepresentable {
         context.coordinator.collapseUIIfRequested()
         context.coordinator.expandToCurrentDirectoryIfRequested()
         if context.coordinator.consumeReloadIfRequested() {
-            context.coordinator.reloadRoots()
+            let preserveExpansion = appState.fileTreeReloadPreservesExpansion
+            appState.fileTreeReloadPreservesExpansion = false
+            context.coordinator.reloadRoots(preserveExpansion: preserveExpansion)
         }
         context.coordinator.applyThemeIfNeeded()
         MainWindowKeyViewLoop.sync(appState: appState)
@@ -82,6 +84,8 @@ struct FileTreeView: NSViewRepresentable {
         private var roots: [FileTreeNode] = []
         private var excludedPaths: [String] = []
         fileprivate var rootPaths: [String] = []
+        /// Standardized paths for user-added custom roots (shown at top of the tree).
+        private var customUserRootPaths: Set<String> = []
 
         private var eventSubscriptions: EventBusSubscriptionBag?
         private var lastFocusToken = 0
@@ -356,12 +360,28 @@ struct FileTreeView: NSViewRepresentable {
 
         private func collapseAllAndExpandToHome() {
             guard let outlineView else { return }
+            let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+            let homeNorm = standardizedPath(homePath)
+            FileTreeFilter.addPriorityPath(homeNorm)
+
             expandedDirectoryPaths.removeAll()
             for root in roots {
                 collapseRecursive(node: root, outlineView: outlineView)
                 outlineView.collapseItem(root, collapseChildren: true)
             }
-            expandRootToHome(outlineView: outlineView)
+
+            if let homeNode = expandRootToHome(outlineView: outlineView) {
+                openDirectoryFromTree(node: homeNode, outlineView: outlineView)
+            } else {
+                appState.noteUserRequestedTreeDirectory(homePath)
+                appState.loadDirectory(homePath, saveHistory: true)
+                DispatchQueue.main.async { [weak self, weak outlineView] in
+                    guard let self, let outlineView else { return }
+                    self.selectDirectoryInTree(path: homePath, outlineView: outlineView, scroll: true)
+                    outlineView.window?.makeFirstResponder(outlineView)
+                    self.appState.focusFileTreeKeyboardTarget()
+                }
+            }
         }
 
         private func collapseRecursive(node: FileTreeNode, outlineView: NSOutlineView) {
@@ -371,40 +391,67 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
-        private func expandRootToHome(outlineView: NSOutlineView) {
+        @discardableResult
+        private func expandRootToHome(outlineView: NSOutlineView) -> FileTreeNode? {
             let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+            let homeNorm = standardizedPath(homePath)
             let homeName = (homePath as NSString).lastPathComponent
 
-            for root in roots {
-                outlineView.expandItem(root)
-                expandedDirectoryPaths.insert(root.path)
-                root.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-                outlineView.reloadItem(root, reloadChildren: true)
+            if let customHomeRoot = roots.first(where: { isCustomUserRoot($0) && standardizedPath($0.path) == homeNorm }) {
+                outlineView.expandItem(customHomeRoot)
+                expandedDirectoryPaths.insert(customHomeRoot.path)
+                customHomeRoot.reloadChildren(appState: appState, rootPaths: rootPaths)
+                outlineView.reloadItem(customHomeRoot, reloadChildren: true)
+                selectTreeNode(customHomeRoot, outlineView: outlineView)
+                return customHomeRoot
+            }
 
-                if root.path == "/Volumes" {
-                    root.children?.forEach { child in
-                        child.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-                        outlineView.reloadItem(child, reloadChildren: true)
-                        if child.children?.isEmpty == false {
-                            outlineView.expandItem(child)
-                            expandedDirectoryPaths.insert(child.path)
-                        }
-                    }
-                }
-
-                if root.path == "/Users",
-                   let homeNode = root.children?.first(where: { $0.name == homeName }) {
-                    homeNode.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-                    outlineView.reloadItem(homeNode, reloadChildren: true)
-                    outlineView.expandItem(homeNode)
-                    expandedDirectoryPaths.insert(homeNode.path)
-                    let row = outlineView.row(forItem: homeNode)
-                    if row >= 0 {
-                        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                        outlineView.scrollRowToVisible(row)
-                    }
+            if let volumesRoot = roots.first(where: { standardizedPath($0.path) == standardizedPath("/Volumes") }) {
+                outlineView.expandItem(volumesRoot)
+                expandedDirectoryPaths.insert(volumesRoot.path)
+                volumesRoot.reloadChildren(appState: appState, rootPaths: rootPaths)
+                outlineView.reloadItem(volumesRoot, reloadChildren: true)
+                volumesRoot.children?.forEach { child in
+                    guard isDirectoryExpandable(child) else { return }
+                    outlineView.expandItem(child)
+                    expandedDirectoryPaths.insert(child.path)
                 }
             }
+
+            guard let usersRoot = roots.first(where: { standardizedPath($0.path) == standardizedPath("/Users") }) else {
+                return nil
+            }
+            outlineView.expandItem(usersRoot)
+            expandedDirectoryPaths.insert(usersRoot.path)
+            usersRoot.reloadChildren(appState: appState, rootPaths: rootPaths)
+            outlineView.reloadItem(usersRoot, reloadChildren: true)
+            guard let homeNode = usersRoot.children?.first(where: { $0.name == homeName }) else { return nil }
+            outlineView.expandItem(homeNode)
+            expandedDirectoryPaths.insert(homeNode.path)
+            selectTreeNode(homeNode, outlineView: outlineView)
+            return homeNode
+        }
+
+        private func selectTreeNode(_ node: FileTreeNode, outlineView: NSOutlineView) {
+            let row = outlineView.row(forItem: node)
+            guard row >= 0 else { return }
+            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            outlineView.scrollRowToVisible(row)
+        }
+
+        private func isCustomUserRoot(_ node: FileTreeNode) -> Bool {
+            customUserRootPaths.contains(standardizedPath(node.path))
+        }
+
+        private func refreshCustomUserRootPaths() {
+            let filesystemRoots = Set(
+                AppConfig.filesystemRootDirectoryPaths().map { AppConfig.standardizedRootDirectoryPath($0) }
+            )
+            customUserRootPaths = Set(
+                rootPaths
+                    .map { AppConfig.standardizedRootDirectoryPath($0) }
+                    .filter { !filesystemRoots.contains($0) }
+            )
         }
 
         func startObservingSettings() {
@@ -442,7 +489,7 @@ struct FileTreeView: NSViewRepresentable {
             pathsToReload.formUnion(discoveredPaths)
             for path in pathsToReload.sorted(by: { $0.count < $1.count }) {
                 guard let node = findNodeByPath(path) else { continue }
-                node.invalidateChildren()
+                node.reloadChildren(appState: appState, rootPaths: rootPaths)
                 guard outlineView.row(forItem: node) >= 0 else { continue }
                 outlineView.reloadItem(node, reloadChildren: true)
             }
@@ -470,7 +517,7 @@ struct FileTreeView: NSViewRepresentable {
             let pathsToRefresh = Set(expandedDirectoryPaths.flatMap { ancestorPaths(of: $0) })
             for path in pathsToRefresh.sorted(by: { $0.count < $1.count }) {
                 guard let node = findNodeByPath(path) else { continue }
-                node.invalidateChildren()
+                node.reloadChildren(appState: appState, rootPaths: rootPaths)
                 guard outlineView.row(forItem: node) >= 0 else { continue }
                 outlineView.reloadItem(node, reloadChildren: true)
             }
@@ -506,25 +553,34 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
-        func reloadRoots() {
+        func reloadRoots(preserveExpansion: Bool = false) {
+            let savedExpansion = preserveExpansion ? expandedDirectoryPaths : nil
             FileTreeFilter.invalidateCache()
             excludedPaths = PathExclusions.excludedPaths(config: appState.config)
             let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
-            rootPaths = appState.config.rawSettings()["root_directories"] as? [String]
-                ?? ThemeDefaults.defaultRootDirectories
+            rootPaths = appState.config.rootDirectoriesForFileTree()
+            refreshCustomUserRootPaths()
             roots = rootPaths.map { path in
                 let expanded = (path as NSString).expandingTildeInPath
                 return FileTreeNode(path: expanded, isDirectory: true, showHidden: showHidden, excluded: excludedPaths)
             }
-            expandedDirectoryPaths.removeAll()
-            outlineView?.reloadData()
-            if let first = roots.first {
-                outlineView?.expandItem(first)
-                expandedDirectoryPaths.insert(first.path)
-            }
             lastSyncedDirectory = nil
             pendingHighlightSync?.cancel()
-            syncSelection()
+            guard let outlineView else { return }
+            if let savedExpansion {
+                expandedDirectoryPaths = savedExpansion
+                outlineView.reloadData()
+                restoreTrackedExpansion(outlineView: outlineView)
+                syncSelection(retryCount: 0, force: true)
+            } else {
+                expandedDirectoryPaths.removeAll()
+                outlineView.reloadData()
+                if let first = roots.first {
+                    outlineView.expandItem(first)
+                    expandedDirectoryPaths.insert(first.path)
+                }
+                syncSelection()
+            }
         }
 
         func syncSelection(retryCount: Int = 0, force: Bool = false) {
@@ -628,8 +684,7 @@ struct FileTreeView: NSViewRepresentable {
             if remainder.hasPrefix("/") { remainder.removeFirst() }
 
             for component in remainder.split(separator: "/").map(String.init) {
-                current.invalidateChildren()
-                current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                current.reloadChildren(appState: appState, rootPaths: rootPaths)
                 reloadItemPreservingSelection(outlineView, current, reloadChildren: true)
                 guard let next = current.children?.first(where: { $0.name == component }) else { return }
                 current = next
@@ -645,15 +700,26 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         private func rootContaining(normalized: String) -> FileTreeNode? {
-            roots.first { root in
+            var best: FileTreeNode?
+            var bestRootLength = -1
+            for root in roots {
                 let rootNorm = standardizedPath(root.path)
-                return normalized == rootNorm || normalized.hasPrefix(rootNorm + "/")
+                guard normalized == rootNorm || normalized.hasPrefix(rootNorm + "/") else { continue }
+                if rootNorm.count > bestRootLength {
+                    best = root
+                    bestRootLength = rootNorm.count
+                }
             }
+            return best
         }
 
         /// Walk path components from the containing root — O(depth), not O(tree size).
         private func findNodeByPath(_ targetPath: String) -> FileTreeNode? {
             let normalized = standardizedPath(targetPath)
+            if customUserRootPaths.contains(normalized),
+               let customRoot = roots.first(where: { standardizedPath($0.path) == normalized }) {
+                return customRoot
+            }
             guard let root = rootContaining(normalized: normalized) else { return nil }
             let rootNorm = standardizedPath(root.path)
             if rootNorm == normalized { return root }
@@ -664,10 +730,9 @@ struct FileTreeView: NSViewRepresentable {
             guard !remainder.isEmpty else { return root }
 
             for component in remainder.split(separator: "/").map(String.init) {
-                current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                current.reloadChildren(appState: appState, rootPaths: rootPaths)
                 if current.children?.contains(where: { $0.name == component }) != true {
-                    current.invalidateChildren()
-                    current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                    current.reloadChildren(appState: appState, rootPaths: rootPaths)
                     outlineView?.reloadItem(current, reloadChildren: true)
                 }
                 guard let next = current.children?.first(where: { $0.name == component }) else {
@@ -697,10 +762,9 @@ struct FileTreeView: NSViewRepresentable {
                 if remainder.hasPrefix("/") { remainder.removeFirst() }
                 var current = root
                 for component in remainder.split(separator: "/").map(String.init) {
-                    current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                    current.reloadChildren(appState: appState, rootPaths: rootPaths)
                     if current.children?.contains(where: { $0.name == component }) != true {
-                        current.invalidateChildren()
-                        current.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                        current.reloadChildren(appState: appState, rootPaths: rootPaths)
                     }
                     reloadItemPreservingSelection(outlineView, current, reloadChildren: true)
                     guard let next = current.children?.first(where: { $0.name == component }) else { return }
@@ -1272,23 +1336,46 @@ final class FileTreeNode: NSObject {
     func loadChildrenIfNeeded(appState: AppState, rootPaths: [String]) {
         guard isDirectory, !didLoad else { return }
         didLoad = true
+        children = Self.sortedDirectoryChildren(
+            at: path,
+            showHidden: showHidden,
+            excluded: excluded,
+            appState: appState,
+            rootPaths: rootPaths
+        )
+    }
+
+    /// Rescan and replace children in case-insensitive name order (used on filter/root refresh).
+    func reloadChildren(appState: AppState, rootPaths: [String]) {
+        guard isDirectory else { return }
+        didLoad = false
+        children = nil
+        loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+    }
+
+    private static func sortedDirectoryChildren(
+        at path: String,
+        showHidden: Bool,
+        excluded: [String],
+        appState: AppState,
+        rootPaths: [String]
+    ) -> [FileTreeNode] {
         let url = URL(fileURLWithPath: path)
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: url,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: showHidden ? [] : [.skipsHiddenFiles]
         ) else {
-            children = []
-            return
+            return []
         }
         let normalizedRoots = rootPaths.map {
             URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL.path
         }
-        children = entries
+        return entries
             .filter { entry in
                 !PathExclusions.isExcluded(entry.path, excluded: excluded)
             }
-            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .sorted { AppConfig.comparePathsForFileTreeSort($0.path, $1.path) }
             .compactMap { entry -> FileTreeNode? in
                 let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
                 guard isDir else { return nil }

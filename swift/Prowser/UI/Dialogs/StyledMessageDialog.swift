@@ -41,7 +41,8 @@ enum StyledMessageDialog {
         defaultButtonIndex: Int? = nil,
         escapeButtonIndex: Int? = nil,
         accessoryView: NSView? = nil,
-        initialFirstResponder: NSView? = nil
+        initialFirstResponder: NSView? = nil,
+        parentWindow: NSWindow? = nil
     ) -> Int? {
         let specs = buttons.isEmpty ? [Button("OK")] : buttons
         let leftToRight = visualLeftToRightOrder(specs)
@@ -73,7 +74,7 @@ enum StyledMessageDialog {
             }
         }
 
-        controller.runModal()
+        controller.runModal(parentWindow: parentWindow)
         return controller.selectedIndex
     }
 
@@ -134,7 +135,8 @@ enum StyledMessageDialog {
         secondaryMessage: String? = nil,
         confirmTitle: String,
         cancelTitle: String = "Cancel",
-        defaultCancel: Bool = true
+        defaultCancel: Bool = true,
+        parentWindow: NSWindow? = nil
     ) -> Bool {
         let defaultIndex = defaultCancel ? 0 : 1
         let index = present(
@@ -145,7 +147,8 @@ enum StyledMessageDialog {
             icon: .warning,
             buttons: [Button(cancelTitle, role: .dismissive), Button(confirmTitle)],
             defaultButtonIndex: defaultIndex,
-            escapeButtonIndex: 0
+            escapeButtonIndex: 0,
+            parentWindow: parentWindow
         )
         return index == 1
     }
@@ -252,6 +255,7 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     let buttonsLeftToRight: [NSButton]
     let escapeButton: NSButton?
     var selectedIndex: Int?
+    private weak var sheetParent: NSWindow?
 
     init(
         title: String,
@@ -416,10 +420,18 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    func runModal() {
+    func runModal(parentWindow: NSWindow? = nil) {
         panel.center()
         NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        if let parentWindow {
+            sheetParent = parentWindow
+            parentWindow.makeKeyAndOrderFront(nil)
+            parentWindow.beginSheet(panel) { [weak self] _ in
+                self?.sheetParent = nil
+            }
+        } else {
+            panel.makeKeyAndOrderFront(nil)
+        }
         if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
             panel.makeFirstResponder(firstResponder)
         }
@@ -432,7 +444,12 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     }
 
     private func close() {
-        panel.orderOut(nil)
+        if let sheetParent {
+            sheetParent.endSheet(panel)
+            self.sheetParent = nil
+        } else {
+            panel.orderOut(nil)
+        }
         NSApp.stopModal()
     }
 

@@ -52,7 +52,7 @@ enum CacheManagementService {
     }
 
     static func clearAllCaches(paths: ProfilePaths) -> Int {
-        let ir = (try? clearImageRecognitionCache(paths: paths, includeDownloadedModels: true)) ?? 0
+        let ir = (try? clearImageRecognitionCache(paths: paths, includeDownloadedModels: false)) ?? 0
         return clearThumbnailCache(paths: paths)
             + removeContents(of: paths.metadataCacheDirectory)
             + ir

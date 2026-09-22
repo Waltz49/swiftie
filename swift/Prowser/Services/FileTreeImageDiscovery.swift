@@ -32,8 +32,7 @@ final class FileTreeImageDiscovery {
         let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
         let followSymlinks = appState.config.bool(forKey: "follow_symlinks", default: false)
         let rootPaths = Set(
-            (appState.config.rawSettings()["root_directories"] as? [String] ?? ThemeDefaults.defaultRootDirectories)
-                .map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL.path }
+            appState.config.rootDirectoriesForFileTree().map { AppConfig.standardizedRootDirectoryPath($0) }
         )
         let gen = generation
 

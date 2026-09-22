@@ -476,6 +476,12 @@ struct ProwserCommands: Commands {
                     Task { @MainActor in appState.toggleNumberOverlay() }
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+
+                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                    Button("Remove Facial Rec Models") {
+                        Task { @MainActor in appState.removeFacialRecognitionModels() }
+                    }
+                }
             }
 
             Divider()

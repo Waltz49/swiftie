@@ -84,7 +84,9 @@ struct SettingsWindowView: View {
                 DialogButton("Cancel", isCancel: true) { settingsCancel() },
                 DialogButton("OK", isDefault: true) { settingsOK() },
             ],
-            focusDefaultOnAppear: false
+            focusDefaultOnAppear: false,
+            allowReturnActivatesDefault: false,
+            useSwiftUIDefaultActionShortcut: false
         )
     }
 
@@ -113,7 +115,11 @@ struct SettingsWindowView: View {
 
     private func settingsOK() {
         rememberSettingsTab()
+        let refreshFileTree = appState.config.treeRelatedSettingsChangedInCurrentSession()
         appState.theme.commitSettingsOK()
+        if refreshFileTree {
+            appState.refreshFileTreeAfterSettingsCommit()
+        }
         appState.refreshImageRecognitionForCurrentSettings()
         appState.eventBus.emit(.settingsChanged)
         dismissAction = .committed
