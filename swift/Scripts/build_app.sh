@@ -131,7 +131,7 @@ Options:
   --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
   --dmg [PATH]            Also create styled LZMA (ULMO) installer DMG (default: /tmp/Prowser-swift.dmg)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
-  --fda                   After build: reset optional TCC + open FDA Settings (see fda_walkthrough.sh)
+  --fda                   After build: reset TCC + open FDA Settings (no clipboard/dialog)
   --install PATH          Copy signed .app to PATH (e.g. /Applications/swift-prowser.app) for a stable FDA target
   --nerb                  Embed profile /tmp/nerb (same as -p /tmp/nerb at launch)
   -h, --help              Show this help
@@ -324,7 +324,7 @@ echo "  Or:      $SWIFT_ROOT/Scripts/build_app.sh --fda [--install /Applications
 echo ""
 
 if [[ "$FDA_WALKTHROUGH" -eq 1 ]]; then
-    "$SWIFT_ROOT/Scripts/fda_walkthrough.sh" --app "$OUTPUT" --reset
+    "$SWIFT_ROOT/Scripts/fda_walkthrough.sh" --app "$OUTPUT" --reset --open-only
 fi
 echo "Launch:"
 echo "  open \"$OUTPUT\""

@@ -22,6 +22,7 @@ BUNDLE_ID="com.prowser.Prowser"
 APP_PATH="${HOME}/tmp/prowser_swift.app"
 DO_RESET=0
 DO_CHECK=0
+OPEN_ONLY=0
 
 usage() {
     cat <<EOF
@@ -32,6 +33,7 @@ Options:
   --reset       Run: tccutil reset SystemPolicyAllFiles $BUNDLE_ID
                 (clears old FDA for this bundle id; you must re-add the app)
   --check       Best-effort check via TCC.db (needs FDA on this shell; optional)
+  --open-only   Open Full Disk Access settings only (no clipboard, no dialog)
   -h, --help    Show this help
 
 After each ad-hoc rebuild, codesign identity changes — re-run this script and
@@ -51,6 +53,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --check)
             DO_CHECK=1
+            shift
+            ;;
+        --open-only)
+            OPEN_ONLY=1
             shift
             ;;
         -h|--help)
@@ -111,16 +117,21 @@ echo ""
 echo "Designated requirement (for PPPC / MDM only):"
 codesign -dr - "$APP_PATH" 2>/dev/null | sed 's/^/  /' || true
 
-printf '%s' "$APP_PATH" | pbcopy
-echo ""
-echo "Copied app path to clipboard."
-
 open_fda_settings() {
     if open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles" 2>/dev/null; then
         return 0
     fi
     open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 }
+
+if [[ "$OPEN_ONLY" -eq 1 ]]; then
+    open_fda_settings
+    exit 0
+fi
+
+printf '%s' "$APP_PATH" | pbcopy
+echo ""
+echo "Copied app path to clipboard."
 
 open_fda_settings
 

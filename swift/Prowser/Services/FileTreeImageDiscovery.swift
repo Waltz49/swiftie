@@ -6,57 +6,122 @@ final class FileTreeImageDiscovery {
     static let shared = FileTreeImageDiscovery()
 
     private var cache: [String: Bool] = [:]
-    private var pending: Set<String> = []
     private var generation = 0
+
+    private struct QueuedCheck {
+        let priority: Int
+        let sequence: Int
+        let path: String
+        let cacheKey: String
+        let context: CheckContext
+        let generation: Int
+    }
+
+    private struct CheckContext: Sendable {
+        let mode: String
+        let filterPattern: String
+        let maxDepth: Int
+        let extensions: [String]
+        let excludedPaths: [String]
+        let includeHidden: Bool
+        let followSymlinks: Bool
+        let enabledRootPaths: Set<String>
+    }
+
+    private var queue: [QueuedCheck] = []
+    private var queuedPriorityByKey: [String: Int] = [:]
+    private var sequence = 0
+    private var workerRunning = false
 
     func invalidate() {
         generation += 1
         cache.removeAll()
-        pending.removeAll()
+        queue.removeAll()
+        queuedPriorityByKey.removeAll()
+        // Leave `workerRunning` set so an in-flight walk stays the only worker.
+        // It drops its result on the generation check, then drains anything queued since.
     }
 
     func cachedResult(path: String, appState: AppState) -> Bool? {
         cache[cacheKey(path: path, appState: appState)]
     }
 
-    func scheduleCheck(path: String, appState: AppState, onUpdate: @escaping (String) -> Void) {
+    func scheduleCheck(
+        path: String,
+        appState: AppState,
+        priority: Int = 2,
+        onUpdate: @escaping (String, Bool) -> Void
+    ) {
         let key = cacheKey(path: path, appState: appState)
-        if cache[key] != nil || pending.contains(key) { return }
-        pending.insert(key)
+        if cache[key] != nil { return }
+        if let existing = queuedPriorityByKey[key], priority >= existing { return }
 
+        let context = makeContext(appState: appState)
+        let gen = generation
+        sequence += 1
+        let item = QueuedCheck(
+            priority: priority,
+            sequence: sequence,
+            path: path,
+            cacheKey: key,
+            context: context,
+            generation: gen
+        )
+        queuedPriorityByKey[key] = priority
+        queue.append(item)
+        pumpWorker(onUpdate: onUpdate)
+    }
+
+    private func pumpWorker(onUpdate: @escaping (String, Bool) -> Void) {
+        guard !workerRunning else { return }
+        queue.sort { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+            return lhs.sequence < rhs.sequence
+        }
+        while !queue.isEmpty {
+            let next = queue.removeFirst()
+            // A later enqueue of the same path replaced this one (Python heap stale-priority skip).
+            guard queuedPriorityByKey[next.cacheKey] == next.priority else { continue }
+            queuedPriorityByKey.removeValue(forKey: next.cacheKey)
+            workerRunning = true
+
+            let path = next.path
+            let cacheKey = next.cacheKey
+            let context = next.context
+            let gen = next.generation
+
+            Task.detached(priority: .utility) {
+                let found = Self.directoryContainsImages(at: path, context: context)
+                await MainActor.run {
+                    self.workerRunning = false
+                    if gen == self.generation, self.cache[cacheKey] == nil {
+                        self.cache[cacheKey] = found
+                        onUpdate(path, found)
+                    }
+                    self.pumpWorker(onUpdate: onUpdate)
+                }
+            }
+            return
+        }
+    }
+
+    private func makeContext(appState: AppState) -> CheckContext {
         let mode = appState.filterSettings.filteredTree
         let pattern = filterPattern(mode: mode, appState: appState)
         let maxDepth = appState.config.int(forKey: "search_depth", default: 4)
         let extensions = appState.config.imageExtensions
-        let excluded = PathExclusions.excludedPaths(config: appState.config)
-        let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
-        let followSymlinks = appState.config.bool(forKey: "follow_symlinks", default: false)
-        let rootPaths = Set(
-            appState.config.rootDirectoriesForFileTree().map { AppConfig.standardizedRootDirectoryPath($0) }
-        )
-        let gen = generation
-
-        Task.detached(priority: .utility) {
-            let found = Self.directoryContainsImages(
-                at: path,
-                extensions: extensions,
-                filterPattern: pattern,
-                maxDepth: maxDepth,
-                excludedPaths: excluded,
-                includeHidden: showHidden,
-                followSymlinks: followSymlinks,
-                enabledRootPaths: rootPaths
+        return CheckContext(
+            mode: mode,
+            filterPattern: pattern,
+            maxDepth: maxDepth,
+            extensions: extensions,
+            excludedPaths: PathExclusions.excludedPaths(config: appState.config),
+            includeHidden: appState.config.bool(forKey: "show_hidden_directories", default: false),
+            followSymlinks: appState.config.bool(forKey: "follow_symlinks", default: false),
+            enabledRootPaths: Set(
+                appState.config.rootDirectoriesForFileTree().map { AppConfig.standardizedRootDirectoryPath($0) }
             )
-            await MainActor.run {
-                guard gen == self.generation else { return }
-                self.pending.remove(key)
-                self.cache[key] = found
-                // Only refresh the tree when a folder becomes visible (was hidden pending scan).
-                if found {
-                    onUpdate(path)
-                }
-            }
-        }
+        )
     }
 
     private func cacheKey(path: String, appState: AppState) -> String {
@@ -71,63 +136,75 @@ final class FileTreeImageDiscovery {
         mode == "use_filter" ? appState.filterSettings.filterPattern : "*"
     }
 
-    nonisolated static func directoryContainsImages(
-        at path: String,
-        extensions: [String],
-        filterPattern: String,
-        maxDepth: Int,
-        excludedPaths: [String],
-        includeHidden: Bool,
-        followSymlinks: Bool,
-        enabledRootPaths: Set<String>
-    ) -> Bool {
-        let normalizedExtensions = Set(extensions.map { normalizeExtension($0) })
+    nonisolated private static func directoryContainsImages(at path: String, context: CheckContext) -> Bool {
+        if context.mode == "all" { return true }
+        let normalizedExtensions = Set(context.extensions.map { normalizeExtension($0) })
         guard !normalizedExtensions.isEmpty else { return false }
+
+        let matchPattern = context.mode == "use_filter"
+            ? DirectoryScanner.patternForMatching(context.filterPattern)
+            : "*"
 
         let root = URL(fileURLWithPath: path).standardizedFileURL
         var stack: [(URL, Int)] = [(root, 0)]
 
         while let (dirURL, depth) = stack.popLast() {
             let dirPath = dirURL.standardizedFileURL.path
-            if isExcludedPath(dirPath, excluded: excludedPaths) { continue }
-            if depth > maxDepth { continue }
+            if isExcludedPath(dirPath, excluded: context.excludedPaths) { continue }
+            if depth > context.maxDepth { continue }
+            if shouldSkipDirectoryPath(dirPath) { continue }
 
-            let options: FileManager.DirectoryEnumerationOptions = includeHidden ? [] : [.skipsHiddenFiles]
+            let options: FileManager.DirectoryEnumerationOptions = context.includeHidden ? [] : [.skipsHiddenFiles]
             guard let entries = try? FileManager.default.contentsOfDirectory(
                 at: dirURL,
                 includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey],
                 options: options
             ) else { continue }
 
+            var subdirs: [URL] = []
+            var regularFiles: [URL] = []
             for entry in entries {
                 let values = try? entry.resourceValues(forKeys: [
                     .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
                 ])
                 if values?.isSymbolicLink == true {
                     let linkPath = entry.standardizedFileURL.path
-                    if !followSymlinks, !enabledRootPaths.contains(linkPath) { continue }
+                    if !context.followSymlinks, !context.enabledRootPaths.contains(linkPath) { continue }
                 }
-
                 if values?.isRegularFile == true {
-                    let ext = normalizeExtension(entry.pathExtension)
-                    guard normalizedExtensions.contains(ext) else { continue }
-                    if !DirectoryScanner.matchesGlob(entry.lastPathComponent, pattern: filterPattern) {
+                    regularFiles.append(entry)
+                } else if values?.isDirectory == true {
+                    guard !FileTreeExcludedExtensions.shouldExcludeDirectory(named: entry.lastPathComponent) else {
                         continue
                     }
-                    if !isExcludedPath(entry.path, excluded: excludedPaths) {
-                        return true
-                    }
-                    continue
+                    subdirs.append(entry)
                 }
+            }
 
-                guard values?.isDirectory == true else { continue }
-                guard !FileTreeExcludedExtensions.shouldExcludeDirectory(named: entry.lastPathComponent) else {
-                    continue
+            for entry in regularFiles {
+                let ext = normalizeExtension(entry.pathExtension)
+                guard normalizedExtensions.contains(ext) else { continue }
+                if context.mode == "use_filter", matchPattern != "*" {
+                    if !DirectoryScanner.matchesGlob(entry.lastPathComponent, pattern: matchPattern) { continue }
                 }
-                if depth < maxDepth {
+                if !isExcludedPath(entry.path, excluded: context.excludedPaths) {
+                    return true
+                }
+            }
+
+            if depth < context.maxDepth {
+                for entry in subdirs {
                     stack.append((entry, depth + 1))
                 }
             }
+        }
+        return false
+    }
+
+    /// Port of `SKIPPED_PATTERNS` substring checks in `deep_check_has_images`.
+    nonisolated private static func shouldSkipDirectoryPath(_ path: String) -> Bool {
+        for pattern in FileTreeSkippedPathPatterns.patterns {
+            if path.contains(pattern) { return true }
         }
         return false
     }
@@ -149,3 +226,10 @@ final class FileTreeImageDiscovery {
         return false
     }
 }
+
+/// Substrings that skip deep tree walks (`thumbnails/thumbnail_constants.py` `SKIPPED_PATTERNS`).
+enum FileTreeSkippedPathPatterns {
+    static let patterns: [String] = [".app", ".framework", ".bundle", ".pkg", ".pages"]
+}
+
+
