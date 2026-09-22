@@ -23,8 +23,10 @@ struct DestinationsSettingsTab: View {
                 ForEach(0..<9, id: \.self) { index in
                     HStack {
                         Text("Slot \(index + 1)").frame(width: 56, alignment: .trailing)
-                        TextField("Path", text: pathBinding(index))
-                            .textFieldStyle(.roundedBorder)
+                        SettingsPathTextField(
+                            title: "Path",
+                            text: pathBinding(index)
+                        )
                         SettingsPathValidationIndicator(
                             state: SettingsPathValidation.validateMoveDestinationPath(destinations[index] ?? "")
                         )
@@ -40,7 +42,9 @@ struct DestinationsSettingsTab: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear { destinations = appState.config.moveDestinations() }
+        .onAppear {
+            destinations = SettingsSupport.loadOptionalPathSlots(appState.config.moveDestinations())
+        }
     }
 
     private func pathBinding(_ index: Int) -> Binding<String> {
@@ -57,7 +61,10 @@ struct DestinationsSettingsTab: View {
     }
 
     private func persist() {
-        appState.config.setOptionalStringArray("move_destinations", values: destinations)
+        appState.config.setOptionalStringArray(
+            "move_destinations",
+            values: SettingsSupport.expandedOptionalPathSlots(destinations)
+        )
         appState.config.applySettingsChange(emit: appState.eventBus)
     }
 }

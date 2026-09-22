@@ -13,8 +13,22 @@ enum SettingsPathValidation {
         (path.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
     }
 
+    /// Settings UI display form (`~/…` under the user home directory). Python `_path_to_display`.
+    static func displayPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return StatusBarFormatter.displayPath(expandedPath(trimmed))
+    }
+
+    /// After editing, normalize visible text to display form while keeping storage expanded on persist.
+    static func normalizedDisplayPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return displayPath(trimmed)
+    }
+
     static func validateMoveDestinationPath(_ path: String) -> SettingsPathValidationState {
-        directoryValidationState(path)
+        validateDirectoryPath(path)
     }
 
     static func validateFavoriteDestinationPath(
@@ -106,5 +120,44 @@ struct SettingsPathValidationIndicator: View {
             }
         }
         .frame(width: 20)
+    }
+}
+
+/// Path/filename field: shortens to `~/…` on blur and Return (Python `_path_to_display` on field exit).
+@MainActor
+struct SettingsPathTextField: View {
+    let title: String
+    @Binding var text: String
+    var prompt: Text?
+    var help: String?
+    var onCommit: (() -> Void)? = nil
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Group {
+            if let prompt {
+                TextField(title, text: $text, prompt: prompt)
+            } else {
+                TextField(title, text: $text)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .focused($isFocused)
+        .onChange(of: isFocused) { wasFocused, nowFocused in
+            if wasFocused, !nowFocused {
+                shortenOnBlur()
+            }
+        }
+        .onSubmit { shortenOnBlur() }
+        .help(help ?? title)
+    }
+
+    private func shortenOnBlur() {
+        let normalized = SettingsPathValidation.normalizedDisplayPath(text)
+        if normalized != text {
+            text = normalized
+        }
+        onCommit?()
     }
 }

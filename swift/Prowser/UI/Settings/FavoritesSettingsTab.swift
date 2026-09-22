@@ -15,8 +15,10 @@ struct FavoritesSettingsTab: View {
                 ForEach(0..<9, id: \.self) { index in
                     HStack {
                         Text("⌃\(index + 1)").frame(width: 28, alignment: .trailing)
-                        TextField("Path", text: pathBinding(index))
-                            .textFieldStyle(.roundedBorder)
+                        SettingsPathTextField(
+                            title: "Path",
+                            text: pathBinding(index)
+                        )
                         SettingsPathValidationIndicator(
                             state: SettingsPathValidation.validateFavoriteDestinationPath(
                                 favorites[index] ?? "",
@@ -38,7 +40,9 @@ struct FavoritesSettingsTab: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear { favorites = appState.config.favoriteDirectories() }
+        .onAppear {
+            favorites = SettingsSupport.loadOptionalPathSlots(appState.config.favoriteDirectories())
+        }
     }
 
     private func pathBinding(_ index: Int) -> Binding<String> {
@@ -49,7 +53,10 @@ struct FavoritesSettingsTab: View {
     }
 
     private func persist() {
-        appState.config.setOptionalStringArray("favorite_directories", values: favorites)
+        appState.config.setOptionalStringArray(
+            "favorite_directories",
+            values: SettingsSupport.expandedOptionalPathSlots(favorites)
+        )
         appState.config.applySettingsChange(emit: appState.eventBus)
     }
 }

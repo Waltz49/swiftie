@@ -229,6 +229,7 @@ final class AppState {
         // Lifetime bus subscriptions (app teardown ends the process).
         _ = eventBus.subscribe(.settingsChanged) { [weak self] _ in
             guard let self else { return }
+            self.menuRefresh.refreshAll()
             self.loadSidebarToolbarSettings()
             self.theme.reload()
             KeyboardInputTracer.installIfNeeded(config: self.config)
@@ -264,6 +265,7 @@ final class AppState {
         _ = eventBus.subscribe(.viewModeChanged) { [weak self] _ in
             self?.browseImageHistory.onViewModeChanged()
             self?.persistRestoreState()
+            self?.menuRefresh.refreshAll()
         }
 
         startNamedPipeListener()
@@ -468,6 +470,10 @@ final class AppState {
 
     func refreshMenuState() {
         menuRefresh.refreshAll()
+    }
+
+    func excludeFilesFromView() {
+        ThumbnailExcludeService.excludeFilesFromView(appState: self)
     }
 
     func isFormattedListMode() -> Bool {

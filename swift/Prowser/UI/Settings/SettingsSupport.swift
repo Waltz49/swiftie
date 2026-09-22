@@ -133,8 +133,12 @@ enum SettingsSupport {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
+        let current = SettingsPathValidation.expandedPath(binding.wrappedValue ?? "")
+        if !current.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        binding.wrappedValue = url.path
+        binding.wrappedValue = SettingsPathValidation.displayPath(url.path)
     }
 
     static func pickDirectory(into binding: Binding<String>) {
@@ -143,8 +147,15 @@ enum SettingsSupport {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
+        let current = SettingsPathValidation.expandedPath(binding.wrappedValue)
+        if !current.isEmpty {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: current, isDirectory: &isDir), isDir.boolValue {
+                panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true)
+            }
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        binding.wrappedValue = url.path
+        binding.wrappedValue = SettingsPathValidation.displayPath(url.path)
     }
 
     static func pickFile(into binding: Binding<String>, allowedTypes: [String] = []) {
@@ -159,8 +170,30 @@ enum SettingsSupport {
                 return .init(filenameExtension: ext)
             }
         }
+        let current = SettingsPathValidation.expandedPath(binding.wrappedValue)
+        if !current.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: current).deletingLastPathComponent()
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        binding.wrappedValue = url.path
+        binding.wrappedValue = SettingsPathValidation.displayPath(url.path)
+    }
+
+    /// Load optional path slots from config for settings text fields (display `~/…` when possible).
+    static func loadOptionalPathSlots(_ values: [String?]) -> [String?] {
+        values.map { value in
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return SettingsPathValidation.displayPath(value)
+        }
+    }
+
+    /// Persist optional path slots using expanded paths (Python `_display_to_path` on save).
+    static func expandedOptionalPathSlots(_ values: [String?]) -> [String?] {
+        values.map { value in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return SettingsPathValidation.expandedPath(trimmed)
+        }
     }
 
     static func pickApplication(into binding: Binding<String>) {
@@ -202,13 +235,13 @@ enum SettingsSupport {
         var isDir: ObjCBool = false
         let path = url.path
         if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
-            binding.wrappedValue = StatusBarFormatter.displayPath(path)
+            binding.wrappedValue = SettingsPathValidation.displayPath(path)
             return
         }
         let ext = url.pathExtension.lowercased()
         let allowed = Set(imageExtensions.map { normalizeImageExtension($0) })
         if allowed.contains(ext) {
-            binding.wrappedValue = StatusBarFormatter.displayPath(path)
+            binding.wrappedValue = SettingsPathValidation.displayPath(path)
             return
         }
         let alert = NSAlert()
@@ -232,7 +265,7 @@ struct SettingsPathRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.subheadline)
-            Text(path)
+            Text(SettingsPathValidation.displayPath(path))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

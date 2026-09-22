@@ -43,8 +43,11 @@ struct ExitScriptsSheet: View {
             Text(title).font(.headline)
             Text(subtitle).font(.caption).foregroundStyle(.secondary)
             HStack {
-                TextField("python /path/to/script.py", text: text)
-                    .textFieldStyle(.roundedBorder)
+                SettingsPathTextField(
+                    title: "python /path/to/script.py",
+                    text: text,
+                    onCommit: nil
+                )
                 Button("Browse…") {
                     SettingsSupport.pickFile(into: text, allowedTypes: ["py", "sh", ""])
                 }

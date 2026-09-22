@@ -5,8 +5,6 @@ struct DirectoriesSettingsTab: View {
     @Environment(AppState.self) private var appState
     @State private var rootDirectories: [String] = []
     @State private var newRootPath = ""
-    @State private var imageCreationEnabled = false
-    @State private var imageCreationPath = ""
     @State private var temporaryFilesPath = ""
     @State private var ignoreEntries: [IgnoreEntry] = IgnoreEntry.defaults()
     @State private var rootExpanded = true
@@ -14,7 +12,6 @@ struct DirectoriesSettingsTab: View {
     @State private var depthExpanded = true
     @State private var filesExpanded = true
     @State private var ignoreExpanded = true
-    @FocusState private var focusedIgnoreEntryID: UUID?
 
     struct IgnoreEntry: Identifiable {
         let id = UUID()
@@ -73,10 +70,9 @@ struct DirectoriesSettingsTab: View {
                     rootDirectoriesToggleGrid
 
                     HStack {
-                        TextField("Custom path", text: $newRootPath)
-                            .textFieldStyle(.roundedBorder)
+                        SettingsPathTextField(title: "Custom path", text: $newRootPath)
                         Button("Add") {
-                            let expanded = (newRootPath as NSString).expandingTildeInPath
+                            let expanded = SettingsPathValidation.expandedPath(newRootPath)
                             guard !expanded.isEmpty, !rootDirectories.contains(expanded) else { return }
                             rootDirectories.append(expanded)
                             newRootPath = ""
@@ -86,7 +82,8 @@ struct DirectoriesSettingsTab: View {
 
                     ForEach(rootDirectories.filter { !filesystemRootDirectories.contains($0) }, id: \.self) { path in
                         HStack {
-                            Text(path).lineLimit(1).truncationMode(.middle)
+                            Text(SettingsPathValidation.displayPath(path))
+                                .lineLimit(1).truncationMode(.middle)
                             Spacer()
                             Button("Remove") {
                                 rootDirectories.removeAll { $0 == path }
@@ -133,9 +130,12 @@ struct DirectoriesSettingsTab: View {
                 ) {
 
                     HStack {
-                        TextField("Temporary files", text: $temporaryFilesPath, prompt: Text("Default: \(defaultTempPath)"))
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { persistTemporaryFiles() }
+                        SettingsPathTextField(
+                            title: "Temporary files",
+                            text: $temporaryFilesPath,
+                            prompt: Text("Default: \(defaultTempPath)"),
+                            onCommit: persistTemporaryFiles
+                        )
                         Button("Choose…") {
                             SettingsSupport.pickDirectory(into: $temporaryFilesPath)
                             persistTemporaryFiles()
@@ -151,13 +151,11 @@ struct DirectoriesSettingsTab: View {
                         HStack {
                             SettingsPreferenceSwitch(isOn: entry.enabled)
                                 .onChange(of: entry.wrappedValue.enabled) { _, _ in persistIgnoreDirectories() }
-                            TextField("Path", text: entry.path)
-                                .textFieldStyle(.roundedBorder)
-                                .focused($focusedIgnoreEntryID, equals: entry.id)
-                                .onSubmit {
-                                    expandIgnorePath(entryID: entry.id)
-                                    persistIgnoreDirectories()
-                                }
+                            SettingsPathTextField(
+                                title: "Path",
+                                text: entry.path,
+                                onCommit: persistIgnoreDirectories
+                            )
                             Button("Choose…") {
                                 let index = ignoreEntries.firstIndex(where: { $0.id == entry.id })
                                 guard let index else { return }
@@ -173,11 +171,6 @@ struct DirectoriesSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-        .onChange(of: focusedIgnoreEntryID) { previousID, newID in
-            guard let previousID, previousID != newID else { return }
-            expandIgnorePath(entryID: previousID)
-            persistIgnoreDirectories()
         }
         .onAppear { load() }
         .onChange(of: rootExpanded) { _, value in
@@ -264,14 +257,16 @@ struct DirectoriesSettingsTab: View {
     private func load() {
         filesystemRootDirectories = AppConfig.filesystemRootDirectoryPaths()
         rootDirectories = appState.config.rootDirectories()
-        let imageCreation = appState.config.imageCreationDirectory()
-        imageCreationEnabled = imageCreation.enabled
-        imageCreationPath = imageCreation.path ?? ""
-        temporaryFilesPath = appState.config.temporaryFilesDirectoryRaw() ?? ""
+        if let rawTemp = appState.config.temporaryFilesDirectoryRaw(), !rawTemp.isEmpty {
+            temporaryFilesPath = SettingsPathValidation.displayPath(rawTemp)
+        } else {
+            temporaryFilesPath = ""
+        }
         ignoreEntries = appState.config.ignoreDirectories().map { dict in
-            IgnoreEntry(
+            let raw = dict["path"] as? String ?? ""
+            return IgnoreEntry(
                 enabled: dict["enabled"] as? Bool ?? false,
-                path: dict["path"] as? String ?? ""
+                path: raw.isEmpty ? "" : SettingsPathValidation.displayPath(raw)
             )
         }
         if ignoreEntries.count < 3 {
@@ -290,29 +285,12 @@ struct DirectoriesSettingsTab: View {
         settingsChanged()
     }
 
-    private func persistImageCreation() {
-        let path = imageCreationPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        appState.config.setImageCreationDirectory(
-            path: path.isEmpty ? nil : (path as NSString).expandingTildeInPath,
-            enabled: imageCreationEnabled
-        )
-        settingsChanged()
-    }
-
     private func persistTemporaryFiles() {
         let trimmed = temporaryFilesPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        appState.config.setTemporaryFilesDirectory(trimmed.isEmpty ? nil : (trimmed as NSString).expandingTildeInPath)
+        appState.config.setTemporaryFilesDirectory(
+            trimmed.isEmpty ? nil : SettingsPathValidation.expandedPath(trimmed)
+        )
         settingsChanged()
-    }
-
-    private func expandIgnorePath(entryID: UUID) {
-        guard let index = ignoreEntries.firstIndex(where: { $0.id == entryID }) else { return }
-        let trimmed = ignoreEntries[index].path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let expanded = SettingsPathValidation.expandedPath(trimmed)
-        if expanded != ignoreEntries[index].path {
-            ignoreEntries[index].path = expanded
-        }
     }
 
     private func persistIgnoreDirectories() {

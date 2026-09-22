@@ -351,6 +351,8 @@ struct ProwserCommands: Commands {
                 Task { @MainActor in appState.restoreCustomSort() }
             }
 
+            ExcludeThumbsFromViewMenuButton(appState: appState)
+
             Button("Lock Selected File") {
                 Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
             }
@@ -704,6 +706,20 @@ struct ProwserCommands: Commands {
         }
     }
 
+}
+
+@MainActor
+private struct ExcludeThumbsFromViewMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        if appState.menuRefresh.excludeFilesFromViewVisible {
+            Button("Exclude Thumbs from View") {
+                Task { @MainActor in appState.excludeFilesFromView() }
+            }
+            .keyboardShortcut("x", modifiers: .command)
+        }
+    }
 }
 
 private struct MapLocationButton: View {

@@ -15,6 +15,8 @@ final class MenuRefreshState {
     /// False while a dialog/settings/about window is key so SwiftUI Command shortcuts
     /// do not fire against the browser (Python `WindowShortcut` parity).
     var browserWindowShortcutsEnabled = true
+    /// Tools → Exclude Thumbs from View (⌘X); thumbnail view only when exclude rules are enabled.
+    var excludeFilesFromViewVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
 
     func bind(_ appState: AppState) {
@@ -37,6 +39,12 @@ final class MenuRefreshState {
             default: "move"
         ) != "none"
         refreshDeleteExifDate(appState: appState)
+        refreshExcludeFilesFromView(appState: appState)
+    }
+
+    func refreshExcludeFilesFromView(appState: AppState) {
+        excludeFilesFromViewVisible = appState.fileData.currentViewMode == .thumbnail
+            && ThumbnailExcludeService.hasEnabledExcludeRules(config: appState.config)
     }
 
     func refreshDeleteExifDate(appState: AppState) {
