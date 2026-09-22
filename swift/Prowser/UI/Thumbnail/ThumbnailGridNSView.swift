@@ -1515,16 +1515,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 orderedVisiblePaths: visiblePaths,
                 orderedNearPaths: nearPaths
             )
-            for (order, index) in orderedVisible.enumerated() {
+            for (order, path) in visiblePaths.enumerated() {
                 self.requestThumbnailLoad(
-                    for: self.imagePaths[index],
+                    for: path,
                     priority: .visible,
                     queueOrder: order
                 )
             }
-            for (order, index) in orderedNear.enumerated() {
+            for (order, path) in nearPaths.enumerated() {
                 self.requestThumbnailLoad(
-                    for: self.imagePaths[index],
+                    for: path,
                     priority: .nearVisible,
                     queueOrder: order
                 )

@@ -25,12 +25,39 @@ struct DirectoriesSettingsTab: View {
         }
     }
 
-    private let commonRoots: [String] = {
+    /// Top-level directories under `/` for root toggles (refreshed from the filesystem in `load()`).
+    @State private var filesystemRootDirectories: [String] = []
+
+    private static let excludedRootDirectoryNames: Set<String> = [
+        ".nofollow", ".resolve", ".vol", ".Trashes", ".fseventsd",
+        ".Spotlight-V100", ".DocumentRevisions-V100", ".MobileBackups",
+        ".PKInstallSandboxManager-SystemSoftware", ".file",
+    ]
+
+    /// Column count that keeps row heights as equal as possible (matches Python settings grid: 3 or 4 columns).
+    private static func rootDirectoryGridColumnCount(itemCount: Int) -> Int {
+        guard itemCount > 0 else { return 1 }
+        let rowsWith3 = (itemCount + 2) / 3
+        let rowsWith4 = (itemCount + 3) / 4
+        return rowsWith4 <= rowsWith3 ? 4 : 3
+    }
+
+    /// Distribute `paths` in column-major order (fill each column top-to-bottom, then next column).
+    private static func columnMajorColumns(paths: [String], columnCount: Int) -> [[String]] {
+        let count = paths.count
+        guard count > 0 else { return [] }
+        let cols = max(1, columnCount)
+        let rowCount = (count + cols - 1) / cols
+        return (0..<cols).map { col in
+            (0..<rowCount).compactMap { row -> String? in
+                let index = col * rowCount + row
+                return index < count ? paths[index] : nil
+            }
+        }
+    }
+
+    private static func scanFilesystemRootDirectories() -> [String] {
         let fm = FileManager.default
-        let excluded: Set<String> = [
-            ".nofollow", ".resolve", ".vol", ".Trashes", ".fseventsd", "cores",
-            ".Spotlight-V100", ".DocumentRevisions-V100", ".MobileBackups",
-        ]
         guard let entries = try? fm.contentsOfDirectory(atPath: "/") else { return [] }
         return entries
             .filter { entry in
@@ -38,11 +65,11 @@ struct DirectoriesSettingsTab: View {
                 let path = "/\(entry)"
                 return fm.fileExists(atPath: path, isDirectory: &isDir)
                     && isDir.boolValue
-                    && !excluded.contains(entry)
+                    && !excludedRootDirectoryNames.contains(entry)
             }
-            .sorted()
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
             .map { "/\($0)" }
-    }()
+    }
 
     private var defaultTempPath: String {
         ProwserTempFiles.displayPath(
@@ -63,21 +90,7 @@ struct DirectoriesSettingsTab: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading) {
-                        ForEach(commonRoots, id: \.self) { path in
-                            Toggle((path as NSString).lastPathComponent, isOn: Binding(
-                                get: { rootDirectories.contains(path) },
-                                set: { enabled in
-                                    if enabled {
-                                        if !rootDirectories.contains(path) { rootDirectories.append(path) }
-                                    } else {
-                                        rootDirectories.removeAll { $0 == path }
-                                    }
-                                    persistRoots()
-                                }
-                            ))
-                        }
-                    }
+                    rootDirectoriesToggleGrid
 
                     HStack {
                         TextField("Custom path", text: $newRootPath)
@@ -91,7 +104,7 @@ struct DirectoriesSettingsTab: View {
                         }
                     }
 
-                    ForEach(rootDirectories.filter { !commonRoots.contains($0) }, id: \.self) { path in
+                    ForEach(rootDirectories.filter { !filesystemRootDirectories.contains($0) }, id: \.self) { path in
                         HStack {
                             Text(path).lineLimit(1).truncationMode(.middle)
                             Spacer()
@@ -177,6 +190,38 @@ struct DirectoriesSettingsTab: View {
         }
     }
 
+    @ViewBuilder
+    private var rootDirectoriesToggleGrid: some View {
+        let columns = Self.columnMajorColumns(
+            paths: filesystemRootDirectories,
+            columnCount: Self.rootDirectoryGridColumnCount(itemCount: filesystemRootDirectories.count)
+        )
+        HStack(alignment: .top, spacing: 12) {
+            ForEach(Array(columns.enumerated()), id: \.offset) { _, columnPaths in
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(columnPaths, id: \.self) { path in
+                        rootDirectoryToggle(path: path)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func rootDirectoryToggle(path: String) -> some View {
+        Toggle((path as NSString).lastPathComponent, isOn: Binding(
+            get: { rootDirectories.contains(path) },
+            set: { enabled in
+                if enabled {
+                    if !rootDirectories.contains(path) { rootDirectories.append(path) }
+                } else {
+                    rootDirectories.removeAll { $0 == path }
+                }
+                persistRoots()
+            }
+        ))
+    }
+
     private func setAllGroupsExpanded(_ expanded: Bool) {
         withAnimation(.easeInOut(duration: 0.15)) {
             rootExpanded = expanded
@@ -208,6 +253,7 @@ struct DirectoriesSettingsTab: View {
     }
 
     private func load() {
+        filesystemRootDirectories = Self.scanFilesystemRootDirectories()
         rootDirectories = appState.config.rootDirectories()
         let imageCreation = appState.config.imageCreationDirectory()
         imageCreationEnabled = imageCreation.enabled
