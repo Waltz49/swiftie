@@ -299,6 +299,11 @@ enum ExifService {
         let mtime = attrs[.modificationDate] as? Date
         let atime = attrs[.creationDate] as? Date
 
+        if url.pathExtension.lowercased() == "webp" {
+            try writeUserCommentWebP(url: url, text: text, mtime: mtime, atime: atime)
+            return
+        }
+
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let uti = CGImageSourceGetType(source),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
@@ -306,9 +311,7 @@ enum ExifService {
         }
 
         var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
-        var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
-        exif[kCGImagePropertyExifUserComment] = text.isEmpty ? "" : encodeUserCommentData(text)
-        properties[kCGImagePropertyExifDictionary] = exif
+        applyUserComment(text, to: &properties)
 
         let tempURL = url.deletingLastPathComponent()
             .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
@@ -321,13 +324,110 @@ enum ExifService {
             try? FileManager.default.removeItem(at: tempURL)
             throw ExifError.writeFailed
         }
+        try replaceWrittenFile(at: url, with: tempURL, mtime: mtime, atime: atime)
+    }
+
+    private static func writeUserCommentWebP(
+        url: URL,
+        text: String,
+        mtime: Date?,
+        atime: Date?
+    ) throws {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            throw ExifError.readFailed
+        }
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        applyUserComment(text, to: &properties)
+        let exifTiff = try exifTiffBytes(fromImageProperties: properties)
+        let fileData = try Data(contentsOf: url)
+        let output = try WebPImageWriter.dataWithReplacedExifChunk(webpData: fileData, exifTiff: exifTiff)
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        try output.write(to: tempURL, options: .atomic)
+        try replaceWrittenFile(at: url, with: tempURL, mtime: mtime, atime: atime)
+    }
+
+    /// ImageIO writes `kCGImagePropertyExifUserComment` as a `String`; `Data` is dropped on finalize.
+    private static func applyUserComment(_ text: String, to properties: inout [CFString: Any]) {
+        var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        if text.isEmpty {
+            exif.removeValue(forKey: kCGImagePropertyExifUserComment)
+        } else {
+            exif[kCGImagePropertyExifUserComment] = text
+        }
+        if exif.isEmpty {
+            properties.removeValue(forKey: kCGImagePropertyExifDictionary)
+        } else {
+            properties[kCGImagePropertyExifDictionary] = exif
+        }
+    }
+
+    private static func replaceWrittenFile(at url: URL, with tempURL: URL, mtime: Date?, atime: Date?) throws {
         _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+        let path = url.path
         if let mtime {
             try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: path)
         }
         if let atime {
             try FileManager.default.setAttributes([.creationDate: atime], ofItemAtPath: path)
         }
+    }
+
+    /// Build a TIFF EXIF blob (for WebP EXIF chunk) from ImageIO property dictionaries.
+    private static func exifTiffBytes(fromImageProperties properties: [CFString: Any]) throws -> Data {
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("prowser-exif-stub-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ), let image = context.makeImage() else {
+            throw ExifError.writeFailed
+        }
+        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, "public.jpeg" as CFString, 1, nil) else {
+            throw ExifError.writeFailed
+        }
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else {
+            throw ExifError.writeFailed
+        }
+        let jpegData = try Data(contentsOf: tempURL)
+        guard let tiff = extractExifTiffFromJPEG(jpegData) else {
+            throw ExifError.writeFailed
+        }
+        return tiff
+    }
+
+    private static func extractExifTiffFromJPEG(_ jpegData: Data) -> Data? {
+        let bytes = [UInt8](jpegData)
+        guard bytes.count > 4, bytes[0] == 0xFF, bytes[1] == 0xD8 else { return nil }
+        var index = 2
+        while index + 4 < bytes.count {
+            guard bytes[index] == 0xFF else { break }
+            let marker = bytes[index + 1]
+            if marker == 0xD9 { break }
+            let segmentLength = Int(bytes[index + 2]) << 8 | Int(bytes[index + 3])
+            if marker == 0xE1, segmentLength > 8 {
+                let payloadStart = index + 4
+                let payloadEnd = payloadStart + segmentLength - 2
+                guard payloadEnd <= bytes.count else { break }
+                let segment = Data(bytes[payloadStart..<payloadEnd])
+                let exifHeader = Data("Exif\0\0".utf8)
+                if segment.count > exifHeader.count, segment.prefix(exifHeader.count) == exifHeader {
+                    return segment.subdata(in: exifHeader.count..<segment.count)
+                }
+            }
+            index += 2 + segmentLength
+        }
+        return nil
     }
 
     private static func deleteUserCommentImageIO(path: String) throws {
@@ -524,6 +624,7 @@ enum ExifService {
         text.trimmingCharacters(in: CharacterSet(charactersIn: "\0"))
     }
 
+    /// Piexif-style UserComment bytes (read/decode paths). ImageIO writes need a plain `String` instead.
     static func encodeUserCommentData(_ text: String) -> Data {
         if text.canBeConverted(to: .ascii) {
             return Data("ASCII\0\0\0".utf8) + text.data(using: .ascii)!

@@ -62,23 +62,26 @@ final class MenuRefreshState {
     }
 
     func refreshBrowserWindowShortcuts() {
-        browserWindowShortcutsEnabled = BrowserWindowIdentity.browserWindowOwnsShortcuts()
+        let enabled = BrowserWindowIdentity.browserWindowOwnsShortcuts()
+        if browserWindowShortcutsEnabled != enabled {
+            browserWindowShortcutsEnabled = enabled
+            appState?.bumpMenuCommandsRevision()
+        }
     }
 
     private func installKeyWindowObservers() {
         guard keyWindowObservers.isEmpty else { return }
         let center = NotificationCenter.default
+        let refresh: () -> Void = { [weak self] in
+            MainActor.assumeIsolated {
+                self?.refreshBrowserWindowShortcuts()
+            }
+        }
         keyWindowObservers = [
-            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.refreshBrowserWindowShortcuts()
-                }
-            },
-            center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.refreshBrowserWindowShortcuts()
-                }
-            },
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { _ in refresh() },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { _ in refresh() },
+            center.addObserver(forName: NSWindow.didBecomeMainNotification, object: nil, queue: .main) { _ in refresh() },
+            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in refresh() },
         ]
     }
 }

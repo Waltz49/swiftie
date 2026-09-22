@@ -72,6 +72,11 @@ enum WebPImageWriter {
         }
     }
 
+    /// Replace or add the WebP `EXIF` chunk without re-encoding image data (port of piexif.insert for WebP).
+    static func dataWithReplacedExifChunk(webpData: Data, exifTiff: Data) throws -> Data {
+        try muxExifChunk(into: webpData, exif: exifTiff)
+    }
+
     private static func muxExifChunk(into webpData: Data, exif: Data) throws -> Data {
         var assembled = Data()
         let muxError: WebPMuxError = webpData.withUnsafeBytes { webpBuffer in

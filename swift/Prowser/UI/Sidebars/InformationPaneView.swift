@@ -138,9 +138,7 @@ struct InformationPaneView: View {
     private func handleLink(_ action: InformationPaneLinkAction) {
         switch action {
         case .copySeed(let seed):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(seed, forType: .string)
-            appState.status.show("Copied seed to clipboard")
+            appState.copyTextToClipboard(seed)
         case .toggleSection(let key, let expandAll):
             sectionState.toggleSection(key, expandAll: expandAll)
             rebuildHTML()

@@ -112,7 +112,6 @@ final class FileTreeMenuActions: NSObject {
     @objc func copyDirectoryPath(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
         appState.fileOperations.copyPathsToClipboard([path])
-        appState.status.show("Copied path")
     }
 
     @objc func openInFinder(_ sender: NSMenuItem) {

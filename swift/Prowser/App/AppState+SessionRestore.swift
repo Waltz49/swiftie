@@ -19,6 +19,10 @@ extension AppState {
                 returnToListViewAfterBrowse = true
             }
             prepareBrowseReturnStateIfNeeded()
+            DispatchQueue.main.async { [weak self] in
+                self?.focusMainCanvas()
+                self?.menuRefresh.refreshBrowserWindowShortcuts()
+            }
         }
         if previous == .browse && (newMode == .thumbnail || newMode == .list) {
             if newMode == .thumbnail {

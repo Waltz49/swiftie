@@ -136,9 +136,7 @@ struct EditExifUserCommentSheet: View {
 
     private func copyComment(full: Bool) {
         let text = ExifService.userCommentTextForClipboard(appState.editUserCommentText, copyFull: full)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        appState.status.show("Copied to clipboard.")
+        appState.copyTextToClipboard(text)
     }
 
     private func loadThumbnail() {

@@ -444,8 +444,16 @@ final class FileOperationsService {
     }
 
     func copyPathsToClipboard(_ paths: [String]) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(paths.joined(separator: "\n"), forType: .string)
+        guard let appState, !paths.isEmpty else { return }
+        let text: String
+        if paths.count > 1 {
+            text = paths
+                .map { "[\(InformationFormatting.normalizePathForDisplay($0))]" }
+                .joined(separator: " ")
+        } else {
+            text = InformationFormatting.normalizePathForDisplay(paths[0])
+        }
+        appState.copyTextToClipboard(text)
     }
 
     func copyImageToClipboard(path explicitPath: String? = nil) {
@@ -461,8 +469,7 @@ final class FileOperationsService {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
-        let name = (path as NSString).lastPathComponent
-        appState.status.show("Copied image to clipboard: \(name)")
+        appState.copyFeedback.show()
     }
 
     func duplicateFiles(_ paths: [String]) -> [String] {

@@ -51,8 +51,18 @@ enum BrowserWindowIdentity {
         if let eventWindow = event?.window, isAuxiliaryWindow(eventWindow) {
             return false
         }
-        guard let key = NSApp.keyWindow else { return false }
-        return isMainBrowserWindow(key)
+        if let key = NSApp.keyWindow {
+            if isAuxiliaryWindow(key) { return false }
+            if isMainBrowserWindow(key) { return true }
+            return key.canBecomeKey && key.styleMask.contains(.titled) && !isAuxiliaryWindow(key)
+        }
+        // At launch `keyWindow` is often nil while the SwiftUI main window is still coming up.
+        if NSApp.windows.contains(where: { $0.isKeyWindow && isAuxiliaryWindow($0) }) {
+            return false
+        }
+        return NSApp.windows.contains { candidate in
+            !isAuxiliaryWindow(candidate) && candidate.canBecomeKey && candidate.styleMask.contains(.titled)
+        }
     }
 
     static func focusFirstTextInput(in window: NSWindow) {
@@ -85,15 +95,19 @@ final class AuxiliaryDialogWindow: NSWindow {
 
 /// Marks the SwiftUI `Window("Prowser")` scene as the browser, never a dialog.
 struct MainWindowIdentityAnchor: NSViewRepresentable {
+    @Environment(AppState.self) private var appState
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             BrowserWindowIdentity.tagMainBrowserWindow(view.window)
+            appState.noteMainBrowserWindowReady()
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         BrowserWindowIdentity.tagMainBrowserWindow(nsView.window)
+        appState.noteMainBrowserWindowReady()
     }
 }

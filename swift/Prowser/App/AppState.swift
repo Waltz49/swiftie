@@ -25,6 +25,7 @@ final class AppState {
     let fileTreeOperations = FileTreeOperationsService()
     let renamePrefixService = RenamePrefixService()
     let status = StatusNotificationService()
+    let copyFeedback = CopyFeedbackService()
     let keyboardHandler = KeyboardHandlerController()
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
     private let aboutDialog = AboutDialogController()
@@ -137,6 +138,8 @@ final class AppState {
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
     var sidebarLayoutRevision = 0
+    /// Bumped when command-menu enablement changes so SwiftUI `Commands` re-evaluate `.disabled`.
+    var menuCommandsRevision = 0
     /// True while `PreviewPaneView` is mounted (Python `preview_widget.isVisible()`).
     var previewPaneInLayout = false
     var chromeSavedLayout: ChromeSavedLayout?
@@ -330,9 +333,7 @@ final class AppState {
                 status.show("No user comment to copy")
                 return
             }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-            status.show("Copied user comment")
+            copyTextToClipboard(text)
         }
     }
 
@@ -353,9 +354,7 @@ final class AppState {
                 status.show("No prompt text to copy")
                 return
             }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(clipboard, forType: .string)
-            status.show(full ? "Copied full user comment" : "Copied prompt to clipboard")
+            copyTextToClipboard(clipboard)
         }
     }
 
@@ -470,6 +469,15 @@ final class AppState {
 
     func refreshMenuState() {
         menuRefresh.refreshAll()
+    }
+
+    /// Main window tagged and ready — refresh menu shortcut enablement (launch / restore).
+    func noteMainBrowserWindowReady() {
+        menuRefresh.refreshBrowserWindowShortcuts()
+    }
+
+    func bumpMenuCommandsRevision() {
+        menuCommandsRevision += 1
     }
 
     func excludeFilesFromView() {

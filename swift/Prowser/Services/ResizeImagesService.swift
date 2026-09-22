@@ -268,12 +268,12 @@ enum ResizeImagesService {
             var destProperties = properties
             if var exif = destProperties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
                 if let userComment, !userComment.isEmpty {
-                    exif[kCGImagePropertyExifUserComment] = ExifService.encodeUserCommentData(userComment)
+                    exif[kCGImagePropertyExifUserComment] = userComment
                 }
                 destProperties[kCGImagePropertyExifDictionary] = exif
             } else if let userComment, !userComment.isEmpty, ExifService.canWriteExif(path: path) {
                 destProperties[kCGImagePropertyExifDictionary] = [
-                    kCGImagePropertyExifUserComment: ExifService.encodeUserCommentData(userComment),
+                    kCGImagePropertyExifUserComment: userComment,
                 ]
             }
 

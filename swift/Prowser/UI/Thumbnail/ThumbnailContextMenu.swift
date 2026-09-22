@@ -267,7 +267,6 @@ private final class MenuActions: NSObject {
     @objc func copyPath(_ sender: NSMenuItem) {
         guard let appState, let paths = sender.representedObject as? [String] else { return }
         appState.fileOperations.copyPathsToClipboard(paths)
-        appState.status.show(paths.count == 1 ? "Copied path" : "Copied \(paths.count) paths")
     }
 
     @objc func copyImage(_ sender: NSMenuItem) {

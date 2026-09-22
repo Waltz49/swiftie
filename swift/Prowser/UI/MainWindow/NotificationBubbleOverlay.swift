@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// Stacked toast bubbles anchored above the status bar (Python `NotificationBubble`).
+/// Stacked toast bubbles at the window lower-left, above the status bar when visible (Python `NotificationBubble`).
 struct NotificationBubbleOverlay: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
         @Bindable var status = appState.status
         let bubbles = status.bubbles
-        let bottomPadding: CGFloat = appState.effectiveStatusBarHeight > 0 ? 30 : 12
+        let statusBarHeight = appState.effectiveStatusBarHeight
+        let bottomPadding: CGFloat = statusBarHeight > 0 ? statusBarHeight + 6 : 12
         VStack(alignment: .leading, spacing: 6) {
             ForEach(bubbles) { bubble in
                 Text(bubble.message)
@@ -28,7 +29,7 @@ struct NotificationBubbleOverlay: View {
         }
         .frame(maxWidth: 420, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        .padding(.leading, 12)
+        .padding(.leading, 5)
         .padding(.bottom, bottomPadding)
         .allowsHitTesting(false)
     }

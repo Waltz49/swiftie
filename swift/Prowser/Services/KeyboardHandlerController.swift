@@ -262,6 +262,19 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘C — copy path (Python `copy_file_path_to_clipboard`; tree uses FileTreeKeyboard).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            return copyFilePathToClipboard(appState: appState)
+        }
+
+        // ^C — copy image (Python Edit ▸ Copy Image).
+        if hasControl, !hasCommand, !hasShift, !hasOption,
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            appState.fileOperations.copyImageToClipboard()
+            return true
+        }
+
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
@@ -1517,6 +1530,20 @@ final class KeyboardHandlerController {
     /// Forward delete (117) and backspace/delete (51) both map to trash shortcuts on macOS.
     private func isDeleteKey(_ event: NSEvent) -> Bool {
         event.keyCode == 51 || event.keyCode == 117
+    }
+
+    private func copyFilePathToClipboard(appState: AppState) -> Bool {
+        let paths: [String]
+        if !appState.selection.selectedFiles.isEmpty {
+            paths = Array(appState.selection.selectedFiles)
+        } else if let current = appState.fileData.currentImagePath {
+            paths = [current]
+        } else {
+            appState.status.show("No files selected")
+            return true
+        }
+        appState.fileOperations.copyPathsToClipboard(paths)
+        return true
     }
 
 }

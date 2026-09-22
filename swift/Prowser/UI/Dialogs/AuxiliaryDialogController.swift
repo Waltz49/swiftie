@@ -70,7 +70,10 @@ final class AuxiliaryDialogController: NSObject, NSWindowDelegate {
         let closeHost: () -> Void = { [weak self] in
             self?.close(id)
         }
-        let root = content
+        let root = ZStack {
+            content
+            CopyFeedbackOverlay()
+        }
             .environment(appState)
             .environment(\.themeColors, appState.theme.colors)
             .environment(\.closeDialog, DialogCloseAction(close: closeHost))

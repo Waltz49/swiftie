@@ -26,12 +26,9 @@ struct MainWindowView: View {
                     LeftSidebarView()
                 },
                 center: {
-                    ZStack(alignment: .bottomLeading) {
-                        ContentStackView()
-                            .frame(minWidth: SidebarWidthLimits.centerMin, maxHeight: .infinity)
-                            .background(MainWindowCanvasTabStopView())
-                        NotificationBubbleOverlay()
-                    }
+                    ContentStackView()
+                        .frame(minWidth: SidebarWidthLimits.centerMin, maxHeight: .infinity)
+                        .background(MainWindowCanvasTabStopView())
                 },
                 right: {
                     RightSidebarView()
@@ -42,6 +39,12 @@ struct MainWindowView: View {
             if appState.effectiveStatusBarHeight > 0 || appState.chromeLayoutOverride != nil {
                 StatusBarView()
             }
+        }
+        .overlay(alignment: .bottomLeading) {
+            NotificationBubbleOverlay()
+        }
+        .overlay {
+            CopyFeedbackOverlay()
         }
         .navigationTitle(appState.fileData.currentDirectory.map { ($0 as NSString).lastPathComponent } ?? "Prowser")
         .preferredColorScheme(appState.theme.preferredColorScheme)

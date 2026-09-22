@@ -32,7 +32,6 @@ enum FileTreeKeyboard {
            event.charactersIgnoringModifiers?.lowercased() == "c",
            let path = coordinator.selectedDirectoryPath() {
             appState.fileOperations.copyPathsToClipboard([path])
-            appState.status.show("Copied path")
             return true
         }
 

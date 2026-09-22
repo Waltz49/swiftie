@@ -7,7 +7,8 @@ struct ProwserCommands: Commands {
 
     private var allowBrowserShortcuts: Bool {
         MainActor.assumeIsolated {
-            appState.menuRefresh.browserWindowShortcutsEnabled
+            _ = appState.menuCommandsRevision
+            return appState.menuRefresh.browserWindowShortcutsEnabled
         }
     }
 
@@ -644,7 +645,6 @@ struct ProwserCommands: Commands {
             return
         }
         appState.fileOperations.copyPathsToClipboard(paths)
-        appState.status.show(paths.count == 1 ? "Copied path" : "Copied \(paths.count) paths")
     }
 
     @MainActor

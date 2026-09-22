@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillUpdate(_ notification: Notification) {
         guard isPrimary else { return }
         scheduleMenuBarDeduplication()
+        appState?.menuRefresh.refreshBrowserWindowShortcuts()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -296,6 +297,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         WindowFullscreen.installRestoreTracking(config: appState.config)
+        scheduleStartupMenuRefresh()
+    }
+
+    /// Python `MenuManager.schedule_startup_menu_shortcut_priming` — menus may stay disabled until layout settles.
+    private func scheduleStartupMenuRefresh() {
+        DispatchQueue.main.async { [weak self] in
+            self?.appState?.menuRefresh.refreshAll()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.appState?.menuRefresh.refreshAll()
+        }
     }
 
     private static func uniqued(_ paths: [String]) -> [String] {
