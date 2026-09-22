@@ -30,6 +30,8 @@ final class FileTreeImageDiscovery {
 
     private var queue: [QueuedCheck] = []
     private var queuedPriorityByKey: [String: Int] = [:]
+    /// Paths currently walking on a detached task (same `generation` as when started).
+    private var inFlightGenerationByKey: [String: Int] = [:]
     private var sequence = 0
     private var workerRunning = false
 
@@ -54,10 +56,14 @@ final class FileTreeImageDiscovery {
     ) {
         let key = cacheKey(path: path, appState: appState)
         if cache[key] != nil { return }
-        if let existing = queuedPriorityByKey[key], priority >= existing { return }
+        let gen = generation
+        if inFlightGenerationByKey[key] == gen { return }
+        if let existing = queuedPriorityByKey[key] {
+            if priority >= existing { return }
+            queue.removeAll { $0.cacheKey == key }
+        }
 
         let context = makeContext(appState: appState)
-        let gen = generation
         sequence += 1
         let item = QueuedCheck(
             priority: priority,
@@ -89,11 +95,13 @@ final class FileTreeImageDiscovery {
             let cacheKey = next.cacheKey
             let context = next.context
             let gen = next.generation
+            inFlightGenerationByKey[cacheKey] = gen
 
             Task.detached(priority: .utility) {
                 let found = Self.directoryContainsImages(at: path, context: context)
                 await MainActor.run {
                     self.workerRunning = false
+                    self.inFlightGenerationByKey.removeValue(forKey: cacheKey)
                     if gen == self.generation, self.cache[cacheKey] == nil {
                         self.cache[cacheKey] = found
                         onUpdate(path, found)
@@ -231,5 +239,4 @@ final class FileTreeImageDiscovery {
 enum FileTreeSkippedPathPatterns {
     static let patterns: [String] = [".app", ".framework", ".bundle", ".pkg", ".pages"]
 }
-
 

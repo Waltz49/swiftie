@@ -1503,7 +1503,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
         let orderedVisible = thumbnailIndicesInVisualOrder(visibleIndices)
         let orderedNear = thumbnailIndicesInVisualOrder(nearVisible)
-        let pixelSize = thumbnailGenerationPixelSize()
 
         guard let appState else { return }
         let visiblePaths = orderedVisible.map { imagePaths[$0] }
@@ -1511,7 +1510,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let scheduleBackgroundAfterLoad = scheduleBackground
         Task { @MainActor in
             await appState.thumbnailCache.reprioritizeForViewport(
-                size: pixelSize,
                 orderedVisiblePaths: visiblePaths,
                 orderedNearPaths: nearPaths
             )

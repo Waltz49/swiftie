@@ -200,7 +200,6 @@ actor ThumbnailCache {
 
     /// Cancel off-viewport and stale-priority work, then callers queue viewport paths top-down.
     func reprioritizeForViewport(
-        size: Int,
         orderedVisiblePaths: [String],
         orderedNearPaths: [String]
     ) async {
