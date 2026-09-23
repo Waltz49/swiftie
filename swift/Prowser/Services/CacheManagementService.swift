@@ -58,9 +58,13 @@ enum CacheManagementService {
             + ir
     }
 
-    static func scrubCaches(paths: ProfilePaths) -> ScrubResult {
+    static func scrubCaches(paths: ProfilePaths, cacheKeyForPath: [String: String]) -> ScrubResult {
         let before = cacheTotals(paths: paths)
-        let thumbsRemoved = scrubThumbnailCache(paths.thumbnailCacheDirectory)
+        let thumbsRemoved = scrubThumbnailCache(
+            paths.thumbnailCacheDirectory,
+            knownImagePaths: Array(cacheKeyForPath.keys),
+            cacheKeyForPath: cacheKeyForPath
+        )
         let irRemoved = scrubImageRecognitionCache(paths: paths)
         let after = cacheTotals(paths: paths)
         return ScrubResult(
@@ -138,17 +142,29 @@ enum CacheManagementService {
         let items: [FeatureCacheScrubItem]
     }
 
-    private static func scrubThumbnailCache(_ directory: URL) -> Int {
+    /// Remove thumbnail JPEGs whose cache key no longer matches an existing image path (Python scrub orphan pass).
+    private static func scrubThumbnailCache(
+        _ directory: URL,
+        knownImagePaths: [String],
+        cacheKeyForPath: [String: String]
+    ) -> Int {
         let fm = FileManager.default
+        let validKeys = Set(
+            knownImagePaths.filter { fm.fileExists(atPath: $0) }.compactMap { cacheKeyForPath[$0] }
+        )
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return 0
         }
         var removed = 0
-        for file in files {
-            guard let name = file.lastPathComponent.components(separatedBy: "_").first else { continue }
-            let imagePath = name.hasPrefix("/") ? name : "/" + name
-            if !fm.fileExists(atPath: imagePath) {
+        for file in files where file.pathExtension.lowercased() == "jpg" {
+            let stem = file.deletingPathExtension().lastPathComponent
+            guard let underscore = stem.lastIndex(of: "_") else {
                 if (try? fm.removeItem(at: file)) != nil { removed += 1 }
+                continue
+            }
+            let baseKey = String(stem[..<underscore])
+            if !validKeys.contains(baseKey), (try? fm.removeItem(at: file)) != nil {
+                removed += 1
             }
         }
         return removed

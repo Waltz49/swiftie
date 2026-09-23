@@ -146,6 +146,7 @@ struct CacheSettingsTab: View {
     private func clearThumbnails() {
         guard confirm("Clear Thumbnail Cache", "This will clear only the thumbnail cache.") else { return }
         let removed = CacheManagementService.clearThumbnailCache(paths: appState.config.profilePaths)
+        appState.refreshThumbnailsAfterDiskCacheMutation()
         statusMessage = "Removed \(removed) cached thumbnails."
         refreshTotals()
     }
@@ -180,10 +181,23 @@ struct CacheSettingsTab: View {
     }
 
     private func scrubCaches() {
-        let result = CacheManagementService.scrubCaches(paths: appState.config.profilePaths)
-        let reclaimed = ByteCountFormatter.string(fromByteCount: result.bytesReclaimed, countStyle: .file)
-        statusMessage = "Scrubbed \(result.thumbnailsRemoved) thumbnails, \(result.imageRecognitionRemoved) image-rec entries. Reclaimed \(reclaimed)."
-        refreshTotals()
+        Task {
+            let paths = Array(
+                Set(appState.metadataCache.allCachedPaths() + appState.fileData.displayedImages)
+            )
+            var cacheKeyForPath: [String: String] = [:]
+            for path in paths {
+                cacheKeyForPath[path] = await appState.thumbnailCache.cacheKey(for: path)
+            }
+            let result = CacheManagementService.scrubCaches(
+                paths: appState.config.profilePaths,
+                cacheKeyForPath: cacheKeyForPath
+            )
+            appState.refreshThumbnailsAfterDiskCacheMutation()
+            let reclaimed = ByteCountFormatter.string(fromByteCount: result.bytesReclaimed, countStyle: .file)
+            statusMessage = "Scrubbed \(result.thumbnailsRemoved) thumbnails, \(result.imageRecognitionRemoved) image-rec entries. Reclaimed \(reclaimed)."
+            refreshTotals()
+        }
     }
 
     private func clearAll() {
@@ -192,6 +206,7 @@ struct CacheSettingsTab: View {
             "This will clear thumbnail, metadata, and image recognition feature caches. Downloaded search models are not removed. Caches will rebuild as needed, which may temporarily slow performance."
         ) else { return }
         let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths)
+        appState.refreshThumbnailsAfterDiskCacheMutation()
         appState.refreshImageRecognitionForCurrentSettings()
         reloadIndexingAvailability()
         statusMessage = "Cleared \(removed) cache entries."

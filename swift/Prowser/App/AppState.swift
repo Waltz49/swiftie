@@ -495,6 +495,22 @@ final class AppState {
         thumbnailGridHost?.endDirectoryLoad()
     }
 
+    /// After Settings clears or scrubs thumbnail disk cache (Python `cache_cleared` / `clear_cache`).
+    func refreshThumbnailsAfterDiskCacheMutation() {
+        let paths = fileData.displayedImages
+        Task {
+            await thumbnailCache.resetAfterDiskCacheMutation()
+            await MainActor.run {
+                if paths.isEmpty {
+                    thumbnailGridHost?.clearThumbnails()
+                    thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+                } else {
+                    DirectoryRefreshService.invalidateThumbnails(appState: self, paths: paths)
+                }
+            }
+        }
+    }
+
     /// Main window tagged and ready — refresh menu shortcut enablement (launch / restore).
     func noteMainBrowserWindowReady() {
         menuRefresh.refreshBrowserWindowShortcuts()

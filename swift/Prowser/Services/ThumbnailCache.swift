@@ -65,6 +65,19 @@ actor ThumbnailCache {
         diskSizesByPath.removeValue(forKey: normalized)
     }
 
+    /// Python `clear_cache("thumbnails")` — drop in-memory thumbnails and cancel queued decodes after disk cache changes.
+    func resetAfterDiskCacheMutation() async {
+        decodeQueueGeneration += 1
+        for entry in inflightGenerations.values {
+            entry.task.cancel()
+        }
+        inflightGenerations.removeAll()
+        memoryCache.removeAll()
+        memoryKeysByPath.removeAll()
+        diskSizesByPath.removeAll()
+        await decodePool.cancelWaiters(withPriorityAtMost: ThumbnailLoadPriority.visible.rawValue)
+    }
+
     func cacheKey(for imagePath: String) -> String {
         ThumbnailCacheKey.computeCacheKey(
             imagePath: imagePath,
@@ -176,7 +189,17 @@ actor ThumbnailCache {
             inflightGenerations.removeValue(forKey: memoryKey)
         }
 
-        guard enqueuedGeneration == decodeQueueGeneration else { return nil }
+        if enqueuedGeneration != decodeQueueGeneration {
+            if let generated, priority.rawValue >= ThumbnailLoadPriority.nearVisible.rawValue {
+                let image = NSImage(
+                    cgImage: generated.image,
+                    size: NSSize(width: generated.image.width, height: generated.image.height)
+                )
+                try? await storeThumbnailOffDiskIO(image, for: imagePath, size: size, memoryKey: memoryKey)
+                return generated
+            }
+            return nil
+        }
         if priority == .background, let session = backgroundLoadSession,
            session != acceptedBackgroundLoadSession {
             return nil
@@ -258,68 +281,90 @@ actor ThumbnailCache {
             return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
         }
         let url = diskURL(for: imagePath, size: size)
-        guard let image = NSImage(contentsOf: url),
-              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        guard let cgImage = loadDiskThumbnailCGImage(at: url) else {
             return nil
         }
         registerDiskSize(imagePath: imagePath, size: size)
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         storeInMemory(key: memoryKey, image: image, imagePath: imagePath, pixelSize: size)
         return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
     }
 
+    /// JPEG on disk from a prior session (Python `get_thumbnail_sync` disk path).
+    private func loadDiskThumbnailCGImage(at url: URL) -> CGImage? {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return image
+    }
+
     private func scaledDownFromLarger(imagePath: String, size: Int) -> GeneratedThumbnail? {
         let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
-        guard let keys = memoryKeysByPath[normalized] else { return nil }
-        var bestKey: String?
-        var bestSize = Int.max
-        for key in keys {
-            guard let cachedSize = parseSize(fromMemoryKey: key), cachedSize > size else { continue }
-            if cachedSize < bestSize, memoryCache[key] != nil {
-                bestSize = cachedSize
-                bestKey = key
+        if let keys = memoryKeysByPath[normalized] {
+            var bestKey: String?
+            var bestSize = Int.max
+            for key in keys {
+                guard let cachedSize = parseSize(fromMemoryKey: key), cachedSize > size else { continue }
+                if cachedSize < bestSize, memoryCache[key] != nil {
+                    bestSize = cachedSize
+                    bestKey = key
+                }
             }
-        }
-        if let bestKey, let entry = memoryCache[bestKey],
-           let scaled = scaleImage(entry.image, toMaxPixel: size),
-           let cgImage = scaled.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            let memoryKey = memoryKey(for: imagePath, size: size)
-            storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
-            return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
+            if let bestKey, let entry = memoryCache[bestKey],
+               let scaled = scaleImage(entry.image, toMaxPixel: size),
+               let cgImage = scaled.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                let memoryKey = memoryKey(for: imagePath, size: size)
+                storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
+                return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
+            }
         }
 
         let base = cacheKey(for: imagePath)
         let prefix = "\(base)_"
-        var bestDiskSize = 0
+        // Smallest on-disk JPEG that still covers `size` (avoid loading 900px when 316 exists).
+        var bestDiskSize = Int.max
         var bestDiskURL: URL?
         if let indexedSizes = diskSizesByPath[normalized], !indexedSizes.isEmpty {
-            for cachedSize in indexedSizes where cachedSize >= size && cachedSize > bestDiskSize {
+            for cachedSize in indexedSizes where cachedSize >= size && cachedSize < bestDiskSize {
                 bestDiskSize = cachedSize
                 bestDiskURL = thumbnailDirectory.appendingPathComponent(
                     ThumbnailCacheKey.diskFilename(cacheKey: base, size: cachedSize)
                 )
             }
         }
-        if bestDiskURL == nil, memoryKeysByPath[normalized] != nil {
+        if bestDiskURL == nil {
             guard let filenames = try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path) else {
                 return nil
             }
             for filename in filenames where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
                 guard let cachedSize = parseSize(fromDiskFilename: filename, prefix: prefix) else { continue }
                 registerDiskSize(imagePath: imagePath, size: cachedSize)
-                if cachedSize >= size && cachedSize > bestDiskSize {
+                if cachedSize >= size && cachedSize < bestDiskSize {
                     bestDiskSize = cachedSize
                     bestDiskURL = thumbnailDirectory.appendingPathComponent(filename)
                 }
             }
         }
+        if bestDiskURL == nil {
+            bestDiskSize = 0
+        }
         guard let url = bestDiskURL,
-              let image = NSImage(contentsOf: url),
-              let scaled = scaleImage(image, toMaxPixel: size),
+              let diskImage = loadDiskThumbnailCGImage(at: url) else {
+            return nil
+        }
+        let nsImage = NSImage(cgImage: diskImage, size: NSSize(width: diskImage.width, height: diskImage.height))
+        guard let scaled = scaleImage(nsImage, toMaxPixel: size),
               let cgImage = scaled.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
         }
         let memoryKey = memoryKey(for: imagePath, size: size)
         storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
+        if bestDiskSize != size {
+            let persistImage = scaled
+            Task { try? await self.storeThumbnailOffDiskIO(persistImage, for: imagePath, size: size, memoryKey: memoryKey) }
+        }
         return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
     }
 

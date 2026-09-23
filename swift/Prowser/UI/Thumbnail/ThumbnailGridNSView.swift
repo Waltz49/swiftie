@@ -142,7 +142,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var basenamesNeedingExtensions: Set<String> = []
     private var thumbnails: [String: NSImage] = [:]
     private var loadingPaths: Set<String> = []
-    private var thumbnailPixelSize: Int = 256
     private var isUpdatingDocumentSize = false
     private var lastLayoutViewportWidth: CGFloat = 0
     private var lastLayoutSnapshot: LayoutSnapshot?
@@ -151,6 +150,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var backgroundLoadWorkItem: DispatchWorkItem?
     private var backgroundLoadFollowUpWorkItem: DispatchWorkItem?
     private var backgroundLoadSession: UInt64 = 0
+    /// Supersedes overlapping `loadVisibleThumbnails` tasks so reprioritize is not bumped repeatedly.
+    private var visibleThumbnailLoadGeneration: UInt64 = 0
     /// True while the user is scrolling; off-screen batch loads are paused.
     private var backgroundLoadingSuspended = false
     var wrapAround = true
@@ -424,6 +425,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     func invalidateThumbnails(for paths: [String]) {
         guard !paths.isEmpty else { return }
+        invalidateThumbnailLoadingSession()
         for path in paths {
             thumbnails.removeValue(forKey: path)
             loadingPaths.remove(path)
@@ -1249,8 +1251,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         scheduleBackgroundThumbnailLoading(excluded: excluded, session: backgroundLoadSession)
     }
 
+    /// Pixel size passed to ``ThumbnailCache`` (Python ``current_thumbnail_size`` / disk cache key suffix).
     private func thumbnailGenerationPixelSize() -> Int {
-        max(thumbnailPixelSize, Int(metrics.cellWidth * 2))
+        let cell = Int(metrics.cellWidth.rounded(.up))
+        return min(
+            Int(ThumbnailLayout.maxCellSize),
+            max(ThumbnailGridLayoutService.minThumbnailSize, cell)
+        )
     }
 
     /// Python `current_thumbnail_size` when auto; config `thumbnail_cell_size` when manual.
@@ -1545,11 +1552,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let visiblePaths = orderedVisible.map { imagePaths[$0] }
         let nearPaths = orderedNear.map { imagePaths[$0] }
         let scheduleBackgroundAfterLoad = scheduleBackground
+        visibleThumbnailLoadGeneration += 1
+        let loadGeneration = visibleThumbnailLoadGeneration
         Task { @MainActor in
+            guard loadGeneration == self.visibleThumbnailLoadGeneration else { return }
             await appState.thumbnailCache.reprioritizeForViewport(
                 orderedVisiblePaths: visiblePaths,
                 orderedNearPaths: nearPaths
             )
+            guard loadGeneration == self.visibleThumbnailLoadGeneration else { return }
             for (order, path) in visiblePaths.enumerated() {
                 self.requestThumbnailLoad(
                     for: path,

@@ -19,6 +19,11 @@ final class MetadataCacheService {
 
     var entryCount: Int { cache.count }
 
+    /// Paths with persisted metadata entries (used when scrubbing thumbnail disk cache).
+    func allCachedPaths() -> [String] {
+        Array(cache.keys)
+    }
+
     init(paths: ProfilePaths) {
         cacheFile = paths.metadataCacheDirectory.appendingPathComponent("metadata_cache.json")
         load()
