@@ -108,6 +108,11 @@ struct FileTreeView: NSViewRepresentable {
         private var pendingHighlightSync: DispatchWorkItem?
         private var expandedDirectoryPaths: Set<String> = []
         fileprivate var userIsNavigatingTree = false
+        private var treeExpandInProgress = false
+        private var expandGeneration = 0
+        private var allModeExpandQueue: [(FileTreeNode, Int)] = []
+        private var allModeExpandVisited: Set<String> = []
+        private var filteredPathsToExpand: [String] = []
         private var userNavigationReset: DispatchWorkItem?
 
         init(appState: AppState) {
@@ -148,36 +153,182 @@ struct FileTreeView: NSViewRepresentable {
         func expandToCurrentDirectoryIfRequested() {
             guard appState.fileTreeExpandToken != lastExpandToken else { return }
             lastExpandToken = appState.fileTreeExpandToken
-            let depth = appState.config.int(forKey: "shift_cmd_depth", default: 4)
-            expandFromSelection(maxLevels: max(1, depth))
-            syncSelection()
+            performExpandFromKeyboardShortcut()
         }
 
-        private func expandFromSelection(maxLevels: Int) {
-            guard let outlineView, maxLevels > 0 else { return }
-            let startNode: FileTreeNode?
+        /// ⌘↩ — expand highlighted directory (Python `expand_file_tree`; batched to keep UI responsive).
+        func performExpandFromKeyboardShortcut() {
+            guard !treeExpandInProgress else { return }
+            guard let outlineView, let startNode = expandStartNode() else { return }
+
+            expandGeneration += 1
+            let generation = expandGeneration
+            allModeExpandQueue.removeAll()
+            allModeExpandVisited.removeAll()
+            filteredPathsToExpand.removeAll()
+            treeExpandInProgress = true
+            markUserNavigatingTree(extended: true)
+            appState.noteUserRequestedTreeDirectory(startNode.path)
+
+            let mode = appState.filterSettings.filteredTree
+            if mode == "all" {
+                let depth = max(1, appState.config.int(forKey: "shift_cmd_depth", default: 4))
+                allModeExpandQueue = [(startNode, depth)]
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.drainAllModeExpandQueue(generation: generation)
+                }
+                return
+            }
+
+            let scanContext = makeExpandScanContext(startDir: startNode.path)
+            Task.detached {
+                let paths = FileTreeExpandRunner.discoverPathsToExpand(context: scanContext)
+                await MainActor.run { [weak self] in
+                    self?.beginFilteredModeExpand(
+                        paths: paths,
+                        startNode: startNode,
+                        outlineView: outlineView,
+                        generation: generation
+                    )
+                }
+            }
+        }
+
+        private func expandStartNode() -> FileTreeNode? {
+            guard let outlineView else { return nil }
             if outlineView.selectedRow >= 0,
                let selected = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode {
-                startNode = selected
-            } else if let first = roots.first {
-                startNode = first
-            } else {
-                startNode = nil
+                if selected.isDirectory { return selected }
+                return findNodeByPath(
+                    URL(fileURLWithPath: selected.path).deletingLastPathComponent().standardizedFileURL.path
+                )
             }
-            guard let startNode else { return }
-            expandLevels(from: startNode, outlineView: outlineView, remaining: maxLevels)
+            return roots.first
         }
 
-        private func expandLevels(from node: FileTreeNode, outlineView: NSOutlineView, remaining: Int) {
-            guard remaining > 0, isDirectoryExpandable(node) else { return }
-            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
-            outlineView.reloadItem(node, reloadChildren: true)
-            outlineView.expandItem(node)
-            expandedDirectoryPaths.insert(node.path)
-            guard remaining > 1, let children = node.children else { return }
-            for child in children where child.isDirectory && isDirectoryExpandable(child) {
-                expandLevels(from: child, outlineView: outlineView, remaining: remaining - 1)
+        private func makeExpandScanContext(startDir: String) -> FileTreeExpandRunner.ScanContext {
+            let mode = appState.filterSettings.filteredTree
+            let pattern = appState.filterSettings.filterPattern
+            let walkMaxDepth = appState.config.int(forKey: "search_depth", default: 4)
+            let roots = appState.config.rootDirectoriesForFileTree().map { AppConfig.standardizedRootDirectoryPath($0) }
+            return FileTreeExpandRunner.ScanContext(
+                startDir: startDir,
+                walkMaxDepth: walkMaxDepth,
+                mode: mode,
+                filterPattern: pattern,
+                imageExtensions: appState.config.imageExtensions,
+                excludedPaths: PathExclusions.excludedPaths(config: appState.config),
+                includeHidden: appState.config.bool(forKey: "show_hidden_directories", default: false),
+                followSymlinks: appState.config.bool(forKey: "follow_symlinks", default: false),
+                enabledRootPaths: Set(roots)
+            )
+        }
+
+        private func beginFilteredModeExpand(
+            paths: [String],
+            startNode: FileTreeNode,
+            outlineView: NSOutlineView,
+            generation: Int
+        ) {
+            guard generation == expandGeneration else { return }
+            for path in paths {
+                FileTreeFilter.addPriorityPath(path)
             }
+            if !paths.isEmpty {
+                reloadFilterResults(preserveExpansion: true)
+            }
+            expandOutlineNode(startNode, outlineView: outlineView)
+            let startRow = outlineView.row(forItem: startNode)
+            if startRow >= 0 {
+                outlineView.scrollRowToVisible(startRow)
+            }
+            guard !paths.isEmpty else {
+                finishTreeExpand(generation: generation)
+                return
+            }
+            filteredPathsToExpand = paths
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.drainFilteredExpandQueue(generation: generation)
+            }
+        }
+
+        private func drainAllModeExpandQueue(generation: Int, batchSize: Int = 12) {
+            guard generation == expandGeneration, treeExpandInProgress else { return }
+            guard let outlineView else {
+                finishTreeExpand(generation: generation)
+                return
+            }
+
+            var processed = 0
+            while !allModeExpandQueue.isEmpty, processed < batchSize {
+                let (node, remaining) = allModeExpandQueue.removeFirst()
+                guard remaining > 0, isDirectoryExpandable(node) else { continue }
+                let normalized = standardizedPath(node.path)
+                guard allModeExpandVisited.insert(normalized).inserted else { continue }
+                expandOutlineNode(node, outlineView: outlineView)
+                if remaining > 1 {
+                    node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+                    if let children = node.children {
+                        for child in children where child.isDirectory && isDirectoryExpandable(child) {
+                            allModeExpandQueue.append((child, remaining - 1))
+                        }
+                    }
+                }
+                processed += 1
+            }
+
+            if !allModeExpandQueue.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.drainAllModeExpandQueue(generation: generation, batchSize: batchSize)
+                }
+            } else {
+                finishTreeExpand(generation: generation)
+            }
+        }
+
+        private func drainFilteredExpandQueue(generation: Int, batchSize: Int = 20) {
+            guard generation == expandGeneration, treeExpandInProgress else { return }
+            guard let outlineView else {
+                finishTreeExpand(generation: generation)
+                return
+            }
+
+            guard !filteredPathsToExpand.isEmpty else {
+                finishTreeExpand(generation: generation)
+                return
+            }
+
+            let end = min(batchSize, filteredPathsToExpand.count)
+            let batch = Array(filteredPathsToExpand.prefix(end))
+            filteredPathsToExpand.removeFirst(end)
+
+            for path in batch {
+                guard let node = findNodeByPath(path) else { continue }
+                expandPath(to: node, outlineView: outlineView, preserveSelection: true)
+            }
+
+            if !filteredPathsToExpand.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+                    self?.drainFilteredExpandQueue(generation: generation, batchSize: batchSize)
+                }
+            } else {
+                finishTreeExpand(generation: generation)
+            }
+        }
+
+        private func expandOutlineNode(_ node: FileTreeNode, outlineView: NSOutlineView) {
+            guard isDirectoryExpandable(node) else { return }
+            node.loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)
+            if !outlineView.isItemExpanded(node) {
+                outlineView.expandItem(node)
+            }
+            expandedDirectoryPaths.insert(node.path)
+        }
+
+        private func finishTreeExpand(generation: Int) {
+            guard generation == expandGeneration else { return }
+            publishExpandedPathsForDiscovery()
+            treeExpandInProgress = false
         }
 
         /// Disclosure when any non-excluded child directory exists. Filtered visibility is applied when children load.
@@ -211,6 +362,7 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         private func shouldDeferTreeHighlightSync() -> Bool {
+            if treeExpandInProgress { return true }
             let pinUserDirectory = appState.userRequestedTreeDirectory != nil && !appState.specificFilesActive
             return userIsNavigatingTree && !pinUserDirectory
         }
@@ -550,7 +702,7 @@ struct FileTreeView: NSViewRepresentable {
                 guard outlineView.row(forItem: node) >= 0 else { continue }
                 reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
             }
-            if outlineView.selectedRow < 0 {
+            if outlineView.selectedRow < 0, !treeExpandInProgress {
                 syncSelectionIfNeeded()
             }
         }
@@ -564,10 +716,7 @@ struct FileTreeView: NSViewRepresentable {
                 expandedDirectoryPaths.removeAll()
                 for root in roots { root.invalidateSubtree() }
                 outlineView.reloadData()
-                if let first = roots.first {
-                    outlineView.expandItem(first)
-                    expandedDirectoryPaths.insert(first.path)
-                }
+                publishExpandedPathsForDiscovery()
                 syncSelectionIfNeeded()
                 return
             }
@@ -640,11 +789,6 @@ struct FileTreeView: NSViewRepresentable {
                 expandedDirectoryPaths.removeAll()
                 publishExpandedPathsForDiscovery()
                 outlineView.reloadData()
-                if let first = roots.first {
-                    outlineView.expandItem(first)
-                    expandedDirectoryPaths.insert(first.path)
-                    publishExpandedPathsForDiscovery()
-                }
                 syncSelection()
             }
         }

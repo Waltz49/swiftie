@@ -988,15 +988,19 @@ final class AppState {
         collapseFileTree()
     }
 
-    /// ⌘Return — collapse tree, expand/select home (custom root if set), focus tree, open ~.
+    /// ⌘⇧Return — collapse tree, expand/select home (custom root if set), focus tree, open ~.
     func collapseFileTree() {
         fileTreeCollapseUIToken += 1
         requestFileTreeFocus()
     }
 
-    /// ⌘⇧Return — expand tree to the current directory.
+    /// ⌘Return (file tree focus) — expand highlighted node to ⇧⌘↩ depth (Directories settings).
     func expandFileTreeToCurrentDirectory() {
-        fileTreeExpandToken += 1
+        if let outline = fileTreeOutlineView, let coordinator = outline.coordinator {
+            coordinator.performExpandFromKeyboardShortcut()
+        } else {
+            fileTreeExpandToken += 1
+        }
     }
 
     func clearDirectoryHistory() {

@@ -65,9 +65,9 @@ enum FileTreeKeyboard {
         if hasCommand, !hasOption, !hasControl,
            event.keyCode == 36 || event.keyCode == 76 {
             if hasShift {
-                appState.expandFileTreeToCurrentDirectory()
-            } else {
                 appState.collapseFileTree()
+            } else {
+                appState.expandFileTreeToCurrentDirectory()
             }
             return true
         }

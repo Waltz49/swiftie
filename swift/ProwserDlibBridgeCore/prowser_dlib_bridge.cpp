@@ -53,6 +53,7 @@ dlib::frontal_face_detector g_detector;
 dlib::shape_predictor g_shape_predictor;
 face_recognition_net_type g_face_net;
 bool g_models_loaded = false;
+int g_last_hog_face_count = 0;
 
 dlib::matrix<dlib::rgb_pixel> rgb_matrix_from_buffer(
     const uint8_t *rgb,
@@ -77,6 +78,37 @@ dlib::matrix<float, 0, 1> face_descriptor(const dlib::matrix<dlib::rgb_pixel> &i
     dlib::matrix<dlib::rgb_pixel> face_chip;
     dlib::extract_image_chip(img, dlib::get_face_chip_details(shape, 150, 0.25), face_chip);
     return g_face_net(face_chip);
+}
+static int encode_faces_on_image(
+    const dlib::matrix<dlib::rgb_pixel> &img,
+    float *encodings_out,
+    ProwserFaceRect *rects_out,
+    int32_t max_faces)
+{
+    // Static macOS dlib + hand-built rgb_pixel matrices: upsample 1 loses faces vs pip face_recognition.
+    // upsample 0 matches Python recall on the same pixels (see Tools/FaceDetectBench).
+    std::vector<dlib::rectangle> faces = g_detector(img, 0);
+    g_last_hog_face_count = static_cast<int>(faces.size());
+    int written = 0;
+    for (const auto &face : faces) {
+        if (written >= max_faces) {
+            break;
+        }
+        try {
+            auto desc = face_descriptor(img, face);
+            for (long i = 0; i < desc.nr(); ++i) {
+                encodings_out[written * PROWSER_DLIB_ENCODING_DIM + static_cast<size_t>(i)] = desc(i);
+            }
+            rects_out[written].top = static_cast<int>(face.top());
+            rects_out[written].right = static_cast<int>(face.right());
+            rects_out[written].bottom = static_cast<int>(face.bottom());
+            rects_out[written].left = static_cast<int>(face.left());
+            ++written;
+        } catch (...) {
+            continue;
+        }
+    }
+    return written;
 }
 #endif
 
@@ -133,6 +165,16 @@ bool prowser_dlib_models_are_loaded(void)
 #endif
 }
 
+int prowser_dlib_last_hog_face_count(void)
+{
+#if !PROWSER_HAS_DLIB
+    return 0;
+#else
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_last_hog_face_count;
+#endif
+}
+
 int prowser_dlib_encode_faces_rgb(
     const uint8_t *rgb,
     int32_t width,
@@ -161,23 +203,7 @@ int prowser_dlib_encode_faces_rgb(
     }
     try {
         auto img = rgb_matrix_from_buffer(rgb, width, height, bytes_per_row);
-        std::vector<dlib::rectangle> faces = g_detector(img);
-        int written = 0;
-        for (const auto &face : faces) {
-            if (written >= max_faces) {
-                break;
-            }
-            auto desc = face_descriptor(img, face);
-            for (long i = 0; i < desc.nr(); ++i) {
-                encodings_out[written * PROWSER_DLIB_ENCODING_DIM + static_cast<size_t>(i)] = desc(i);
-            }
-            rects_out[written].top = static_cast<int>(face.top());
-            rects_out[written].right = static_cast<int>(face.right());
-            rects_out[written].bottom = static_cast<int>(face.bottom());
-            rects_out[written].left = static_cast<int>(face.left());
-            ++written;
-        }
-        return written;
+        return encode_faces_on_image(img, encodings_out, rects_out, max_faces);
     } catch (...) {
         return -1;
     }

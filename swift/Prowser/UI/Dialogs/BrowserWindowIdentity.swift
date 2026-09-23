@@ -65,6 +65,21 @@ enum BrowserWindowIdentity {
         }
     }
 
+    /// SwiftUI `CommandMenu` enablement — stays true while the main browser is visible and no
+    /// auxiliary dialog is key (menu bar tracking uses a transient non-titled key window).
+    static func browserMenuCommandsEnabled() -> Bool {
+        if NSApp.modalWindow != nil { return false }
+        if auxiliaryWindowIsKey() { return false }
+        if NSApp.windows.contains(where: { isMainBrowserWindow($0) && $0.isVisible }) {
+            return true
+        }
+        return browserWindowOwnsShortcuts()
+    }
+
+    private static func auxiliaryWindowIsKey() -> Bool {
+        NSApp.windows.contains { $0.isKeyWindow && isAuxiliaryWindow($0) }
+    }
+
     static func focusFirstTextInput(in window: NSWindow) {
         guard let content = window.contentView else { return }
         if let text = firstTextInput(in: content) {

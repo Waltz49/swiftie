@@ -13,6 +13,10 @@ public enum ProwserDlibBridge {
         prowser_dlib_models_are_loaded()
     }
 
+    public static var lastHogFaceCount: Int {
+        Int(prowser_dlib_last_hog_face_count())
+    }
+
     public static func loadModels(shapePredictorPath: String, faceRecognitionResNetPath: String) -> Bool {
         shapePredictorPath.withCString { shapePtr in
             faceRecognitionResNetPath.withCString { resnetPtr in

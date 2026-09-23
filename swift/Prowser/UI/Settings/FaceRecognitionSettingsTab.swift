@@ -23,7 +23,7 @@ struct FaceRecognitionSettingsTab: View {
                 )
             } else if !FaceModelManifest.isInstalled(profile: appState.config.profilePaths) {
                 facesUnavailableNote(
-                    "Face models are not installed. Use Search by Person (⌘P) or Quick Person (⌃⌘P) to download them."
+                    "Face models are not installed. Use Search by Person (⌘P), Extract Faces (⇧⌘P), or Quick Person (⌃⌘P) to download them."
                 )
                 Button("Download Face Models…") { downloadModels() }
                     .padding(.horizontal, 20)
@@ -169,20 +169,33 @@ struct FaceRecognitionSettingsTab: View {
             return
         }
 
+        let currentSubjects = appState.knownFaces.loadSubjects()
         let profile = appState.config.profilePaths
-        let detections = await Task.detached(priority: .userInitiated) {
-            FaceEngine.encodeFacesFromPath(path, profile: profile)
-        }.value
 
-        if detections.isEmpty {
-            StyledMessageDialog.showWarning(title: "No face detected", message: "No faces were detected in the selected image.")
+        let progress = CancellableProgressPanelController(
+            title: "Assign faces",
+            labelText: "Detecting faces…",
+            maximum: 0,
+            indeterminate: true
+        )
+        progress.show()
+        let encoded = await Task.detached(priority: .userInitiated) {
+            FaceEngine.encodeFacesFromPathWithDisplayImage(path, profile: profile)
+        }.value
+        progress.close()
+
+        guard let encoded, !encoded.detections.isEmpty else {
+            StyledMessageDialog.showWarning(
+                title: "No face detected",
+                message: "No faces were detected in the selected image."
+            )
             return
         }
 
-        let currentSubjects = appState.knownFaces.loadSubjects()
         guard let results = await FaceAssignDialog.present(
             imagePath: path,
-            detections: detections,
+            detections: encoded.detections,
+            displayCGImage: encoded.displayCGImage,
             subjects: currentSubjects
         ), !results.isEmpty else {
             return

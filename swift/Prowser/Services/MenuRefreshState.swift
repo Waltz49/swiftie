@@ -12,9 +12,10 @@ final class MenuRefreshState {
     var deleteExifDateEnabled = false
     var deleteExifDateTitle = "Delete EXIF Date from File…"
     var destinationsMenuVisible = true
-    /// False while a dialog/settings/about window is key so SwiftUI Command shortcuts
-    /// do not fire against the browser (Python `WindowShortcut` parity).
+    /// False while a dialog/settings/about window is key (`KeyboardHandlerController` parity).
     var browserWindowShortcutsEnabled = true
+    /// SwiftUI menu items — lenient while menu bar tracking resigns the main window key.
+    var browserMenuCommandsEnabled = true
     /// Tools → Exclude Thumbs from View (⌘X); thumbnail view only when exclude rules are enabled.
     var excludeFilesFromViewVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
@@ -69,9 +70,13 @@ final class MenuRefreshState {
     }
 
     func refreshBrowserWindowShortcuts() {
-        let enabled = BrowserWindowIdentity.browserWindowOwnsShortcuts()
-        if browserWindowShortcutsEnabled != enabled {
-            browserWindowShortcutsEnabled = enabled
+        let shortcuts = BrowserWindowIdentity.browserWindowOwnsShortcuts()
+        let menus = BrowserWindowIdentity.browserMenuCommandsEnabled()
+        let changed = browserWindowShortcutsEnabled != shortcuts
+            || browserMenuCommandsEnabled != menus
+        browserWindowShortcutsEnabled = shortcuts
+        browserMenuCommandsEnabled = menus
+        if changed {
             appState?.bumpMenuCommandsRevision()
         }
     }
@@ -86,8 +91,8 @@ final class MenuRefreshState {
         }
         keyWindowObservers = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { _ in refresh() },
-            center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { _ in refresh() },
-            center.addObserver(forName: NSWindow.didBecomeMainNotification, object: nil, queue: .main) { _ in refresh() },
+            // Skip didResignKey — main resigns before menu tracking's transient key is key and
+            // would briefly disable SwiftUI Command menus (249afee menu refresh regression).
             center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in refresh() },
         ]
     }

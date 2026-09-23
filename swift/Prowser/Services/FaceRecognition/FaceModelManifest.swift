@@ -52,9 +52,9 @@ enum FaceModelManifest {
         }
     }
 
-    static func resolveZipURL(profile: ProfilePaths, downloadBaseURL: String) -> URL? {
+    /// Zip URL from Settings → Models for Search base (ignores `_mirror`).
+    static func remoteZipURL(downloadBaseURL: String) -> URL? {
         let cat = catalog
-        if let mirror = mirrorZipURL(profile: profile) { return mirror }
         let base = downloadBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else { return nil }
         if base.hasPrefix("file://") {
@@ -62,6 +62,15 @@ enum FaceModelManifest {
         }
         let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
         return URL(string: "\(trimmed)/\(cat.downloadFile)")
+    }
+
+    static func resolveZipURL(profile: ProfilePaths, downloadBaseURL: String) -> URL? {
+        if let mirror = mirrorZipURL(profile: profile) { return mirror }
+        return remoteZipURL(downloadBaseURL: downloadBaseURL)
+    }
+
+    static func isDownloadAvailable(profile: ProfilePaths, downloadBaseURL: String) -> Bool {
+        mirrorZipURL(profile: profile) != nil || remoteZipURL(downloadBaseURL: downloadBaseURL) != nil
     }
 
     static func mirrorZipURL(profile: ProfilePaths) -> URL? {

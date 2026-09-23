@@ -5,10 +5,10 @@ import AppKit
 struct ProwserCommands: Commands {
     @Bindable var appState: AppState
 
-    private var allowBrowserShortcuts: Bool {
+    private var allowBrowserMenuCommands: Bool {
         MainActor.assumeIsolated {
             _ = appState.menuCommandsRevision
-            return appState.menuRefresh.browserWindowShortcutsEnabled
+            return appState.menuRefresh.browserMenuCommandsEnabled
         }
     }
 
@@ -96,7 +96,7 @@ struct ProwserCommands: Commands {
                     Task { @MainActor in appState.fileOperations.deselectAll() }
                 }
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
         }
 
         CommandMenu(MenuBarTitles.file) {
@@ -181,7 +181,7 @@ struct ProwserCommands: Commands {
 
                 Divider()
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
 
             Button("Close Window") {
                 Task { @MainActor in NSApp.keyWindow?.performClose(nil) }
@@ -193,7 +193,7 @@ struct ProwserCommands: Commands {
             Button("About…") {
                 Task { @MainActor in appState.showAboutDialog() }
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
         }
 
         CommandMenu(MenuBarTitles.view) {
@@ -276,7 +276,7 @@ struct ProwserCommands: Commands {
 
             ThemeMenuContent(appState: appState, applyTheme: applyTheme)
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
         }
 
         CommandMenu("Search") {
@@ -334,7 +334,7 @@ struct ProwserCommands: Commands {
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
         }
 
         CommandMenu("Tools") {
@@ -519,7 +519,7 @@ struct ProwserCommands: Commands {
                 }
             }
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
         }
 
         CommandGroup(replacing: .help) {
@@ -540,7 +540,7 @@ struct ProwserCommands: Commands {
                     }
                 }
             }
-            .disabled(!allowBrowserShortcuts)
+            .disabled(!allowBrowserMenuCommands)
         }
     }
 

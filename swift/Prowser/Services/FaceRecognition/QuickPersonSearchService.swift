@@ -8,6 +8,14 @@ enum QuickPersonSearchService {
     static func run(appState: AppState) async {
         guard FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) else { return }
 
+        guard FaceEngine.isBridgeLinked() else {
+            StyledMessageDialog.showWarning(
+                title: "Quick Person Search",
+                message: "Native dlib is not linked in this build. Run swift/Scripts/build_dlib_macos.sh and rebuild."
+            )
+            return
+        }
+
         let paths = SelectionService.selectedFilesOrCurrent(appState: appState)
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "Quick Person Search", message: "Select one or more images first.")

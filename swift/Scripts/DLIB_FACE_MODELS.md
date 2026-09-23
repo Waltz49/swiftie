@@ -17,7 +17,7 @@ Default HTTPS folder: `https://waltzremote.com/swift-prowser/search-models/v1`
 
 ## Maintainer
 
-1. Obtain `shape_predictor_5_face_landmarks.dat` and `dlib_face_recognition_resnet_model_v1.dat` (same as Python `face_recognition_models`).
+1. Obtain `shape_predictor_5_face_landmarks.dat`, optional `shape_predictor_68_face_landmarks.dat` (Python `encoding_model="large"`), and `dlib_face_recognition_resnet_model_v1.dat` (same as Python `face_recognition_models`).
 2. Zip them as `dlib_face_models.zip` and publish beside ResNet/CLIP zips.
 3. Update SHA-256 entries in `Prowser/Resources/dlib_face_models.json` when checksums are known.
 

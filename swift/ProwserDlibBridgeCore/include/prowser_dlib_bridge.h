@@ -33,6 +33,9 @@ typedef struct {
 /// Detect faces and compute 128-D encodings on RGB8 image (row-major, `width * 3` bytes per row).
 /// `encodings_out` must hold at least `max_faces * PROWSER_DLIB_ENCODING_DIM` floats.
 /// `rects_out` must hold at least `max_faces` rects.
+/// HOG detections on last successful `prowser_dlib_encode_faces_rgb` call (before encoding skips).
+int prowser_dlib_last_hog_face_count(void);
+
 /// Returns number of faces written, or -1 on error.
 int prowser_dlib_encode_faces_rgb(
     const uint8_t *rgb,

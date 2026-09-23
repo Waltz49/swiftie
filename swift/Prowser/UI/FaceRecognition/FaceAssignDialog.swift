@@ -13,9 +13,16 @@ enum FaceAssignDialog {
     static func present(
         imagePath: String,
         detections: [FaceEngine.FaceDetection],
+        displayCGImage: CGImage,
         subjects: [KnownFacesStore.Subject]
     ) async -> [FaceAssignResult]? {
-        guard let cgImage = ImageRecognitionImageLoader.loadCGImage(path: imagePath) else { return nil }
+        if detections.isEmpty {
+            StyledMessageDialog.showWarning(
+                title: "No face detected",
+                message: "No faces were detected in the selected image."
+            )
+            return nil
+        }
 
         return await withCheckedContinuation { continuation in
             var resumed = false
@@ -48,7 +55,7 @@ enum FaceAssignDialog {
                 )
             }
 
-            let canvas = FaceAssignCanvasView(cgImage: cgImage, faceStates: faceStates)
+            let canvas = FaceAssignCanvasView(cgImage: displayCGImage, faceStates: faceStates)
             canvas.translatesAutoresizingMaskIntoConstraints = false
             canvas.onStatesChanged = { faceStates = $0 }
 
@@ -108,10 +115,6 @@ enum FaceAssignDialog {
             okButton.target = session.okTarget
             okButton.action = #selector(BlockTarget.invoke)
 
-            if detections.isEmpty {
-                okButton.isEnabled = false
-            }
-
             _ = AppKitDialogKeyboardNavigation.install(
                 on: panel,
                 buttonsLeftToRight: [cancelButton, okButton],
@@ -121,7 +124,7 @@ enum FaceAssignDialog {
             panel.center()
             NSApp.activate(ignoringOtherApps: true)
             panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(okButton.isEnabled ? okButton : cancelButton)
+            panel.makeFirstResponder(okButton)
         }
     }
 
@@ -161,7 +164,7 @@ private final class FaceAssignCanvasView: NSView, NSTextFieldDelegate {
     let cgImage: CGImage
     var faceStates: [FaceAssignFaceState]
     var onStatesChanged: (([FaceAssignFaceState]) -> Void)?
-    /// Keeps button targets alive (`NSButton` holds its target weakly).
+    /// Keeps button targets alive (`NSButton` holds its target weakly`).
     var retainedActionTargets: [NSObject] = []
 
     private var editingIndex: Int?

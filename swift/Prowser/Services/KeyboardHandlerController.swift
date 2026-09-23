@@ -217,14 +217,10 @@ final class KeyboardHandlerController {
             }
         }
 
-        // ⌘Return / ⌘⇧Return — collapse / expand file tree.
-        if hasCommand, !hasOption, !hasControl,
+        // ⌘⇧Return — collapse file tree to home (⌘↩ expand is handled in `FileTreeKeyboard` when tree is focused).
+        if hasCommand, hasShift, !hasOption, !hasControl,
            event.keyCode == 36 || event.keyCode == 76 {
-            if hasShift {
-                appState.expandFileTreeToCurrentDirectory()
-            } else {
-                appState.collapseFileTree()
-            }
+            appState.collapseFileTree()
             return true
         }
 
@@ -1153,6 +1149,10 @@ final class KeyboardHandlerController {
     private func navigateLinear(appState: AppState, delta: Int, images: [String]? = nil) -> Bool {
         let paths = images ?? appState.fileData.displayedImages
         guard !paths.isEmpty else { return false }
+        if !appState.selection.selectedFiles.isEmpty {
+            SelectionService.clearSelection(appState: appState, preserveCurrentImage: true)
+            appState.selection.rangeAnchorIndex = nil
+        }
         let wrap = appState.config.bool(forKey: "wrap_around", default: true)
         let currentIndex = resolvedCurrentIndex(appState: appState, images: paths)
         let next = nextIndex(currentIndex, delta: delta, count: paths.count, wrap: wrap)

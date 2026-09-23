@@ -63,6 +63,14 @@ let packageTargets: [Target] = [
             ]),
         ]
     ),
+    .executableTarget(
+        name: "FaceDetectBench",
+        dependencies: ["ProwserDlibBridge"],
+        path: "Tools/FaceDetectBench",
+        linkerSettings: [
+            .linkedFramework("Accelerate"),
+        ]
+    ),
 ]
 
 let package = Package(
@@ -70,6 +78,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Prowser", targets: ["Prowser"]),
+        .executable(name: "FaceDetectBench", targets: ["FaceDetectBench"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ainame/Swift-WebP.git", from: "0.5.0"),

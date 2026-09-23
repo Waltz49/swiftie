@@ -13,6 +13,14 @@ enum PersonSearchService {
     static func run(appState: AppState, options: PersonSearchOptions) async {
         guard FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) else { return }
 
+        guard FaceEngine.isBridgeLinked() else {
+            StyledMessageDialog.showWarning(
+                title: "Search by person",
+                message: "Native dlib is not linked in this build. Run swift/Scripts/build_dlib_macos.sh and rebuild."
+            )
+            return
+        }
+
         let store = appState.knownFaces
         guard let subject = store.subject(id: options.subjectID), !subject.samples.isEmpty else {
             StyledMessageDialog.showWarning(title: "Search by person", message: "No face samples found for this person.")

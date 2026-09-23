@@ -88,13 +88,21 @@ final class SearchOperationsService {
             )
             return
         }
-        guard let path = appState.fileData.currentImagePath, FileManager.default.fileExists(atPath: path) else {
-            StyledMessageDialog.showInformation(
-                title: "No image",
-                message: "No current image to examine. Select an image in the browser first."
-            )
-            return
+        // Python Search > Extract Faces → Faces tab examine. In browse, the on-screen image
+        // (`currentImagePath`) is authoritative; elsewhere use get_selected_files parity.
+        let path: String?
+        if appState.fileData.currentViewMode == .browse {
+            path = appState.fileData.currentImagePath
+        } else {
+            let paths = SelectionService.selectedFilesOrCurrent(appState: appState)
+            guard paths.count == 1 else { return }
+            path = paths[0]
         }
+        guard let path, FileManager.default.fileExists(atPath: path) else { return }
+        if let index = appState.fileData.displayedImages.firstIndex(of: path) {
+            appState.fileData.setCurrentIndex(index)
+        }
+        appState.fileData.setCurrentImagePath(path)
         appState.openSettingsWindow(tab: .faceRecognition, userInfo: ["autoExamineFaces": true])
     }
 

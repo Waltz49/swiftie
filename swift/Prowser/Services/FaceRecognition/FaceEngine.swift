@@ -1,5 +1,7 @@
-import AppKit
+import CoreGraphics
+import Accelerate
 import Foundation
+import ImageIO
 import ProwserDlibBridge
 
 /// Port of `faces/face_engine.py` using native dlib.
@@ -34,16 +36,26 @@ enum FaceEngine {
         return ProwserDlibBridge.loadModels(shapePredictorPath: shape, faceRecognitionResNetPath: resnet)
     }
 
+    /// One ImageIO load for detection + assign dialog preview (avoids a second full-resolution decode).
+    struct PathEncodeResult {
+        var detections: [FaceDetection]
+        var displayCGImage: CGImage
+    }
+
     static func encodeFacesFromPath(_ imagePath: String, profile: ProfilePaths) -> [FaceDetection] {
+        encodeFacesFromPathWithDisplayImage(imagePath, profile: profile)?.detections ?? []
+    }
+
+    static func encodeFacesFromPathWithDisplayImage(_ imagePath: String, profile: ProfilePaths) -> PathEncodeResult? {
         guard loadModelsIfNeeded(profile: profile),
-              let pack = loadRGB(imagePath: imagePath) else { return [] }
+              let pack = loadRGB(imagePath: imagePath) else { return nil }
         var detections = encodeFacesRGB(width: pack.detectWidth, height: pack.detectHeight, rgb: pack.rgb)
         if pack.fullWidth != pack.detectWidth || pack.fullHeight != pack.detectHeight {
             let sx = Double(pack.fullWidth) / Double(pack.detectWidth)
             let sy = Double(pack.fullHeight) / Double(pack.detectHeight)
             detections = detections.map { scaleDetection($0, sx: sx, sy: sy) }
         }
-        return detections
+        return PathEncodeResult(detections: detections, displayCGImage: pack.displayCGImage)
     }
 
     private static func scaleDetection(_ det: FaceDetection, sx: Double, sy: Double) -> FaceDetection {
@@ -98,56 +110,49 @@ enum FaceEngine {
         var fullHeight: Int
         var detectWidth: Int
         var detectHeight: Int
+        var displayCGImage: CGImage
         var rgb: Data
     }
 
     private static func loadRGB(imagePath: String) -> RGBPack? {
-        guard let cg = ImageRecognitionImageLoader.loadCGImage(path: imagePath) else { return nil }
-        let fullWidth = cg.width
-        let fullHeight = cg.height
-        var working = cg
-        let maxDim = max(fullWidth, fullHeight)
-        if maxDim > scanningDownscaleThreshold {
-            let scale = Double(scanningDownscaleThreshold) / Double(maxDim)
-            let newW = Int(Double(fullWidth) * scale)
-            let newH = Int(Double(fullHeight) * scale)
-            if let scaled = resize(cg: cg, width: newW, height: newH) {
-                working = scaled
-            }
+        guard let fullCG = ImageRecognitionImageLoader.loadCGImage(path: imagePath) else {
+            return nil
         }
+        let working = downscaledForFaceScanning(fullCG, maxLongEdge: scanningDownscaleThreshold)
         guard let rgb = rgbData(from: working) else { return nil }
         return RGBPack(
-            fullWidth: fullWidth,
-            fullHeight: fullHeight,
+            fullWidth: fullCG.width,
+            fullHeight: fullCG.height,
             detectWidth: working.width,
             detectHeight: working.height,
+            displayCGImage: fullCG,
             rgb: rgb
         )
     }
 
-    /// Bitmap contexts use a bottom-left origin; flip so row 0 is the image top (matches dlib + overlay).
-    private static func drawCGImageTopLeftIntoContext(_ cg: CGImage, in rect: CGRect, context: CGContext) {
-        context.saveGState()
-        context.translateBy(x: rect.minX, y: rect.maxY)
-        context.scaleBy(x: 1, y: -1)
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
-        context.restoreGState()
-    }
-
-    private static func resize(cg: CGImage, width: Int, height: Int) -> CGImage? {
-        guard let colorSpace = cg.colorSpace else { return nil }
+    /// Same sizing as `faces/face_engine._maybe_resize_for_detection` (longest edge cap, int dimensions).
+    private static func downscaledForFaceScanning(_ cg: CGImage, maxLongEdge: Int) -> CGImage {
+        let width = cg.width
+        let height = cg.height
+        let longest = max(width, height)
+        guard longest > maxLongEdge else { return cg }
+        let scale = Double(maxLongEdge) / Double(longest)
+        let newWidth = Int(Double(width) * scale)
+        let newHeight = Int(Double(height) * scale)
+        guard newWidth > 0, newHeight > 0 else { return cg }
+        let colorSpace = cg.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
             data: nil,
-            width: width,
-            height: height,
+            width: newWidth,
+            height: newHeight,
             bitsPerComponent: 8,
-            bytesPerRow: width * 4,
+            bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        ) else { return cg }
         ctx.interpolationQuality = .high
-        drawCGImageTopLeftIntoContext(cg, in: CGRect(x: 0, y: 0, width: width, height: height), context: ctx)
-        return ctx.makeImage()
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+        return ctx.makeImage() ?? cg
     }
 
     private static func rgbData(from cg: CGImage) -> Data? {
@@ -163,28 +168,30 @@ enum FaceEngine {
                 height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceRGB(),
+                space: cg.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else { return false }
-            drawCGImageTopLeftIntoContext(cg, in: CGRect(x: 0, y: 0, width: width, height: height), context: ctx)
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
         guard ok else { return nil }
         var rgb = Data(count: width * height * 3)
-        rgb.withUnsafeMutableBytes { dst in
-            rgba.withUnsafeBytes { src in
-                guard let d = dst.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                      let s = src.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                var di = 0
-                for y in 0..<height {
-                    for x in 0..<width {
-                        let si = y * bytesPerRow + x * 4
-                        d[di] = s[si]
-                        d[di + 1] = s[si + 1]
-                        d[di + 2] = s[si + 2]
-                        di += 3
-                    }
-                }
+        rgba.withUnsafeBytes { src in
+            rgb.withUnsafeMutableBytes { dst in
+                guard let s = src.baseAddress, let d = dst.baseAddress else { return }
+                var srcBuf = vImage_Buffer(
+                    data: UnsafeMutableRawPointer(mutating: s),
+                    height: vImagePixelCount(height),
+                    width: vImagePixelCount(width),
+                    rowBytes: bytesPerRow
+                )
+                var dstBuf = vImage_Buffer(
+                    data: d,
+                    height: vImagePixelCount(height),
+                    width: vImagePixelCount(width),
+                    rowBytes: width * 3
+                )
+                vImageConvert_RGBA8888toRGB888(&srcBuf, &dstBuf, vImage_Flags(kvImageNoFlags))
             }
         }
         return rgb
