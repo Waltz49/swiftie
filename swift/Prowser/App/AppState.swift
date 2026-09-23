@@ -876,6 +876,10 @@ final class AppState {
     }
 
     func refreshDirectory() {
+        if specificFilesActive {
+            DirectoryRefreshService.refreshSpecificFilesList(appState: self, force: true)
+            return
+        }
         guard let dir = fileData.currentDirectory else { return }
         let previous = fileData.displayedImages
         loadDirectory(dir, saveHistory: false)

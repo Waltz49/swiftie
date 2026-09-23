@@ -1269,28 +1269,20 @@ final class KeyboardHandlerController {
         let pageSize = thumbnailPageSize(appState: appState)
         let delta = direction * pageSize
         let wrap = appState.config.bool(forKey: "wrap_around", default: true)
-        let next = nextIndex(appState.fileData.currentIndex, delta: delta, count: images.count, wrap: wrap)
+        let current = resolvedCurrentIndex(appState: appState, images: images)
+        let next = nextIndex(current, delta: delta, count: images.count, wrap: wrap)
         appState.fileData.setCurrentIndex(next)
         appState.fileData.setCurrentImagePath(images[next])
         return true
     }
 
     private func thumbnailPageSize(appState: AppState) -> Int {
-        let cellSize = appState.config.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
-        let sidebar = appState.leftSidebarColumnVisible ? appState.leftSidebarWidth : 0
-        let right = appState.rightSidebarColumnVisible ? appState.rightSidebarWidth : 0
-        let viewportWidth = max(400, 1100 - sidebar - right)
-        let showFilename = appState.config.bool(forKey: "thumbnail_filename_visible", default: false)
-        let showSize = appState.config.bool(forKey: "show_image_size", default: false)
-        let metrics = ThumbnailLayout.metrics(
-            for: viewportWidth,
-            itemCount: appState.fileData.displayedImages.count,
-            showFilename: showFilename,
-            showImageSize: showSize,
-            cellSize: CGFloat(cellSize)
-        )
-        let rowsPerPage = 5
-        return max(1, metrics.columns * rowsPerPage)
+        if let grid = appState.thumbnailGridHost, !appState.fileData.displayedImages.isEmpty {
+            return grid.keyboardPageScrollDelta()
+        }
+        let images = appState.fileData.displayedImages
+        let columns = max(1, thumbnailColumns(appState: appState, count: images.count))
+        return max(columns, columns * 5)
     }
 
     private func navigateCmdMulti(appState: AppState, direction: ThumbnailNavigateDirection) -> Bool {

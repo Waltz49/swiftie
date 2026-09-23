@@ -18,10 +18,57 @@ enum DirectoryRefreshService {
         }
     }
 
+    /// Refresh the displayed specific-files set (Python `_refresh_specific_files_list`).
+    static func refreshSpecificFilesList(appState: AppState, force: Bool = false) {
+        let displayed = appState.fileData.displayedImages
+        guard !displayed.isEmpty else { return }
+
+        let activePath = appState.fileData.currentImagePath
+        let validFiles = displayed.filter { FileManager.default.fileExists(atPath: $0) }
+        let deleted = Set(displayed).subtracting(validFiles)
+
+        if validFiles.isEmpty {
+            appState.fileData.setDisplayedImages([])
+            appState.fileData.setCurrentImagePath(nil)
+            appState.thumbnailGridHost?.clearThumbnails()
+            return
+        }
+
+        if !deleted.isEmpty {
+            applyRemovedFiles(
+                appState: appState,
+                removed: deleted,
+                displayed: displayed,
+                activePath: activePath
+            )
+        }
+
+        let currentList = appState.fileData.displayedImages
+        if let activePath, currentList.contains(activePath) {
+            appState.fileData.setCurrentImagePath(activePath)
+        } else if let first = currentList.first {
+            appState.fileData.setCurrentImagePath(first)
+        }
+
+        if force {
+            invalidateThumbnails(appState: appState, paths: currentList)
+        } else {
+            let modified = modifiedPaths(in: Set(currentList), metadataCache: appState.metadataCache)
+            if !modified.isEmpty {
+                invalidateThumbnails(appState: appState, paths: modified)
+            }
+        }
+
+        appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+    }
+
     static func checkAndRefreshIfChanged(appState: AppState) {
         guard !appState.isLoadingDirectory else { return }
         guard !appState.isDirectoryRefreshSuppressed else { return }
-        guard !appState.specificFilesActive else { return }
+        if appState.specificFilesActive {
+            refreshSpecificFilesList(appState: appState, force: false)
+            return
+        }
         guard let directory = appState.fileData.currentDirectory,
               FileManager.default.fileExists(atPath: directory) else { return }
 

@@ -135,6 +135,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         return max(1, isReferenceGraphMode ? 1 : metrics.columns)
     }
+
+    /// One Page Up/Down step in thumbnail indices (Python `rows_per_page * columns`).
+    func keyboardPageScrollDelta() -> Int {
+        let columns = max(1, gridColumnCount)
+        let viewportHeight = viewportSizeForLayout().height
+        let rowStride = metrics.cellHeight + ThumbnailLayout.verticalSpacing
+        guard rowStride > 0 else { return columns }
+        let effectiveHeight = max(1, viewportHeight - ThumbnailLayout.topCoverBandHeight)
+        let rowsPerPage = max(1, Int(effectiveHeight / rowStride))
+        return max(1, columns * rowsPerPage)
+    }
     private var isReferenceGraphMode: Bool {
         referenceGraph != nil && !imagePaths.isEmpty
     }
