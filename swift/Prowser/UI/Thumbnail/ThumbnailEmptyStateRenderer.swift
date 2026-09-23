@@ -33,10 +33,14 @@ enum ThumbnailEmptyStateRenderer {
     static func message(
         directory: String?,
         filterPattern: String,
-        directoryListingDenied: Bool
+        directoryListingDenied: Bool,
+        isLoadingDirectory: Bool = false
     ) -> String? {
         guard let directory else { return nil }
         let displayDirectory = StatusBarFormatter.displayPath(directory)
+        if isLoadingDirectory {
+            return "Loading\n\n\(displayDirectory)"
+        }
         if directoryListingDenied {
             return """
             macOS denied access to list images in

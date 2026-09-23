@@ -23,11 +23,6 @@ struct BrowseView: NSViewRepresentable {
         context.coordinator.view = view
         appState.browseImageHost = view
         context.coordinator.startObserving()
-        DispatchQueue.main.async { [weak appState] in
-            guard let appState, appState.fileData.currentViewMode == .browse else { return }
-            appState.focusMainCanvas()
-            appState.menuRefresh.refreshBrowserWindowShortcuts()
-        }
         return view
     }
 

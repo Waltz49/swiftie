@@ -108,6 +108,5 @@ struct MainWindowIdentityAnchor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         BrowserWindowIdentity.tagMainBrowserWindow(nsView.window)
-        appState.noteMainBrowserWindowReady()
     }
 }

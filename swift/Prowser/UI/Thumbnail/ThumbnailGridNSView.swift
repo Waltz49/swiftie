@@ -93,6 +93,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     var filterPattern: String = "*"
     var imageExtensions: [String] = []
     var directoryListingDenied = false
+    var isLoadingDirectory = false {
+        didSet {
+            if oldValue != isLoadingDirectory {
+                needsDisplay = true
+            }
+        }
+    }
     /// Reference-graph presentation (Python `reference_graph_data`).
     var referenceGraph: ReferenceGraph? {
         didSet { reloadLayoutIfNeeded() }
@@ -195,6 +202,26 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         needsDisplay = true
     }
 
+    private var showsEmptyCanvas: Bool {
+        isLoadingDirectory || imagePaths.isEmpty
+    }
+
+    func beginDirectoryLoad() {
+        isLoadingDirectory = true
+        imagePaths = []
+        clearThumbnails()
+        sectionedLayoutResult = nil
+        referenceLayout = nil
+        reloadLayout()
+        needsDisplay = true
+    }
+
+    func endDirectoryLoad() {
+        isLoadingDirectory = false
+        reloadLayoutIfNeeded()
+        needsDisplay = true
+    }
+
     func reloadLayoutIfNeeded() {
         let snapshot = currentLayoutSnapshot()
         if snapshot == lastLayoutSnapshot { return }
@@ -205,7 +232,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let viewportWidth = viewportWidthForLayout()
         lastLayoutViewportWidth = viewportWidth
         lastLayoutSnapshot = currentLayoutSnapshot(viewportWidth: viewportWidth)
-        if imagePaths.isEmpty {
+        if showsEmptyCanvas {
             referenceLayout = nil
             referenceNodeFrames = [:]
             sectionedLayoutResult = nil
@@ -468,7 +495,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     func updateEmptyStateContext() {
-        guard imagePaths.isEmpty else {
+        guard showsEmptyCanvas else {
+            suggestedFilters = []
+            hasImagesInFolder = false
+            filterButtons = []
+            hoveredFilterButtonIndex = -1
+            return
+        }
+        if isLoadingDirectory {
             suggestedFilters = []
             hasImagesInFolder = false
             filterButtons = []
@@ -492,14 +526,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if imagePaths.isEmpty {
+        if showsEmptyCanvas {
             emptyStateStyle.background.setFill()
             bounds.fill()
             let area = NSRect(origin: .zero, size: emptyStateViewportSize())
             if let message = ThumbnailEmptyStateRenderer.message(
                 directory: currentDirectory,
                 filterPattern: filterPattern,
-                directoryListingDenied: directoryListingDenied
+                directoryListingDenied: directoryListingDenied,
+                isLoadingDirectory: isLoadingDirectory
             ) {
                 filterButtons = ThumbnailEmptyStateRenderer.draw(
                     in: area,
@@ -679,7 +714,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             return
         }
 
-        if imagePaths.isEmpty {
+        if showsEmptyCanvas {
             return
         }
         let point = convert(event.locationInWindow, from: nil)
@@ -709,7 +744,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if imagePaths.isEmpty {
+        if showsEmptyCanvas {
             let point = convert(event.locationInWindow, from: nil)
             handleEmptyStateClick(at: point)
             return
@@ -1226,9 +1261,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     ) -> CGFloat {
         let manual = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
         if manual {
-            return CGFloat(
-                configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
-                    ?? ThumbnailLayout.defaultCellSize
+            let raw = configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
+                ?? ThumbnailLayout.defaultCellSize
+            return min(
+                ThumbnailLayout.maxCellSize,
+                max(ThumbnailLayout.minCellSize, CGFloat(raw))
             )
         }
         var overlay = ThumbnailLayout.overlayLabelHeight(

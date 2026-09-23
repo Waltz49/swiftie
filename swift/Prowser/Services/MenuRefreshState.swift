@@ -25,6 +25,13 @@ final class MenuRefreshState {
         refreshAll()
     }
 
+    /// Python `MenuManager.prime_menu_keys_for_view_change` — without trash/volume scans.
+    func primeForViewChange(appState: AppState) {
+        refreshBrowserWindowShortcuts()
+        refreshExcludeFilesFromView(appState: appState)
+        refreshDeleteExifDate(appState: appState)
+    }
+
     func refreshAll() {
         guard let appState else { return }
         refreshBrowserWindowShortcuts()

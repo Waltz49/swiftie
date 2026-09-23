@@ -39,6 +39,8 @@ struct ChromeSavedLayout: Equatable {
 @MainActor
 final class DirectoryLoadCoordinator {
     private unowned let appState: AppState
+    private var activeLoadGeneration = 0
+    private var activeLoadTask: Task<Void, Never>?
 
     init(appState: AppState) {
         self.appState = appState
@@ -109,15 +111,24 @@ final class DirectoryLoadCoordinator {
         appState.fileData.setCurrentImagePath(normalizedTarget)
 
         let directory = URL(fileURLWithPath: targetFile).deletingLastPathComponent().path
-        appState.loadDirectory(directory, saveHistory: false)
+        loadDirectory(directory, saveHistory: false, pinnedImagePath: normalizedTarget)
 
-        appState.fileData.setCurrentImagePath(normalizedTarget)
         appState.fileData.setViewMode(.browse)
         appState.clearBrowseReturnState()
-        appState.menuRefresh.refreshAll()
+        appState.scheduleDeferredMenuRefresh()
     }
 
-    func loadDirectory(_ path: String, saveHistory: Bool) {
+    func loadDirectory(
+        _ path: String,
+        saveHistory: Bool,
+        pinnedImagePath: String? = nil,
+        onComplete: (() -> Void)? = nil
+    ) {
+        guard let normalized = FileDataModel.normalizePath(path) else {
+            onComplete?()
+            return
+        }
+
         if saveHistory {
             appState.directoryHistory.saveCurrent(
                 fileData: appState.fileData,
@@ -128,22 +139,83 @@ final class DirectoryLoadCoordinator {
         if !appState.referenceGraphActive {
             appState.duplicateSections = []
             appState.setSpecificFilesActive(false)
-            // Python `directory_loader.load_directory`: leaving duplicate grouped view on normal load.
             if appState.config.string(forKey: "sort_mode", default: "date") == SortMode.duplicates.rawValue {
                 appState.config.updateSetting("sort_mode", value: SortMode.date.rawValue)
                 appState.config.updateSetting("sort_reversed", value: false)
             }
         }
-        let scanned = DirectoryScanner.scanDirectory(
-            at: path,
+
+        activeLoadTask?.cancel()
+        activeLoadGeneration += 1
+        let generation = activeLoadGeneration
+
+        let pin: String?
+        if let explicit = pinnedImagePath.flatMap({ FileDataModel.normalizePath($0) }) {
+            pin = explicit
+        } else if appState.fileData.currentViewMode == .browse {
+            pin = appState.fileData.currentImagePath
+        } else {
+            pin = nil
+        }
+
+        let snapshot = DirectoryLoadBackgroundWork.Snapshot(
+            path: normalized,
             extensions: appState.config.imageExtensions,
-            filterPattern: appState.filterSettings.filterPattern
+            filterPattern: appState.filterSettings.filterPattern,
+            sortModeRaw: appState.config.string(forKey: "sort_mode", default: "date"),
+            sortReversed: appState.config.bool(forKey: "sort_reversed", default: false),
+            useExifDate: appState.config.useExifDate
         )
-        let options = SortingService.Options.from(config: appState.config)
-        let images = SortingService.sorted(scanned, options: options, metadataCache: appState.metadataCache)
-        appState.metadataCache.saveIfNeeded()
+
+        let useLoadingCanvas = !appState.hasCompletedInitialThumbnailDirectoryLoad
+            && appState.fileData.currentViewMode == .thumbnail
+            && pin == nil
+
+        appState.isLoadingDirectory = true
+        appState.showThumbnailDirectoryLoadingCanvas = useLoadingCanvas
+
+        if useLoadingCanvas {
+            appState.fileData.setDisplayedImages([])
+            appState.fileData.setCurrentDirectory(normalized)
+            appState.beginThumbnailDirectoryLoad()
+        } else if pin != nil {
+            appState.fileData.setCurrentDirectory(normalized)
+            if let pin {
+                appState.fileData.setCurrentImagePath(pin)
+            }
+        }
+
+        activeLoadTask = Task { [weak self] in
+            let images = await Task.detached(priority: .userInitiated) {
+                DirectoryLoadBackgroundWork.scanAndSort(snapshot)
+            }.value
+
+            guard !Task.isCancelled else { return }
+            self?.finishDirectoryLoad(
+                generation: generation,
+                path: normalized,
+                images: images,
+                pinnedPath: pin,
+                onComplete: onComplete
+            )
+        }
+    }
+
+    private func finishDirectoryLoad(
+        generation: Int,
+        path: String,
+        images: [String],
+        pinnedPath: String?,
+        onComplete: (() -> Void)?
+    ) {
+        guard generation == activeLoadGeneration else { return }
+        appState.isLoadingDirectory = false
+        if appState.showThumbnailDirectoryLoadingCanvas {
+            appState.endThumbnailDirectoryLoad()
+        }
+        appState.noteInitialThumbnailDirectoryLoadCompleted()
+
         appState.fileData.setCurrentDirectory(path)
-        let pinnedPath = appState.fileData.currentImagePath
         appState.fileData.setDisplayedImages(images)
         if let pinnedPath, let normalized = FileDataModel.normalizePath(pinnedPath),
            images.contains(normalized) {
@@ -155,13 +227,16 @@ final class DirectoryLoadCoordinator {
         }
         DisplayedImagesSync.ensureActiveImageListed(
             fileData: appState.fileData,
-            filterPattern: appState.filterSettings.filterPattern
+            filterPattern: appState.filterSettings.filterPattern,
+            isLoadingDirectory: false
         )
         appState.config.updateSetting("last_directory", value: path)
         appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))
         appState.watchCurrentDirectory()
         appState.persistRestoreState()
+        appState.scheduleDeferredMenuRefresh()
+        onComplete?()
     }
 
     func goBack() {
@@ -191,6 +266,14 @@ final class DirectoryLoadCoordinator {
             appState.fileData.setCurrentDirectory(directory)
         }
         appState.duplicateSections = entry.duplicateSections
+
+        let finishRestore = { [weak self] in
+            guard let self else { return }
+            self.appState.directoryHistory.applyEntry(entry, to: self.appState.fileData)
+            self.appState.fileData.setViewMode(entry.viewMode)
+            SelectionService.restoreSelections(appState: self.appState, selectedFiles: entry.selectedFiles)
+        }
+
         if !entry.displayedImages.isEmpty {
             appState.fileData.setDisplayedImages(entry.displayedImages)
             if entry.referenceGraphActive {
@@ -218,12 +301,12 @@ final class DirectoryLoadCoordinator {
                 appState.clearReferenceGraphPresentation()
             }
             appState.watchCurrentDirectory()
+            finishRestore()
         } else if let directory = entry.directory {
-            loadDirectory(directory, saveHistory: false)
+            loadDirectory(directory, saveHistory: false, onComplete: finishRestore)
+        } else {
+            finishRestore()
         }
-        appState.directoryHistory.applyEntry(entry, to: appState.fileData)
-        appState.fileData.setViewMode(entry.viewMode)
-        SelectionService.restoreSelections(appState: appState, selectedFiles: entry.selectedFiles)
     }
 }
 

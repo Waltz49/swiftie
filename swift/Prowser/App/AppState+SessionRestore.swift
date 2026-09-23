@@ -12,19 +12,21 @@ extension AppState {
     }
 
     func handleViewModeTransition(to newMode: ViewMode) {
-        refreshMenuState()
         let previous = lastViewMode
-        if previous != .browse && newMode == .browse {
+        let enteringBrowse = previous != .browse && newMode == .browse
+        let leavingBrowse = previous == .browse && (newMode == .thumbnail || newMode == .list)
+
+        if enteringBrowse {
             if previous == .list {
                 returnToListViewAfterBrowse = true
             }
             prepareBrowseReturnStateIfNeeded()
+            primeMenuKeysForViewChange()
             DispatchQueue.main.async { [weak self] in
                 self?.focusMainCanvas()
-                self?.menuRefresh.refreshBrowserWindowShortcuts()
             }
-        }
-        if previous == .browse && (newMode == .thumbnail || newMode == .list) {
+        } else if leavingBrowse {
+            refreshMenuState()
             if newMode == .thumbnail {
                 restoreBrowseReturnStateIfNeeded()
             } else {
@@ -34,6 +36,8 @@ extension AppState {
             reconcileUserRequestedTreeDirectoryWithActiveImage()
             syncFileTreeToActiveImage()
             focusMainCanvas()
+        } else {
+            refreshMenuState()
         }
         lastViewMode = newMode
     }

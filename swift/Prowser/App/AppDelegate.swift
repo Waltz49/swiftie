@@ -74,7 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillUpdate(_ notification: Notification) {
         guard isPrimary else { return }
         scheduleMenuBarDeduplication()
-        appState?.menuRefresh.refreshBrowserWindowShortcuts()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

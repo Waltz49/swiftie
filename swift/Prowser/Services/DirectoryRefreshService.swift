@@ -19,6 +19,7 @@ enum DirectoryRefreshService {
     }
 
     static func checkAndRefreshIfChanged(appState: AppState) {
+        guard !appState.isLoadingDirectory else { return }
         guard !appState.isDirectoryRefreshSuppressed else { return }
         guard !appState.specificFilesActive else { return }
         guard let directory = appState.fileData.currentDirectory,

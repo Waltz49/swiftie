@@ -140,6 +140,17 @@ final class AppState {
     var sidebarLayoutRevision = 0
     /// Bumped when command-menu enablement changes so SwiftUI `Commands` re-evaluate `.disabled`.
     var menuCommandsRevision = 0
+    /// Directory scan/sort in flight (Python `_loading_directory_mode`).
+    var isLoadingDirectory = false
+    /// First thumbnail folder open this session — show loading canvas.
+    var showThumbnailDirectoryLoadingCanvas = false
+    private(set) var hasCompletedInitialThumbnailDirectoryLoad = false
+
+    func noteInitialThumbnailDirectoryLoadCompleted() {
+        hasCompletedInitialThumbnailDirectoryLoad = true
+        showThumbnailDirectoryLoadingCanvas = false
+    }
+
     /// True while `PreviewPaneView` is mounted (Python `preview_widget.isVisible()`).
     var previewPaneInLayout = false
     var chromeSavedLayout: ChromeSavedLayout?
@@ -471,6 +482,19 @@ final class AppState {
         menuRefresh.refreshAll()
     }
 
+    func primeMenuKeysForViewChange() {
+        menuRefresh.primeForViewChange(appState: self)
+    }
+
+    func beginThumbnailDirectoryLoad() {
+        guard fileData.currentViewMode == .thumbnail else { return }
+        thumbnailGridHost?.beginDirectoryLoad()
+    }
+
+    func endThumbnailDirectoryLoad() {
+        thumbnailGridHost?.endDirectoryLoad()
+    }
+
     /// Main window tagged and ready — refresh menu shortcut enablement (launch / restore).
     func noteMainBrowserWindowReady() {
         menuRefresh.refreshBrowserWindowShortcuts()
@@ -782,7 +806,12 @@ final class AppState {
         clearDeletedPlaceholders()
         backgroundImageRecognition.notePriorityDirectory(path)
         directoryLoader.loadDirectory(path, saveHistory: saveHistory)
-        menuRefresh.refreshAll()
+    }
+
+    func scheduleDeferredMenuRefresh() {
+        DispatchQueue.main.async { [weak self] in
+            self?.menuRefresh.refreshAll()
+        }
     }
 
     /// Tools ▸ Open Home Directory (Python `open_home_directory`, ⌃H / Qt `Meta+H`).
@@ -1571,6 +1600,7 @@ final class AppState {
         config.updateSetting("thumbnail_cell_size", value: newSize)
         config.updateSetting("manual_thumbnail_size", value: true)
         config.applySettingsChange(emit: eventBus)
+        thumbnailGridHost?.reloadLayout()
         status.show(String(format: "Thumbnail size: %.0f", newSize))
     }
 
@@ -1578,6 +1608,7 @@ final class AppState {
         config.updateSetting("manual_thumbnail_size", value: false)
         config.updateSetting("thumbnail_cell_size", value: ThumbnailLayout.defaultCellSize)
         config.applySettingsChange(emit: eventBus)
+        thumbnailGridHost?.reloadLayout()
         status.show("Thumbnail size reset")
     }
 

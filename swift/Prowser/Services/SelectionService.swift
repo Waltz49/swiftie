@@ -217,13 +217,17 @@ enum SelectionService {
     }
 
     static func openBrowseForCurrentSelection(appState: AppState) {
+        if appState.isLoadingDirectory {
+            return
+        }
         if openSelectedFilesLevel(appState: appState) {
             return
         }
         guard appState.fileData.currentImagePath != nil else { return }
         DisplayedImagesSync.ensureActiveImageListed(
             fileData: appState.fileData,
-            filterPattern: appState.filterSettings.filterPattern
+            filterPattern: appState.filterSettings.filterPattern,
+            isLoadingDirectory: appState.isLoadingDirectory
         )
         if appState.fileData.currentViewMode == .list {
             appState.returnToListViewAfterBrowse = true

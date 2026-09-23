@@ -60,6 +60,10 @@ struct ThumbnailGridView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         // Observers handle directory/filter/displayed/settings; this coalesces other AppState changes.
+        _ = appState.isLoadingDirectory
+        _ = appState.showThumbnailDirectoryLoadingCanvas
+        _ = appState.config.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
+        _ = appState.config.bool(forKey: "manual_thumbnail_size", default: false)
         context.coordinator.syncFromAppStateIfNeeded()
     }
 
@@ -97,6 +101,9 @@ struct ThumbnailGridView: NSViewRepresentable {
             var imageExtensions: [String]
             var duplicateSections: [DuplicateGroupPresentation.DuplicateSection]
             var sortMode: String
+            var showDirectoryLoadingCanvas: Bool
+            var thumbnailCellSize: Double
+            var manualThumbnailSize: Bool
         }
 
         private struct SelectionFingerprint: Equatable {
@@ -233,7 +240,7 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         private func syncFromAppState(force: Bool) {
             guard let gridView else { return }
-            let paths = appState.fileData.displayedImages
+            let paths = appState.showThumbnailDirectoryLoadingCanvas ? [] : appState.fileData.displayedImages
             let index = resolvedHighlightIndex(in: paths)
             let fingerprint = GridSyncFingerprint(
                 themeID: appState.theme.colors.themeID,
@@ -253,7 +260,13 @@ struct ThumbnailGridView: NSViewRepresentable {
                 showExtensions: appState.config.bool(forKey: "show_extensions", default: true),
                 imageExtensions: appState.config.imageExtensions,
                 duplicateSections: appState.duplicateSections,
-                sortMode: appState.config.string(forKey: "sort_mode", default: SortMode.date.rawValue)
+                sortMode: appState.config.string(forKey: "sort_mode", default: SortMode.date.rawValue),
+                showDirectoryLoadingCanvas: appState.showThumbnailDirectoryLoadingCanvas,
+                thumbnailCellSize: appState.config.double(
+                    forKey: "thumbnail_cell_size",
+                    default: ThumbnailLayout.defaultCellSize
+                ),
+                manualThumbnailSize: appState.config.bool(forKey: "manual_thumbnail_size", default: false)
             )
             if !force, fingerprint == lastGridSyncFingerprint {
                 syncSelectionVisualsIfNeeded(to: gridView)
@@ -281,6 +294,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
             gridView.currentDirectory = directory
             gridView.filterPattern = appState.filterSettings.filterPattern
+            gridView.isLoadingDirectory = fingerprint.showDirectoryLoadingCanvas
             gridView.imageExtensions = appState.config.imageExtensions
             if gridView.imagePaths != paths {
                 gridView.pruneThumbnails(keeping: Set(paths))
@@ -294,7 +308,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
             gridView.updateEmptyStateContext()
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
-            applyThumbnailLoadingActive(inThumbnailMode, gridView: gridView)
+            applyThumbnailLoadingActive(inThumbnailMode && !fingerprint.showDirectoryLoadingCanvas, gridView: gridView)
             gridView.wrapAround = fingerprint.wrapAround
             gridView.showFilenames = fingerprint.showFilenames
             gridView.showImageSize = fingerprint.showImageSize

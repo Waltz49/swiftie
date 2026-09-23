@@ -83,10 +83,8 @@ enum ThumbnailLayout {
         cellSize: CGFloat = defaultCellSize,
         scrollbarWidth: CGFloat = 0
     ) -> GridMetrics {
-        let targetCell = min(
-            max(cellSize, CGFloat(ThumbnailGridLayoutService.minThumbnailSize)),
-            maxCellSize
-        )
+        // Auto layout never passes cellSize below 150; manual sizing may go down to `minCellSize` (Python `set_thumbnail_size`).
+        let targetCell = min(max(cellSize, minCellSize), maxCellSize)
         // Python `calculate_grid_layout`: columns from fixed slot width, not stretched cells.
         let availableWidth = max(viewportWidth - scrollbarWidth - baseMargin * 2, 1)
         let cellSlot = targetCell + borderSpace + thumbnailSpacing

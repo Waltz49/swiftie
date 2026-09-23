@@ -62,6 +62,7 @@ struct FileTreeView: NSViewRepresentable {
     func updateNSView(_ tabStop: NSView, context: Context) {
         // Access image path so SwiftUI retriggers sync when thumbnail highlight moves.
         _ = appState.fileData.currentImagePath
+        _ = appState.fileTreeSyncActiveImageToken
         FileTreeFilter.setFileTreePaneVisible(
             appState.effectiveLeftSidebarVisible
                 && appState.config.bool(forKey: "file_tree_visible", default: true)
@@ -203,9 +204,7 @@ struct FileTreeView: NSViewRepresentable {
             pendingHighlightSync = nil
             let delay: TimeInterval = extended ? 1.0 : 0.2
             let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.userIsNavigatingTree = false
-                self.syncSelectionIfNeeded()
+                self?.userIsNavigatingTree = false
             }
             userNavigationReset = work
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -218,7 +217,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func syncSelectionIfNeeded() {
             switch appState.fileData.currentViewMode {
-            case .slideshow, .slideshow2, .slideshow3:
+            case .slideshow, .slideshow2, .slideshow3, .browse:
                 return
             default:
                 break
@@ -226,22 +225,29 @@ struct FileTreeView: NSViewRepresentable {
             guard treeHighlightSyncAllowed() else { return }
             if shouldDeferTreeHighlightSync() { return }
             let currentImage = appState.fileData.currentImagePath
-            if currentImage == lastSyncedImagePath { return }
             let currentDir = activeImageDirectoryForTreeSync()
-            if currentDir == lastSyncedDirectory, isTreeShowingDirectory(currentDir) {
-                lastSyncedImagePath = currentImage
+            if treeHighlightAlreadySynced(imagePath: currentImage, directory: currentDir) {
                 return
             }
             scheduleDebouncedHighlightSync(retryCount: 0)
         }
 
-        /// True when the outline already has the directory row materialized (Python `_last_highlighted_directory` skip).
-        /// Uses already-loaded children only so the check does not scan disk.
-        private func isTreeShowingDirectory(_ directory: String?) -> Bool {
+        /// Skip only when the active image and its directory row are already selected (Python `_last_highlighted_*`).
+        private func treeHighlightAlreadySynced(imagePath: String?, directory: String?) -> Bool {
+            guard let imagePath, let directory else { return false }
+            let directoryNorm = standardizedPath(directory)
+            guard imagePath == lastSyncedImagePath, directoryNorm == lastSyncedDirectory else { return false }
+            return isTreeHighlightSyncedToDirectory(directory)
+        }
+
+        /// Directory row exists and is the current outline selection.
+        private func isTreeHighlightSyncedToDirectory(_ directory: String?) -> Bool {
             guard let directory, let outlineView else { return false }
             let norm = standardizedPath(directory)
             guard let node = loadedNode(at: norm) else { return false }
-            return outlineView.row(forItem: node) >= 0
+            let row = outlineView.row(forItem: node)
+            guard row >= 0 else { return false }
+            return outlineView.selectedRow == row
         }
 
         private func loadedNode(at targetPath: String) -> FileTreeNode? {
@@ -519,8 +525,17 @@ struct FileTreeView: NSViewRepresentable {
                 self?.syncSelectionIfNeeded()
             }
             bag.subscribe(.directoryLoaded) { [weak self] _ in
-                self?.syncSelectionIfNeeded()
+                self?.syncAfterDirectoryLoaded()
             }
+        }
+
+        /// New folder listing — clear skip flags so launch/CLI restore always highlights the tree once.
+        private func syncAfterDirectoryLoaded() {
+            lastSyncedDirectory = nil
+            lastSyncedImagePath = nil
+            lastExpandedHighlightDirectory = nil
+            pendingHighlightSync?.cancel()
+            syncSelection(retryCount: 0, force: true)
         }
 
         /// Background discovery finished — refresh parent rows only (no re-expand / no thumbnail resync).
@@ -533,7 +548,10 @@ struct FileTreeView: NSViewRepresentable {
                 guard let node = findNodeByPath(path) else { continue }
                 node.reloadChildren(appState: appState, rootPaths: rootPaths)
                 guard outlineView.row(forItem: node) >= 0 else { continue }
-                outlineView.reloadItem(node, reloadChildren: true)
+                reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
+            }
+            if outlineView.selectedRow < 0 {
+                syncSelectionIfNeeded()
             }
         }
 
@@ -559,7 +577,7 @@ struct FileTreeView: NSViewRepresentable {
                 guard let node = findNodeByPath(path) else { continue }
                 node.reloadChildren(appState: appState, rootPaths: rootPaths)
                 guard outlineView.row(forItem: node) >= 0 else { continue }
-                outlineView.reloadItem(node, reloadChildren: true)
+                reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
             }
             restoreTrackedExpansion(outlineView: outlineView)
             syncSelectionIfNeeded()
@@ -633,7 +651,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func syncSelection(retryCount: Int = 0, force: Bool = false) {
             switch appState.fileData.currentViewMode {
-            case .slideshow, .slideshow2, .slideshow3:
+            case .slideshow, .slideshow2, .slideshow3, .browse:
                 return
             default:
                 break
@@ -645,9 +663,7 @@ struct FileTreeView: NSViewRepresentable {
             if let directory = directoryToHighlightForTreeSync() {
                 let directoryNorm = standardizedPath(directory)
                 let currentImage = appState.fileData.currentImagePath
-                if !force, retryCount == 0, currentImage == lastSyncedImagePath { return }
-                if !force, retryCount == 0, directoryNorm == lastSyncedDirectory, isTreeShowingDirectory(directoryNorm) {
-                    lastSyncedImagePath = currentImage
+                if !force, retryCount == 0, treeHighlightAlreadySynced(imagePath: currentImage, directory: directory) {
                     return
                 }
 

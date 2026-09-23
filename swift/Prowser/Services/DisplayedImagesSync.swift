@@ -6,8 +6,10 @@ import Foundation
 enum DisplayedImagesSync {
     static func ensureActiveImageListed(
         fileData: FileDataModel,
-        filterPattern: String = "*"
+        filterPattern: String = "*",
+        isLoadingDirectory: Bool = false
     ) {
+        guard !isLoadingDirectory else { return }
         guard let raw = fileData.currentImagePath,
               let path = FileDataModel.normalizePath(raw),
               FileManager.default.fileExists(atPath: path),
