@@ -37,6 +37,8 @@ enum DialogButtonRowLayout {
     case standard
     /// Buttons only — embed in a parent `HStack` (e.g. image-gen dialog footer).
     case inline
+    /// Equal gaps between buttons, stretched across the full row width.
+    case evenlySpaced
 }
 
 /// Right-aligned dialog button row with Qt-style keyboard behaviour:
@@ -94,6 +96,8 @@ struct DialogButtonRow<Leading: View>: View {
                     leading()
                     ForEach(buttons) { rowButton($0) }
                 }
+            case .evenlySpaced:
+                evenlySpacedButtons
             }
         }
         .background(
@@ -104,6 +108,19 @@ struct DialogButtonRow<Leading: View>: View {
             guard focusDefaultOnAppear else { return }
             DispatchQueue.main.async { focusedID = initialButtonID }
         }
+    }
+
+    private var evenlySpacedButtons: some View {
+        let ordered = leadingButtons + buttons
+        return HStack(spacing: 0) {
+            ForEach(Array(ordered.enumerated()), id: \.element.id) { index, button in
+                if index > 0 {
+                    Spacer(minLength: 12)
+                }
+                rowButton(button)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func rowButton(_ button: DialogButton) -> some View {

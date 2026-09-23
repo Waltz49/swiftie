@@ -23,11 +23,18 @@ struct AboutView: View {
             Text("Version: \(AboutBuildInfo.packageVersion())")
                 .font(.system(size: 12))
 
+            Text("A native image browser for macOS")
+                .multilineTextAlignment(.center)
+
             Text("Build Date: \(AboutBuildInfo.buildDate())")
                 .font(.system(size: 12))
 
-            Text("A native image browser for macOS")
+            Text(profileLine)
+                .font(.system(size: 12))
                 .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .frame(maxWidth: profileLineWidth, alignment: .center)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text("Built with Swift, SwiftUI, and AppKit")
                 .font(.system(size: 12))
@@ -39,8 +46,6 @@ struct AboutView: View {
                 Link("Website", destination: URL(string: "https://waltzremote.com")!)
             }
 
-            Spacer(minLength: 8)
-
             DialogButtonRow(
                 [
                     DialogButton("License", action: onShowLicense),
@@ -49,11 +54,27 @@ struct AboutView: View {
                         appState.closeAboutDialog()
                     },
                 ],
-                focusDefaultOnAppear: true
+                focusDefaultOnAppear: true,
+                layout: .evenlySpaced
             )
         }
         .padding(20)
-        .frame(minWidth: 400, minHeight: 320)
+        .frame(minWidth: max(400, profileLineWidth + 40))
+        .fixedSize()
         .themeDialogStyle()
+    }
+
+    @MainActor
+    private var profileLine: String {
+        "Profile: \(appState.config.prowserHome.path)"
+    }
+
+    /// Width of the profile line, capped so a long path wraps instead of exceeding the screen.
+    @MainActor
+    private var profileLineWidth: CGFloat {
+        let font = NSFont.systemFont(ofSize: 12)
+        let measured = ceil((profileLine as NSString).size(withAttributes: [.font: font]).width)
+        let screenLimit = max(360, (NSScreen.main?.visibleFrame.width ?? 1400) - 120)
+        return min(measured, screenLimit)
     }
 }

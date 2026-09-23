@@ -28,23 +28,73 @@ final class AboutDialogController: NSObject, NSWindowDelegate {
         )
         let window = AuxiliaryDialogWindow(contentViewController: host)
         window.title = "About Prowser"
-        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
-        window.minSize = NSSize(width: 400, height: 420)
-        window.setContentSize(NSSize(width: 440, height: 480))
+        window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.identifier = NSUserInterfaceItemIdentifier(BrowserWindowIdentity.about)
         window.delegate = self
         aboutWindow = window
-        DialogGeometryPersistence.apply(
-            to: window,
-            config: appState.config,
-            key: DialogGeometryKey.about,
-            defaultSize: NSSize(width: 440, height: 480),
-            minSize: NSSize(width: 400, height: 420)
-        )
+        fitWindowToContent(window, host: host, config: appState.config, reposition: true)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, window === self.aboutWindow, let appState = self.appState else { return }
+            self.fitWindowToContent(window, host: host, config: appState.config, reposition: false)
+        }
+    }
+
+    /// Size the About window to the SwiftUI ideal size so a long profile path widens it and wrapping grows it.
+    private func fitWindowToContent<Content: View>(
+        _ window: NSWindow,
+        host: NSHostingController<Content>,
+        config: AppConfig,
+        reposition: Bool
+    ) {
+        window.maxSize = NSSize(width: 10_000, height: 10_000)
+        window.minSize = NSSize(width: 200, height: 100)
+        host.sizingOptions = .intrinsicContentSize
+        host.view.layoutSubtreeIfNeeded()
+
+        var size = host.view.intrinsicContentSize
+        if size.width <= 1 || size.height <= 1 || !size.width.isFinite || !size.height.isFinite {
+            let fitted = host.sizeThatFits(in: CGSize(width: 2_000, height: 2_000))
+            size = NSSize(width: fitted.width, height: fitted.height)
+        }
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1400, height: 900)
+        let contentSize = NSSize(
+            width: min(max(400, ceil(size.width)), visible.width - 40),
+            height: min(max(1, ceil(size.height)), visible.height - 80)
+        )
+        let previousFrame = window.frame
+        window.setContentSize(contentSize)
+
+        if reposition {
+            if let stored = DialogGeometryPersistence.loadFrame(config: config, key: DialogGeometryKey.about),
+               stored.positionIsKnown {
+                var frame = window.frame
+                frame.origin.x = stored.x
+                frame.origin.y = stored.y + stored.height - frame.size.height
+                window.setFrame(
+                    DialogGeometryPersistence.clampFrame(frame, minSize: NSSize(width: 400, height: 200)),
+                    display: false
+                )
+            } else {
+                window.center()
+            }
+        } else if previousFrame.width > 1 {
+            var frame = window.frame
+            frame.origin.x = previousFrame.origin.x
+            frame.origin.y = previousFrame.maxY - frame.size.height
+            window.setFrame(
+                DialogGeometryPersistence.clampFrame(frame, minSize: NSSize(width: 400, height: 200)),
+                display: true
+            )
+        }
+
+        let locked = window.frame.size
+        window.minSize = locked
+        window.maxSize = locked
     }
 
     func close() {
