@@ -339,10 +339,7 @@ struct ProwserCommands: Commands {
 
         CommandMenu("Tools") {
             Group {
-                Button("Quick Mass Rename…") {
-                Task { @MainActor in appState.quickMassRename() }
-            }
-            .keyboardShortcut("m", modifiers: [.command, .shift])
+            QuickMassRenameMenuButton(appState: appState)
 
             Button("Backup Custom Sort") {
                 Task { @MainActor in appState.backupCustomSort() }
@@ -354,15 +351,7 @@ struct ProwserCommands: Commands {
 
             ExcludeThumbsFromViewMenuButton(appState: appState)
 
-            Button("Lock Selected File") {
-                Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
-            }
-            .keyboardShortcut("l", modifiers: .command)
-
-            Button("Unlock Selected File") {
-                Task { @MainActor in appState.fileOperations.unlockSelectedFiles() }
-            }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
+            LockUnlockMenuButtons(appState: appState)
 
             Divider()
 
@@ -706,6 +695,39 @@ struct ProwserCommands: Commands {
         }
     }
 
+}
+
+@MainActor
+private struct QuickMassRenameMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        if appState.menuRefresh.quickMassRenameMenuVisible {
+            Button("Quick Mass Rename…") {
+                Task { @MainActor in appState.quickMassRename() }
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+        }
+    }
+}
+
+@MainActor
+private struct LockUnlockMenuButtons: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        if appState.menuRefresh.lockUnlockMenuVisible {
+            Button("Lock Selected File") {
+                Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
+            }
+            .keyboardShortcut("l", modifiers: .command)
+
+            Button("Unlock Selected File") {
+                Task { @MainActor in appState.fileOperations.unlockSelectedFiles() }
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
+        }
+    }
 }
 
 @MainActor

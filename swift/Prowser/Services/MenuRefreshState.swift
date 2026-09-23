@@ -18,6 +18,10 @@ final class MenuRefreshState {
     var browserMenuCommandsEnabled = true
     /// Tools → Exclude Thumbs from View (⌘X); thumbnail view only when exclude rules are enabled.
     var excludeFilesFromViewVisible = false
+    /// Tools → Lock / Unlock Selected File; hidden unless Settings → General allows thumbnail locking.
+    var lockUnlockMenuVisible = false
+    /// Tools → Quick Mass Rename; hidden unless Settings → General allows quick mass rename.
+    var quickMassRenameMenuVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
 
     func bind(_ appState: AppState) {
@@ -48,6 +52,19 @@ final class MenuRefreshState {
         ) != "none"
         refreshDeleteExifDate(appState: appState)
         refreshExcludeFilesFromView(appState: appState)
+        refreshGeneralToolsMenuVisibility(appState: appState)
+    }
+
+    func refreshGeneralToolsMenuVisibility(appState: AppState) {
+        let lockVisible = appState.config.bool(forKey: "allow_thumbnail_locking")
+        let quickMassRenameVisible = appState.config.bool(forKey: "allow_quick_mass_rename")
+        let changed = lockVisible != lockUnlockMenuVisible
+            || quickMassRenameVisible != quickMassRenameMenuVisible
+        lockUnlockMenuVisible = lockVisible
+        quickMassRenameMenuVisible = quickMassRenameVisible
+        if changed {
+            appState.bumpMenuCommandsRevision()
+        }
     }
 
     func refreshExcludeFilesFromView(appState: AppState) {
