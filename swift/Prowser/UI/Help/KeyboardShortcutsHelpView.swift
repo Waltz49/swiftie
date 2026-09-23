@@ -98,7 +98,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘⇧O", "Open file"),
                         ("⌘R", "Refresh"),
                         ("⇧⌘R", "Reveal in Finder"),
-                        ("⌘Delete", "Move to Trash"),
+                        ("⌘Delete", "Move File to Trash"),
                         ("⌘C", "Copy path"),
                         ("^C", "Copy image"),
                         ("⌘⇧H", "Show image in directory"),

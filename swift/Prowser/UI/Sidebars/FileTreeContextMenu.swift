@@ -25,6 +25,24 @@ enum FileTreeContextMenu {
         )
         addAction(
             menu,
+            title: "Search by Description...",
+            shortcut: "⌘F",
+            enabled: !restricted,
+            representedObject: directoryPath,
+            action: #selector(FileTreeMenuActions.searchByDescription(_:))
+        )
+        if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+            addAction(
+                menu,
+                title: "Search by Person...",
+                shortcut: "⌘P",
+                enabled: !restricted,
+                representedObject: directoryPath,
+                action: #selector(FileTreeMenuActions.searchByPerson(_:))
+            )
+        }
+        addAction(
+            menu,
             title: "Copy Directory Path",
             shortcut: "⌘C",
             representedObject: directoryPath,
@@ -112,6 +130,28 @@ final class FileTreeMenuActions: NSObject {
     @objc func copyDirectoryPath(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
         appState.fileOperations.copyPathsToClipboard([path])
+    }
+
+    @objc func searchByDescription(_ sender: NSMenuItem) {
+        guard let appState, let path = sender.representedObject as? String else { return }
+        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
+            showRestrictedAlert(path: path)
+            return
+        }
+        appState.config.updateSetting("clip_search_dir", value: path)
+        appState.config.updateSetting("clip_search_dir_enabled", value: true)
+        appState.searchOperations.presentClipSearchDialog()
+    }
+
+    @objc func searchByPerson(_ sender: NSMenuItem) {
+        guard let appState, let path = sender.representedObject as? String else { return }
+        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
+            showRestrictedAlert(path: path)
+            return
+        }
+        appState.config.updateSetting("find_person_dir", value: path)
+        appState.config.updateSetting("find_person_dir_enabled", value: true)
+        appState.searchOperations.presentPersonSearchDialog()
     }
 
     @objc func openInFinder(_ sender: NSMenuItem) {

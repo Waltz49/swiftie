@@ -198,13 +198,31 @@ enum SettingsSupport {
 
     static func pickApplication(into binding: Binding<String>) {
         let panel = NSOpenPanel()
+        panel.title = "Select Image Editor"
+        panel.prompt = "Choose"
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
         panel.allowedContentTypes = [.application]
-        panel.prompt = "Choose"
+        // Match settings_dialog.py: always start in /Applications.
+        panel.directoryURL = applicationsChooserDirectory()
         guard panel.runModal() == .OK, let url = panel.url else { return }
         binding.wrappedValue = url.deletingPathExtension().lastPathComponent
+    }
+
+    /// Start directory for the external-editor chooser (`/Applications`, then `~/Applications`).
+    private static func applicationsChooserDirectory() -> URL {
+        let systemApps = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        if FileManager.default.fileExists(atPath: systemApps.path) {
+            return systemApps
+        }
+        let userApps = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Applications", isDirectory: true)
+        if FileManager.default.fileExists(atPath: userApps.path) {
+            return userApps
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     /// Favorite slots accept a directory or image file (Python `browse_favorite_destination`).

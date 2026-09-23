@@ -485,7 +485,7 @@ class MenuManager:
         file_menu.addSeparator()
         
         # Settings
-        settings_action = QAction("Settings...", self.main_window)
+        settings_action = QAction("Preferences...", self.main_window)
         settings_action.setShortcut(QKeySequence("Ctrl+,"))
         settings_action.triggered.connect(self.main_window.show_settings)
         file_menu.addAction(settings_action)
@@ -493,7 +493,7 @@ class MenuManager:
         file_menu.addSeparator()
         
         # Delete File section
-        self.main_window.delete_action = QAction("Delete File", self.main_window)
+        self.main_window.delete_action = QAction("Move File to Trash", self.main_window)
         self.main_window.delete_action.setShortcut(QKeySequence("Ctrl+Backspace"))
         self.main_window.delete_action.triggered.connect(self.file_operations_manager.delete_selected_files)
         file_menu.addAction(self.main_window.delete_action)
@@ -3830,9 +3830,9 @@ class MenuManager:
             ellipsis = "..." if confirm_delete else ""
             
             if selected_count > 1:
-                mw.delete_action.setText(f"Delete Files{ellipsis}")
+                mw.delete_action.setText(f"Move Files to Trash{ellipsis}")
             else:
-                mw.delete_action.setText(f"Delete File{ellipsis}")
+                mw.delete_action.setText(f"Move File to Trash{ellipsis}")
     
     def update_sidebar_menu_actions_for_view_mode(self, view_mode):
         """Update sidebar menu actions enabled state based on view mode"""

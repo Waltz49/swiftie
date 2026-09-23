@@ -95,24 +95,6 @@ enum ThumbnailContextMenu {
         showInDirectory.representedObject = paths
         showInDirectory.isEnabled = singleOnly && appState.specificFilesActive
 
-        let convertFormat = menu.addItem(
-            withTitle: "Convert Format…",
-            action: #selector(MenuActions.convertFormat(_:)),
-            keyEquivalent: ""
-        )
-        NSMenuShortcutSupport.apply(display: "⌘M", to: convertFormat)
-        convertFormat.target = MenuActions.shared
-        convertFormat.representedObject = paths
-
-        let resizeImages = menu.addItem(
-            withTitle: "Resize…",
-            action: #selector(MenuActions.resizeImages(_:)),
-            keyEquivalent: ""
-        )
-        NSMenuShortcutSupport.apply(display: "⌘⇧Z", to: resizeImages)
-        resizeImages.target = MenuActions.shared
-        resizeImages.representedObject = paths
-
         menu.addItem(.separator())
 
         let editorName = appState.config.string(forKey: "image_editor_app", default: "Preview")
@@ -135,25 +117,26 @@ enum ThumbnailContextMenu {
         exif.target = MenuActions.shared
         exif.representedObject = paths
 
-        let findRefs = menu.addItem(
-            withTitle: "Find References to This Image…",
-            action: #selector(MenuActions.findReferences(_:)),
+        let convertFormat = menu.addItem(
+            withTitle: "Convert Format…",
+            action: #selector(MenuActions.convertFormat(_:)),
             keyEquivalent: ""
         )
-        findRefs.target = MenuActions.shared
-        findRefs.representedObject = paths
-        findRefs.isEnabled = singleOnly
+        NSMenuShortcutSupport.apply(display: "⌘M", to: convertFormat)
+        convertFormat.target = MenuActions.shared
+        convertFormat.representedObject = paths
 
-        if singleOnly {
-            let refGraph = menu.addItem(
-                withTitle: "Show Reference Graph",
-                action: #selector(MenuActions.showReferenceGraph(_:)),
+        if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+            let extractFaces = menu.addItem(
+                withTitle: "Extract Faces",
+                action: #selector(MenuActions.extractFaces(_:)),
                 keyEquivalent: ""
             )
-            refGraph.target = MenuActions.shared
-            refGraph.representedObject = paths
+            NSMenuShortcutSupport.apply(display: "⇧⌘P", to: extractFaces)
+            extractFaces.target = MenuActions.shared
+            extractFaces.representedObject = paths
+            extractFaces.isEnabled = singleOnly
         }
-
 
         let anyHasGPS = paths.contains { ExifService.gpsCoordinates(for: $0) != nil }
         let mapLocation = menu.addItem(
@@ -165,6 +148,35 @@ enum ThumbnailContextMenu {
         mapLocation.target = MenuActions.shared
         mapLocation.representedObject = paths
         mapLocation.isEnabled = anyHasGPS
+
+        if singleOnly, let path = paths.first {
+            let imageDir = (path as NSString).deletingLastPathComponent
+            let comment = ExifService.userComment(path: path) ?? ""
+            let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
+            let (resolved, _, _) = ReferenceGraphService.resolveExifReferencePaths(
+                imageDir: imageDir,
+                currentPath: path,
+                entries: entries
+            )
+            if !resolved.isEmpty {
+                let refGraph = menu.addItem(
+                    withTitle: "Show Reference Graph",
+                    action: #selector(MenuActions.showReferenceGraph(_:)),
+                    keyEquivalent: ""
+                )
+                refGraph.target = MenuActions.shared
+                refGraph.representedObject = paths
+            }
+        }
+
+        let findRefs = menu.addItem(
+            withTitle: "Find References to This Image…",
+            action: #selector(MenuActions.findReferences(_:)),
+            keyEquivalent: ""
+        )
+        findRefs.target = MenuActions.shared
+        findRefs.representedObject = paths
+        findRefs.isEnabled = singleOnly
 
         menu.addItem(.separator())
 
@@ -218,6 +230,15 @@ enum ThumbnailContextMenu {
             let wallpaperDisabled = menu.addItem(withTitle: "Set as Wallpaper", action: nil, keyEquivalent: "")
             wallpaperDisabled.isEnabled = false
         }
+
+        let resizeImages = menu.addItem(
+            withTitle: "Resize…",
+            action: #selector(MenuActions.resizeImages(_:)),
+            keyEquivalent: ""
+        )
+        NSMenuShortcutSupport.apply(display: "⌘⇧Z", to: resizeImages)
+        resizeImages.target = MenuActions.shared
+        resizeImages.representedObject = paths
 
         if multiSelect {
             menu.addItem(.separator())
@@ -316,6 +337,15 @@ private final class MenuActions: NSObject {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
         appState.fileData.setCurrentImagePath(path)
         appState.exifOperations.editUserCommentForCurrent()
+    }
+
+    @objc func extractFaces(_ sender: NSMenuItem) {
+        guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
+        if let index = appState.fileData.displayedImages.firstIndex(of: path) {
+            appState.fileData.setCurrentIndex(index)
+        }
+        appState.fileData.setCurrentImagePath(path)
+        appState.searchOperations.extractFaces()
     }
 
     @objc func findReferences(_ sender: NSMenuItem) {

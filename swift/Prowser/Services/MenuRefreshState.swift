@@ -11,6 +11,7 @@ final class MenuRefreshState {
     var moveWorkFilesVisible = false
     var deleteExifDateEnabled = false
     var deleteExifDateTitle = "Delete EXIF Date from File…"
+    var moveToTrashMenuTitle = "Move File to Trash"
     var destinationsMenuVisible = true
     /// False while a dialog/settings/about window is key (`KeyboardHandlerController` parity).
     var browserWindowShortcutsEnabled = true
@@ -35,6 +36,7 @@ final class MenuRefreshState {
         refreshBrowserWindowShortcuts()
         refreshExcludeFilesFromView(appState: appState)
         refreshDeleteExifDate(appState: appState)
+        refreshMoveToTrashMenuTitle(appState: appState)
     }
 
     func refreshAll() {
@@ -51,6 +53,7 @@ final class MenuRefreshState {
             default: "move"
         ) != "none"
         refreshDeleteExifDate(appState: appState)
+        refreshMoveToTrashMenuTitle(appState: appState)
         refreshExcludeFilesFromView(appState: appState)
         refreshGeneralToolsMenuVisibility(appState: appState)
     }
@@ -70,6 +73,15 @@ final class MenuRefreshState {
     func refreshExcludeFilesFromView(appState: AppState) {
         excludeFilesFromViewVisible = appState.fileData.currentViewMode == .thumbnail
             && ThumbnailExcludeService.hasEnabledExcludeRules(config: appState.config)
+    }
+
+    func refreshMoveToTrashMenuTitle(appState: AppState) {
+        let selectedCount = appState.selection.selectedFiles.count
+        let confirm = appState.config.bool(forKey: "confirm_delete", default: true)
+        let ellipsis = confirm ? "…" : ""
+        moveToTrashMenuTitle = selectedCount > 1
+            ? "Move Files to Trash\(ellipsis)"
+            : "Move File to Trash\(ellipsis)"
     }
 
     func refreshDeleteExifDate(appState: AppState) {

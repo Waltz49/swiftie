@@ -166,9 +166,9 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [~] Favorites submenu (^1–9 slots)
 - [~] Back / Forward (⌘[ / ⌘])
 - [~] Move to submenu (destinations 1–9, last drop — currently under File; Python uses top-level Move/Copy menu)
-- [x] Settings… (⌘, — **Prowser Preferences** window)
+- [x] Preferences… (⌘, — **Prowser Preferences** window)
 - [~] Reveal in Finder (⇧⌘R)
-- [~] Move to Trash (⌘Delete; `confirm_delete`)
+- [~] Move File to Trash (⌘Delete; `confirm_delete`)
 - [~] Refresh (⌘R)
 - [x] View Copy of Trash… (⌘⇧T, when trash has images)
 - [x] Last Image (⌘; browse history swap)
@@ -507,7 +507,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 - Resize appears in thumbnail **context menu** (Swift-only; Python Edit menu only).
 - Resize resampling uses Core Graphics interpolation (Python: Pillow); filter names match, output may differ slightly.
 - Image-gen submit still delegates final dim alignment to Python `buildPayload`; Swift UI now mirrors live limit math.
-- Preferences window uses **Prowser Preferences** title; menu item remains **Settings…** (⌘,).
+- Preferences window uses **Prowser Preferences** title; app menu item **Preferences…** (⌘,).
 - `exclude_directories` rules filter the **current** thumbnail list (session `displayed_images`); they do not remove paths from disk or from tree scans (`ignore_directories` is separate).
 
 ## Remaining gate items (manual sign-off)

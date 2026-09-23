@@ -19,6 +19,10 @@ struct ProwserCommands: Commands {
             Button("About Prowser") {
                 Task { @MainActor in appState.showAboutDialog() }
             }
+            Button("Preferences…") {
+                Task { @MainActor in appState.openSettingsWindow() }
+            }
+            .keyboardShortcut(",", modifiers: .command)
         }
 
         // Python File → Exit uses QuitRole and `main_window.close`. Putting Quit in the
@@ -35,9 +39,97 @@ struct ProwserCommands: Commands {
             Divider()
         }
 
+        CommandMenu(MenuBarTitles.file) {
+            Group {
+                Button("Open File…") {
+                    Task { @MainActor in appState.openFileDialog() }
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
+                Button("Open Directory…") {
+                    Task { @MainActor in openDirectory() }
+                }
+                .keyboardShortcut("o", modifiers: .command)
+
+                Button("Refresh") {
+                    Task { @MainActor in appState.refreshDirectory() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                Divider()
+
+                MoveToTrashMenuButton(appState: appState)
+
+                TrashViewCopyMenuButton(appState: appState)
+
+                Divider()
+
+                Menu("Recent…") {
+                    RecentDirectoriesMenuContent(appState: appState)
+                }
+
+                Menu("Favorites") {
+                    ForEach(1...9, id: \.self) { slot in
+                        FavoriteMenuButton(appState: appState, slot: slot)
+                    }
+                }
+
+                LastImageMenuButton(appState: appState)
+
+                Button("Image History") {
+                    Task { @MainActor in appState.openBrowseImageHistory() }
+                }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF3FunctionKey)!)), modifiers: [])
+
+                Divider()
+
+                Button("Back") {
+                    Task { @MainActor in appState.goBack() }
+                }
+                .keyboardShortcut("[", modifiers: .command)
+
+                Button("Forward") {
+                    Task { @MainActor in appState.goForward() }
+                }
+                .keyboardShortcut("]", modifiers: .command)
+
+                DestinationsMenuVisibility(appState: appState)
+
+                Button("Reveal in Finder") {
+                    Task { @MainActor in revealSelection() }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
+            .disabled(!allowBrowserMenuCommands)
+
+            Button("Close Window") {
+                Task { @MainActor in NSApp.keyWindow?.performClose(nil) }
+            }
+            .keyboardShortcut("w", modifiers: .command)
+        }
+
         CommandMenu(MenuBarTitles.edit) {
             Group {
-                ExternalEditorButton(appState: appState)
+                Button("Select All") {
+                    Task { @MainActor in appState.fileOperations.selectAllDisplayed() }
+                }
+                .keyboardShortcut("a", modifiers: .command)
+
+                Divider()
+
+                Button("Copy Path") {
+                    Task { @MainActor in copyPath() }
+                }
+                .keyboardShortcut("c", modifiers: .command)
+
+                Button("Copy Image") {
+                    Task { @MainActor in appState.fileOperations.copyImageToClipboard() }
+                }
+                .keyboardShortcut("c", modifiers: .control)
+
+                Button("Copy User Comment") {
+                    Task { @MainActor in appState.copyUserCommentToClipboard() }
+                }
 
                 Divider()
 
@@ -65,32 +157,9 @@ struct ProwserCommands: Commands {
 
                 Divider()
 
-                Button("Lock Files") {
-                    Task { @MainActor in appState.fileOperations.lockSelectedFiles() }
-                }
-                .keyboardShortcut("l", modifiers: .command)
-
-                Button("Unlock Files") {
-                    Task { @MainActor in appState.fileOperations.unlockSelectedFiles() }
-                }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
+                ExternalEditorButton(appState: appState)
 
                 Divider()
-
-                Button("Copy Image") {
-                    Task { @MainActor in appState.fileOperations.copyImageToClipboard() }
-                }
-                .keyboardShortcut("c", modifiers: .control)
-
-                Button("Copy Path") {
-                    Task { @MainActor in copyPath() }
-                }
-                .keyboardShortcut("c", modifiers: .command)
-
-                Button("Select All") {
-                    Task { @MainActor in appState.fileOperations.selectAllDisplayed() }
-                }
-                .keyboardShortcut("a", modifiers: .command)
 
                 Button("Deselect All") {
                     Task { @MainActor in appState.fileOperations.deselectAll() }
@@ -99,182 +168,68 @@ struct ProwserCommands: Commands {
             .disabled(!allowBrowserMenuCommands)
         }
 
-        CommandMenu(MenuBarTitles.file) {
-            Group {
-                Button("Open File…") {
-                    Task { @MainActor in appState.openFileDialog() }
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
-
-                Button("Open Directory…") {
-                    Task { @MainActor in openDirectory() }
-                }
-                .keyboardShortcut("o", modifiers: .command)
-
-                Divider()
-
-                Button("Back") {
-                    Task { @MainActor in appState.goBack() }
-                }
-                .keyboardShortcut("[", modifiers: .command)
-
-                Button("Forward") {
-                    Task { @MainActor in appState.goForward() }
-                }
-                .keyboardShortcut("]", modifiers: .command)
-
-                Divider()
-
-                Menu("Recent…") {
-                    RecentDirectoriesMenuContent(appState: appState)
-                }
-
-                Menu("Favorites") {
-                    ForEach(1...9, id: \.self) { slot in
-                        FavoriteMenuButton(appState: appState, slot: slot)
-                    }
-                }
-
-                DestinationsMenuVisibility(appState: appState)
-
-                Divider()
-
-                Button("Settings…") {
-                    Task { @MainActor in appState.openSettingsWindow() }
-                }
-                .keyboardShortcut(",", modifiers: .command)
-
-                LastImageMenuButton(appState: appState)
-
-                Button("Delete File") {
-                    Task { @MainActor in deleteSelection() }
-                }
-                .keyboardShortcut(.delete, modifiers: [.command, .shift])
-
-                Button("Copy User Comment") {
-                    Task { @MainActor in appState.copyUserCommentToClipboard() }
-                }
-
-                Divider()
-
-                Button("Reveal in Finder") {
-                    Task { @MainActor in revealSelection() }
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-
-                Button("Move to Trash") {
-                    Task { @MainActor in deleteSelection() }
-                }
-                .keyboardShortcut(.delete, modifiers: .command)
-
-                Button("Refresh") {
-                    Task { @MainActor in appState.refreshDirectory() }
-                }
-                .keyboardShortcut("r", modifiers: .command)
-
-                TrashViewCopyMenuButton(appState: appState)
-
-                Button("Image History") {
-                    Task { @MainActor in appState.openBrowseImageHistory() }
-                }
-                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF3FunctionKey)!)), modifiers: [])
-
-                Divider()
-            }
-            .disabled(!allowBrowserMenuCommands)
-
-            Button("Close Window") {
-                Task { @MainActor in NSApp.keyWindow?.performClose(nil) }
-            }
-            .keyboardShortcut("w", modifiers: .command)
-
-            Divider()
-
-            Button("About…") {
-                Task { @MainActor in appState.showAboutDialog() }
-            }
-            .disabled(!allowBrowserMenuCommands)
-        }
-
         CommandMenu(MenuBarTitles.view) {
             Group {
+                PaneToggleButton(appState: appState, pane: .fileTree)
+                    .keyboardShortcut("t", modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .preview)
+                    .keyboardShortcut("p", modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .informationSidebar)
+                    .keyboardShortcut("i", modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .statusBar)
+                    .keyboardShortcut("b", modifiers: [])
+
+                ChromeToggleMenuButton(appState: appState)
+
+                Button("List View Toggle") {
+                    Task { @MainActor in appState.toggleListView() }
+                }
+                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .organizeSidebar)
+                    .keyboardShortcut("o", modifiers: [])
+
+                ThemeMenuContent(appState: appState, applyTheme: applyTheme)
+
                 Button("Enter Image Viewer") {
-                Task { @MainActor in
-                    guard appState.fileData.currentImagePath != nil else { return }
-                    appState.fileData.setViewMode(.browse)
+                    Task { @MainActor in
+                        guard appState.fileData.currentImagePath != nil else { return }
+                        appState.fileData.setViewMode(.browse)
+                    }
                 }
-            }
-            .keyboardShortcut("f", modifiers: [])
+                .keyboardShortcut("f", modifiers: [])
 
-            Button("List View Toggle") {
-                Task { @MainActor in appState.toggleListView() }
-            }
-            .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
-
-            Divider()
-
-            PaneToggleButton(appState: appState, pane: .fileTree)
-                .keyboardShortcut("t", modifiers: [])
-
-            PaneToggleButton(appState: appState, pane: .preview)
-                .keyboardShortcut("p", modifiers: [])
-
-            PaneToggleButton(appState: appState, pane: .organizeSidebar)
-                .keyboardShortcut("o", modifiers: [])
-
-            PaneToggleButton(appState: appState, pane: .informationSidebar)
-                .keyboardShortcut("i", modifiers: [])
-
-            PaneToggleButton(appState: appState, pane: .statusBar)
-                .keyboardShortcut("b", modifiers: [])
-
-            Divider()
-
-            Menu("Sort By") {
-                SortMenuButton(appState: appState, title: "Date (Newest First)", mode: .date, reversed: false, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "Date (Oldest First)", mode: .date, reversed: true, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "EXIF Date (Newest First)", mode: .exifDate, reversed: false, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "EXIF Date (Oldest First)", mode: .exifDate, reversed: true, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "EXIF Year (Newest First)", mode: .exifYear, reversed: false, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "EXIF Year (Oldest First)", mode: .exifYear, reversed: true, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "Name (A-Z)", mode: .name, reversed: false, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "Name (Z-A)", mode: .name, reversed: true, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "Size (Largest First)", mode: .size, reversed: false, apply: applySortMode)
-                SortMenuButton(appState: appState, title: "Size (Smallest First)", mode: .size, reversed: true, apply: applySortMode)
-                Divider()
-                Button("Reverse Sort Order") {
-                    Task { @MainActor in appState.reverseSortOrder() }
+                Button("Cycle Thumbnail Overlay") {
+                    Task { @MainActor in appState.cycleThumbnailOverlay() }
                 }
-                .keyboardShortcut("t", modifiers: .command)
-                RandomSortMenuButton(appState: appState)
-                SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode)
-            }
+                .keyboardShortcut("i", modifiers: .command)
 
-            Button("Cycle Thumbnail Overlay") {
-                Task { @MainActor in appState.cycleThumbnailOverlay() }
-            }
-            .keyboardShortcut("i", modifiers: .command)
+                Menu("Sort By") {
+                    SortMenuButton(appState: appState, title: "Date (Newest First)", mode: .date, reversed: false, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Date (Oldest First)", mode: .date, reversed: true, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "EXIF Date (Newest First)", mode: .exifDate, reversed: false, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "EXIF Date (Oldest First)", mode: .exifDate, reversed: true, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "EXIF Year (Newest First)", mode: .exifYear, reversed: false, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "EXIF Year (Oldest First)", mode: .exifYear, reversed: true, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Name (A-Z)", mode: .name, reversed: false, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Name (Z-A)", mode: .name, reversed: true, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Size (Largest First)", mode: .size, reversed: false, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Size (Smallest First)", mode: .size, reversed: true, apply: applySortMode)
+                    Divider()
+                    Button("Reverse Sort Order") {
+                        Task { @MainActor in appState.reverseSortOrder() }
+                    }
+                    .keyboardShortcut("t", modifiers: .command)
+                    RandomSortMenuButton(appState: appState)
+                    SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode)
+                }
 
-            ActualSizeToggleButton(appState: appState)
+                ActualSizeToggleButton(appState: appState)
 
-            Divider()
-
-            ChromeToggleMenuButton(appState: appState)
-
-            FullscreenToggleButton()
-
-            Divider()
-
-            Button("Previous Image") {
-                Task { @MainActor in navigate(.left) }
-            }
-            Button("Next Image") {
-                Task { @MainActor in navigate(.right) }
-            }
-
-            Divider()
-
-            ThemeMenuContent(appState: appState, applyTheme: applyTheme)
+                FullscreenToggleButton()
             }
             .disabled(!allowBrowserMenuCommands)
         }
@@ -292,23 +247,30 @@ struct ProwserCommands: Commands {
                 .keyboardShortcut("f", modifiers: .command)
 
                 if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                    Button("Search by Person…") {
+                    Button("Search for Known Person...") {
                         Task { @MainActor in appState.searchOperations.presentPersonSearchDialog() }
                     }
                     .keyboardShortcut("p", modifiers: .command)
 
-                    Button("Quick Person Search") {
+                    Button("Search for Person in Current Image...") {
                         Task { @MainActor in appState.searchOperations.runQuickPersonSearch() }
                     }
                     .keyboardShortcut("p", modifiers: [.command, .control])
 
-                    Button("Extract Faces") {
+                    Button("Identify Faces in Current Image...") {
                         Task { @MainActor in appState.searchOperations.extractFaces() }
                     }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                 }
 
-                Divider()
+                Menu("Find Duplicate Image Files") {
+                    Button("Find in This Directory") {
+                        Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
+                    }
+                    Button("Find in This and Subdirectories") {
+                        Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
+                    }
+                }
 
                 Menu("Find Similar Image Files") {
                     Button("Find in This Directory") {
@@ -317,16 +279,6 @@ struct ProwserCommands: Commands {
                     Button("Find in This and Subdirectories") {
                         Task { @MainActor in appState.searchOperations.findSimilarImageFilesRecursive() }
                     }
-                }
-
-                Divider()
-
-                Button("Find Duplicate Image Files in Directory") {
-                    Task { @MainActor in appState.searchOperations.findExactDuplicatesInDisplayed() }
-                }
-
-                Button("Find Duplicate Image Files (Recursive)") {
-                    Task { @MainActor in appState.searchOperations.findExactDuplicatesRecursive() }
                 }
 
                 Button("Show Image in Directory") {
@@ -339,174 +291,164 @@ struct ProwserCommands: Commands {
 
         CommandMenu("Tools") {
             Group {
-            QuickMassRenameMenuButton(appState: appState)
+                QuickMassRenameMenuButton(appState: appState)
 
-            Button("Backup Custom Sort") {
-                Task { @MainActor in appState.backupCustomSort() }
-            }
-
-            Button("Restore Custom Sort") {
-                Task { @MainActor in appState.restoreCustomSort() }
-            }
-
-            ExcludeThumbsFromViewMenuButton(appState: appState)
-
-            LockUnlockMenuButtons(appState: appState)
-
-            Divider()
-
-            MapLocationButton(appState: appState)
-
-            Divider()
-
-            Button("Open Home Directory") {
-                Task { @MainActor in appState.openHomeDirectory() }
-            }
-            .keyboardShortcut("h", modifiers: .control)
-
-            Button("Cache Subdirectories' Thumbnails") {
-                Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
-            }
-            .keyboardShortcut("c", modifiers: [.command, .shift])
-
-            if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                Button("Cache Subdirectories' Faces") {
-                    Task { @MainActor in appState.searchOperations.cacheFaces() }
-                }
-                .keyboardShortcut("=", modifiers: .command)
-            }
-
-            DeleteExifDateMenuButton(appState: appState)
-
-            Divider()
-
-            Menu("Slideshows") {
-                Button("Multiple Images Slideshow") {
-                    Task { @MainActor in appState.startSlideshow(.slideshow) }
-                }
-                .keyboardShortcut("s", modifiers: [])
-
-                Button("Panning Slideshow") {
-                    Task { @MainActor in appState.startSlideshow(.slideshow2) }
-                }
-                .keyboardShortcut("s", modifiers: .shift)
-
-                Button("Floating Frames Slideshow") {
-                    Task { @MainActor in appState.startSlideshow(.slideshow3) }
-                }
-                .keyboardShortcut("s", modifiers: [.shift, .control])
-            }
-
-            Divider()
-
-            Menu("Create Screen Size Copy...") {
-                Button("Create Screen Size Copy (Last Used)") {
-                    Task { @MainActor in appState.createScreenSizeCopy() }
+                Button("Backup Custom Sort") {
+                    Task { @MainActor in appState.backupCustomSort() }
                 }
 
-                Divider()
-
-                Button("Fit (Contain)") {
-                    Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .contain) }
-                }
-                Button("Fill (Cover)") {
-                    Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .cover) }
-                }
-                Button("Fit to Width") {
-                    Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .width) }
-                }
-                Button("Fit to Height") {
-                    Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .height) }
-                }
-            }
-
-            Menu("Wallpaper") {
-                Button("Set Wallpaper (Last Used)") {
-                    Task { @MainActor in setWallpaperLastUsed() }
-                }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
-
-                Divider()
-
-                Button("Fit (Contain)") {
-                    Task { @MainActor in setWallpaper(scaling: .contain, persist: true) }
-                }
-                Button("Fill (Cover)") {
-                    Task { @MainActor in setWallpaper(scaling: .cover, persist: true) }
-                }
-                Button("Fit to Width") {
-                    Task { @MainActor in setWallpaper(scaling: .fitWidth, persist: true) }
-                }
-                Button("Fit to Height") {
-                    Task { @MainActor in setWallpaper(scaling: .fitHeight, persist: true) }
-                }
-            }
-
-            Menu("Debug") {
-                Button("Print Cache Status") {
-                    Task { @MainActor in appState.printCacheStatus() }
-                }
-                .keyboardShortcut("d", modifiers: .command)
-
-                Button("Random Images") {
-                    Task { @MainActor in appState.loadRandomImagesFromRecents() }
+                Button("Restore Custom Sort") {
+                    Task { @MainActor in appState.restoreCustomSort() }
                 }
 
-                Button("View Live Log") {
-                    Task { @MainActor in appState.openLiveLog() }
-                }
-                .keyboardShortcut("l", modifiers: .control)
+                LockUnlockMenuButtons(appState: appState)
 
-                Divider()
-
-                Button("Toggle Debug Mode") {
-                    Task { @MainActor in appState.toggleDebugMode() }
-                }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-
-                Button("Toggle Number Overlay") {
-                    Task { @MainActor in appState.toggleNumberOverlay() }
-                }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
-
-                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                    Button("Remove Facial Rec Models") {
-                        Task { @MainActor in appState.removeFacialRecognitionModels() }
+                Menu("EXIF and Dates") {
+                    Button("Reset File Date to EXIF Timestamp…") {
+                        Task { @MainActor in appState.exifOperations.resetFileDateToExifForSelection() }
                     }
-                }
-            }
+                    Button("Reset EXIF Timestamp to File Date…") {
+                        Task { @MainActor in appState.exifOperations.resetExifDateToFileDateForSelection() }
+                    }
 
-            Divider()
+                    DeleteExifDateMenuButton(appState: appState)
 
-            Menu("EXIF and Dates") {
-                Button("Reset File Date to EXIF Timestamp…") {
-                    Task { @MainActor in appState.exifOperations.resetFileDateToExifForSelection() }
-                }
-                Button("Reset EXIF Timestamp to File Date…") {
-                    Task { @MainActor in appState.exifOperations.resetExifDateToFileDateForSelection() }
-                }
+                    Divider()
 
-                Divider()
+                    Button("Edit EXIF User Comment…") {
+                        Task { @MainActor in appState.beginEditUserComment() }
+                    }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
 
-                Button("Edit EXIF User Comment…") {
-                    Task { @MainActor in appState.beginEditUserComment() }
-                }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
+                    Button("Delete User Comment from File…") {
+                        Task { @MainActor in appState.exifOperations.deleteUserCommentForSelection() }
+                    }
 
-                Button("Delete User Comment from File…") {
-                    Task { @MainActor in appState.exifOperations.deleteUserCommentForSelection() }
-                }
+                    Divider()
 
-                Divider()
-
-                Button("Find References to This Image…") {
-                    Task { @MainActor in
-                        if let path = appState.fileData.currentImagePath {
-                            appState.findReferences(to: path)
+                    Button("Find References to This Image…") {
+                        Task { @MainActor in
+                            if let path = appState.fileData.currentImagePath {
+                                appState.findReferences(to: path)
+                            }
                         }
                     }
                 }
-            }
+
+                MapLocationButton(appState: appState)
+
+                Menu("Slideshows") {
+                    Button("Multiple Images Slideshow") {
+                        Task { @MainActor in appState.startSlideshow(.slideshow) }
+                    }
+                    .keyboardShortcut("s", modifiers: [])
+
+                    Button("Panning Slideshow") {
+                        Task { @MainActor in appState.startSlideshow(.slideshow2) }
+                    }
+                    .keyboardShortcut("s", modifiers: .shift)
+
+                    Button("Floating Frames Slideshow") {
+                        Task { @MainActor in appState.startSlideshow(.slideshow3) }
+                    }
+                    .keyboardShortcut("s", modifiers: [.shift, .control])
+                }
+
+                Menu("Wallpaper") {
+                    Button("Set Wallpaper (Last Used)") {
+                        Task { @MainActor in setWallpaperLastUsed() }
+                    }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
+
+                    Divider()
+
+                    Button("Fit (Contain)") {
+                        Task { @MainActor in setWallpaper(scaling: .contain, persist: true) }
+                    }
+                    Button("Fill (Cover)") {
+                        Task { @MainActor in setWallpaper(scaling: .cover, persist: true) }
+                    }
+                    Button("Fit to Width") {
+                        Task { @MainActor in setWallpaper(scaling: .fitWidth, persist: true) }
+                    }
+                    Button("Fit to Height") {
+                        Task { @MainActor in setWallpaper(scaling: .fitHeight, persist: true) }
+                    }
+                }
+
+                Menu("Create Screen Size Copy...") {
+                    Button("Create Screen Size Copy (Last Used)") {
+                        Task { @MainActor in appState.createScreenSizeCopy() }
+                    }
+
+                    Divider()
+
+                    Button("Fit (Contain)") {
+                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .contain) }
+                    }
+                    Button("Fill (Cover)") {
+                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .cover) }
+                    }
+                    Button("Fit to Width") {
+                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .width) }
+                    }
+                    Button("Fit to Height") {
+                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .height) }
+                    }
+                }
+
+                Button("Open Home Directory") {
+                    Task { @MainActor in appState.openHomeDirectory() }
+                }
+                .keyboardShortcut("h", modifiers: .control)
+
+                Button("Cache Subdirectories' Thumbnails") {
+                    Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
+                }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+
+                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                    Button("Cache Subdirectories' Faces") {
+                        Task { @MainActor in appState.searchOperations.cacheFaces() }
+                    }
+                    .keyboardShortcut("=", modifiers: .command)
+                }
+
+                ExcludeThumbsFromViewMenuButton(appState: appState)
+
+                Menu("Debug") {
+                    Button("Random Images") {
+                        Task { @MainActor in appState.loadRandomImagesFromRecents() }
+                    }
+
+                    Button("View Live Log") {
+                        Task { @MainActor in appState.openLiveLog() }
+                    }
+                    .keyboardShortcut("l", modifiers: .control)
+
+                    Divider()
+
+                    Button("Print Cache Status") {
+                        Task { @MainActor in appState.printCacheStatus() }
+                    }
+                    .keyboardShortcut("d", modifiers: .command)
+
+                    Button("Toggle Debug Mode") {
+                        Task { @MainActor in appState.toggleDebugMode() }
+                    }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                    Button("Toggle Number Overlay") {
+                        Task { @MainActor in appState.toggleNumberOverlay() }
+                    }
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
+
+                    if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                        Button("Remove Facial Rec Models") {
+                            Task { @MainActor in appState.removeFacialRecognitionModels() }
+                        }
+                    }
+                }
             }
             .disabled(!allowBrowserMenuCommands)
         }
@@ -534,65 +476,6 @@ struct ProwserCommands: Commands {
     }
 
     @MainActor
-    private func navigate(_ direction: ThumbnailNavigateDirection) {
-        if !appState.menuRefresh.browserWindowShortcutsEnabled {
-            return
-        }
-        let images = appState.fileData.displayedImages
-        guard !images.isEmpty else { return }
-        KeyboardInputTracer.log(
-            "ProwserCommands.navigate \(direction) view=\(appState.fileData.currentViewMode)",
-            config: appState.config
-        )
-
-        switch appState.fileData.currentViewMode {
-        case .thumbnail:
-            appState.eventBus.emit(
-                .thumbnailNavigate,
-                payload: .thumbnailDirection(direction)
-            )
-        case .list:
-            navigateList(direction)
-        default:
-            navigateLinear(direction)
-        }
-    }
-
-    @MainActor
-    private func navigateList(_ direction: ThumbnailNavigateDirection) {
-        let images = appState.fileData.displayedImages
-        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
-        let delta: Int
-        switch direction {
-        case .left, .up: delta = -1
-        case .right, .down: delta = 1
-        }
-        let next = nextIndex(appState.fileData.currentIndex, delta: delta, count: images.count, wrap: wrap)
-        appState.fileData.setCurrentIndex(next)
-        appState.fileData.setCurrentImagePath(images[next])
-    }
-
-    @MainActor
-    private func navigateLinear(_ direction: ThumbnailNavigateDirection) {
-        let images = appState.fileData.displayedImages
-        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
-        let delta = (direction == .left || direction == .up) ? -1 : 1
-        let next = nextIndex(appState.fileData.currentIndex, delta: delta, count: images.count, wrap: wrap)
-        appState.fileData.setCurrentIndex(next)
-        appState.fileData.setCurrentImagePath(images[next])
-    }
-
-    @MainActor
-    private func nextIndex(_ index: Int, delta: Int, count: Int, wrap: Bool) -> Int {
-        guard count > 0 else { return 0 }
-        let raw = index + delta
-        if wrap {
-            return ((raw % count) + count) % count
-        }
-        return min(max(0, raw), count - 1)
-    }
-
-    @MainActor
     private func openDirectory() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -608,11 +491,6 @@ struct ProwserCommands: Commands {
         let paths = selectedPaths()
         guard !paths.isEmpty else { return }
         appState.fileOperations.revealInFinder(paths)
-    }
-
-    @MainActor
-    private func deleteSelection() {
-        appState.fileOperations.deleteSelectedFiles()
     }
 
     @MainActor
@@ -695,6 +573,23 @@ struct ProwserCommands: Commands {
         }
     }
 
+}
+
+@MainActor
+private struct MoveToTrashMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button(appState.menuRefresh.moveToTrashMenuTitle) {
+            Task { @MainActor in deleteSelection() }
+        }
+        .keyboardShortcut(.delete, modifiers: .command)
+    }
+
+    @MainActor
+    private func deleteSelection() {
+        appState.fileOperations.deleteSelectedFiles()
+    }
 }
 
 @MainActor
@@ -1048,10 +943,9 @@ private struct ThemeMenuContent: View {
 
     var body: some View {
         Menu("Theme") {
-            Button("Dark") { applyTheme("dark") }
             Button("Light") { applyTheme("light") }
+            Button("Dark") { applyTheme("dark") }
             Button("User") { applyTheme("user") }
-            Button("Use System Setting") { applyTheme("system") }
             let customIDs = appState.theme.customThemeIDs
             if !customIDs.isEmpty {
                 Divider()
@@ -1061,6 +955,8 @@ private struct ThemeMenuContent: View {
                     }
                 }
             }
+            Divider()
+            Button("Use System Setting") { applyTheme("system") }
         }
     }
 }
