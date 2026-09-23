@@ -193,7 +193,9 @@ struct CacheSettingsTab: View {
                 paths: appState.config.profilePaths,
                 cacheKeyForPath: cacheKeyForPath
             )
-            appState.refreshThumbnailsAfterDiskCacheMutation()
+            if result.thumbnailsRemoved > 0 {
+                appState.refreshThumbnailsAfterDiskCacheMutation()
+            }
             let reclaimed = ByteCountFormatter.string(fromByteCount: result.bytesReclaimed, countStyle: .file)
             statusMessage = "Scrubbed \(result.thumbnailsRemoved) thumbnails, \(result.imageRecognitionRemoved) image-rec entries. Reclaimed \(reclaimed)."
             refreshTotals()

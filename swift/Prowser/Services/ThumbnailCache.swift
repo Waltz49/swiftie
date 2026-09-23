@@ -75,6 +75,7 @@ actor ThumbnailCache {
         memoryCache.removeAll()
         memoryKeysByPath.removeAll()
         diskSizesByPath.removeAll()
+        mtimeStatCache.removeAll()
         await decodePool.cancelWaiters(withPriorityAtMost: ThumbnailLoadPriority.visible.rawValue)
     }
 
@@ -191,12 +192,7 @@ actor ThumbnailCache {
 
         if enqueuedGeneration != decodeQueueGeneration {
             if let generated, priority.rawValue >= ThumbnailLoadPriority.nearVisible.rawValue {
-                let image = NSImage(
-                    cgImage: generated.image,
-                    size: NSSize(width: generated.image.width, height: generated.image.height)
-                )
-                try? await storeThumbnailOffDiskIO(image, for: imagePath, size: size, memoryKey: memoryKey)
-                return generated
+                return await storeGeneratedThumbnail(generated, imagePath: imagePath, size: size, memoryKey: memoryKey)
             }
             return nil
         }
@@ -205,7 +201,19 @@ actor ThumbnailCache {
             return nil
         }
         guard let generated else { return nil }
-        let image = NSImage(cgImage: generated.image, size: NSSize(width: generated.image.width, height: generated.image.height))
+        return await storeGeneratedThumbnail(generated, imagePath: imagePath, size: size, memoryKey: memoryKey)
+    }
+
+    private func storeGeneratedThumbnail(
+        _ generated: GeneratedThumbnail,
+        imagePath: String,
+        size: Int,
+        memoryKey: String
+    ) async -> GeneratedThumbnail {
+        let image = NSImage(
+            cgImage: generated.image,
+            size: NSSize(width: generated.image.width, height: generated.image.height)
+        )
         try? await storeThumbnailOffDiskIO(image, for: imagePath, size: size, memoryKey: memoryKey)
         return generated
     }
@@ -346,9 +354,6 @@ actor ThumbnailCache {
                     bestDiskURL = thumbnailDirectory.appendingPathComponent(filename)
                 }
             }
-        }
-        if bestDiskURL == nil {
-            bestDiskSize = 0
         }
         guard let url = bestDiskURL,
               let diskImage = loadDiskThumbnailCGImage(at: url) else {

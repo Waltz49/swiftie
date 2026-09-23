@@ -60,11 +60,7 @@ enum CacheManagementService {
 
     static func scrubCaches(paths: ProfilePaths, cacheKeyForPath: [String: String]) -> ScrubResult {
         let before = cacheTotals(paths: paths)
-        let thumbsRemoved = scrubThumbnailCache(
-            paths.thumbnailCacheDirectory,
-            knownImagePaths: Array(cacheKeyForPath.keys),
-            cacheKeyForPath: cacheKeyForPath
-        )
+        let thumbsRemoved = scrubThumbnailCache(paths.thumbnailCacheDirectory, cacheKeyForPath: cacheKeyForPath)
         let irRemoved = scrubImageRecognitionCache(paths: paths)
         let after = cacheTotals(paths: paths)
         return ScrubResult(
@@ -145,12 +141,13 @@ enum CacheManagementService {
     /// Remove thumbnail JPEGs whose cache key no longer matches an existing image path (Python scrub orphan pass).
     private static func scrubThumbnailCache(
         _ directory: URL,
-        knownImagePaths: [String],
         cacheKeyForPath: [String: String]
     ) -> Int {
         let fm = FileManager.default
         let validKeys = Set(
-            knownImagePaths.filter { fm.fileExists(atPath: $0) }.compactMap { cacheKeyForPath[$0] }
+            cacheKeyForPath.keys
+                .filter { fm.fileExists(atPath: $0) }
+                .compactMap { cacheKeyForPath[$0] }
         )
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return 0
