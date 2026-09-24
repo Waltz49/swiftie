@@ -154,6 +154,41 @@ extension AppState {
         return false
     }
 
+    private static let leftSidebarPaneConfigKeys = [
+        "file_tree_visible",
+        "preview_visible",
+        "chat_visible",
+    ]
+
+    private static let rightSidebarPaneConfigKeys = [
+        "shortcuts_sidebar_visible",
+        "information_sidebar_visible",
+    ]
+
+    /// Show one sidebar pane and hide siblings on the same column (⌥T/P/O/I).
+    func showSidebarPaneExclusive(configKey: String) {
+        let siblingKeys: [String]
+        let side: SidebarSplitSide
+        if Self.leftSidebarPaneConfigKeys.contains(configKey) {
+            siblingKeys = Self.leftSidebarPaneConfigKeys
+            side = .left
+        } else if Self.rightSidebarPaneConfigKeys.contains(configKey) {
+            siblingKeys = Self.rightSidebarPaneConfigKeys
+            side = .right
+        } else {
+            return
+        }
+        clearChromeSuppression()
+        for key in siblingKeys {
+            config.updateSetting(key, value: key == configKey)
+        }
+        revealSidebarColumn(side)
+        if configKey == "file_tree_visible" {
+            revealFileTreeFocusedOnActiveImage()
+        }
+        noteSidebarLayoutChanged()
+    }
+
     var statusBarColumnVisible: Bool {
         !chromeSuppressed && config.bool(forKey: "status_bar_visible", default: true)
     }

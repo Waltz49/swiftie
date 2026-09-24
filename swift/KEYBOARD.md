@@ -90,6 +90,10 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 | Cmd+Shift+I | Toggle number overlay |
 | T | Toggle file tree |
 | P | Toggle preview widget |
+| ⌥T | Show file tree only (hide other left sidebar panes) |
+| ⌥P | Show preview only (hide other left sidebar panes) |
+| ⌥O | Show organize sidebar only (hide other right panes) |
+| ⌥I | Show information pane only (hide other right panes) |
 | , | Toggle chat pane (when chat UI is enabled) |
 | F4, ., ⌃. | Toggle chrome (menu bar, etc.) |
 | F12 | Toggle list view |
@@ -209,6 +213,8 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 |-----|--------|
 | I | Toggle information sidebar |
 | O | Toggle shortcuts sidebar |
+| ⌥T / ⌥P | Show file tree or preview only (left sidebar) |
+| ⌥O / ⌥I | Show organize or information pane only (right) |
 | B | Toggle status bar |
 | Cmd+I | Cycle filename/number overlay |
 | Cmd+Shift+I | Toggle number overlay |

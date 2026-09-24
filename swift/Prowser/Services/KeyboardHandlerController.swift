@@ -315,6 +315,13 @@ final class KeyboardHandlerController {
         // Let other Command-key bindings fall through to menus.
         if hasCommand { return false }
 
+        // ⌥T/P/O/I — show one sidebar pane (hide siblings on that column).
+        if hasOption, !hasControl, !hasShift {
+            if handleOptionPaneExclusiveShortcut(event, appState: appState) {
+                return true
+            }
+        }
+
         // F3 — Image History (Python File ▸ Image History WindowShortcut).
         if !hasCommand, !hasControl, !hasShift, !hasOption, Self.isF3Key(event) {
             let mode = appState.fileData.currentViewMode
@@ -945,6 +952,21 @@ final class KeyboardHandlerController {
         appState.config.updateSetting("slideshow3_speed", value: next)
         appState.config.applySettingsChange(emit: appState.eventBus)
         appState.status.show("Floating frames speed: \(next)")
+    }
+
+    /// ⌥ + pane letter — exclusive pane on left (T, P) or right (O, I). Uses key codes for layout safety.
+    private func handleOptionPaneExclusiveShortcut(_ event: NSEvent, appState: AppState) -> Bool {
+        let configKey: String?
+        switch event.keyCode {
+        case 17: configKey = "file_tree_visible" // T
+        case 35: configKey = "preview_visible" // P
+        case 31: configKey = "shortcuts_sidebar_visible" // O
+        case 34: configKey = "information_sidebar_visible" // I
+        default: configKey = nil
+        }
+        guard let configKey else { return false }
+        appState.showSidebarPaneExclusive(configKey: configKey)
+        return true
     }
 
     private func handleLetter(_ event: NSEvent, appState: AppState) -> Bool {

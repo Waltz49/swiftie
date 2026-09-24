@@ -52,6 +52,8 @@ struct KeyboardShortcutsHelpView: View {
                         ("I", "Toggle information pane"),
                         ("O", "Toggle shortcuts sidebar"),
                         ("T", "Toggle file tree"),
+                        ("⌥T / ⌥P", "Show file tree or preview only (left)"),
+                        ("⌥O / ⌥I", "Show organize or information pane only (right)"),
                         ("B", "Toggle status bar"),
                         ("Double-click titlebar", "Expand pane to fit content"),
                         ("Drag titlebar", "Resize pane (preview, info)"),
