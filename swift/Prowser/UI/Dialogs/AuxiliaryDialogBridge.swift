@@ -21,6 +21,8 @@ struct AuxiliaryDialogBridge: View {
             .onChange(of: appState.showEditUserCommentSheet) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showSimilaritySearchSheet) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showClipSearchSheet) { _, _ in appState.syncAuxiliaryDialogs() }
+            .onChange(of: appState.showPersonSearchSheet) { _, _ in appState.syncAuxiliaryDialogs() }
+            .onChange(of: appState.personSearchSheetWindowTitle) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showImageRecognitionCaveats) { _, _ in appState.syncAuxiliaryDialogs() }
     }
 }

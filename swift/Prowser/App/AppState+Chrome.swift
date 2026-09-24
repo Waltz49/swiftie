@@ -61,7 +61,12 @@ extension AppState {
     }
 
     func refreshSidebarLayout() {
+        let beforeLeft = leftSidebarWidth
+        let beforeRight = rightSidebarWidth
         reloadSidebarWidthsFromConfig()
+        guard abs(beforeLeft - leftSidebarWidth) > 0.5 || abs(beforeRight - rightSidebarWidth) > 0.5 else {
+            return
+        }
         sidebarLayoutRevision += 1
     }
 
@@ -151,6 +156,13 @@ extension AppState {
 
     var statusBarColumnVisible: Bool {
         !chromeSuppressed && config.bool(forKey: "status_bar_visible", default: true)
+    }
+
+    /// Keep the status bar row in the layout while visible or animating (avoids VStack insert/remove flicker).
+    var mountsStatusBarRow: Bool {
+        statusBarColumnVisible
+            || statusBarPeekActive
+            || chromeLayoutOverride != nil
     }
 
     var effectiveStatusBarHeight: CGFloat {

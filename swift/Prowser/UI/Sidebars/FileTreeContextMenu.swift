@@ -34,7 +34,7 @@ enum FileTreeContextMenu {
         if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
             addAction(
                 menu,
-                title: "Search for Known Person...",
+                title: "Search for Known Person…",
                 shortcut: "⌘P",
                 enabled: !restricted,
                 representedObject: directoryPath,

@@ -59,6 +59,7 @@ final class AppState {
     var showSimilaritySearchSheet = false
     var showClipSearchSheet = false
     var showPersonSearchSheet = false
+    var personSearchSheetWindowTitle = PersonSearchSheetWindowTitle.knownPerson
     var isAboutDialogVisible: Bool { aboutDialog.isVisible }
     var isSettingsDialogVisible: Bool { settingsDialog.isVisible }
     var showFindReferencesSheet = false
@@ -1390,10 +1391,13 @@ final class AppState {
         syncDialog(
             id: DialogID.personSearch,
             show: showPersonSearchSheet,
-            title: "Search for Known Person",
+            title: personSearchSheetWindowTitle,
             defaultSize: NSSize(width: 500, height: 360),
             minSize: NSSize(width: 460, height: 320),
-            onClose: { [weak self] in self?.showPersonSearchSheet = false }
+            onClose: { [weak self] in
+                self?.showPersonSearchSheet = false
+                self?.personSearchSheetWindowTitle = PersonSearchSheetWindowTitle.knownPerson
+            }
         ) {
             PersonSearchSheet { [weak self] options in
                 guard let self else { return }

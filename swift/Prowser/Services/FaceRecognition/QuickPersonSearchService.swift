@@ -72,6 +72,7 @@ enum QuickPersonSearchService {
         _ = appState.knownFaces.replaceAllSamples(subjectID: subjectID, samples: samples)
 
         appState.config.updateSetting("find_person_subject_id", value: subjectID)
+        appState.personSearchSheetWindowTitle = AppState.PersonSearchSheetWindowTitle.personInCurrentImage
         appState.showPersonSearchSheet = true
         appState.syncAuxiliaryDialogs()
     }

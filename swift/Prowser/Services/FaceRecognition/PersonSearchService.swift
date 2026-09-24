@@ -108,7 +108,7 @@ enum PersonSearchService {
                 progress: { cur, max, path, processed, extractionDuration in
                     Task { @MainActor in
                         panel.setMaximum(max)
-                        panel.update(value: cur, label: (path as NSString).lastPathComponent)
+                        panel.update(value: cur, label: "Caching faces… \((path as NSString).lastPathComponent)")
                     }
                     if processed, let extractionDuration {
                         panel.recordExtractionDuration(extractionDuration)

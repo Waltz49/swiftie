@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    /// Posted after a modal styled message or progress panel dismisses so menu shortcut enablement resyncs.
+    static let prowserBrowserShortcutGateShouldRefresh = Notification.Name("prowserBrowserShortcutGateShouldRefresh")
+}
+
 /// Classifies Prowser windows so dialogs can own the key window without leaking
 /// browser shortcuts (Python `WindowShortcut` / `present_auxiliary_dialog` parity).
 enum BrowserWindowIdentity {
@@ -52,12 +57,12 @@ enum BrowserWindowIdentity {
             return false
         }
         if let key = NSApp.keyWindow {
-            if isAuxiliaryWindow(key) { return false }
+            if visibleAuxiliaryKeyWindow(key) { return false }
             if isMainBrowserWindow(key) { return true }
             return key.canBecomeKey && key.styleMask.contains(.titled) && !isAuxiliaryWindow(key)
         }
         // At launch `keyWindow` is often nil while the SwiftUI main window is still coming up.
-        if NSApp.windows.contains(where: { $0.isKeyWindow && isAuxiliaryWindow($0) }) {
+        if auxiliaryWindowIsKey() {
             return false
         }
         return NSApp.windows.contains { candidate in
@@ -76,8 +81,24 @@ enum BrowserWindowIdentity {
         return browserWindowOwnsShortcuts()
     }
 
+    /// Ordered-out modal panels can remain `isKeyWindow` until the next key change; ignore non-visible windows.
+    private static func visibleAuxiliaryKeyWindow(_ window: NSWindow) -> Bool {
+        window.isVisible && isAuxiliaryWindow(window)
+    }
+
     private static func auxiliaryWindowIsKey() -> Bool {
-        NSApp.windows.contains { $0.isKeyWindow && isAuxiliaryWindow($0) }
+        NSApp.windows.contains { $0.isKeyWindow && visibleAuxiliaryKeyWindow($0) }
+    }
+
+    /// After `NSApp.runModal(for:)` styled messages, key can stay on an ordered-out panel or become nil;
+    /// SwiftUI `CommandMenu` shortcuts (e.g. ⌃⌘P) stay disabled until the main browser is key again.
+    static func restoreBrowserKeyAfterAuxiliaryDialog() {
+        if let main = NSApp.windows.first(where: { isMainBrowserWindow($0) && $0.isVisible }) {
+            main.makeKeyAndOrderFront(nil)
+        }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .prowserBrowserShortcutGateShouldRefresh, object: nil)
+        }
     }
 
     static func focusFirstTextInput(in window: NSWindow) {

@@ -451,6 +451,7 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             panel.orderOut(nil)
         }
         NSApp.stopModal()
+        BrowserWindowIdentity.restoreBrowserKeyAfterAuxiliaryDialog()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

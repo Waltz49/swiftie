@@ -11,7 +11,6 @@ final class MenuRefreshState {
     var moveWorkFilesVisible = false
     var deleteExifDateEnabled = false
     var deleteExifDateTitle = "Delete EXIF Date from File…"
-    var moveToTrashMenuTitle = "Move File to Trash"
     var destinationsMenuVisible = true
     /// False while a dialog/settings/about window is key (`KeyboardHandlerController` parity).
     var browserWindowShortcutsEnabled = true
@@ -19,10 +18,9 @@ final class MenuRefreshState {
     var browserMenuCommandsEnabled = true
     /// Tools → Exclude Thumbs from View (⌘X); thumbnail view only when exclude rules are enabled.
     var excludeFilesFromViewVisible = false
-    /// Tools → Lock / Unlock Selected File; hidden unless Settings → General allows thumbnail locking.
-    var lockUnlockMenuVisible = false
-    /// Tools → Quick Mass Rename; hidden unless Settings → General allows quick mass rename.
+    var moveToTrashMenuTitle = "Move File to Trash"
     var quickMassRenameMenuVisible = false
+    var lockUnlockMenuVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
 
     func bind(_ appState: AppState) {
@@ -36,7 +34,9 @@ final class MenuRefreshState {
         refreshBrowserWindowShortcuts()
         refreshExcludeFilesFromView(appState: appState)
         refreshDeleteExifDate(appState: appState)
-        refreshMoveToTrashMenuTitle(appState: appState)
+        refreshMoveToTrashMenu(appState: appState)
+        refreshQuickMassRenameMenu(appState: appState)
+        refreshLockUnlockMenu(appState: appState)
     }
 
     func refreshAll() {
@@ -53,35 +53,10 @@ final class MenuRefreshState {
             default: "move"
         ) != "none"
         refreshDeleteExifDate(appState: appState)
-        refreshMoveToTrashMenuTitle(appState: appState)
         refreshExcludeFilesFromView(appState: appState)
-        refreshGeneralToolsMenuVisibility(appState: appState)
-    }
-
-    func refreshGeneralToolsMenuVisibility(appState: AppState) {
-        let lockVisible = appState.config.bool(forKey: "allow_thumbnail_locking")
-        let quickMassRenameVisible = appState.config.bool(forKey: "allow_quick_mass_rename")
-        let changed = lockVisible != lockUnlockMenuVisible
-            || quickMassRenameVisible != quickMassRenameMenuVisible
-        lockUnlockMenuVisible = lockVisible
-        quickMassRenameMenuVisible = quickMassRenameVisible
-        if changed {
-            appState.bumpMenuCommandsRevision()
-        }
-    }
-
-    func refreshExcludeFilesFromView(appState: AppState) {
-        excludeFilesFromViewVisible = appState.fileData.currentViewMode == .thumbnail
-            && ThumbnailExcludeService.hasEnabledExcludeRules(config: appState.config)
-    }
-
-    func refreshMoveToTrashMenuTitle(appState: AppState) {
-        let selectedCount = appState.selection.selectedFiles.count
-        let confirm = appState.config.bool(forKey: "confirm_delete", default: true)
-        let ellipsis = confirm ? "…" : ""
-        moveToTrashMenuTitle = selectedCount > 1
-            ? "Move Files to Trash\(ellipsis)"
-            : "Move File to Trash\(ellipsis)"
+        refreshMoveToTrashMenu(appState: appState)
+        refreshQuickMassRenameMenu(appState: appState)
+        refreshLockUnlockMenu(appState: appState)
     }
 
     func refreshDeleteExifDate(appState: AppState) {
@@ -96,6 +71,36 @@ final class MenuRefreshState {
         deleteExifDateTitle = withExif.count > 1
             ? "Delete EXIF Dates from Files…"
             : "Delete EXIF Date from File…"
+    }
+
+    func refreshExcludeFilesFromView(appState: AppState) {
+        excludeFilesFromViewVisible = appState.fileData.currentViewMode == .thumbnail
+            && ThumbnailExcludeService.hasEnabledExcludeRules(config: appState.config)
+    }
+
+    func refreshMoveToTrashMenu(appState: AppState) {
+        let paths = SelectionService.selectedFilesOrCurrent(appState: appState)
+        let confirm = appState.config.bool(forKey: "confirm_delete", default: true)
+        let ellipsis = confirm ? "…" : ""
+        moveToTrashMenuTitle = paths.count > 1
+            ? "Move Files to Trash\(ellipsis)"
+            : "Move File to Trash\(ellipsis)"
+    }
+
+    func refreshQuickMassRenameMenu(appState: AppState) {
+        let visible = appState.config.bool(forKey: "allow_quick_mass_rename", default: false)
+        guard visible != quickMassRenameMenuVisible else { return }
+        quickMassRenameMenuVisible = visible
+        appState.bumpMenuCommandsRevision()
+    }
+
+    func refreshLockUnlockMenu(appState: AppState) {
+        let allow = appState.config.bool(forKey: "allow_thumbnail_locking", default: false)
+        let mode = appState.fileData.currentViewMode
+        let visible = allow && (mode == .thumbnail || mode == .browse)
+        guard visible != lockUnlockMenuVisible else { return }
+        lockUnlockMenuVisible = visible
+        appState.bumpMenuCommandsRevision()
     }
 
     func refreshBrowserWindowShortcuts() {
@@ -123,6 +128,11 @@ final class MenuRefreshState {
             // Skip didResignKey — main resigns before menu tracking's transient key is key and
             // would briefly disable SwiftUI Command menus (249afee menu refresh regression).
             center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in refresh() },
+            center.addObserver(
+                forName: .prowserBrowserShortcutGateShouldRefresh,
+                object: nil,
+                queue: .main
+            ) { _ in refresh() },
         ]
     }
 }

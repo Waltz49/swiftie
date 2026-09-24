@@ -78,6 +78,9 @@ struct KeyboardShortcutsHelpView: View {
                     shortcutSection("Search", rows: [
                         ("⌘K", "Find similar images (CNN)"),
                         ("⌘F / ⌘⇧K", "Search by text (CLIP)"),
+                        ("⌘P", "Search for Known Person"),
+                        ("⌃⌘P", "Search for Person in Current Image"),
+                        ("⇧⌘P", "Identify Faces in Current Image"),
                     ])
                     shortcutSection("Thumbnail grid", rows: [
                         ("+ / − / 0", "Larger / smaller / reset cell size (list: row height)"),
@@ -87,7 +90,9 @@ struct KeyboardShortcutsHelpView: View {
                     ])
                     shortcutSection("File tree (when tree has focus)", rows: [
                         ("F2", "Rename highlighted directory"),
-                        ("⌘C", "Copy directory path"),
+                        ("⌘F", "Search by text (CLIP) in selected folder"),
+                        ("⌘P", "Search for Known Person in selected folder"),
+                        ("⌘C", "Copy path of selected row"),
                         ("⇧A", "Show all images including subdirectories"),
                         ("⇧F", "Find duplicate image files (recursive from highlighted folder)"),
                         ("Return / Space", "Open folder or expand/collapse"),

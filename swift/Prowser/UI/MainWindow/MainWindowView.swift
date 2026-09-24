@@ -36,7 +36,7 @@ struct MainWindowView: View {
             )
             .frame(maxHeight: .infinity)
 
-            if appState.effectiveStatusBarHeight > 0 || appState.chromeLayoutOverride != nil {
+            if appState.mountsStatusBarRow {
                 StatusBarView()
             }
         }

@@ -3,6 +3,11 @@ import Foundation
 
 /// Search sheets, browse exit before search, copy-path parity, tree search scope.
 extension AppState {
+    enum PersonSearchSheetWindowTitle {
+        static let knownPerson = "Search for Known Person"
+        static let personInCurrentImage = "Search for Person in Current Image"
+    }
+
     struct SearchSheetDirectoryPrime: Sendable {
         var useCustomDirectory: Bool
         var customDirectory: String

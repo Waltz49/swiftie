@@ -286,6 +286,7 @@ final class CancellableProgressPanelController {
         }
         keyboardMonitor = nil
         panel.orderOut(nil)
+        BrowserWindowIdentity.restoreBrowserKeyAfterAuxiliaryDialog()
     }
 
     nonisolated func setMaximum(_ maximum: Int) {

@@ -201,6 +201,22 @@ final class DirectoryLoadCoordinator {
         }
     }
 
+    /// Prefer explicit pin, then existing active path, then first listing entry (path is source of truth).
+    private static func resolveActiveImageAfterDirectoryLoad(
+        images: [String],
+        pinnedPath: String?,
+        currentPath: String?
+    ) -> String? {
+        if images.isEmpty { return nil }
+        for candidate in [pinnedPath, currentPath] {
+            guard let candidate,
+                  let normalized = FileDataModel.normalizePath(candidate),
+                  images.contains(normalized) else { continue }
+            return normalized
+        }
+        return images.first
+    }
+
     private func finishDirectoryLoad(
         generation: Int,
         path: String,
@@ -209,27 +225,27 @@ final class DirectoryLoadCoordinator {
         onComplete: (() -> Void)?
     ) {
         guard generation == activeLoadGeneration else { return }
+
+        appState.fileData.setCurrentDirectory(path)
+        appState.fileData.setDisplayedImages(images)
+        let resolvedActive = Self.resolveActiveImageAfterDirectoryLoad(
+            images: images,
+            pinnedPath: pinnedPath,
+            currentPath: appState.fileData.currentImagePath
+        )
+        appState.fileData.setCurrentImagePath(resolvedActive)
+        DisplayedImagesSync.ensureActiveImageListed(
+            fileData: appState.fileData,
+            filterPattern: appState.filterSettings.filterPattern,
+            isLoadingDirectory: false
+        )
+
         appState.isLoadingDirectory = false
         if appState.showThumbnailDirectoryLoadingCanvas {
             appState.endThumbnailDirectoryLoad()
         }
         appState.noteInitialThumbnailDirectoryLoadCompleted()
 
-        appState.fileData.setCurrentDirectory(path)
-        appState.fileData.setDisplayedImages(images)
-        if let pinnedPath, let normalized = FileDataModel.normalizePath(pinnedPath),
-           images.contains(normalized) {
-            appState.fileData.setCurrentImagePath(normalized)
-        } else if let first = images.first {
-            appState.fileData.setCurrentImagePath(first)
-        } else {
-            appState.fileData.setCurrentImagePath(nil)
-        }
-        DisplayedImagesSync.ensureActiveImageListed(
-            fileData: appState.fileData,
-            filterPattern: appState.filterSettings.filterPattern,
-            isLoadingDirectory: false
-        )
         appState.config.updateSetting("last_directory", value: path)
         appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))

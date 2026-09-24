@@ -75,7 +75,7 @@ enum ImageSearchResultPresentation {
               let grid = appState.thumbnailGridHost,
               let path = appState.fileData.currentImagePath,
               let normalized = FileDataModel.normalizePath(path),
-              let index = paths.firstIndex(of: normalized) else { return }
+              let index = FileDataModel.indexOfPath(normalized, in: paths) else { return }
         grid.selectIndex(index, scroll: true, notifyDelegate: false)
         grid.scrollToSelectionAfterLayout()
     }

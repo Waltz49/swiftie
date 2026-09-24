@@ -18,11 +18,6 @@ enum StatusBarMenus {
         addSortItem(menu, title: "Name ↓ (Z-A)", mode: .name, reversed: true, currentMode: currentMode, currentReversed: reversed, appState: appState)
         addSortItem(menu, title: "Size ↑ (Largest First)", mode: .size, reversed: false, currentMode: currentMode, currentReversed: reversed, appState: appState)
         addSortItem(menu, title: "Size ↓ (Smallest First)", mode: .size, reversed: true, currentMode: currentMode, currentReversed: reversed, appState: appState)
-        let reverseItem = makeAction(title: "Reverse Sort Order", handler: {
-            appState.reverseSortOrder()
-        })
-        NSMenuShortcutSupport.apply(display: "⌘T", to: reverseItem)
-        menu.addItem(reverseItem)
         addSortItem(menu, title: "Random", mode: .random, reversed: false, currentMode: currentMode, currentReversed: reversed, appState: appState)
         addSortItem(menu, title: "Custom", mode: .custom, reversed: false, currentMode: currentMode, currentReversed: reversed, appState: appState)
 

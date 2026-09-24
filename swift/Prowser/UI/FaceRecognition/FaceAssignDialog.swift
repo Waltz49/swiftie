@@ -40,7 +40,7 @@ enum FaceAssignDialog {
                 backing: .buffered,
                 defer: false
             )
-            panel.title = "Assign faces"
+            panel.title = "Identify Faces in Current Image"
             panel.isFloatingPanel = true
             panel.level = .modalPanel
 
