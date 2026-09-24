@@ -123,8 +123,7 @@ final class FileTreeMenuActions: NSObject {
 
     @objc func renameDirectory(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
-        appState.fileOperations.beginRename(path: path)
-        appState.fileTreeReloadToken += 1
+        appState.beginDirectoryRename(path: path)
     }
 
     @objc func copyDirectoryPath(_ sender: NSMenuItem) {

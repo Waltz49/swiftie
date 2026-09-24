@@ -490,8 +490,24 @@ final class AppState {
         if fileData.currentViewMode == .thumbnail, let grid = thumbnailGridHost {
             grid.beginInlineRename(path: path)
         } else {
-            fileOperations.beginRename(path: path)
+            status.show("Rename (F2) is available in thumbnail view")
         }
+    }
+
+    func beginDirectoryRename(path: String) {
+        fileTreeOutlineView?.beginInlineRename(nodePath: path)
+    }
+
+    /// After an inline tree rename: refresh the renamed node only, keep tree focus/selection, skip active-image tree sync.
+    func applyFileTreeDirectoryRename(oldPath: String, newPath: String) {
+        if let current = fileData.currentDirectory {
+            let currentNorm = FileDataModel.normalizePath(current) ?? current
+            let oldNorm = FileDataModel.normalizePath(oldPath) ?? oldPath
+            if currentNorm == oldNorm {
+                loadDirectory(newPath, saveHistory: true, pinnedImagePath: fileData.currentImagePath)
+            }
+        }
+        fileTreeOutlineView?.coordinator?.applyDirectoryRename(oldPath: oldPath, newPath: newPath)
     }
 
     func refreshMenuState() {

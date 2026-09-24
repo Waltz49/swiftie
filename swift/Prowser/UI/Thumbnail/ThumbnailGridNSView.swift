@@ -119,6 +119,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private var renameEditor: NSTextField?
     private var renameEditingPath: String?
+    private var renameCanceled = false
     private var suggestedFilters: [String] = []
     private var hasImagesInFolder = false
     private var filterButtons: [ThumbnailEmptyFilterButton] = []
@@ -722,6 +723,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     override func mouseDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if renameEditor != nil {
+            let point = convert(event.locationInWindow, from: nil)
+            if let editor = renameEditor, !editor.frame.contains(point) {
+                commitInlineRename()
+            }
+            return
+        }
+
         if flags.contains(.control), !flags.contains(.command) {
             showContextMenu(for: event)
             return
@@ -731,6 +740,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             return
         }
         let point = convert(event.locationInWindow, from: nil)
+        if event.clickCount == 1,
+           !flags.contains(.shift), !flags.contains(.command), !flags.contains(.control),
+           let index = indexAt(point: point),
+           index < imagePaths.count,
+           let overlayRect = filenameOverlayRect(for: index),
+           overlayRect.contains(point),
+           showFilenames || showImageSize {
+            beginInlineRename(path: imagePaths[index])
+            return
+        }
         guard let index = indexAt(point: point) else { return }
         // Keep first-click drag/selection state; second down must not retarget selection.
         if event.clickCount >= 2 {
@@ -790,6 +809,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if renameEditor != nil { return }
         let point = convert(event.locationInWindow, from: nil)
         guard let start = dragStartPoint, let sourcePath = dragSourcePath else { return }
         let distance = hypot(point.x - start.x, point.y - start.y)
@@ -985,6 +1005,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     override var acceptsFirstResponder: Bool { true }
 
+    var isInlineRenaming: Bool { renameEditor != nil }
+
     func claimKeyboardFocus() {
         guard window != nil else {
             logKey("claimKeyboardFocus skipped (no window)")
@@ -992,6 +1014,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
+            if self.isInlineRenaming {
+                self.logKey("claimKeyboardFocus skipped (inline rename)")
+                return
+            }
             guard window.isKeyWindow else {
                 self.logKey("claimKeyboardFocus skipped (window not key)")
                 return
@@ -1847,31 +1873,47 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     func beginInlineRename(path: String) {
-        guard let index = imagePaths.firstIndex(of: path) else {
-            onInlineRenameCommitted?(path, path)
-            return
-        }
-        if !showFilenames {
+        guard let index = FileDataModel.indexOfPath(path, in: imagePaths) else { return }
+        if !showFilenames, !showImageSize {
             showFilenames = true
             reloadLayout()
+            DispatchQueue.main.async { [weak self] in
+                self?.beginInlineRename(path: path)
+            }
+            return
         }
+        guard let overlayRect = filenameOverlayRect(for: index) else { return }
         cancelInlineRename(restoreFocus: false)
         selectIndex(index, scroll: true, notifyDelegate: false)
-        let cell = cellFrame(for: index)
-        let overlayRect = filenameOverlayRect(in: cell)
-        let basename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        layoutSubtreeIfNeeded()
+        let basename = URL(fileURLWithPath: imagePaths[index]).deletingPathExtension().lastPathComponent
         let editor = NSTextField(frame: overlayRect)
         editor.stringValue = basename
-        editor.isBordered = true
-        editor.isBezeled = true
-        editor.focusRingType = .exterior
-        editor.font = NSFont.systemFont(ofSize: 13)
+        editor.isEditable = true
+        editor.isSelectable = true
+        editor.isBordered = false
+        editor.isBezeled = false
+        editor.drawsBackground = true
+        editor.backgroundColor = overlayBoxColor
+        editor.textColor = .labelColor
+        editor.font = NSFont(name: "Arial", size: 13) ?? NSFont.systemFont(ofSize: 13)
+        editor.focusRingType = .none
+        editor.wantsLayer = true
+        applyRenameEditorBorder(editor: editor, valid: true)
         editor.delegate = self
-        addSubview(editor)
+        addSubview(editor, positioned: .above, relativeTo: nil)
         renameEditor = editor
-        renameEditingPath = path
+        renameEditingPath = imagePaths[index]
+        renameCanceled = false
         editor.selectText(nil)
         window?.makeFirstResponder(editor)
+    }
+
+    private func applyRenameEditorBorder(editor: NSTextField, valid: Bool) {
+        editor.layer?.borderWidth = 2
+        editor.layer?.borderColor = (valid
+            ? NSColor(red: 135 / 255, green: 206 / 255, blue: 235 / 255, alpha: 1)
+            : NSColor(red: 220 / 255, green: 50 / 255, blue: 50 / 255, alpha: 1)).cgColor
     }
 
     func cancelInlineRename(restoreFocus: Bool = true) {
@@ -1884,31 +1926,52 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func commitInlineRename() {
+        if renameCanceled {
+            renameCanceled = false
+            cancelInlineRename()
+            return
+        }
         guard let editor = renameEditor, let originalPath = renameEditingPath else { return }
         let newBase = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ext = (originalPath as NSString).pathExtension
-        let newName = ext.isEmpty ? newBase : "\(newBase).\(ext)"
-        let oldName = (originalPath as NSString).lastPathComponent
+        let originalBase = URL(fileURLWithPath: originalPath).deletingPathExtension().lastPathComponent
+        if newBase.isEmpty || newBase == originalBase {
+            cancelInlineRename()
+            return
+        }
+        if let error = FileOperationsService.validateMacOSFilenameBase(newBase) {
+            appState?.status.show(error)
+            applyRenameEditorBorder(editor: editor, valid: false)
+            editor.selectText(nil)
+            return
+        }
         cancelInlineRename()
-        guard !newBase.isEmpty, newName != oldName else { return }
-        onInlineRenameCommitted?(originalPath, newName)
+        onInlineRenameCommitted?(originalPath, newBase)
     }
 
-    private func filenameOverlayRect(in cell: NSRect) -> NSRect {
-        if showFilenames || showImageSize {
-            let overlayHeight = min(28, cell.height * 0.22)
+    private func filenameOverlayRect(for index: Int) -> NSRect? {
+        let cell = cellFrame(for: index)
+        let overlayBandHeight: CGFloat
+        if isDuplicateSectionMode, let custom = sectionedLayoutResult?.overlayHeights[index] {
+            overlayBandHeight = custom
+        } else {
+            overlayBandHeight = ThumbnailLayout.overlayLabelHeight(
+                showFilename: showFilenames,
+                showImageSize: showImageSize
+            )
+        }
+        if overlayBandHeight <= 0 {
             return NSRect(
                 x: cell.minX + 4,
-                y: cell.maxY - overlayHeight - 2,
+                y: cell.minY + 4,
                 width: max(40, cell.width - 8),
-                height: overlayHeight
+                height: 22
             )
         }
         return NSRect(
             x: cell.minX + 4,
-            y: cell.minY + 4,
+            y: cell.minY + cell.height - overlayBandHeight,
             width: max(40, cell.width - 8),
-            height: 22
+            height: overlayBandHeight
         )
     }
 }
@@ -1916,6 +1979,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 extension ThumbnailGridNSView: NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            renameCanceled = true
             cancelInlineRename()
             return true
         }
@@ -1926,9 +1990,11 @@ extension ThumbnailGridNSView: NSTextFieldDelegate {
         return false
     }
 
-    func controlTextDidEndEditing(_ obj: Notification) {
-        if renameEditor != nil {
-            commitInlineRename()
-        }
+    func controlTextDidChange(_ obj: Notification) {
+        guard let editor = renameEditor else { return }
+        let text = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = FileOperationsService.validateMacOSFilenameBase(text) == nil
+        applyRenameEditorBorder(editor: editor, valid: valid)
     }
+
 }

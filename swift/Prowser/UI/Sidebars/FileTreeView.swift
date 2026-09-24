@@ -114,6 +114,8 @@ struct FileTreeView: NSViewRepresentable {
         private var allModeExpandVisited: Set<String> = []
         private var filteredPathsToExpand: [String] = []
         private var userNavigationReset: DispatchWorkItem?
+        /// After inline directory rename, keep tree on that folder until the user navigates the tree.
+        private var pinnedDirectoryAfterRename: String?
 
         init(appState: AppState) {
             self.appState = appState
@@ -136,6 +138,7 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func syncToActiveImageIfRequested() {
+            guard pinnedDirectoryAfterRename == nil else { return }
             guard appState.fileTreeSyncActiveImageToken != lastSyncActiveImageToken else { return }
             lastSyncActiveImageToken = appState.fileTreeSyncActiveImageToken
             lastSyncedDirectory = nil
@@ -350,6 +353,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func markUserNavigatingTree(extended: Bool = false) {
             userIsNavigatingTree = true
+            pinnedDirectoryAfterRename = nil
             userNavigationReset?.cancel()
             pendingHighlightSync?.cancel()
             pendingHighlightSync = nil
@@ -368,6 +372,7 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func syncSelectionIfNeeded() {
+            if pinnedDirectoryAfterRename != nil { return }
             switch appState.fileData.currentViewMode {
             case .slideshow, .slideshow2, .slideshow3, .browse:
                 return
@@ -488,10 +493,11 @@ struct FileTreeView: NSViewRepresentable {
 
         func renameSelectedDirectory() {
             guard let outlineView,
+                  outlineView.selectedRow >= 0,
                   let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode,
+                  node.isDirectory,
                   FileTreePathRestrictions.canRenameDirectory(node.path) else { return }
-            appState.fileOperations.beginRename(path: node.path)
-            appState.fileTreeReloadToken += 1
+            outlineView.beginInlineRename(node: node)
         }
 
         func selectedDirectoryPath() -> String? {
@@ -806,6 +812,7 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func syncSelection(retryCount: Int = 0, force: Bool = false) {
+            if pinnedDirectoryAfterRename != nil { return }
             switch appState.fileData.currentViewMode {
             case .slideshow, .slideshow2, .slideshow3, .browse:
                 return
@@ -968,7 +975,88 @@ struct FileTreeView: NSViewRepresentable {
             return best
         }
 
-        /// Walk path components from the containing root — O(depth), not O(tree size).
+        func fileTreeNode(forPath path: String) -> FileTreeNode? {
+            findNodeByPath(path)
+        }
+
+        /// Update one renamed directory in the outline without reloading the whole tree.
+        func applyDirectoryRename(oldPath: String, newPath: String) {
+            pendingHighlightSync?.cancel()
+            pendingHighlightSync = nil
+
+            let oldNorm = standardizedPath(oldPath)
+            let newNorm = standardizedPath(newPath)
+            guard let node = findNodeByPath(oldPath) else {
+                pinnedDirectoryAfterRename = newNorm
+                appState.focusFileTreeKeyboardTarget()
+                return
+            }
+
+            migrateExpandedPaths(oldBase: oldNorm, newBase: newNorm)
+            node.applyPathRename(fromBase: oldNorm, toBase: newNorm)
+            appState.renameStatusManager.migrateDirectoryPath(from: oldPath, to: newPath)
+
+            guard let outlineView else { return }
+            let sortOrderChanged = resortSiblingsAfterRename(renamedNode: node, outlineView: outlineView)
+            if sortOrderChanged {
+                if let parent = outlineView.parent(forItem: node) as? FileTreeNode {
+                    outlineView.reloadItem(parent, reloadChildren: true)
+                } else {
+                    outlineView.reloadData()
+                    restoreTrackedExpansion(outlineView: outlineView)
+                }
+            } else {
+                outlineView.reloadItem(node, reloadChildren: true)
+            }
+
+            reselectTreeNode(node, in: outlineView)
+
+            pinnedDirectoryAfterRename = newNorm
+            lastSyncedDirectory = newNorm
+            lastSyncedImagePath = appState.fileData.currentImagePath
+            lastExpandedHighlightDirectory = nil
+            appState.focusFileTreeKeyboardTarget()
+        }
+
+        private func migrateExpandedPaths(oldBase: String, newBase: String) {
+            let oldPrefix = oldBase + "/"
+            var migrated: Set<String> = []
+            for path in expandedDirectoryPaths {
+                if path == oldBase {
+                    migrated.insert(newBase)
+                } else if path.hasPrefix(oldPrefix) {
+                    migrated.insert(newBase + String(path.dropFirst(oldBase.count)))
+                } else {
+                    migrated.insert(path)
+                }
+            }
+            expandedDirectoryPaths = migrated
+            publishExpandedPathsForDiscovery()
+        }
+
+        /// Re-sort loaded siblings; returns true when the renamed node's index changed (outline must reload parent).
+        private func resortSiblingsAfterRename(renamedNode: FileTreeNode, outlineView: NSOutlineView) -> Bool {
+            if let parent = outlineView.parent(forItem: renamedNode) as? FileTreeNode {
+                guard var siblings = parent.children else { return false }
+                let oldIndex = siblings.firstIndex { $0 === renamedNode }
+                siblings.sort { AppConfig.comparePathsForFileTreeSort($0.path, $1.path) }
+                parent.children = siblings
+                guard let oldIndex,
+                      let newIndex = siblings.firstIndex(where: { $0 === renamedNode }) else { return false }
+                return oldIndex != newIndex
+            }
+            guard let oldIndex = roots.firstIndex(where: { $0 === renamedNode }) else { return false }
+            roots.sort { AppConfig.comparePathsForFileTreeSort($0.path, $1.path) }
+            guard let newIndex = roots.firstIndex(where: { $0 === renamedNode }) else { return false }
+            return oldIndex != newIndex
+        }
+
+        private func reselectTreeNode(_ node: FileTreeNode, in outlineView: NSOutlineView) {
+            let row = outlineView.row(forItem: node)
+            guard row >= 0 else { return }
+            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+
         private func findNodeByPath(_ targetPath: String) -> FileTreeNode? {
             let normalized = standardizedPath(targetPath)
             if customUserRootPaths.contains(normalized),
@@ -1484,7 +1572,111 @@ final class FileTreeOutlineView: NSOutlineView {
         return []
     }
 
+    private var renameEditor: NSTextField?
+    private var renameEditingPath: String?
+    private var renameEditorHost: NSView?
+    private var renameCanceled = false
+
+    var isInlineRenaming: Bool { renameEditor != nil }
+
+    func beginInlineRename(nodePath: String) {
+        if let coordinator, let node = coordinator.fileTreeNode(forPath: nodePath) {
+            beginInlineRename(node: node)
+            return
+        }
+        if selectedRow >= 0,
+           let node = item(atRow: selectedRow) as? FileTreeNode,
+           FileTreeFilter.standardizedPath(node.path) == FileTreeFilter.standardizedPath(nodePath) {
+            beginInlineRename(node: node)
+        }
+    }
+
+    func beginInlineRename(node: FileTreeNode) {
+        guard node.isDirectory else { return }
+        guard FileTreePathRestrictions.canRenameDirectory(node.path) else { return }
+        let row = row(forItem: node)
+        guard row >= 0 else { return }
+        cancelInlineRename(restoreFocus: false)
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        scrollRowToVisible(row)
+        layoutSubtreeIfNeeded()
+
+        let host = enclosingScrollView?.contentView ?? self
+        let cellRect = frameOfCell(atColumn: 0, row: row)
+        let editorRectInHost: NSRect
+        if let cellView = view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView,
+           let label = cellView.textField,
+           label.bounds.width > 0 {
+            editorRectInHost = label.convert(label.bounds, to: host)
+        } else {
+            // cellRect already includes outline indent; label starts after icon (2 + 14 + 3).
+            let textStart = cellRect.minX + 19
+            let rectInOutline = NSRect(
+                x: textStart,
+                y: cellRect.minY,
+                width: max(40, cellRect.maxX - textStart - 4),
+                height: max(16, cellRect.height)
+            )
+            editorRectInHost = convert(rectInOutline, to: host)
+        }
+
+        let editor = NSTextField(frame: editorRectInHost)
+        editor.stringValue = node.name
+        editor.isEditable = true
+        editor.isSelectable = true
+        editor.isBordered = false
+        editor.isBezeled = false
+        editor.drawsBackground = true
+        editor.backgroundColor = NSColor.black.withAlphaComponent(0.94)
+        editor.textColor = appState.map { NSColor($0.theme.colors.sidebarText) } ?? .labelColor
+        editor.font = NSFont.systemFont(ofSize: 11)
+        editor.focusRingType = .none
+        editor.wantsLayer = true
+        editor.layer?.borderWidth = 1
+        editor.layer?.borderColor = NSColor(white: 0.42, alpha: 1).cgColor
+        editor.delegate = self
+        host.addSubview(editor, positioned: .above, relativeTo: nil)
+        renameEditor = editor
+        renameEditorHost = host
+        renameEditingPath = node.path
+        renameCanceled = false
+        editor.selectText(nil)
+        window?.makeFirstResponder(editor)
+    }
+
+    func cancelInlineRename(restoreFocus: Bool = true) {
+        renameEditor?.removeFromSuperview()
+        renameEditor = nil
+        renameEditorHost = nil
+        renameEditingPath = nil
+        if restoreFocus {
+            window?.makeFirstResponder(self)
+            appState?.focusFileTreeKeyboardTarget()
+        }
+    }
+
+    private func commitInlineRename() {
+        if renameCanceled {
+            renameCanceled = false
+            cancelInlineRename()
+            return
+        }
+        guard let editor = renameEditor, let path = renameEditingPath else { return }
+        let newName = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        cancelInlineRename()
+        guard let appState else { return }
+        let outcome = appState.fileOperations.commitDirectoryRename(path: path, newName: newName)
+        appState.fileOperations.applyInlineRenameOutcome(outcome)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        if renameEditor != nil {
+            let point = event.locationInWindow
+            if let editor = renameEditor, !editor.convert(editor.bounds, to: nil).contains(point) {
+                commitInlineRename()
+            }
+            return
+        }
         coordinator?.markUserNavigatingTree()
         let point = convert(event.locationInWindow, from: nil)
         let row = row(at: point)
@@ -1536,6 +1728,9 @@ final class FileTreeOutlineView: NSOutlineView {
     }
 
     override func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool {
+        if let field = responder as? NSTextField, field === renameEditor {
+            return true
+        }
         if let field = responder as? NSTextField, field.isEditable {
             return false
         }
@@ -1561,10 +1756,36 @@ final class FileTreeOutlineView: NSOutlineView {
     }
 }
 
+extension FileTreeOutlineView: NSTextFieldDelegate {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            renameCanceled = true
+            cancelInlineRename()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            commitInlineRename()
+            return true
+        }
+        return false
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let editor = renameEditor else { return }
+        let text = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = FileOperationsService.validateDirectoryName(text) == nil
+        editor.layer?.borderWidth = valid ? 1 : 2
+        editor.layer?.borderColor = (valid
+            ? NSColor(white: 0.42, alpha: 1)
+            : NSColor(red: 220 / 255, green: 50 / 255, blue: 50 / 255, alpha: 1)).cgColor
+    }
+
+}
+
 @MainActor
 final class FileTreeNode: NSObject {
-    let path: String
-    let name: String
+    var path: String
+    var name: String
     let isDirectory: Bool
     private let showHidden: Bool
     private let excluded: [String]
@@ -1578,6 +1799,20 @@ final class FileTreeNode: NSObject {
         self.showHidden = showHidden
         self.excluded = excluded
         super.init()
+    }
+
+    /// Update this node and descendants after a directory rename on disk.
+    func applyPathRename(fromBase oldBase: String, toBase newBase: String) {
+        let oldNorm = URL(fileURLWithPath: oldBase).standardizedFileURL.path
+        let newNorm = URL(fileURLWithPath: newBase).standardizedFileURL.path
+        guard path == oldNorm || path.hasPrefix(oldNorm + "/") else { return }
+        if path == oldNorm {
+            path = newNorm
+        } else {
+            path = newNorm + String(path.dropFirst(oldNorm.count))
+        }
+        name = (path as NSString).lastPathComponent
+        children?.forEach { $0.applyPathRename(fromBase: oldNorm, toBase: newNorm) }
     }
 
     func loadChildrenIfNeeded(appState: AppState, rootPaths: [String]) {

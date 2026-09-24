@@ -78,7 +78,7 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 | Cmd+Shift+Z | Resize images |
 | Cmd+L | Lock files (when locking enabled) |
 | Cmd+Shift+L | Unlock files |
-| F2 | Rename selected file |
+| F2 | Rename selected file (inline editor on filename overlay); in file tree, rename selected folder |
 
 ### View Options
 | Key | Action |
@@ -100,7 +100,7 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 | Cmd+Return | Collapse file tree |
 | Cmd+Shift+Return | Expand file tree |
 
-When the **file tree** has keyboard focus, **⌘F** (Find Images / CLIP), **⌘P** (Search for Known Person), and **⌘C** (copy path) use the selected row (folder scope, or parent folder if a file row is selected). Those shortcuts are handled in the tree before the global Search menu.
+When the **file tree** has keyboard focus, **⌘F** (Find Images / CLIP), **⌘P** (Search for Known Person), and **⌘C** (copy path) use the selected row (folder scope, or parent folder if a file row is selected). **F2** renames the selected directory inline. Those shortcuts are handled in the tree before the global Search menu.
 
 ### Desktop & Maps
 | Key | Action |

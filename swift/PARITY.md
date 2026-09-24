@@ -99,7 +99,7 @@ Source: `browser_window/managers/thumbnail_context_menu.py`, `thumbnail_canvas.p
 
 Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). List rows use same handler.
 
-- [x] Rename (F2 — inline rename in `ThumbnailGridNSView`; file-tree F2 uses alert dialog)
+- [x] Rename (F2 — inline rename in thumbnail grid and file tree; click filename overlay in thumbnails)
 - [~] Delete / Delete… (`ThumbnailContextMenu` + `confirm_delete`)
 - [~] Copy pathname (⌘C)
 - [~] Copy image (⌃C, single selection)
@@ -450,7 +450,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] Thumbnail cell size +/- / 0; list row height +/- / 0; Page Up/Down
 - [x] ⌘X exclude thumbs from view (Tools; thumbnail mode + enabled exclude rules)
 - [~] Slideshow keys (mode 1–3 partial; overlap/presets 7/8/0/9 ported for mode 1)
-- [~] F2 rename, F12 list toggle, ⌘Return tree collapse/expand
+- [x] F2 rename (inline in thumbnail + file tree), F12 list toggle, ⌘Return tree collapse/expand
 - [~] F3 browse image history; ⇧Space browse space mode toggle
 - [~] ⌘⇧H show image in directory
 - [~] ⌘; last image swap (`BrowseImageHistoryController.swapFirstTwoAndShow`)

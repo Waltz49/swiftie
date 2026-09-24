@@ -1,6 +1,14 @@
 import AppKit
 import Foundation
 
+/// Result of inline rename commit (thumbnail or file tree).
+enum InlineRenameOutcome {
+    case unchanged
+    case renamed(newPath: String, displayName: String)
+    case keepEditing(message: String)
+    case blocked(title: String, message: String)
+}
+
 /// File move/delete/reveal operations. Port of `files/file_operations_manager.py` (phase 1).
 @Observable
 @MainActor
@@ -191,6 +199,119 @@ final class FileOperationsService {
         let newPath = dest.path
         refreshAfterChange()
         return newPath
+    }
+
+    // MARK: - Inline rename (Python thumbnail_canvas / file_tree_handler)
+
+    /// Port of `thumbnail_canvas._validate_macos_filename` (basename without extension).
+    static func validateMacOSFilenameBase(_ name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Filename cannot be empty" }
+        for char in ["/", ":"] where trimmed.contains(char) {
+            return "Filename cannot contain '\(char)'"
+        }
+        for scalar in trimmed.unicodeScalars where scalar.value < 0x20 && scalar.value != 0x09 && scalar.value != 0x0A {
+            return "Filename contains invalid control characters"
+        }
+        return nil
+    }
+
+    /// Port of `file_tree_handler._validate_directory_name`.
+    static func validateDirectoryName(_ name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Directory name cannot be empty" }
+        for char in ["/", "\\", ":", "*", "?", "\"", "<", ">", "|"] where trimmed.contains(char) {
+            return "Directory name cannot contain '\(char)'"
+        }
+        let reserved: Set<String> = [
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        ]
+        if reserved.contains(trimmed.uppercased()) {
+            return "'\(trimmed)' is a reserved name"
+        }
+        return nil
+    }
+
+    func commitFileRename(path: String, newBaseName: String) -> InlineRenameOutcome {
+        let trimmed = newBaseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originalBase = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        if trimmed == originalBase { return .unchanged }
+
+        if RenamePrefixPlanner.isInsidePhotosLibrary(path) {
+            return .blocked(
+                title: "Operation Not Allowed",
+                message: """
+                    Renaming files within macOS Photos Library is not allowed.
+
+                    Photos Library files cannot be renamed or modified.
+                    """
+            )
+        }
+
+        if let error = Self.validateMacOSFilenameBase(trimmed) {
+            return .keepEditing(message: error)
+        }
+
+        let ext = (path as NSString).pathExtension
+        let newFilename = ext.isEmpty ? trimmed : "\(trimmed).\(ext)"
+        let directory = (path as NSString).deletingLastPathComponent
+        let newPath = (directory as NSString).appendingPathComponent(newFilename)
+        if FileManager.default.fileExists(atPath: newPath), newPath != path {
+            return .keepEditing(message: "File '\(newFilename)' already exists")
+        }
+
+        do {
+            let resultPath = try rename(path: path, to: newFilename)
+            guard let appState else { return .renamed(newPath: resultPath, displayName: newFilename) }
+            appState.fileData.setCurrentImagePath(resultPath)
+            appState.selection.selectedFiles = [resultPath]
+            return .renamed(newPath: resultPath, displayName: newFilename)
+        } catch {
+            return .blocked(title: "Rename Failed", message: error.localizedDescription)
+        }
+    }
+
+    func commitDirectoryRename(path: String, newName: String) -> InlineRenameOutcome {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let oldName = ((path as NSString).standardizingPath as NSString).lastPathComponent
+        if trimmed == oldName { return .unchanged }
+
+        if let error = Self.validateDirectoryName(trimmed) {
+            return .blocked(title: "Invalid Directory Name", message: error)
+        }
+
+        let parent = ((path as NSString).standardizingPath as NSString).deletingLastPathComponent
+        let newPath = (parent as NSString).appendingPathComponent(trimmed)
+        if FileManager.default.fileExists(atPath: newPath) {
+            return .blocked(
+                title: "Rename Failed",
+                message: "A directory named '\(trimmed)' already exists."
+            )
+        }
+
+        do {
+            try FileManager.default.moveItem(atPath: path, toPath: newPath)
+            guard let appState else { return .renamed(newPath: newPath, displayName: trimmed) }
+            appState.applyFileTreeDirectoryRename(oldPath: path, newPath: newPath)
+            return .renamed(newPath: newPath, displayName: trimmed)
+        } catch {
+            return .blocked(title: "Rename Failed", message: "Failed to rename directory: \(error.localizedDescription)")
+        }
+    }
+
+    func applyInlineRenameOutcome(_ outcome: InlineRenameOutcome) {
+        switch outcome {
+        case .unchanged:
+            break
+        case .renamed(_, let displayName):
+            appState?.status.show("Renamed to \(displayName)")
+        case .keepEditing(let message):
+            appState?.status.show(message)
+        case .blocked(let title, let message):
+            showAlert(title, message)
+        }
     }
 
     func copy(paths: [String], to directory: String) throws -> [String] {
@@ -482,24 +603,6 @@ final class FileOperationsService {
             refreshAfterChange()
         }
         return created
-    }
-
-    func beginRename(path: String) {
-        guard let appState else { return }
-        guard let newName = StyledMessageDialog.presentTextInput(
-            title: "Rename",
-            message: (path as NSString).lastPathComponent,
-            initialText: (path as NSString).lastPathComponent,
-            confirmTitle: "Rename"
-        ), newName != (path as NSString).lastPathComponent else { return }
-
-        do {
-            let newPath = try rename(path: path, to: newName)
-            appState.fileData.setCurrentImagePath(newPath)
-            appState.status.show("Renamed to \(newName)")
-        } catch {
-            showAlert("Rename Failed", error.localizedDescription)
-        }
     }
 
     private func duplicateFile(at path: String) -> String? {

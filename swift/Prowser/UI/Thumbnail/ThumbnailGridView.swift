@@ -32,20 +32,19 @@ struct ThumbnailGridView: NSViewRepresentable {
         gridView.gridDelegate = context.coordinator
         gridView.configSource = appState.config
         gridView.appState = appState
-        gridView.onInlineRenameCommitted = { [weak appState] originalPath, newName in
+        gridView.onInlineRenameCommitted = { [weak appState] originalPath, newBaseName in
             guard let appState else { return }
-            Task { @MainActor in
-                do {
-                    let newPath = try appState.fileOperations.rename(path: originalPath, to: newName)
-                    appState.fileData.setCurrentImagePath(newPath)
-                    appState.selection.selectedFiles = [newPath]
-                    appState.status.show("Renamed to \(newName)")
-                } catch {
-                    StyledMessageDialog.showInformation(
-                        title: "Rename Failed",
-                        message: error.localizedDescription
-                    )
-                }
+            let outcome = appState.fileOperations.commitFileRename(path: originalPath, newBaseName: newBaseName)
+            switch outcome {
+            case .unchanged:
+                break
+            case .renamed(_, let displayName):
+                appState.status.show("Renamed to \(displayName)")
+            case .keepEditing(let message):
+                appState.status.show(message)
+                appState.thumbnailGridHost?.beginInlineRename(path: originalPath)
+            case .blocked(let title, let message):
+                StyledMessageDialog.showInformation(title: title, message: message)
             }
         }
         scrollView.documentView = gridView
@@ -310,7 +309,9 @@ struct ThumbnailGridView: NSViewRepresentable {
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
             applyThumbnailLoadingActive(inThumbnailMode && !fingerprint.showDirectoryLoadingCanvas, gridView: gridView)
             gridView.wrapAround = fingerprint.wrapAround
-            gridView.showFilenames = fingerprint.showFilenames
+            if !gridView.isInlineRenaming {
+                gridView.showFilenames = fingerprint.showFilenames
+            }
             gridView.showImageSize = fingerprint.showImageSize
             gridView.showExtensions = fingerprint.showExtensions
             gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
@@ -333,6 +334,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 gridView.startBackgroundThumbnailLoadingIfNeeded()
             }
             if inThumbnailMode,
+               !gridView.isInlineRenaming,
                !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: gridView.window) {
                 gridView.claimKeyboardFocus()
             }

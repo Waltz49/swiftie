@@ -30,6 +30,16 @@ final class RenameStatusManager {
         return statusCache[key]
     }
 
+    func migrateDirectoryPath(from oldPath: String, to newPath: String) {
+        guard isEnabled else { return }
+        let oldKey = Self.normalizePath(oldPath)
+        let newKey = Self.normalizePath(newPath)
+        if let value = statusCache.removeValue(forKey: oldKey) {
+            statusCache[newKey] = value
+            persistCache()
+        }
+    }
+
     func scanVisibleDirectories(_ directories: [String], config: AppConfig) {
         guard isEnabled else { return }
         let template = config.string(forKey: "rename_prefix_template", default: "image-%d")
