@@ -246,6 +246,13 @@ final class KeyboardHandlerController {
                 appState.searchOperations.presentClipSearchDialog()
                 return true
             }
+            if !hasShift, !hasControl, event.charactersIgnoringModifiers?.lowercased() == "p" {
+                if appState.fileTreePaneHasKeyboardFocus(in: event.window) {
+                    return false
+                }
+                appState.searchOperations.presentPersonSearchDialog()
+                return true
+            }
         }
 
         // ⌘⇧Return — collapse file tree to home (⌘↩ expand is handled in `FileTreeKeyboard` when tree is focused).

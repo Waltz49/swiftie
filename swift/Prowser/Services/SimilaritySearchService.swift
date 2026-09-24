@@ -7,6 +7,10 @@ enum SimilaritySearchService {
     static func run(appState: AppState, options: SimilaritySearchOptions) async {
         appState.prepareMainViewForImageSearch()
 
+        let expandedCustom = AppState.expandedSearchDirectoryPath(options.customDirectory)
+        var resolvedOptions = options
+        resolvedOptions.customDirectory = expandedCustom
+
         let refs = referencePaths(appState: appState)
         let multiSelectRefs = refs.count > 1 ? refs : []
         guard !refs.isEmpty else {
@@ -17,24 +21,30 @@ enum SimilaritySearchService {
         let displayedSeed = appState.fileData.displayedImages
         let paths = SearchImagePathCollector.collectPaths(
             appState: appState,
-            recursive: options.recursive,
-            customDirectory: options.customDirectory,
-            useCustomDirectory: options.useCustomDirectory,
-            includeDisplayed: refs
+            recursive: resolvedOptions.recursive,
+            customDirectory: resolvedOptions.customDirectory,
+            useCustomDirectory: resolvedOptions.useCustomDirectory,
+            includeDisplayed: resolvedOptions.useCustomDirectory ? [] : refs
         )
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "No Images Found", message: "No images found to search.")
             return
         }
 
-        let searchDir = options.useCustomDirectory ? options.customDirectory : SearchImagePathCollector.currentSearchDirectory(appState: appState)
+        let searchDir = resolvedOptions.useCustomDirectory
+            ? resolvedOptions.customDirectory
+            : SearchImagePathCollector.currentSearchDirectory(appState: appState)
+        appState.pinFileTreeForSearchScopeDirectory(
+            resolvedOptions.customDirectory,
+            useCustomDirectory: resolvedOptions.useCustomDirectory
+        )
         let metricName = appState.config.string(forKey: "similarity_metric", default: "cosine")
         let resnetForLog = appState.config.string(forKey: "resnet_model", default: "resnet18")
         SimilaritySearchLog.logScope(
             config: appState.config,
             kind: "CNN",
             candidateCount: paths.count,
-            recursive: options.recursive,
+            recursive: resolvedOptions.recursive,
             searchDirectory: searchDir,
             filterPattern: appState.filterSettings.filterPattern,
             searchDepth: appState.config.int(forKey: "search_depth", default: 4),
@@ -173,7 +183,7 @@ enum SimilaritySearchService {
                 orderedPaths: ordered,
                 currentImagePath: appState.fileData.currentImagePath,
                 statusMessage: statusMessage,
-                saveHistory: filesChanged || options.recursive,
+                saveHistory: filesChanged || resolvedOptions.recursive,
                 multiSelectReferencePaths: multiSelectRefs.isEmpty ? nil : multiSelectRefs
             )
         } catch ModelDownloadError.userDeclined {

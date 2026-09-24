@@ -33,26 +33,38 @@ struct ClipSearchSheet: View {
                     .monospacedDigit()
                     .frame(width: 44, alignment: .trailing)
             }
-            HStack(spacing: 8) {
-                Toggle("", isOn: $useCustomDirectory)
-                    .labelsHidden()
-                    .frame(width: 24)
-                TextField("Directory for search", text: $customDirectory)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!useCustomDirectory)
-                Button("…") { browseDirectory() }
-                    .disabled(!useCustomDirectory)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Toggle("", isOn: $useCustomDirectory)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                    TextField("Directory for search", text: $customDirectory)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!useCustomDirectory)
+                    Text(validationMark)
+                        .frame(width: 20)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(validationColor)
+                    Button("…") { browseDirectory() }
+                        .disabled(!useCustomDirectory)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Toggle("", isOn: $recursive)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                        .disabled(!useCustomDirectory)
+                    Text("Search in subdirectories")
+                }
             }
-            Toggle("Search in subdirectories", isOn: $recursive)
-                .padding(.leading, 28)
-                .disabled(!useCustomDirectory)
             HStack {
                 Spacer()
                 Button("Cancel") { closeDialog() }
                     .keyboardShortcut(.cancelAction)
                 Button("Search") { submit() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSubmit)
             }
         }
         .padding(20)
@@ -65,6 +77,43 @@ struct ClipSearchSheet: View {
                 recursive = false
             }
         }
+    }
+
+    private var resolvedCustomDirectory: String {
+        AppState.expandedSearchDirectoryPath(customDirectory)
+    }
+
+    private var customDirectoryIsValid: Bool {
+        var isDir: ObjCBool = false
+        let path = resolvedCustomDirectory
+        guard !path.isEmpty else { return true }
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private var validationMark: String {
+        let raw = customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return "" }
+        if customDirectoryIsValid {
+            return useCustomDirectory ? "✓" : "-"
+        }
+        return useCustomDirectory ? "✗" : "-"
+    }
+
+    private var validationColor: Color {
+        let raw = customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return .secondary }
+        if customDirectoryIsValid { return .green }
+        return useCustomDirectory ? .red : .secondary
+    }
+
+    private var canSubmit: Bool {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else { return false }
+        if useCustomDirectory {
+            let raw = customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !raw.isEmpty, !customDirectoryIsValid { return false }
+        }
+        return true
     }
 
     private func loadDefaults() {
@@ -118,4 +167,9 @@ struct ClipSearchSheet: View {
             threshold: threshold
         ))
     }
+}
+
+/// Shared leading column width for directory + recursive checkboxes in search sheets.
+enum SearchSheetCheckboxLayout {
+    static let width: CGFloat = 20
 }

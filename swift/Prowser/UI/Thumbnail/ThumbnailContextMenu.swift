@@ -286,7 +286,12 @@ private final class MenuActions: NSObject {
     }
 
     @objc func copyPath(_ sender: NSMenuItem) {
-        guard let appState, let paths = sender.representedObject as? [String] else { return }
+        guard let appState else { return }
+        let paths = appState.pathsForCopyPathCommand()
+        guard !paths.isEmpty else {
+            appState.status.show("No files selected")
+            return
+        }
         appState.fileOperations.copyPathsToClipboard(paths)
     }
 

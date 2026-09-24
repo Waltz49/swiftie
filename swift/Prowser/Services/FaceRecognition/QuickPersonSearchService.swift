@@ -69,12 +69,28 @@ enum QuickPersonSearchService {
             )
             return
         }
-        _ = appState.knownFaces.replaceAllSamples(subjectID: subjectID, samples: samples)
+        guard appState.knownFaces.replaceAllSamples(subjectID: subjectID, samples: samples) else {
+            StyledMessageDialog.showWarning(
+                title: "Search for Person in Current Image",
+                message: "Could not save the face samples."
+            )
+            return
+        }
+
+        let profile = appState.config.profilePaths
+        for sample in samples {
+            guard let path = sample.path else { continue }
+            _ = FaceSampleThumbnailService.thumbnail(
+                profile: profile,
+                imagePath: path,
+                embedding: sample.embedding
+            )
+        }
 
         appState.config.updateSetting("find_person_subject_id", value: subjectID)
-        appState.personSearchSheetWindowTitle = AppState.PersonSearchSheetWindowTitle.personInCurrentImage
-        appState.showPersonSearchSheet = true
-        appState.syncAuxiliaryDialogs()
+        appState.searchOperations.presentPersonSearchDialog(
+            sheetWindowTitle: AppState.PersonSearchSheetWindowTitle.personInCurrentImage
+        )
     }
 
 }

@@ -40,34 +40,41 @@ struct PersonSearchSheet: View {
                 personThumbStrip
             }
 
-            HStack(spacing: 10) {
-                Toggle("", isOn: $useCustomDirectory)
-                    .labelsHidden()
-                    .toggleStyle(.checkbox)
-                    .frame(width: 20)
-                    .help("Use custom directory for search")
-                TextField("Enter directory path for search", text: $customDirectory)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!useCustomDirectory)
-                Text(validationMark)
-                    .frame(width: 20)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(validationColor)
-                Button("…") { browseDirectory() }
-                    .frame(width: 30)
-                    .disabled(!useCustomDirectory)
-                    .help("Browse for directory")
-            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Toggle("", isOn: $useCustomDirectory)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                        .help("Use custom directory for search")
+                    TextField("Enter directory path for search", text: $customDirectory)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!useCustomDirectory)
+                    Text(validationMark)
+                        .frame(width: 20)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(validationColor)
+                    Button("…") { browseDirectory() }
+                        .frame(width: 30)
+                        .disabled(!useCustomDirectory)
+                        .help("Browse for directory")
+                }
 
-            Toggle(isOn: $recursive) {
-                Text("Recursive (search up to \(searchDepth) directories deep)")
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Toggle("", isOn: $recursive)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                        .disabled(!recursiveEnabled)
+                    Text("Recursive (search up to \(searchDepth) directories deep)")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .help(
+                    "If checked, searches recursively in subdirectories (up to \(searchDepth) levels)\n"
+                        + "and opens results in a new level.\n"
+                        + "Depth is controlled by 'Search depth' in the Directories settings tab."
+                )
             }
-            .disabled(!recursiveEnabled)
-            .help(
-                "If checked, searches recursively in subdirectories (up to \(searchDepth) levels)\n"
-                    + "and opens results in a new level.\n"
-                    + "Depth is controlled by 'Search depth' in the Directories settings tab."
-            )
 
             HStack {
                 Spacer()

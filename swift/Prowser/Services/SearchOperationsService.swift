@@ -60,10 +60,13 @@ final class SearchOperationsService {
         appState.syncAuxiliaryDialogs()
     }
 
-    func presentPersonSearchDialog(directoryOverride: String? = nil) {
+    func presentPersonSearchDialog(
+        directoryOverride: String? = nil,
+        sheetWindowTitle: String = AppState.PersonSearchSheetWindowTitle.knownPerson
+    ) {
         guard let appState else { return }
         guard FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) else { return }
-        appState.personSearchSheetWindowTitle = AppState.PersonSearchSheetWindowTitle.knownPerson
+        appState.personSearchSheetWindowTitle = sheetWindowTitle
         let treeContext = appState.captureSearchInvocationTreeContext()
         appState.primePersonSearchDirectoryForPresentation(
             directoryOverride: directoryOverride,

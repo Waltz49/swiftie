@@ -22,19 +22,27 @@ struct SimilaritySearchSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Find images similar to the selected image(s):")
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Toggle("", isOn: $useCustomDirectory)
-                    .labelsHidden()
-                    .frame(width: 24)
-                TextField("Directory for search", text: $customDirectory)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!useCustomDirectory)
-                Button("…") { browseDirectory() }
-                    .disabled(!useCustomDirectory)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Toggle("", isOn: $useCustomDirectory)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                    TextField("Directory for search", text: $customDirectory)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!useCustomDirectory)
+                    Button("…") { browseDirectory() }
+                        .disabled(!useCustomDirectory)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Toggle("", isOn: $recursive)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                        .disabled(!useCustomDirectory)
+                    Text("Search in subdirectories")
+                }
             }
-            Toggle("Search in subdirectories", isOn: $recursive)
-                .padding(.leading, 28)
-                .disabled(!useCustomDirectory)
             HStack {
                 Spacer()
                 Button("Cancel") { closeDialog() }
@@ -79,7 +87,7 @@ struct SimilaritySearchSheet: View {
     }
 
     private func validateDirectory() {
-        let path = customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = AppState.expandedSearchDirectoryPath(customDirectory)
         dirValid = !useCustomDirectory || FileManager.default.fileExists(atPath: path)
     }
 
@@ -95,13 +103,14 @@ struct SimilaritySearchSheet: View {
 
     private func submit() {
         let effectiveRecursive = useCustomDirectory && recursive
+        let expandedDir = AppState.expandedSearchDirectoryPath(customDirectory)
         appState.config.updateSetting("cnn_recursive", value: effectiveRecursive)
         appState.config.updateSetting("cnn_search_dir_enabled", value: useCustomDirectory)
-        appState.config.updateSetting("cnn_search_dir", value: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines))
+        appState.config.updateSetting("cnn_search_dir", value: expandedDir)
         let options = SimilaritySearchOptions(
             recursive: effectiveRecursive,
             useCustomDirectory: useCustomDirectory,
-            customDirectory: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            customDirectory: expandedDir
         )
         closeDialog()
         onSubmit(options)

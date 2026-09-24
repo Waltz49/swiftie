@@ -169,8 +169,8 @@ extension AppState {
            let path = outline.coordinator?.selectedTreeRowPath() {
             return [path]
         }
-        if !selection.selectedFiles.isEmpty {
-            return Array(selection.selectedFiles)
+        if fileData.currentViewMode == .thumbnail, selection.selectedFiles.count > 1 {
+            return Array(selection.selectedFiles).sorted()
         }
         if let current = fileData.currentImagePath {
             return [current]
