@@ -27,6 +27,8 @@ extension AppState {
             }
         } else if leavingBrowse {
             refreshMenuState()
+            clearUserRequestedTreeDirectory()
+            let browseExitPath = fileData.currentImagePath
             if newMode == .thumbnail {
                 restoreBrowseReturnStateIfNeeded()
             } else {
@@ -34,6 +36,9 @@ extension AppState {
             }
             ensureCurrentDirectoryAlignedWithActiveImage()
             reconcileUserRequestedTreeDirectoryWithActiveImage()
+            if newMode == .thumbnail {
+                finalizeThumbnailHighlightAfterBrowseExit(preferredPath: browseExitPath)
+            }
             syncFileTreeToActiveImage()
             focusMainCanvas()
         } else {
@@ -78,8 +83,18 @@ extension AppState {
 
     func shouldStashThumbnailContextForBrowse() -> Bool {
         if specificFilesActive { return true }
+        if referenceGraphActive { return true }
         if config.string(forKey: "sort_mode", default: "date") == SortMode.custom.rawValue {
             return true
+        }
+        if let path = fileData.currentImagePath,
+           let imageDir = FileDataModel.parentDirectory(of: path),
+           let currentDir = fileData.currentDirectory {
+            let imageNorm = URL(fileURLWithPath: imageDir).standardizedFileURL.path
+            let currentNorm = URL(fileURLWithPath: currentDir).standardizedFileURL.path
+            if imageNorm != currentNorm {
+                return true
+            }
         }
         return false
     }
@@ -95,16 +110,18 @@ extension AppState {
         }
         setSpecificFilesActive(stashed.specificFilesActive)
         fileData.setDisplayedImages(stashed.displayedImages)
-        if let path = Self.resolveActiveImagePathAfterBrowseRestore(
+        let restoredPath = Self.resolveActiveImagePathAfterBrowseRestore(
             preferred: pathAtBrowseExit,
             fallback: stashed.currentImagePath,
             in: fileData.displayedImages
-        ) {
-            fileData.setCurrentImagePath(path)
+        )
+        if let restoredPath {
+            fileData.setCurrentImagePath(restoredPath)
         }
         config.updateSetting("thumbnail_cell_size", value: stashed.thumbnailCellSize)
         config.updateSetting("manual_thumbnail_size", value: stashed.manualThumbnailSize)
         config.applySettingsChange(emit: eventBus)
+        finalizeThumbnailHighlightAfterBrowseExit(preferredPath: restoredPath ?? pathAtBrowseExit)
     }
 
     /// Pick the active file by path after restoring a stashed thumbnail list. Never uses list indices.
@@ -116,10 +133,28 @@ extension AppState {
         for candidate in [preferred, fallback] {
             guard let candidate,
                   let normalized = FileDataModel.normalizePath(candidate),
-                  displayedImages.contains(normalized) else { continue }
+                  FileDataModel.indexOfPath(normalized, in: displayedImages) != nil else { continue }
             return normalized
         }
         return nil
+    }
+
+    /// Re-highlight the browse exit file by path (never by stale list index).
+    func finalizeThumbnailHighlightAfterBrowseExit(preferredPath: String?) {
+        guard fileData.currentViewMode == .thumbnail else { return }
+        let candidates = [preferredPath, fileData.currentImagePath].compactMap { $0 }
+        for raw in candidates {
+            guard let path = FileDataModel.normalizePath(raw) else { continue }
+            DisplayedImagesSync.ensureActiveImageListed(
+                fileData: fileData,
+                filterPattern: filterSettings.filterPattern
+            )
+            if FileDataModel.indexOfPath(path, in: fileData.displayedImages) != nil {
+                fileData.setCurrentImagePath(path)
+                fileData.reconcileCurrentIndexWithPath()
+                return
+            }
+        }
     }
     /// Python launch restore: thumbnail/slideshow reopen the folder, browse reopens the file.
     func restoreSession(_ snapshot: AppConfig.RestoreStateSnapshot) {

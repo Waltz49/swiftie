@@ -6,6 +6,8 @@ Legend: `[ ]` not started · `[~]` partial · `[x]` done
 
 Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_menu.py`, `information_tools_menu.py`, `jobs_tools_menu.py`, `chat_tools_menu.py`, `status_bar_config.py`, `files/file_tree_handler.py`.
 
+**Face search UI labels:** Swift uses **Search for Known Person** (⌘P) and **Search for Person in Current Image** (⌃⌘P). The Python UI still uses **Search by Person…** and **Quick Person Search** for the same flows.
+
 ## App shell
 
 - [~] Single-instance lock (`data/instance.lock`) + named-pipe forward/listen (`NamedPipeListener`)
@@ -122,7 +124,7 @@ Source: `files/file_tree_handler.py` `contextMenuEvent`. Menu in `FileTreeContex
 
 - [~] Rename… (F2, permission-checked)
 - [~] Search by Text… (⌘F / ⌘⇧K) — `ClipSearchSheet` + native Core ML
-- [x] Search by Person… (⌘P) — native dlib + shared `face_cache`
+- [x] Search for Known Person… (⌘P) — native dlib + shared `face_cache` (Python: Search by Person…)
 - [~] Copy Directory Path (⌘C)
 - [~] Open in Finder
 - [~] Show All Images inc. Subdirs (⇧A)
@@ -226,8 +228,8 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 
 - [~] Find Similar Image Files… (⌘K — CNN worker)
 - [x] Search by Text… (⌘F / ⌘⇧K — CLIP reorder)
-- [x] Search by Person… (⌘P) — native dlib + shared `face_cache`
-- [x] Quick Person Search (⌃⌘P)
+- [x] Search for Known Person… (⌘P) — native dlib + shared `face_cache` (Python: Search by Person…)
+- [x] Search for Person in Current Image (⌃⌘P) (Python: Quick Person Search)
 - [~] Extract Faces (⇧⌘P in Python Search menu)
 - [x] Find Duplicate Image Files — in directory
 - [x] Find Duplicate Image Files — recursive (Search menu, click only; no ⇧F — use tree context menu or tree focus + ⇧F)
@@ -344,7 +346,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | Image-gen unified (`dialog_geometry` in `imagegen`) | done | done |
 | Job queue panel (`job_queue_geometry`) | done | done |
 | Edit EXIF user comment | done | done |
-| Similarity / person search | done | done |
+| Similarity / known-person search | done | done |
 | Find references | done | done |
 | Keyboard help / About | done | done |
 | EXIF batch confirmation | done | done |
@@ -406,7 +408,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | Key | Python | Swift |
 |-----|--------|-------|
 | Chat messages / system prompts (`chat_system_prompts.json`) | done | done |
-| CNN / person search last directory settings | done | done |
+| CNN / known-person search last directory settings (`find_person_*`) | done | done |
 
 ### On-disk caches (not in `settings.json`)
 
@@ -436,7 +438,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] `WhisperBridge` — WAV transcription worker
 - [~] `workers/ipc_json.py`
 - [~] ImageGen UI wiring (create sheet, job queue)
-- [~] Chat pane; person-search dialog
+- [~] Chat pane; Search for Known Person dialog (Python: Search by person)
 
 ## Keyboard shortcuts
 
@@ -452,6 +454,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] ⌘⇧H show image in directory
 - [~] ⌘; last image swap (`BrowseImageHistoryController.swapFirstTwoAndShow`)
 - [~] ⌘F CLIP search (`ClipSearchSheet`)
+- [x] ⌘P Search for Known Person; ⌃⌘P Search for Person in Current Image (native dlib)
 - [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
 - [x] ⌘N rename prefix (done), ⌘M convert, ⌘⇧Z resize (full dialog)
 
@@ -495,7 +498,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 | File: Settings, Last Image, Delete, Trash view | done | View Copy of Trash when readable trash has images |
 | Edit: copy path/image, lock, rename prefix, convert, resize | done | Resize: CG vs Pillow filters (functional, not bit-identical) |
 | View: pane toggles, sort (checkmarks), theme, chrome | done | Hide/Show dynamic labels |
-| Search: similar, CLIP, person, duplicates, show in dir | done | Quick Person Search (⌃⌘P) |
+| Search: similar, CLIP, person, duplicates, show in dir | done | Search for Known Person (⌘P); Search for Person in Current Image (⌃⌘P) |
 | Move/Copy top-level menu | partial | Folded into File → Move to |
 | Image: create/edit/expand/infill, job queue | partial | Fast-open ⇧⌥/; Check LoRAs + Downloading Models help added |
 | Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting; Exclude Thumbs (⌘X) |

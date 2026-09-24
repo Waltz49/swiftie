@@ -154,7 +154,7 @@ struct CacheSettingsTab: View {
     private func clearFaceCache() {
         guard confirm(
             "Clear Face Cache",
-            "Clear cached face encodings (for Search by person) and face sample thumbnails (Settings → Face Recognition tab)."
+            "Clear cached face encodings (for Search for Known Person) and face sample thumbnails (Settings → Face Recognition tab)."
         ) else { return }
         CacheManagementService.clearFaceCache(paths: appState.config.profilePaths)
         statusMessage = "Cleared face cache and sample thumbnails."

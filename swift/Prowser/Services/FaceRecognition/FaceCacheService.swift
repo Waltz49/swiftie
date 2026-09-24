@@ -24,7 +24,45 @@ final class FaceCacheService: @unchecked Sendable {
     }
 
     func hasCachedFaces(imagePath: String) -> Bool {
-        getEncodings(imagePath: imagePath) != nil
+        lock.lock()
+        defer { lock.unlock() }
+        let index = loadIndex()
+        var matchedKey: String?
+        var entry: IndexEntry?
+        for key in FaceCacheNormalization.candidateIndexKeys(path: imagePath) {
+            if let e = index[key] {
+                matchedKey = key
+                entry = e
+                break
+            }
+        }
+        guard let entry, let matchedKey else { return false }
+        let dataPath = dataPathForIndexKey(matchedKey)
+        guard FileManager.default.fileExists(atPath: dataPath.path) else { return false }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: imagePath),
+              let modified = attrs[.modificationDate] as? Date,
+              let size = attrs[.size] as? Int else { return false }
+        let mtime = modified.timeIntervalSince1970
+        if size != entry.size { return false }
+        if Self.mtimeMatchesIndex(mtime, entry.mtime) { return true }
+        if entry.md5 != nil {
+            guard let storedMD5 = entry.md5,
+                  let currentMD5 = Self.fileMD5(path: imagePath),
+                  currentMD5 == storedMD5 else { return false }
+            var refreshed = entry
+            refreshed.mtime = mtime
+            refreshed.size = size
+            var updated = index
+            updated[matchedKey] = refreshed
+            indexMemory = updated
+            writesSincePersist += 1
+            if writesSincePersist >= Self.persistInterval {
+                persistIndex(updated)
+                writesSincePersist = 0
+            }
+            return true
+        }
+        return false
     }
 
     func getEncodings(imagePath: String, mtime: Double? = nil, size: Int? = nil) -> [[Double]]? {
@@ -41,8 +79,26 @@ final class FaceCacheService: @unchecked Sendable {
             }
         }
         guard let entry, let matchedKey else { return nil }
-        if let mtime, entry.mtime != mtime { return nil }
+        if let mtime, !Self.mtimeMatchesIndex(mtime, entry.mtime) { return nil }
         if let size, entry.size != size { return nil }
+        if mtime == nil, size == nil {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: imagePath),
+                  let modified = attrs[.modificationDate] as? Date,
+                  let fileSize = attrs[.size] as? Int else { return nil }
+            if fileSize != entry.size { return nil }
+            if !Self.mtimeMatchesIndex(modified.timeIntervalSince1970, entry.mtime) {
+                if let storedMD5 = entry.md5, let currentMD5 = Self.fileMD5(path: imagePath), currentMD5 == storedMD5 {
+                    var refreshed = entry
+                    refreshed.mtime = modified.timeIntervalSince1970
+                    refreshed.size = fileSize
+                    var updated = index
+                    updated[matchedKey] = refreshed
+                    indexMemory = updated
+                } else {
+                    return nil
+                }
+            }
+        }
         let dataPath = dataPathForIndexKey(matchedKey)
         guard let data = try? Data(contentsOf: dataPath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -65,7 +121,6 @@ final class FaceCacheService: @unchecked Sendable {
                 s = 0
             }
         }
-        let md5 = Self.fileMD5(path: imagePath)
         let dataPath = dataPath(for: imagePath)
         let payload: [String: Any] = ["encodings": encodings]
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
@@ -73,7 +128,7 @@ final class FaceCacheService: @unchecked Sendable {
         }
         lock.lock()
         var index = loadIndex()
-        let entry = IndexEntry(mtime: m!, size: s!, md5: md5)
+        let entry = IndexEntry(mtime: m!, size: s!, md5: nil)
         index[key] = entry
         indexMemory = index
         writesSincePersist += 1
@@ -142,5 +197,10 @@ final class FaceCacheService: @unchecked Sendable {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
         let digest = Insecure.MD5.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Match Python `_mtime_matches_index` (JSON/fs float noise).
+    private static func mtimeMatchesIndex(_ fileMtime: Double, _ indexMtime: Double) -> Bool {
+        fileMtime == indexMtime || abs(fileMtime - indexMtime) < 1e-4
     }
 }

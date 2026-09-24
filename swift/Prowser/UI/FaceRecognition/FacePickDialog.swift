@@ -15,8 +15,8 @@ enum FacePickDialog {
                 backing: .buffered,
                 defer: false
             )
-            panel.title = "Choose face — Quick Person Search"
-            let label = NSTextField(labelWithString: "Click the face to use for Quick Person Search.")
+            panel.title = "Choose face — Search for Person in Current Image"
+            let label = NSTextField(labelWithString: "Click the face to use for this image in Search for Person in Current Image.")
             label.translatesAutoresizingMaskIntoConstraints = false
 
             let imageView = FaceDetectionOverlayView(cgImage: cgImage, detections: detections)

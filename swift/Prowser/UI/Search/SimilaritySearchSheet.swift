@@ -59,8 +59,16 @@ struct SimilaritySearchSheet: View {
 
     private func loadDefaults() {
         recursive = appState.config.bool(forKey: "cnn_recursive", default: false)
-        useCustomDirectory = appState.config.bool(forKey: "cnn_search_dir_enabled", default: false)
-        customDirectory = appState.config.string(forKey: "cnn_search_dir", default: "")
+        if let prime = appState.consumeSimilaritySearchDirectoryPrime() {
+            useCustomDirectory = prime.useCustomDirectory
+            customDirectory = prime.customDirectory
+            if useCustomDirectory {
+                recursive = appState.config.bool(forKey: "cnn_recursive", default: false)
+            }
+        } else {
+            useCustomDirectory = appState.config.bool(forKey: "cnn_search_dir_enabled", default: false)
+            customDirectory = appState.config.string(forKey: "cnn_search_dir", default: "")
+        }
         if customDirectory.isEmpty, let dir = SearchImagePathCollector.currentSearchDirectory(appState: appState) {
             customDirectory = dir
         }

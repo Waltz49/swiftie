@@ -5,20 +5,24 @@ import SwiftUI
 @MainActor
 enum ClipTextSearchService {
     static func run(appState: AppState, options: ClipSearchOptions) async {
-        if appState.fileData.currentViewMode == .list {
-            appState.toggleListView()
-        }
-        if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
-        }
+        appState.prepareMainViewForImageSearch()
+
+        let expandedCustom = AppState.expandedSearchDirectoryPath(options.customDirectory)
+        var resolvedOptions = options
+        resolvedOptions.customDirectory = expandedCustom
+        appState.pinFileTreeForSearchScopeDirectory(
+            expandedCustom,
+            useCustomDirectory: resolvedOptions.useCustomDirectory
+        )
 
         let displayedSeed = appState.fileData.displayedImages
+        let includeDisplayed = resolvedOptions.useCustomDirectory ? [] : displayedSeed
         let paths = SearchImagePathCollector.collectPaths(
             appState: appState,
-            recursive: options.recursive,
-            customDirectory: options.customDirectory,
-            useCustomDirectory: options.useCustomDirectory,
-            includeDisplayed: displayedSeed
+            recursive: resolvedOptions.recursive,
+            customDirectory: resolvedOptions.customDirectory,
+            useCustomDirectory: resolvedOptions.useCustomDirectory,
+            includeDisplayed: includeDisplayed
         )
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "No Images Found", message: "No images found to search.")
@@ -26,7 +30,7 @@ enum ClipTextSearchService {
         }
 
         let clipName = appState.config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
-        let searchDir = options.useCustomDirectory ? options.customDirectory : SearchImagePathCollector.currentSearchDirectory(appState: appState)
+        let searchDir = resolvedOptions.useCustomDirectory ? resolvedOptions.customDirectory : SearchImagePathCollector.currentSearchDirectory(appState: appState)
         SimilaritySearchLog.logScope(
             config: appState.config,
             kind: "CLIP text",

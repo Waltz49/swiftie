@@ -55,11 +55,21 @@ final class FileDataModel {
         }
         guard let normalized = Self.normalizePath(path) else { return }
         currentImagePath = normalized
-        if let index = displayedImages.firstIndex(of: normalized) {
+        if let index = Self.indexOfPath(normalized, in: displayedImages) {
             currentIndex = index
             eventBridge?.currentIndexChanged(index)
         }
         eventBridge?.currentImageChanged(normalized)
+    }
+
+    /// Index in `displayedImages` for a path (normalized equality).
+    static func indexOfPath(_ path: String, in images: [String]) -> Int? {
+        guard let normalized = normalizePath(path) else { return nil }
+        return images.firstIndex(of: normalized)
+    }
+
+    func reconcileCurrentIndexWithPath() {
+        syncCurrentIndexFromPath()
     }
 
     func setCurrentIndex(_ index: Int) {

@@ -271,6 +271,10 @@ enum SelectionService {
             selection: appState.selection
         )
 
+        if appState.fileData.currentViewMode == .browse {
+            appState.closeBrowseView()
+        }
+
         let directory = URL(fileURLWithPath: selected[0]).deletingLastPathComponent().path
         appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         appState.config.updateSetting("sort_reversed", value: false)

@@ -70,8 +70,16 @@ struct ClipSearchSheet: View {
     private func loadDefaults() {
         prompt = appState.config.string(forKey: "clip_prompt", default: "")
         recursive = appState.config.bool(forKey: "clip_recursive", default: false)
-        useCustomDirectory = appState.config.bool(forKey: "clip_search_dir_enabled", default: false)
-        customDirectory = appState.config.string(forKey: "clip_search_dir", default: "")
+        if let prime = appState.consumeClipSearchDirectoryPrime() {
+            useCustomDirectory = prime.useCustomDirectory
+            customDirectory = prime.customDirectory
+            if useCustomDirectory {
+                recursive = appState.config.bool(forKey: "clip_recursive", default: false)
+            }
+        } else {
+            useCustomDirectory = appState.config.bool(forKey: "clip_search_dir_enabled", default: false)
+            customDirectory = appState.config.string(forKey: "clip_search_dir", default: "")
+        }
         threshold = appState.config.double(forKey: "clip_similarity_threshold", default: 0.20)
         if customDirectory.isEmpty, let dir = SearchImagePathCollector.currentSearchDirectory(appState: appState) {
             customDirectory = dir
@@ -97,15 +105,16 @@ struct ClipSearchSheet: View {
         appState.config.updateSetting("clip_prompt", value: trimmed)
         let effectiveRecursive = useCustomDirectory && recursive
         appState.config.updateSetting("clip_recursive", value: effectiveRecursive)
+        let expandedDir = AppState.expandedSearchDirectoryPath(customDirectory)
         appState.config.updateSetting("clip_search_dir_enabled", value: useCustomDirectory)
-        appState.config.updateSetting("clip_search_dir", value: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines))
+        appState.config.updateSetting("clip_search_dir", value: expandedDir)
         appState.config.updateSetting("clip_similarity_threshold", value: threshold)
         closeDialog()
         onSubmit(ClipSearchOptions(
             prompt: trimmed,
             recursive: effectiveRecursive,
             useCustomDirectory: useCustomDirectory,
-            customDirectory: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines),
+            customDirectory: expandedDir,
             threshold: threshold
         ))
     }

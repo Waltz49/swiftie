@@ -237,22 +237,30 @@ struct ProwserCommands: Commands {
         CommandMenu("Search") {
             Group {
                 Button("Search for Similar Images…") {
-                    Task { @MainActor in appState.searchOperations.presentSimilaritySearchDialog() }
+                    MainActor.assumeIsolated {
+                        appState.searchOperations.presentSimilaritySearchDialog()
+                    }
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
                 Button("Search by Text…") {
-                    Task { @MainActor in appState.searchOperations.presentClipSearchDialog() }
+                    MainActor.assumeIsolated {
+                        guard !appState.fileTreePaneHasKeyboardFocus() else { return }
+                        appState.searchOperations.presentClipSearchDialog()
+                    }
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
                 if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                    Button("Search for Known Person...") {
-                        Task { @MainActor in appState.searchOperations.presentPersonSearchDialog() }
+                    Button("Search for Known Person…") {
+                        MainActor.assumeIsolated {
+                            guard !appState.fileTreePaneHasKeyboardFocus() else { return }
+                            appState.searchOperations.presentPersonSearchDialog()
+                        }
                     }
                     .keyboardShortcut("p", modifiers: .command)
 
-                    Button("Search for Person in Current Image...") {
+                    Button("Search for Person in Current Image…") {
                         Task { @MainActor in appState.searchOperations.runQuickPersonSearch() }
                     }
                     .keyboardShortcut("p", modifiers: [.command, .control])
@@ -506,7 +514,7 @@ struct ProwserCommands: Commands {
 
     @MainActor
     private func copyPath() {
-        let paths = selectedPaths()
+        let paths = appState.pathsForCopyPathCommand()
         guard !paths.isEmpty else {
             appState.status.show("No files selected")
             return
@@ -516,12 +524,8 @@ struct ProwserCommands: Commands {
 
     @MainActor
     private func selectedPaths() -> [String] {
-        if !appState.selection.selectedFiles.isEmpty {
-            return Array(appState.selection.selectedFiles)
-        }
-        if let current = appState.fileData.currentImagePath {
-            return [current]
-        }
+        let paths = appState.pathsForCopyPathCommand()
+        if !paths.isEmpty { return paths }
         return []
     }
 

@@ -30,8 +30,31 @@ enum FileTreeKeyboard {
 
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "c",
-           let path = coordinator.selectedDirectoryPath() {
+           let path = coordinator.selectedTreeRowPath() {
             appState.fileOperations.copyPathsToClipboard([path])
+            return true
+        }
+
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "f",
+           let path = coordinator.treeSearchScopeDirectoryPath() {
+            if FileTreePathRestrictions.isRootOrSystemVolume(path) {
+                showRestrictedAlert(path: path)
+            } else {
+                appState.searchOperations.presentClipSearchDialog(directoryOverride: path)
+            }
+            return true
+        }
+
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "p",
+           FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions),
+           let path = coordinator.treeSearchScopeDirectoryPath() {
+            if FileTreePathRestrictions.isRootOrSystemVolume(path) {
+                showRestrictedAlert(path: path)
+            } else {
+                appState.searchOperations.presentPersonSearchDialog(directoryOverride: path)
+            }
             return true
         }
 

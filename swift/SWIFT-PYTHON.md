@@ -8,7 +8,7 @@ Python-only features from the original PySide6 app are **not** ported:
 
 - Image generation, LoRAs, job queue
 - Chat
-- Face / person search uses **native dlib** in Swift (shared `known_faces.json` + `face_cache/` when profile roots match); Python still uses `face_recognition` for its own UI.
+- **Search for Known Person** (⌘P) and **Search for Person in Current Image** (⌃⌘P) use **native dlib** in Swift (shared `known_faces.json` + `face_cache/` when profile roots match). The Python app implements the same features with `face_recognition` and older menu labels (**Search by Person…**, **Quick Person Search**).
 - Whisper / LM Studio captioning
 
 The Swift browser stores its profile under `~/.swift-prowser` (settings, thumbnail cache, image recognition cache, `.prsort`). That is separate from the Python app’s `~/.prowser`.

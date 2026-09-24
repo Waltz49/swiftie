@@ -26,6 +26,10 @@ final class KeyboardHandlerController {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            self.appState?.recordSearchInvocationTreeContextFromKeyEvent(event)
+            if self.tryHandleFileTreeKeyboard(event) {
+                return nil
+            }
             if Self.isolateNonBrowserKeyDown(event) {
                 return nil
             }
@@ -42,6 +46,20 @@ final class KeyboardHandlerController {
             appState?.syncFileTreeKeyboardFocus(from: event.window)
         }
         return handled
+    }
+
+    /// Tree pane shortcuts (context menu parity) — run before global Search menu / Edit ⌘C.
+    private func tryHandleFileTreeKeyboard(_ event: NSEvent) -> Bool {
+        guard let appState else { return false }
+        guard appState.fileTreePaneHasKeyboardFocus(in: event.window) else { return false }
+        guard let outline = appState.fileTreeOutlineView,
+              let coordinator = outline.coordinator else { return false }
+        return FileTreeKeyboard.handle(
+            event: event,
+            outlineView: outline,
+            coordinator: coordinator,
+            appState: appState
+        )
     }
 
     /// E/H and Home/End jump the active image; focus should leave the file tree (thumbnail/list/browse canvas).
@@ -68,6 +86,16 @@ final class KeyboardHandlerController {
         guard let responder = window?.firstResponder else { return false }
         if responder is FileTreeOutlineView { return true }
         if let stop = responder as? MainWindowTabFocusStopView, stop.role == .tree { return true }
+        return false
+    }
+
+    /// ⌘F / ⌘P (not ⇧⌘P or ⌃⌘P) — tree-scoped search sheet priming.
+    static func isSearchDirectoryPrimingShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.option) else { return false }
+        let c = event.charactersIgnoringModifiers?.lowercased()
+        if c == "f" { return !flags.contains(.shift) }
+        if c == "p" { return !flags.contains(.shift) && !flags.contains(.control) }
         return false
     }
 
@@ -212,6 +240,9 @@ final class KeyboardHandlerController {
                 return true
             }
             if !hasShift, event.charactersIgnoringModifiers?.lowercased() == "f" {
+                if appState.fileTreePaneHasKeyboardFocus(in: event.window) {
+                    return false
+                }
                 appState.searchOperations.presentClipSearchDialog()
                 return true
             }
@@ -261,6 +292,9 @@ final class KeyboardHandlerController {
         // ⌘C — copy path (Python `copy_file_path_to_clipboard`; tree uses FileTreeKeyboard).
         if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if appState.fileTreePaneHasKeyboardFocus(in: event.window) {
+                return false
+            }
             return copyFilePathToClipboard(appState: appState)
         }
 
@@ -335,7 +369,7 @@ final class KeyboardHandlerController {
         if !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event) {
             return false
         }
-        if !fromTreeFocus, Self.fileTreeKeyboardTargetIsFocused(in: event.window) {
+        if !fromTreeFocus, appState!.fileTreePaneHasKeyboardFocus(in: event.window) {
             // Python Image History is a WindowShortcut; still handle F3 when the tree has focus.
             if !Self.isF3Key(event) {
                 return false
@@ -1525,12 +1559,8 @@ final class KeyboardHandlerController {
     }
 
     private func copyFilePathToClipboard(appState: AppState) -> Bool {
-        let paths: [String]
-        if !appState.selection.selectedFiles.isEmpty {
-            paths = Array(appState.selection.selectedFiles)
-        } else if let current = appState.fileData.currentImagePath {
-            paths = [current]
-        } else {
+        let paths = appState.pathsForCopyPathCommand(focusWindow: NSApp.keyWindow)
+        guard !paths.isEmpty else {
             appState.status.show("No files selected")
             return true
         }

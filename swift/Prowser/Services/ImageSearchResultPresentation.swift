@@ -50,9 +50,13 @@ enum ImageSearchResultPresentation {
             appState.selection.clear()
         }
 
-        if appState.fileData.currentViewMode == .list {
+        if appState.fileData.currentViewMode == .browse {
+            appState.closeBrowseView()
+        } else if appState.fileData.currentViewMode == .list {
             appState.toggleListView()
-        } else if appState.fileData.currentViewMode != .thumbnail {
+        } else if appState.fileData.currentViewMode == .slideshow
+            || appState.fileData.currentViewMode == .slideshow2
+            || appState.fileData.currentViewMode == .slideshow3 {
             appState.fileData.setViewMode(.thumbnail)
         }
 
@@ -70,7 +74,8 @@ enum ImageSearchResultPresentation {
         guard appState.fileData.currentViewMode == .thumbnail,
               let grid = appState.thumbnailGridHost,
               let path = appState.fileData.currentImagePath,
-              let index = paths.firstIndex(of: path) else { return }
+              let normalized = FileDataModel.normalizePath(path),
+              let index = paths.firstIndex(of: normalized) else { return }
         grid.selectIndex(index, scroll: true, notifyDelegate: false)
         grid.scrollToSelectionAfterLayout()
     }

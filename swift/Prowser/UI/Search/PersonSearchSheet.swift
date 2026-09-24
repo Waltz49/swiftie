@@ -263,15 +263,20 @@ struct PersonSearchSheet: View {
         subjects = appState.knownFaces.loadSubjects()
         if subjects.isEmpty {
             StyledMessageDialog.showInformation(
-                title: "Search by person",
+                title: "Search for Known Person",
                 message: "No known people. Add people and face samples in Settings → Face Recognition, then try again."
             )
             closeDialog()
             return
         }
         recursive = appState.config.bool(forKey: "find_person_recursive", default: false)
-        useCustomDirectory = appState.config.bool(forKey: "find_person_dir_enabled", default: false)
-        customDirectory = appState.config.string(forKey: "find_person_dir", default: "")
+        if let prime = appState.consumePersonSearchDirectoryPrime() {
+            useCustomDirectory = prime.useCustomDirectory
+            customDirectory = prime.customDirectory
+        } else {
+            useCustomDirectory = appState.config.bool(forKey: "find_person_dir_enabled", default: false)
+            customDirectory = appState.config.string(forKey: "find_person_dir", default: "")
+        }
         let saved = appState.config.string(forKey: "find_person_subject_id", default: "")
         if subjects.contains(where: { $0.id == saved }) {
             selectedSubjectID = saved
@@ -304,14 +309,15 @@ struct PersonSearchSheet: View {
     private func submit() {
         appState.config.updateSetting("find_person_subject_id", value: selectedSubjectID)
         appState.config.updateSetting("find_person_recursive", value: recursive)
+        let expandedDir = AppState.expandedSearchDirectoryPath(customDirectory)
         appState.config.updateSetting("find_person_dir_enabled", value: useCustomDirectory)
-        appState.config.updateSetting("find_person_dir", value: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines))
+        appState.config.updateSetting("find_person_dir", value: expandedDir)
         onSubmit(
             PersonSearchOptions(
                 subjectID: selectedSubjectID,
                 recursive: recursive,
                 useCustomDirectory: useCustomDirectory,
-                customDirectory: customDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+                customDirectory: expandedDir
             )
         )
         closeDialog()

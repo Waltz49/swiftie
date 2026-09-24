@@ -44,6 +44,12 @@ final class AppState {
     /// While set, tree highlight follows this directory until the active image catches up (Python `user_requested_directory`).
     var userRequestedTreeDirectory: String?
     var userRequestedTreeClearWork: DispatchWorkItem?
+    /// One-shot directory priming when opening search sheets from the file tree (not persisted until OK).
+    var pendingPersonSearchDirectoryPrime: SearchSheetDirectoryPrime?
+    var pendingClipSearchDirectoryPrime: SearchSheetDirectoryPrime?
+    var pendingSimilaritySearchDirectoryPrime: SearchSheetDirectoryPrime?
+    /// Set on ⌘F/⌘P keyDown before menu routing steals tree focus (Python `_tree_had_focus_when_invoked`).
+    var pendingSearchInvocationTreeContext: SearchInvocationTreeContext?
     var settingsOpenRequestToken = 0
     var requestedSettingsTab: SettingsTab = .general
     /// Set when opening Settings → Face Recognition for ⇧⌘P Extract Faces (Python `auto_extract_faces`).
@@ -251,7 +257,11 @@ final class AppState {
             // `openReferenceGraphPresentation` (a full `loadDirectory` clears the aggregate grid).
             guard !self.specificFilesActive, !self.referenceGraphActive else { return }
             if let dir = self.fileData.currentDirectory {
-                self.loadDirectory(dir, saveHistory: false)
+                self.loadDirectory(
+                    dir,
+                    saveHistory: false,
+                    pinnedImagePath: self.fileData.currentImagePath
+                )
             }
         }
 
@@ -274,7 +284,12 @@ final class AppState {
             } else {
                 path = nil
             }
-            self?.browseImageHistory.onCurrentImageChanged(path)
+            guard let self else { return }
+            self.browseImageHistory.onCurrentImageChanged(path)
+            self.reconcileUserRequestedTreeDirectoryWithActiveImage()
+            if self.userRequestedTreeDirectory != nil {
+                self.syncFileTreeToActiveImage()
+            }
         }
         _ = eventBus.subscribe(.viewModeChanged) { [weak self] _ in
             self?.browseImageHistory.onViewModeChanged()
@@ -727,7 +742,7 @@ final class AppState {
             Delete downloaded dlib face model files from:
             \(installPath)
 
-            Person search and face caching will prompt to download them again.
+            Search for Known Person and face caching will prompt to download them again.
             """,
             confirmTitle: "Remove",
             defaultCancel: true
@@ -817,11 +832,15 @@ final class AppState {
         backgroundImageRecognition.noteSearchModelsChanged()
     }
 
-    func loadDirectory(_ path: String, saveHistory: Bool = true) {
+    func loadDirectory(_ path: String, saveHistory: Bool = true, pinnedImagePath: String? = nil) {
         setSpecificFilesActive(false)
         clearDeletedPlaceholders()
         backgroundImageRecognition.notePriorityDirectory(path)
-        directoryLoader.loadDirectory(path, saveHistory: saveHistory)
+        directoryLoader.loadDirectory(
+            path,
+            saveHistory: saveHistory,
+            pinnedImagePath: pinnedImagePath
+        )
     }
 
     func scheduleDeferredMenuRefresh() {
@@ -857,7 +876,13 @@ final class AppState {
            Self.directoryPathsMatch(current, dir) {
             return
         }
-        loadDirectory(dir, saveHistory: false)
+        if let normalized = FileDataModel.normalizePath(path),
+           fileData.displayedImages.contains(normalized) {
+            fileData.setCurrentDirectory(dir)
+            syncFileTreeToActiveImage()
+            return
+        }
+        loadDirectory(dir, saveHistory: false, pinnedImagePath: path)
         if let normalized = FileDataModel.normalizePath(path) {
             fileData.setCurrentImagePath(normalized)
             DisplayedImagesSync.ensureActiveImageListed(
@@ -882,7 +907,7 @@ final class AppState {
         }
         guard let dir = fileData.currentDirectory else { return }
         let previous = fileData.displayedImages
-        loadDirectory(dir, saveHistory: false)
+        loadDirectory(dir, saveHistory: false, pinnedImagePath: fileData.currentImagePath)
         if fileData.displayedImages == previous {
             DirectoryRefreshService.invalidateThumbnails(appState: self, paths: previous)
         }
@@ -1365,7 +1390,7 @@ final class AppState {
         syncDialog(
             id: DialogID.personSearch,
             show: showPersonSearchSheet,
-            title: "Search by person",
+            title: "Search for Known Person",
             defaultSize: NSSize(width: 500, height: 360),
             minSize: NSSize(width: 460, height: 320),
             onClose: { [weak self] in self?.showPersonSearchSheet = false }

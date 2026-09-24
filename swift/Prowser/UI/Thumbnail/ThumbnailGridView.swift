@@ -366,10 +366,10 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         private func resolvedHighlightIndex(in paths: [String]) -> Int {
             if let path = appState.fileData.currentImagePath,
-               let index = paths.firstIndex(of: path) {
+               let index = FileDataModel.indexOfPath(path, in: paths) {
                 return index
             }
-            return appState.fileData.currentIndex
+            return min(max(0, appState.fileData.currentIndex), max(0, paths.count - 1))
         }
 
         private func ensureHighlightedVisible() {

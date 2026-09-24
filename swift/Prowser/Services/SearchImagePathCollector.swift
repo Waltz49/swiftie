@@ -34,7 +34,7 @@ enum SearchImagePathCollector {
             return DirectoryScanner.matchesGlob(name, pattern: pattern)
         }
 
-        for p in includeDisplayed { add(p) }
+        for p in includeDisplayed where !useCustomDirectory { add(p) }
 
         let extensions = appState.config.imageExtensions
         let pattern = appState.filterSettings.filterPattern
@@ -42,10 +42,12 @@ enum SearchImagePathCollector {
         let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
         let maxDepth = appState.config.int(forKey: "search_depth", default: 4)
 
-        if useCustomDirectory, let dir = customDirectory, !dir.isEmpty, FileManager.default.fileExists(atPath: dir) {
+        if useCustomDirectory, let dir = customDirectory, !dir.isEmpty {
+            let expanded = AppState.expandedSearchDirectoryPath(dir)
+            guard FileManager.default.fileExists(atPath: expanded) else { return paths }
             if recursive {
                 let scanned = DirectoryScanner.scanDirectoryRecursive(
-                    at: dir,
+                    at: expanded,
                     extensions: extensions,
                     filterPattern: pattern,
                     maxDepth: maxDepth,
@@ -55,7 +57,7 @@ enum SearchImagePathCollector {
                 for p in scanned { add(p) }
             } else {
                 let extSet = Set(extensions.map { AppConfig.normalizeExtension($0) })
-                addTopLevelImages(directory: dir, extensions: extSet, pattern: pattern, add: add)
+                addTopLevelImages(directory: expanded, extensions: extSet, pattern: pattern, add: add)
             }
             return paths
         }

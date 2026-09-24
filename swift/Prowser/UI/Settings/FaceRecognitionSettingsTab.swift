@@ -23,7 +23,7 @@ struct FaceRecognitionSettingsTab: View {
                 )
             } else if !FaceModelManifest.isInstalled(profile: appState.config.profilePaths) {
                 facesUnavailableNote(
-                    "Face models are not installed. Use Search by Person (⌘P), Extract Faces (⇧⌘P), or Quick Person (⌃⌘P) to download them."
+                    "Face models are not installed. Use Search for Known Person (⌘P), Identify Faces in Current Image (⇧⌘P), or Search for Person in Current Image (⌃⌘P) to download them."
                 )
                 Button("Download Face Models…") { downloadModels() }
                     .padding(.horizontal, 20)

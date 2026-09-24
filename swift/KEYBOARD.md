@@ -96,6 +96,8 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 | Cmd+Return | Collapse file tree |
 | Cmd+Shift+Return | Expand file tree |
 
+When the **file tree** has keyboard focus, **⌘F** (Find Images / CLIP), **⌘P** (Search for Known Person), and **⌘C** (copy path) use the selected row (folder scope, or parent folder if a file row is selected). Those shortcuts are handled in the tree before the global Search menu.
+
 ### Desktop & Maps
 | Key | Action |
 |-----|--------|
@@ -147,7 +149,7 @@ EXIF date/year sorts are available from the **View → Sort By** menu (no letter
 | ⌃L | View log (Tools → Debug) |
 | F5 | Show reference graph for active image |
 
-Search menu: duplicate detection (**Shift+Cmd+F** recursive), **Shift+Cmd+H** show image in directory.
+Search menu: **Cmd+P** Search for Known Person, **Ctrl+Cmd+P** Search for Person in Current Image, duplicate detection (**Shift+Cmd+F** recursive), **Shift+Cmd+H** show image in directory.
 
 ## List View
 

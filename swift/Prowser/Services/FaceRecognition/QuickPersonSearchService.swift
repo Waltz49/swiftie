@@ -10,7 +10,7 @@ enum QuickPersonSearchService {
 
         guard FaceEngine.isBridgeLinked() else {
             StyledMessageDialog.showWarning(
-                title: "Quick Person Search",
+                title: "Search for Person in Current Image",
                 message: "Native dlib is not linked in this build. Run swift/Scripts/build_dlib_macos.sh and rebuild."
             )
             return
@@ -18,12 +18,12 @@ enum QuickPersonSearchService {
 
         let paths = SelectionService.selectedFilesOrCurrent(appState: appState)
         guard !paths.isEmpty else {
-            StyledMessageDialog.showWarning(title: "Quick Person Search", message: "Select one or more images first.")
+            StyledMessageDialog.showWarning(title: "Search for Person in Current Image", message: "Select one or more images first.")
             return
         }
         if paths.count > maxImages {
             StyledMessageDialog.showWarning(
-                title: "Quick Person Search",
+                title: "Search for Person in Current Image",
                 message: "Too many images selected (\(paths.count)).\nSelect at most \(maxImages) images."
             )
             return
@@ -33,12 +33,12 @@ enum QuickPersonSearchService {
             try await FaceModelDownloadService.ensureModelsInstalled(
                 profile: appState.config.profilePaths,
                 config: appState.config,
-                purpose: "Download is required for Quick Person Search (⌃⌘P)."
+                purpose: "Download is required for Search for Person in Current Image (⌃⌘P)."
             )
         } catch ModelDownloadError.userDeclined {
             return
         } catch {
-            StyledMessageDialog.showWarning(title: "Quick Person Search", message: error.localizedDescription)
+            StyledMessageDialog.showWarning(title: "Search for Person in Current Image", message: error.localizedDescription)
             return
         }
 
@@ -58,13 +58,13 @@ enum QuickPersonSearchService {
         }
 
         guard !samples.isEmpty else {
-            StyledMessageDialog.showWarning(title: "Quick Person Search", message: "No faces were detected in the selected images.")
+            StyledMessageDialog.showWarning(title: "Search for Person in Current Image", message: "No faces were detected in the selected images.")
             return
         }
 
         guard let subjectID = appState.knownFaces.subjectIDForQuickPerson(createIfMissing: true) else {
             StyledMessageDialog.showWarning(
-                title: "Quick Person Search",
+                title: "Search for Person in Current Image",
                 message: "Could not create or find the \"\(KnownFacesStore.quickPersonSubjectName)\" person."
             )
             return

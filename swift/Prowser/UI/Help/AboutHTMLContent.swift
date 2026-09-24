@@ -43,7 +43,7 @@ enum AboutHTMLContent {
     (<a href="https://github.com/davisking/dlib/blob/master/dlib/LICENSE.txt">Boost Software License 1.0</a>)</li>
     </ul>
     <h2>Optional models (download)</h2>
-    <p class="note">ResNet and CLIP Core ML packages may download on first use (Settings → Models). dlib face weights may download on first use (person search, cache faces, Settings → Face Recognition). License terms are in the License window.</p>
+    <p class="note">ResNet and CLIP Core ML packages may download on first use (Settings → Models). dlib face weights may download on first use (Search for Known Person, cache faces, Settings → Face Recognition). License terms are in the License window.</p>
     <ul>
     <li><a href="https://huggingface.co/openai/clip-vit-base-patch32">openai/clip-vit-base-patch32</a> / <a href="https://huggingface.co/openai/clip-vit-large-patch14">openai/clip-vit-large-patch14</a> (CLIP, <a href="https://github.com/openai/CLIP/blob/main/LICENSE">MIT License</a>)</li>
     <li>PyTorch torchvision ResNet-18/50/101 ImageNet weights (<a href="https://github.com/pytorch/vision/blob/main/LICENSE">BSD 3-Clause License</a>)</li>

@@ -63,10 +63,12 @@ dlib::matrix<dlib::rgb_pixel> rgb_matrix_from_buffer(
 {
     dlib::matrix<dlib::rgb_pixel> img(height, width);
     for (int y = 0; y < height; ++y) {
-        const uint8_t *row = rgb + y * bytes_per_row;
+        const uint8_t *row = rgb + static_cast<size_t>(y) * static_cast<size_t>(bytes_per_row);
         for (int x = 0; x < width; ++x) {
-            const uint8_t *p = row + x * 3;
-            img(y, x) = dlib::rgb_pixel(p[0], p[1], p[2]);
+            const uint8_t *p = row + static_cast<size_t>(x) * 3;
+            img(y, x).red = p[0];
+            img(y, x).green = p[1];
+            img(y, x).blue = p[2];
         }
     }
     return img;

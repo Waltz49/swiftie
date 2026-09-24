@@ -5,12 +5,7 @@ import SwiftUI
 @MainActor
 enum SimilaritySearchService {
     static func run(appState: AppState, options: SimilaritySearchOptions) async {
-        if appState.fileData.currentViewMode == .list {
-            appState.toggleListView()
-        }
-        if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
-        }
+        appState.prepareMainViewForImageSearch()
 
         let refs = referencePaths(appState: appState)
         let multiSelectRefs = refs.count > 1 ? refs : []

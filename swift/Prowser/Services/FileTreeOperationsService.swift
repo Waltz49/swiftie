@@ -45,7 +45,7 @@ final class FileTreeOperationsService {
         )
         appState.clearBrowseReturnState()
         if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
+            appState.closeBrowseView()
         }
         let baseDirectory = URL(fileURLWithPath: images[0]).deletingLastPathComponent().path
         appState.setSpecificFilesActive(true)

@@ -495,9 +495,21 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func selectedDirectoryPath() -> String? {
+            treeSearchScopeDirectoryPath()
+        }
+
+        /// Directory scope for tree search shortcuts (folder row or parent of a file row).
+        func treeSearchScopeDirectoryPath() -> String? {
             guard let outlineView, outlineView.selectedRow >= 0,
-                  let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode,
-                  node.isDirectory else { return nil }
+                  let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode else { return nil }
+            if node.isDirectory { return node.path }
+            return URL(fileURLWithPath: node.path).deletingLastPathComponent().standardizedFileURL.path
+        }
+
+        /// Selected tree row path (file or directory) for copy-path parity.
+        func selectedTreeRowPath() -> String? {
+            guard let outlineView, outlineView.selectedRow >= 0,
+                  let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode else { return nil }
             return node.path
         }
 

@@ -4,7 +4,7 @@ Native face recognition uses dlib `.dat` files downloaded on first use (consent 
 
 ## End-user install
 
-1. Trigger **Search by Person (⌘P)**, **Quick Person (⌃⌘P)**, **Cache Faces (⌘=)**, or **Settings → Face Recognition → Download Face Models…**
+1. Trigger **Search for Known Person (⌘P)**, **Search for Person in Current Image (⌃⌘P)**, **Cache Faces (⌘=)**, or **Settings → Face Recognition → Download Face Models…**
 2. Approve the download (~31 MB zip `dlib_face_models.zip`).
 3. Files install to:
    `{profile}/cache/swift_native/image_recognition/dlib_models/`

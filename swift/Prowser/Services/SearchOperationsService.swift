@@ -38,21 +38,42 @@ final class SearchOperationsService {
         }
     }
 
-    func presentSimilaritySearchDialog() {
+    func presentSimilaritySearchDialog(directoryOverride: String? = nil) {
         guard let appState else { return }
+        let treeContext = appState.captureSearchInvocationTreeContext()
+        appState.primeSimilaritySearchDirectoryForPresentation(
+            directoryOverride: directoryOverride,
+            treeContext: treeContext
+        )
         appState.showSimilaritySearchSheet = true
         appState.syncAuxiliaryDialogs()
     }
 
-    func presentClipSearchDialog() {
+    func presentClipSearchDialog(directoryOverride: String? = nil) {
         guard let appState else { return }
+        let treeContext = appState.captureSearchInvocationTreeContext()
+        appState.primeClipSearchDirectoryForPresentation(
+            directoryOverride: directoryOverride,
+            treeContext: treeContext
+        )
+        if appState.fileData.currentViewMode == .browse {
+            appState.closeBrowseView()
+        }
         appState.showClipSearchSheet = true
         appState.syncAuxiliaryDialogs()
     }
 
-    func presentPersonSearchDialog() {
+    func presentPersonSearchDialog(directoryOverride: String? = nil) {
         guard let appState else { return }
         guard FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) else { return }
+        let treeContext = appState.captureSearchInvocationTreeContext()
+        appState.primePersonSearchDirectoryForPresentation(
+            directoryOverride: directoryOverride,
+            treeContext: treeContext
+        )
+        if appState.fileData.currentViewMode == .browse {
+            appState.closeBrowseView()
+        }
         appState.showPersonSearchSheet = true
         appState.syncAuxiliaryDialogs()
     }

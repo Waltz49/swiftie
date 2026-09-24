@@ -43,7 +43,13 @@ enum FaceEngine {
     }
 
     static func encodeFacesFromPath(_ imagePath: String, profile: ProfilePaths) -> [FaceDetection] {
-        encodeFacesFromPathWithDisplayImage(imagePath, profile: profile)?.detections ?? []
+        guard loadModelsIfNeeded(profile: profile),
+              let pack = loadDetectionRGBPack(imagePath: imagePath) else { return [] }
+        var detections = encodeFacesRGB(width: pack.detectWidth, height: pack.detectHeight, rgb: pack.rgb)
+        if pack.scaleX != 1.0 || pack.scaleY != 1.0 {
+            detections = detections.map { scaleDetection($0, sx: pack.scaleX, sy: pack.scaleY) }
+        }
+        return detections
     }
 
     static func encodeFacesFromPathWithDisplayImage(_ imagePath: String, profile: ProfilePaths) -> PathEncodeResult? {
@@ -94,15 +100,40 @@ enum FaceEngine {
     }
 
     static func faceMeanDistance(knownEncodings: [[Double]], unknownEncoding: [Double]) -> Double? {
+        meanFaceDistance(knownEncodings: knownEncodings, unknownEncoding: unknownEncoding)
+    }
+
+    /// Average L2 distance to each known sample (port of `face_mean_distance`).
+    static func meanFaceDistance(knownEncodings: [[Double]], unknownEncoding: [Double]) -> Double? {
         guard !knownEncodings.isEmpty, unknownEncoding.count == 128 else { return nil }
+        let unknown = unknownEncoding.map(Float.init)
         var sum = 0.0
         for known in knownEncodings {
-            guard known.count == 128, let d = faceDistance(knownEncodings: [known], unknownEncoding: unknownEncoding) else {
-                return nil
-            }
+            guard known.count == 128 else { return nil }
+            let knownF = known.map(Float.init)
+            guard let d = ProwserDlibBridge.minFaceDistance(known: [knownF], unknown: unknown) else { return nil }
             sum += d
         }
         return sum / Double(knownEncodings.count)
+    }
+
+    /// Match phase helper: pre-convert known samples once per search.
+    static func meanFaceDistance(knownEncodings: [[Float]], unknownEncoding: [Float]) -> Double? {
+        guard !knownEncodings.isEmpty, unknownEncoding.count == 128 else { return nil }
+        var sum = 0.0
+        for known in knownEncodings {
+            guard known.count == 128 else { return nil }
+            guard let d = ProwserDlibBridge.minFaceDistance(known: [known], unknown: unknownEncoding) else { return nil }
+            sum += d
+        }
+        return sum / Double(knownEncodings.count)
+    }
+
+    static func compareFaces(knownEncodings: [[Float]], unknownEncoding: [Float], tolerance: Float = Float(defaultTolerance)) -> Bool {
+        guard let minDist = ProwserDlibBridge.minFaceDistance(known: knownEncodings, unknown: unknownEncoding) else {
+            return false
+        }
+        return minDist <= Double(tolerance)
     }
 
     private struct RGBPack {
@@ -114,45 +145,61 @@ enum FaceEngine {
         var rgb: Data
     }
 
+    private struct DetectionRGBPack {
+        var detectWidth: Int
+        var detectHeight: Int
+        var scaleX: Double
+        var scaleY: Double
+        var rgb: Data
+    }
+
+    /// Scan/cache path: one ImageIO decode capped at `scanningDownscaleThreshold` (no full-resolution load).
+    private static func loadDetectionRGBPack(imagePath: String) -> DetectionRGBPack? {
+        guard let oriented = ImageRecognitionImageLoader.orientedPixelSize(path: imagePath) else { return nil }
+        let fullWidth = oriented.width
+        let fullHeight = oriented.height
+        let longest = max(fullWidth, fullHeight)
+        let detectCap = min(longest, scanningDownscaleThreshold)
+        guard let working = ImageRecognitionImageLoader.loadCGImage(path: imagePath, maxPixelSize: detectCap) else {
+            return nil
+        }
+        guard let rgb = rgbData(from: working) else { return nil }
+        let scaleX = Double(fullWidth) / Double(working.width)
+        let scaleY = Double(fullHeight) / Double(working.height)
+        return DetectionRGBPack(
+            detectWidth: working.width,
+            detectHeight: working.height,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            rgb: rgb
+        )
+    }
+
     private static func loadRGB(imagePath: String) -> RGBPack? {
+        guard let oriented = ImageRecognitionImageLoader.orientedPixelSize(path: imagePath) else { return nil }
         guard let fullCG = ImageRecognitionImageLoader.loadCGImage(path: imagePath) else {
             return nil
         }
-        let working = downscaledForFaceScanning(fullCG, maxLongEdge: scanningDownscaleThreshold)
+        let fullWidth = oriented.width
+        let fullHeight = oriented.height
+        let longest = max(fullWidth, fullHeight)
+        let detectCap = min(longest, scanningDownscaleThreshold)
+        let working: CGImage
+        if longest > scanningDownscaleThreshold,
+           let downscaled = ImageRecognitionImageLoader.loadCGImage(path: imagePath, maxPixelSize: detectCap) {
+            working = downscaled
+        } else {
+            working = fullCG
+        }
         guard let rgb = rgbData(from: working) else { return nil }
         return RGBPack(
-            fullWidth: fullCG.width,
-            fullHeight: fullCG.height,
+            fullWidth: fullWidth,
+            fullHeight: fullHeight,
             detectWidth: working.width,
             detectHeight: working.height,
             displayCGImage: fullCG,
             rgb: rgb
         )
-    }
-
-    /// Same sizing as `faces/face_engine._maybe_resize_for_detection` (longest edge cap, int dimensions).
-    private static func downscaledForFaceScanning(_ cg: CGImage, maxLongEdge: Int) -> CGImage {
-        let width = cg.width
-        let height = cg.height
-        let longest = max(width, height)
-        guard longest > maxLongEdge else { return cg }
-        let scale = Double(maxLongEdge) / Double(longest)
-        let newWidth = Int(Double(width) * scale)
-        let newHeight = Int(Double(height) * scale)
-        guard newWidth > 0, newHeight > 0 else { return cg }
-        let colorSpace = cg.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil,
-            width: newWidth,
-            height: newHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return cg }
-        ctx.interpolationQuality = .high
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
-        return ctx.makeImage() ?? cg
     }
 
     private static func rgbData(from cg: CGImage) -> Data? {

@@ -57,8 +57,20 @@ enum FaceScanRunner {
             let detections = FaceEngine.encodeFacesFromPath(path, profile: profile)
             let extractDuration = CFAbsoluteTimeGetCurrent() - extractStart
             let encodings = detections.map(\.encoding)
-            // Persist negative results too (Python `set_encodings` always writes).
-            faceCache.setEncodings(imagePath: path, encodings: encodings, mtime: nil, size: nil)
+            var fileMtime: Double?
+            var fileSize: Int?
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+               let modified = attrs[.modificationDate] as? Date,
+               let size = attrs[.size] as? Int {
+                fileMtime = modified.timeIntervalSince1970
+                fileSize = size
+            }
+            faceCache.setEncodings(
+                imagePath: path,
+                encodings: encodings,
+                mtime: fileMtime,
+                size: fileSize
+            )
             if !encodings.isEmpty {
                 cachedCount += 1
             }

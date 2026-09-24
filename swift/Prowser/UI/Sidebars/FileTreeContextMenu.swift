@@ -34,7 +34,7 @@ enum FileTreeContextMenu {
         if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
             addAction(
                 menu,
-                title: "Search by Person...",
+                title: "Search for Known Person...",
                 shortcut: "⌘P",
                 enabled: !restricted,
                 representedObject: directoryPath,
@@ -97,7 +97,7 @@ enum FileTreeContextMenu {
         action: Selector
     ) {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
-        if let shortcut {
+        if let shortcut, !shortcut.isEmpty {
             NSMenuShortcutSupport.apply(display: shortcut, to: item)
         }
         item.target = FileTreeMenuActions.shared
@@ -138,9 +138,7 @@ final class FileTreeMenuActions: NSObject {
             showRestrictedAlert(path: path)
             return
         }
-        appState.config.updateSetting("clip_search_dir", value: path)
-        appState.config.updateSetting("clip_search_dir_enabled", value: true)
-        appState.searchOperations.presentClipSearchDialog()
+        appState.searchOperations.presentClipSearchDialog(directoryOverride: path)
     }
 
     @objc func searchByPerson(_ sender: NSMenuItem) {
@@ -149,9 +147,7 @@ final class FileTreeMenuActions: NSObject {
             showRestrictedAlert(path: path)
             return
         }
-        appState.config.updateSetting("find_person_dir", value: path)
-        appState.config.updateSetting("find_person_dir_enabled", value: true)
-        appState.searchOperations.presentPersonSearchDialog()
+        appState.searchOperations.presentPersonSearchDialog(directoryOverride: path)
     }
 
     @objc func openInFinder(_ sender: NSMenuItem) {

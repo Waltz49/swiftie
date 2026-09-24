@@ -11,7 +11,7 @@ enum SimilarImageFilesService {
     }
 
     static func findInDisplayed(appState: AppState) async {
-        exitSlideshowIfNeeded(appState: appState)
+        appState.prepareMainViewForImageSearch()
         let paths = filteredDisplayedPaths(appState: appState)
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "No images displayed", message: "")
@@ -84,9 +84,7 @@ enum SimilarImageFilesService {
 
         interruptThumbnailLoading(appState: appState)
 
-        if appState.fileData.currentViewMode == .browse {
-            appState.fileData.setViewMode(.thumbnail)
-        }
+        appState.prepareMainViewForImageSearch()
         appState.fileData.setCurrentDirectory(directoryPath)
 
         let excluded = PathExclusions.excludedPaths(config: appState.config)
