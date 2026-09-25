@@ -1,0 +1,447 @@
+import Foundation
+import ImageIO
+import UniformTypeIdentifiers
+
+/// Native LM Studio captioning (port of `imagegen_plugins/lmstudio_caption.py` via OpenAI-compatible HTTP API).
+@MainActor
+final class LmStudioCaptionService {
+    enum SessionState: Equatable {
+        case unknown
+        case unavailable
+        case available
+    }
+
+    static let shared = LmStudioCaptionService()
+
+    static let visionRequiredMessage =
+        "The loaded LM Studio model does not support image input.\n\n"
+        + "Please load a vision-capable model in LMStudio."
+
+    private(set) var sessionState: SessionState = .unknown
+    private var activeTask: Task<Void, Never>?
+
+    var isCaptionInProgress: Bool { activeTask != nil }
+
+    private init() {}
+
+    func resetSessionState() {
+        sessionState = .unknown
+    }
+
+    var isUIAvailable: Bool {
+        sessionState == .available
+    }
+
+    func probeServices(config: AppConfig) async {
+        let reachable = await networkProbe(config: config)
+        sessionState = reachable ? .available : .unavailable
+    }
+
+    func cancelCaption() {
+        activeTask?.cancel()
+        activeTask = nil
+    }
+
+    func startCaption(
+        imagePath: String,
+        userPromptOverride: String?,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onFinished: @escaping @MainActor (Result<String, Error>) -> Void
+    ) {
+        cancelCaption()
+        activeTask = Task {
+            do {
+                let caption = try await streamCaption(
+                    imagePath: imagePath,
+                    userPromptOverride: userPromptOverride,
+                    config: config,
+                    onChunk: onChunk
+                )
+                guard !Task.isCancelled else {
+                    onFinished(.failure(CaptionError.cancelled))
+                    activeTask = nil
+                    return
+                }
+                sessionState = .available
+                onFinished(.success(caption))
+            } catch {
+                if error is CancellationError || (error as? CaptionError) == .cancelled {
+                    onFinished(.failure(CaptionError.cancelled))
+                } else {
+                    sessionState = .unavailable
+                    onFinished(.failure(error))
+                }
+            }
+            activeTask = nil
+        }
+    }
+
+    // MARK: - Network
+
+    private func networkProbe(config: AppConfig) async -> Bool {
+        guard let base = apiBaseURL(host: captionHost(config: config)) else { return false }
+        let modelsURL = base.appending(path: "models")
+        do {
+            let (data, response) = try await URLSession.shared.data(from: modelsURL)
+            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+                return false
+            }
+            let ids = parseModelIDs(from: data)
+            if !ids.isEmpty { return true }
+            let saved = savedModelKey(config: config)
+            return !saved.isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    private func streamCaption(
+        imagePath: String,
+        userPromptOverride: String?,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        guard let base = apiBaseURL(host: captionHost(config: config)) else {
+            throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
+        }
+        let settings = captionSettings(config: config)
+        let wordCount = settings.maxWords
+        var systemPrompt = settings.systemPrompt.replacingOccurrences(of: "{CAPTION_WORD_COUNT}", with: "\(wordCount)")
+        var userPrompt: String
+        if let override = userPromptOverride?.trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty {
+            userPrompt = override
+        } else {
+            userPrompt = settings.userPrompt.replacingOccurrences(of: "{CAPTION_WORD_COUNT}", with: "\(wordCount)")
+        }
+        systemPrompt = AIPromptExitService.applyTextAIExit(systemPrompt, config: config)
+        userPrompt = AIPromptExitService.applyTextAIExit(userPrompt, config: config)
+
+        let modelID = try await resolveModelID(baseURL: base, config: config)
+        let encoded = try prepareVisionImagePayloads(imagePath: imagePath)
+        let imageURLCandidates = lmStudioImageURLCandidates(jpegBase64: encoded.jpegBase64, pngBase64: encoded.pngBase64)
+
+        var lastImageError = ""
+        for imageURL in imageURLCandidates {
+            do {
+                return try await streamCaptionRequest(
+                    baseURL: base,
+                    modelID: modelID,
+                    systemPrompt: systemPrompt,
+                    userPrompt: userPrompt,
+                    temperature: settings.temperature,
+                    imageURL: imageURL,
+                    config: config,
+                    onChunk: onChunk
+                )
+            } catch CaptionError.runtime(let message) {
+                if impliesVisionRequired(message) {
+                    throw CaptionError.runtime(message)
+                }
+                if isLMStudioImagePayloadError(message) {
+                    lastImageError = message
+                    continue
+                }
+                throw CaptionError.runtime(message)
+            }
+        }
+        throw CaptionError.runtime(
+            lastImageError.isEmpty
+                ? "Caption generation failed.\n\nCould not send image to LM Studio."
+                : "Caption generation failed.\n\nDetail: \(lastImageError)"
+        )
+    }
+
+    private struct VisionImagePayloads {
+        var jpegBase64: String
+        var pngBase64: String
+    }
+
+    private func streamCaptionRequest(
+        baseURL: URL,
+        modelID: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double,
+        imageURL: String,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        let url = baseURL.appending(path: "chat/completions")
+
+        let body: [String: Any] = [
+            "model": modelID,
+            "stream": true,
+            "temperature": temperature,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                [
+                    "role": "user",
+                    "content": [
+                        ["type": "text", "text": userPrompt],
+                        ["type": "image_url", "image_url": ["url": imageURL, "detail": "auto"]],
+                    ],
+                ],
+            ],
+        ]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CaptionError.runtime("No response from LM Studio.")
+        }
+        if http.statusCode == 400 || http.statusCode == 422 {
+            let msg = try await readErrorBody(from: bytes)
+            if impliesVisionRequired(msg) {
+                throw CaptionError.runtime(Self.visionRequiredMessage)
+            }
+            throw CaptionError.runtime("Caption generation failed.\n\nDetail: \(msg)")
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            let msg = try await readErrorBody(from: bytes)
+            throw CaptionError.runtime("Caption generation failed.\n\nDetail: \(msg)")
+        }
+
+        var accumulated = ""
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { break }
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let first = choices.first,
+                  let delta = first["delta"] as? [String: Any],
+                  let chunk = delta["content"] as? String,
+                  !chunk.isEmpty else {
+                continue
+            }
+            accumulated += chunk
+            onChunk(chunk)
+        }
+
+        let final = Self.stripThinkTags(accumulated).trimmingCharacters(in: .whitespacesAndNewlines)
+        if final.isEmpty {
+            throw CaptionError.runtime("Empty caption.")
+        }
+        config.updateSetting("caption_last_lm_model_key", value: modelID)
+        return final
+    }
+
+    private func resolveModelID(baseURL: URL, config: AppConfig) async throws -> String {
+        let modelsURL = baseURL.appending(path: "models")
+        let (data, response) = try await URLSession.shared.data(from: modelsURL)
+        guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+            throw CaptionError.runtime(
+                "Could not contact LMStudio server at \(captionHost(config: config)).\n\n"
+                    + "Please start LMStudio and enable the local API server."
+            )
+        }
+        let ids = parseModelIDs(from: data)
+        if let first = ids.first {
+            return first
+        }
+        let saved = savedModelKey(config: config)
+        if saved.isEmpty {
+            throw CaptionError.runtime(
+                "No model is currently loaded in LMStudio.\n\n"
+                    + "Please load a vision-capable model (VLM) before using AI captioning."
+            )
+        }
+        return saved
+    }
+
+    // MARK: - Settings helpers
+
+    struct CaptionSettings {
+        var host: String
+        var systemPrompt: String
+        var userPrompt: String
+        var maxWords: Int
+        var temperature: Double
+    }
+
+    func captionSettings(config: AppConfig) -> CaptionSettings {
+        CaptionSettings(
+            host: config.string(forKey: "caption_lms_host", default: "localhost:1234"),
+            systemPrompt: config.string(
+                forKey: "caption_system_prompt",
+                default: "Analyze the provided image thoroughly and write a highly detailed, visually rich, {CAPTION_WORD_COUNT}-word caption."
+            ),
+            userPrompt: config.string(
+                forKey: "caption_user_prompt",
+                default: "Carefully study the attached image and provide a comprehensive, vivid, and nuanced {CAPTION_WORD_COUNT}-word caption."
+            ),
+            maxWords: config.int(forKey: "caption_max_words", default: 200),
+            temperature: config.double(forKey: "caption_temperature", default: 0.7)
+        )
+    }
+
+    func captionHost(config: AppConfig) -> String {
+        captionSettings(config: config).host.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func saveCaptionSettings(_ settings: CaptionSettings, config: AppConfig) {
+        config.updateSetting("caption_lms_host", value: settings.host)
+        config.updateSetting("caption_system_prompt", value: settings.systemPrompt)
+        config.updateSetting("caption_user_prompt", value: settings.userPrompt)
+        config.updateSetting("caption_max_words", value: settings.maxWords)
+        config.updateSetting("caption_temperature", value: settings.temperature)
+    }
+
+    private func savedModelKey(config: AppConfig) -> String {
+        config.string(forKey: "caption_last_lm_model_key").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Text processing (Python `_strip_think_tags` / `normalize_lmstudio_output_text`)
+
+    static func stripThinkTags(_ text: String) -> String {
+        var result = text
+        if let firstOpen = result.range(of: "<think") {
+            if let lastClose = result.range(of: "</think", options: .backwards),
+               lastClose.lowerBound >= firstOpen.lowerBound,
+               let endClose = result[lastClose.lowerBound...].firstIndex(of: ">") {
+                result.removeSubrange(firstOpen.lowerBound ... endClose)
+            }
+        }
+        let marker = "<channel|>"
+        if let channel = result.range(of: marker, options: .backwards) {
+            result.removeSubrange(result.startIndex ..< channel.upperBound)
+        }
+        return normalizeLMStudioOutput(result)
+    }
+
+    private static func normalizeLMStudioOutput(_ text: String) -> String {
+        guard !text.isEmpty, !text.allSatisfy(\.isASCII) else { return text }
+        var out = ""
+        out.reserveCapacity(text.count)
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x2013, 0x2014: out.append("-")
+            case 0x2018, 0x2019, 0x201A, 0x201B: out.append("'")
+            case 0x201C, 0x201D, 0x201E, 0x201F: out.append("\"")
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
+    }
+
+    // MARK: - Utilities
+
+    private func apiBaseURL(host: String) -> URL? {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let withScheme: String
+        if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
+            withScheme = trimmed
+        } else {
+            withScheme = "http://\(trimmed)"
+        }
+        guard var components = URLComponents(string: withScheme) else { return nil }
+        if components.path.isEmpty || components.path == "/" {
+            components.path = "/v1"
+        } else if !components.path.hasSuffix("/v1") {
+            components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/v1"
+        }
+        return components.url
+    }
+
+    private func parseModelIDs(from data: Data) -> [String] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = json["data"] as? [[String: Any]] else {
+            return []
+        }
+        return models.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+    }
+
+    /// LM Studio is picky about `image_url.url` — try OpenAI JPEG data URIs, then PNG, then PNG-labeled JPEG (issue #1027).
+    private func lmStudioImageURLCandidates(jpegBase64: String, pngBase64: String) -> [String] {
+        [
+            "data:image/jpeg;base64,\(jpegBase64)",
+            "data:image/png;base64,\(pngBase64)",
+            "data:image/png;base64,\(jpegBase64)",
+        ]
+    }
+
+    private func isLMStudioImagePayloadError(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("invalid url")
+            || lower.contains("base64 encoded image")
+            || lower.contains("'url' field")
+    }
+
+    /// Decode via ImageIO (respects orientation), re-encode as JPEG + PNG for LM Studio vision APIs.
+    private func prepareVisionImagePayloads(imagePath: String) throws -> VisionImagePayloads {
+        let fileURL = URL(fileURLWithPath: imagePath)
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else {
+            throw CaptionError.runtime("Could not load image for captioning.")
+        }
+        let loadOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 4096,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, loadOptions as CFDictionary) else {
+            throw CaptionError.runtime("Could not load image for captioning.")
+        }
+        let jpegBase64 = try rasterBase64(cgImage: cgImage, uti: UTType.jpeg, quality: 0.92)
+        let pngBase64 = try rasterBase64(cgImage: cgImage, uti: UTType.png, quality: 1.0)
+        return VisionImagePayloads(jpegBase64: jpegBase64, pngBase64: pngBase64)
+    }
+
+    private func rasterBase64(cgImage: CGImage, uti: UTType, quality: Double) throws -> String {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data,
+            uti.identifier as CFString,
+            1,
+            nil
+        ) else {
+            throw CaptionError.runtime("Could not encode image for captioning.")
+        }
+        var properties: [CFString: Any] = [:]
+        if uti == .jpeg {
+            properties[kCGImageDestinationLossyCompressionQuality] = quality
+        }
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw CaptionError.runtime("Could not encode image for captioning.")
+        }
+        return (data as Data).base64EncodedString()
+    }
+
+    private func impliesVisionRequired(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("vision")
+            || lower.contains("image input")
+            || lower.contains("multimodal")
+            || message.contains(Self.visionRequiredMessage)
+    }
+
+    private func readErrorBody(from bytes: URLSession.AsyncBytes) async throws -> String {
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count > 32_768 { break }
+        }
+        return String(data: data, encoding: .utf8) ?? "HTTP error"
+    }
+
+    enum CaptionError: Error, Equatable {
+        case cancelled
+        case runtime(String)
+    }
+}
+
+extension LmStudioCaptionService.CaptionError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .cancelled: return "Cancelled"
+        case .runtime(let message): return message
+        }
+    }
+}

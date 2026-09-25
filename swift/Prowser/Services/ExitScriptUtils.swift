@@ -69,6 +69,13 @@ enum ExitScriptUtils {
         (path as NSString).expandingTildeInPath
     }
 
+    static func buildExitScriptArgv(raw: String, promptText: String) -> [String] {
+        var argv = resolveExitScriptArgv(raw: raw)
+        guard !argv.isEmpty else { return [] }
+        argv.append(contentsOf: ["-p", promptText])
+        return argv
+    }
+
     static func resolveExitScriptArgv(raw: String) -> [String] {
         let parts = splitCommand(raw.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !parts.isEmpty else { return [] }
