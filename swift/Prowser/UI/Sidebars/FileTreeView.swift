@@ -55,17 +55,15 @@ struct FileTreeView: NSViewRepresentable {
         appState.fileTreeOutlineView = outline
         context.coordinator.startObservingSettings()
         if !context.coordinator.hasLoadedRoots {
-            context.coordinator.reloadRoots(reason: "makeNSView initial")
+            context.coordinator.reloadRoots()
         } else {
             context.coordinator.syncOutlineAfterReattach()
         }
-        debugPrint("[FileTreeView] makeNSView rootsLoaded=\(context.coordinator.hasLoadedRoots)")
         MainWindowKeyViewLoop.sync(appState: appState)
         return tabStop
     }
 
     static func dismantleNSView(_ tabStop: NSView, coordinator: Coordinator) {
-        debugPrint("[FileTreeView] dismantleNSView rootsLoaded=\(coordinator.hasLoadedRoots)")
         if coordinator.outlineView === coordinator.appState.fileTreeOutlineView {
             coordinator.appState.fileTreeOutlineView = nil
         }
@@ -94,10 +92,7 @@ struct FileTreeView: NSViewRepresentable {
             } else {
                 let preserveExpansion = appState.fileTreeReloadPreservesExpansion
                 appState.fileTreeReloadPreservesExpansion = false
-                context.coordinator.reloadRoots(
-                    preserveExpansion: preserveExpansion,
-                    reason: "reloadToken"
-                )
+                context.coordinator.reloadRoots(preserveExpansion: preserveExpansion)
             }
         }
         context.coordinator.applyThemeIfNeeded()
@@ -850,8 +845,7 @@ struct FileTreeView: NSViewRepresentable {
             treePaneContentVisible = visible
         }
 
-        func reloadRoots(preserveExpansion: Bool = false, reason: String = "unspecified") {
-            debugPrint("[FileTreeView] reloadRoots reason=\(reason) preserveExpansion=\(preserveExpansion)")
+        func reloadRoots(preserveExpansion: Bool = false) {
             let savedExpansion = preserveExpansion ? expandedDirectoryPaths : nil
             lastExpandedHighlightDirectory = nil
             FileTreeFilter.invalidateCache()
