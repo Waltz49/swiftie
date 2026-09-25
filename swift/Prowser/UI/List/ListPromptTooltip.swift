@@ -8,7 +8,8 @@ final class ListPromptTooltip {
     private let panel: NSPanel
     private let label: NSTextField
     private var showTask: Task<Void, Never>?
-    private var activeHost: NSView?
+    private weak var activeHost: NSView?
+    private var pollTask: Task<Void, Never>?
 
     private init() {
         panel = NSPanel(
@@ -57,13 +58,20 @@ final class ListPromptTooltip {
         showTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: delayNs)
             guard !Task.isCancelled else { return }
+            guard activeHost === anchorView else { return }
+            guard hostEffectiveVisible(anchorView), hostUnderCursor(anchorView) else { return }
             present(text: text, colors: colors, anchorView: anchorView)
         }
     }
 
     func hide(for host: NSView? = nil) {
         if let host, activeHost !== host { return }
+        dismiss()
+    }
+
+    private func dismiss() {
         cancelPending()
+        stopPolling()
         activeHost = nil
         panel.orderOut(nil)
     }
@@ -75,6 +83,7 @@ final class ListPromptTooltip {
 
     private func present(text: String, colors: ThemeColors, anchorView: NSView) {
         guard !text.isEmpty else { return }
+        guard hostEffectiveVisible(anchorView), hostUnderCursor(anchorView) else { return }
         label.stringValue = text
         label.textColor = NSColor(colors.text)
         if let chrome = panel.contentView {
@@ -100,5 +109,61 @@ final class ListPromptTooltip {
         }
         panel.setFrameOrigin(origin)
         panel.orderFront(nil)
+        startPolling()
+    }
+
+    private func startPolling() {
+        stopPolling()
+        pollTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard !Task.isCancelled else { return }
+                pollHover()
+                if !panel.isVisible { return }
+            }
+        }
+    }
+
+    private func stopPolling() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
+    private func pollHover() {
+        guard panel.isVisible else {
+            stopPolling()
+            return
+        }
+        guard let host = activeHost else {
+            dismiss()
+            return
+        }
+        if !hostEffectiveVisible(host) {
+            dismiss()
+            return
+        }
+        if !hostUnderCursor(host) {
+            dismiss()
+        }
+    }
+
+    /// Python `_host_effective_visible` — list stays mounted under browse with opacity 0.
+    private func hostEffectiveVisible(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let node = current {
+            if node.isHidden || node.alphaValue < 0.01 {
+                return false
+            }
+            current = node.superview
+        }
+        guard let window = view.window, window.isVisible else { return false }
+        return true
+    }
+
+    private func hostUnderCursor(_ view: NSView) -> Bool {
+        guard let window = view.window else { return false }
+        let locationInWindow = window.mouseLocationOutsideOfEventStream
+        let pointInView = view.convert(locationInWindow, from: nil)
+        return view.bounds.contains(pointInView)
     }
 }

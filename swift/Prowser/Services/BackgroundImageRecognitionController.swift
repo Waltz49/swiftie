@@ -25,6 +25,8 @@ final class BackgroundImageRecognitionController {
         case cnn
     }
 
+    private static let backgroundGatherThumbnailSize = 256
+
     func bind(_ appState: AppState) {
         self.appState = appState
         installActivityMonitor()
@@ -60,8 +62,7 @@ final class BackgroundImageRecognitionController {
 
     func applyEnabledFromSettings() {
         guard let appState else { return }
-        let wantsOn = appState.config.bool(forKey: "background_clip_enabled", default: false)
-        if wantsOn, Self.indexingAvailable(appState: appState) {
+        if shouldRunBackgroundProcessing(appState: appState) {
             startSchedulerIfNeeded()
         } else {
             stopAll()
@@ -73,6 +74,30 @@ final class BackgroundImageRecognitionController {
         appState.config.updateSetting("background_clip_enabled", value: enabled)
         applyEnabledFromSettings()
         appState.eventBus.emit(.backgroundIndexingStateChanged)
+    }
+
+    func setGatherThumbnails(_ enabled: Bool) {
+        guard let appState else { return }
+        appState.config.updateSetting("background_clip_gather_thumbnails", value: enabled)
+        applyEnabledFromSettings()
+        appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+    }
+
+    private func shouldRunBackgroundProcessing(appState: AppState) -> Bool {
+        if appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true) {
+            return true
+        }
+        let wantsClip = appState.config.bool(forKey: "background_clip_enabled", default: false)
+        return wantsClip && Self.indexingAvailable(appState: appState)
+    }
+
+    private func clipIndexingActive(appState: AppState) -> Bool {
+        appState.config.bool(forKey: "background_clip_enabled", default: false)
+            && Self.indexingAvailable(appState: appState)
+    }
+
+    private func gatherThumbnailsActive(appState: AppState) -> Bool {
+        appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true)
     }
 
     func notePriorityDirectory(_ path: String) {
@@ -147,11 +172,7 @@ final class BackgroundImageRecognitionController {
 
     private func schedulerTick() async {
         guard let appState else { return }
-        guard appState.config.bool(forKey: "background_clip_enabled", default: false) else {
-            stopAll()
-            return
-        }
-        guard Self.indexingAvailable(appState: appState) else {
+        guard shouldRunBackgroundProcessing(appState: appState) else {
             stopAll()
             return
         }
@@ -162,16 +183,30 @@ final class BackgroundImageRecognitionController {
         let directories = targetDirectories(appState: appState)
         guard !directories.isEmpty else { return }
 
-        guard let batch = collectBatch(appState: appState, directories: directories) else {
+        let generation = batchGeneration
+
+        if clipIndexingActive(appState: appState) {
+            if let batch = collectFeatureBatch(appState: appState, directories: directories) {
+                let phase = cyclePhase
+                batchTask = Task { [weak self] in
+                    await self?.runFeatureBatch(
+                        appState: appState,
+                        paths: batch,
+                        phase: phase,
+                        generation: generation
+                    )
+                }
+                return
+            }
             flipCyclePhase()
-            return
         }
 
-        let generation = batchGeneration
-        let phase = cyclePhase
-        let paths = batch
+        guard gatherThumbnailsActive(appState: appState) else { return }
+        guard let batch = await collectThumbnailBatch(appState: appState, directories: directories) else {
+            return
+        }
         batchTask = Task { [weak self] in
-            await self?.runBatch(appState: appState, paths: paths, phase: phase, generation: generation)
+            await self?.runThumbnailBatch(appState: appState, paths: batch, generation: generation)
         }
     }
 
@@ -184,7 +219,28 @@ final class BackgroundImageRecognitionController {
         }
     }
 
-    private func collectBatch(appState: AppState, directories: [String]) -> [String]? {
+    private func collectThumbnailBatch(appState: AppState, directories: [String]) async -> [String]? {
+        let batchSize = TimingConstants.backgroundClipBatchSize
+        let thumbSize = Self.backgroundGatherThumbnailSize
+        var collected: [String] = []
+        for directory in directories {
+            if !isIdle() { break }
+            let paths = DirectoryScanner.scanDirectory(
+                at: directory,
+                extensions: appState.config.imageExtensions,
+                filterPattern: "*"
+            )
+            for path in paths {
+                if await appState.thumbnailCache.cachedThumbnail(for: path, size: thumbSize) == nil {
+                    collected.append(path)
+                    if collected.count >= batchSize { return collected }
+                }
+            }
+        }
+        return collected.isEmpty ? nil : collected
+    }
+
+    private func collectFeatureBatch(appState: AppState, directories: [String]) -> [String]? {
         let batchSize = TimingConstants.backgroundClipBatchSize
         var collected: [String] = []
         for directory in directories {
@@ -210,7 +266,35 @@ final class BackgroundImageRecognitionController {
         return collected.isEmpty ? nil : collected
     }
 
-    private func runBatch(
+    private func runThumbnailBatch(appState: AppState, paths: [String], generation: Int) async {
+        setProcessing(true)
+        defer {
+            if generation == batchGeneration {
+                setProcessing(false)
+                batchTask = nil
+            }
+        }
+
+        let shouldCancel: () -> Bool = { [weak self] in
+            guard let self else { return true }
+            return generation != self.batchGeneration
+                || self.foregroundSuspendDepth > 0
+                || !self.isIdle()
+                || Task.isCancelled
+        }
+
+        let thumbSize = Self.backgroundGatherThumbnailSize
+        for path in paths {
+            if shouldCancel() { return }
+            _ = await appState.thumbnailCache.generateThumbnail(
+                for: path,
+                size: thumbSize,
+                priority: .background
+            )
+        }
+    }
+
+    private func runFeatureBatch(
         appState: AppState,
         paths: [String],
         phase: CyclePhase,
@@ -256,12 +340,13 @@ final class BackgroundImageRecognitionController {
         }
 
         guard !shouldCancel() else { return }
-        if appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true) {
+        if gatherThumbnailsActive(appState: appState) {
+            let thumbSize = Self.backgroundGatherThumbnailSize
             for path in paths {
                 if shouldCancel() { return }
                 _ = await appState.thumbnailCache.generateThumbnail(
                     for: path,
-                    size: 256,
+                    size: thumbSize,
                     priority: .background
                 )
             }

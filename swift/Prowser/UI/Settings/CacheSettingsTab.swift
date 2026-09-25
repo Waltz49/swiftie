@@ -12,7 +12,7 @@ struct CacheSettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack() {
                 Text("Caches").font(.title2)
 
                 SettingsSection(title: "Cache Controls") {
@@ -42,34 +42,36 @@ struct CacheSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if indexingAvailable {
-                    SettingsSection(title: "Background Processing") {
-                        SettingsPreferencePanel {
-                            SettingsPreferenceToggleRow(
-                                title: "Enable idle search-data collection",
-                                isOn: $backgroundEnabled
-                            )
-                            .onChange(of: backgroundEnabled) { _, on in
-                                appState.backgroundImageRecognition.setEnabled(on)
-                            }
-                            SettingsPreferenceToggleRow(
-                                title: "Also gather thumbnails",
-                                isOn: $gatherThumbnails
-                            )
-                            .disabled(!backgroundEnabled)
-                            .onChange(of: gatherThumbnails) { _, on in
-                                appState.config.updateSetting("background_clip_gather_thumbnails", value: on)
-                            }
+                SettingsSection(title: "Background Processing") {
+                    SettingsPreferencePanel {
+                        SettingsPreferenceToggleRow(
+                            title: "Gather image metadata for searching, while idle",
+                            subtitle: "While idle, build CLIP and CNN feature caches for favorites, recent folders, and the current directory.",
+                            isOn: $backgroundEnabled
+                        )
+                        .disabled(!indexingAvailable)
+                        .help(
+                            indexingAvailable
+                                ? "While idle, build CLIP and CNN feature caches for favorites, recent folders, and the current directory."
+                                : "Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection."
+                        )
+                        .onChange(of: backgroundEnabled) { _, on in
+                            appState.backgroundImageRecognition.setEnabled(on)
                         }
-                        Text("Runs while idle; may use battery. Does not extract faces.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
+                        SettingsPreferenceToggleRow(
+                            title: "Gather thumbnails while idle",
+                            subtitle: "While idle, cache thumbnails for favorites, recent folders, and the current directory.",
+                            isOn: $gatherThumbnails
+                        )
+                        .help("Gather thumbnails while idle; can be used with or without idle search-data collection.")
+                        .onChange(of: gatherThumbnails) { _, on in
+                            appState.backgroundImageRecognition.setGatherThumbnails(on)
+                        }
                     }
-                } else {
-                    Text("Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection.")
+                    Text(footerNote)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
                 }
 
                 if appState.config.bool(forKey: "debug_mode") {
@@ -110,9 +112,14 @@ struct CacheSettingsTab: View {
 
     private func reloadIndexingAvailability() {
         indexingAvailable = BackgroundImageRecognitionController.indexingAvailable(appState: appState)
-        if !indexingAvailable {
-            appState.backgroundImageRecognition.applyEnabledFromSettings()
+        appState.backgroundImageRecognition.applyEnabledFromSettings()
+    }
+
+    private var footerNote: String {
+        if indexingAvailable {
+            return "Runs while idle; may use battery. Does not extract faces."
         }
+        return "Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection."
     }
 
     private var totalsLabel: String {

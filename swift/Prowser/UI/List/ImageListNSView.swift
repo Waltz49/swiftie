@@ -78,6 +78,8 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
     private var commentLoadTask: Task<Void, Never>?
     private var commentLoadGeneration = 0
     private(set) var isCommentsColumnVisible = false
+    /// False while list is covered (browse, slideshow, etc.) — suppresses comment hover tooltips.
+    var commentTooltipsEnabled = true
 
     var currentPath: String? {
         didSet {
@@ -707,7 +709,8 @@ private final class ImageListTableView: NSTableView, NSTableViewDataSource, NSTa
             cell.configure(
                 info: info,
                 backgroundColor: host.rowBackground(for: path),
-                colors: host.themeColors
+                colors: host.themeColors,
+                listHost: host
             )
             return cell
         }
@@ -945,6 +948,7 @@ private final class ImageListCommentCell: NSTableCellView {
     private var trackingArea: NSTrackingArea?
     private var commentInfo = ImageListCommentInfo(indicator: .blank, fullComment: "")
     private var themeColors = ThemeColors.dark
+    private weak var listHost: ImageListNSView?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -977,7 +981,14 @@ private final class ImageListCommentCell: NSTableCellView {
         trackingArea = area
     }
 
-    func configure(info: ImageListCommentInfo, backgroundColor: NSColor, colors: ThemeColors) {
+    func configure(
+        info: ImageListCommentInfo,
+        backgroundColor: NSColor,
+        colors: ThemeColors,
+        listHost: ImageListNSView
+    ) {
+        ListPromptTooltip.shared.hide(for: self)
+        self.listHost = listHost
         commentInfo = info
         themeColors = colors
         label.stringValue = info.indicator.displayText
@@ -990,6 +1001,7 @@ private final class ImageListCommentCell: NSTableCellView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard listHost?.commentTooltipsEnabled == true else { return }
         let tip = commentInfo.tooltipText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tip.isEmpty else { return }
         ListPromptTooltip.shared.scheduleShow(text: tip, colors: themeColors, anchorView: self)
@@ -1099,6 +1111,13 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
             listView.updateSortIndicators(mode: mode, reversed: reversed)
             let commentsVisible = listView.columnLayout.isColumnVisible(.comments)
             listView.updateCommentsColumnActive(commentsVisible)
+            let tooltipsEnabled = appState.fileData.currentViewMode == .list
+            if listView.commentTooltipsEnabled != tooltipsEnabled {
+                listView.commentTooltipsEnabled = tooltipsEnabled
+                if !tooltipsEnabled {
+                    ListPromptTooltip.shared.hide()
+                }
+            }
             installSelectionObserverIfNeeded()
             if appState.fileData.currentViewMode == .list {
                 listView.ensureActiveRowOnScreen()
@@ -1116,7 +1135,10 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
                 self?.syncSelectionVisuals()
             }
             bag.subscribe(.viewModeChanged) { [weak self] _ in
-                guard let self, self.appState.fileData.currentViewMode == .list else { return }
+                ListPromptTooltip.shared.hide()
+                guard let self else { return }
+                self.listView?.commentTooltipsEnabled = self.appState.fileData.currentViewMode == .list
+                guard self.appState.fileData.currentViewMode == .list else { return }
                 self.syncSelectionVisuals()
                 self.listView?.ensureActiveRowOnScreen()
                 DispatchQueue.main.async { [weak self] in

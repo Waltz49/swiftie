@@ -37,16 +37,6 @@ struct GeneralSettingsTab: View {
                             isOn: boolBinding("raise_status_bar_on_cursor_near_bottom", default: true)
                         )
                         SettingsPreferenceToggleRow(
-                            title: "Use EXIF rotation",
-                            subtitle: "Rotate images based on EXIF data if available.",
-                            tooltip: "Apply automatic EXIF rotation correction. Manual rotation (Shift+arrow keys) still works in fullscreen.",
-                            isOn: exifRotationBinding
-                        )
-                        SettingsPreferenceToggleRow(
-                            title: "Prefer EXIF date for sorting",
-                            isOn: boolBinding("use_exif_date", default: true)
-                        )
-                        SettingsPreferenceToggleRow(
                             title: "Debug mode (⇧-⌘-D)",
                             subtitle: "Enter debug mode. Meaning varies. Use ⌃-L to view log.",
                             tooltip: "Show key popup overlay for debugging keyboard events.",
@@ -97,7 +87,11 @@ struct GeneralSettingsTab: View {
                             isOn: boolBinding("drag_drop_auto_date_change")
                         )
                         SettingsPreferenceToggleRow(
-                            title: "Allow thumbnail locking (⇧-⌘-L)",
+                            title: "Prefer EXIF date for sorting",
+                            isOn: boolBinding("use_exif_date", default: true)
+                        )
+                        SettingsPreferenceToggleRow(
+                            title: "Allow thumbnail locking (⇧-⌘-L) - Experimental",
                             subtitle: "Experimental. Locks thumbnail positions in order.",
                             tooltip: "Allow marking thumbnails as locked to keep them in place while organizing images.",
                             isOn: boolBinding("allow_thumbnail_locking")
@@ -149,6 +143,12 @@ struct GeneralSettingsTab: View {
                                     .frame(width: 72, alignment: .trailing)
                             }
                         }
+                        SettingsPreferenceToggleRow(
+                            title: "Use EXIF rotation",
+                            subtitle: "Rotate images based on EXIF data if available.",
+                            tooltip: "Apply automatic EXIF rotation correction. Manual rotation (Shift+arrow keys) still works in fullscreen.",
+                            isOn: exifRotationBinding
+                        )
                     }
                 }
             }
