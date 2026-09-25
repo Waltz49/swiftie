@@ -23,6 +23,7 @@ enum FileTreeFilter {
     private static var pendingDiscoveryPaths: Set<String> = []
     private static var expandedDirectoryPaths: Set<String> = []
     private static var fileTreePaneVisible = true
+    private static var expandableChildCache: [String: Bool] = [:]
 
     static func setUpdateHandler(_ handler: @escaping (Set<String>) -> Void) {
         onUpdateHandler = handler
@@ -51,12 +52,21 @@ enum FileTreeFilter {
 
     static func invalidateCache() {
         clearShallowCache()
+        invalidateExpandableChildCache()
         cacheKey = ""
         priorityPaths.removeAll()
         pendingDiscoveryPaths.removeAll()
         debounceTask?.cancel()
         debounceTask = nil
         FileTreeImageDiscovery.shared.invalidate()
+    }
+
+    static func invalidateExpandableChildCache(path: String? = nil) {
+        if let path {
+            expandableChildCache.removeValue(forKey: standardizedPath(path))
+        } else {
+            expandableChildCache.removeAll()
+        }
     }
 
     static func standardizedPath(_ path: String) -> String {
@@ -274,7 +284,13 @@ enum FileTreeFilter {
 
     /// Disclosure triangle: any non-excluded child directory exists (filter applied when children load).
     static func hasExpandableChildDirectory(at path: String, appState: AppState) -> Bool {
-        !immediateChildDirectoryPaths(at: path, appState: appState).isEmpty
+        let normalized = standardizedPath(path)
+        if let cached = expandableChildCache[normalized] {
+            return cached
+        }
+        let result = !immediateChildDirectoryPaths(at: path, appState: appState).isEmpty
+        expandableChildCache[normalized] = result
+        return result
     }
 
     static func shouldShowDirectory(at path: String, appState: AppState, rootPaths: [String]) -> Bool {

@@ -126,6 +126,8 @@ final class AppState {
     var fileTreeReloadToken = 0
     /// Next `fileTreeReloadToken` bump should keep expanded rows (settings OK with tree-related changes).
     var fileTreeReloadPreservesExpansion = false
+    /// Next reload should re-filter visible branches only (toolbar filter / pattern), not rebuild roots.
+    var fileTreeReloadFilterOnly = false
     var fileOpsTargetPaths: [String] = []
     /// Session-only last file-tree drop destination for ⌘0 / ⌥⌘0 (Python `_last_drop_location`).
     var lastDropLocation: String?

@@ -11,9 +11,10 @@ struct LeftSidebarView: View {
                 title: "File Tree",
                 expandedConfigKey: "file_tree_visible",
                 defaultExpanded: true,
-                isDisplayed: displayVis[0],
+                isDisplayed: true,
                 omitLeftBorder: true,
                 contextMenuKind: .fileTree,
+                keepContentMountedWhenCollapsed: true,
                 preferredFitContentHeight: { 180 }
             ),
             SidebarPaneDescriptor(

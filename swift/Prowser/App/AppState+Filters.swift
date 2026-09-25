@@ -16,6 +16,8 @@ extension AppState {
 
     func refreshFileTreeFilter() {
         FileTreeFilter.invalidateCache()
+        fileTreeReloadFilterOnly = true
+        fileTreeReloadPreservesExpansion = true
         fileTreeReloadToken += 1
     }
 

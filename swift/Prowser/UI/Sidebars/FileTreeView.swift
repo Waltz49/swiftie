@@ -54,28 +54,51 @@ struct FileTreeView: NSViewRepresentable {
         context.coordinator.tabStopView = tabStop
         appState.fileTreeOutlineView = outline
         context.coordinator.startObservingSettings()
-        context.coordinator.reloadRoots()
+        if !context.coordinator.hasLoadedRoots {
+            context.coordinator.reloadRoots(reason: "makeNSView initial")
+        } else {
+            context.coordinator.syncOutlineAfterReattach()
+        }
+        debugPrint("[FileTreeView] makeNSView rootsLoaded=\(context.coordinator.hasLoadedRoots)")
         MainWindowKeyViewLoop.sync(appState: appState)
         return tabStop
     }
 
+    static func dismantleNSView(_ tabStop: NSView, coordinator: Coordinator) {
+        debugPrint("[FileTreeView] dismantleNSView rootsLoaded=\(coordinator.hasLoadedRoots)")
+        if coordinator.outlineView === coordinator.appState.fileTreeOutlineView {
+            coordinator.appState.fileTreeOutlineView = nil
+        }
+        if coordinator.tabStopView === coordinator.appState.mainWindowTreeTabStop {
+            coordinator.appState.mainWindowTreeTabStop = nil
+        }
+        coordinator.outlineView = nil
+        coordinator.tabStopView = nil
+    }
+
     func updateNSView(_ tabStop: NSView, context: Context) {
-        // Access image path so SwiftUI retriggers sync when thumbnail highlight moves.
-        _ = appState.fileData.currentImagePath
         _ = appState.fileTreeSyncActiveImageToken
-        FileTreeFilter.setFileTreePaneVisible(
-            appState.effectiveLeftSidebarVisible
-                && appState.config.bool(forKey: "file_tree_visible", default: true)
-        )
+        let treePaneContentVisible = appState.effectiveLeftSidebarVisible
+            && appState.config.bool(forKey: "file_tree_visible", default: true)
+        FileTreeFilter.setFileTreePaneVisible(treePaneContentVisible)
+        context.coordinator.updateTreePaneContentVisibility(treePaneContentVisible)
         context.coordinator.syncSelectionIfNeeded()
         context.coordinator.syncToActiveImageIfRequested()
         context.coordinator.focusTreeIfRequested()
         context.coordinator.collapseUIIfRequested()
         context.coordinator.expandToCurrentDirectoryIfRequested()
         if context.coordinator.consumeReloadIfRequested() {
-            let preserveExpansion = appState.fileTreeReloadPreservesExpansion
-            appState.fileTreeReloadPreservesExpansion = false
-            context.coordinator.reloadRoots(preserveExpansion: preserveExpansion)
+            if appState.fileTreeReloadFilterOnly {
+                appState.fileTreeReloadFilterOnly = false
+                context.coordinator.reloadFilterResults(preserveExpansion: true)
+            } else {
+                let preserveExpansion = appState.fileTreeReloadPreservesExpansion
+                appState.fileTreeReloadPreservesExpansion = false
+                context.coordinator.reloadRoots(
+                    preserveExpansion: preserveExpansion,
+                    reason: "reloadToken"
+                )
+            }
         }
         context.coordinator.applyThemeIfNeeded()
         MainWindowKeyViewLoop.sync(appState: appState)
@@ -116,6 +139,10 @@ struct FileTreeView: NSViewRepresentable {
         private var userNavigationReset: DispatchWorkItem?
         /// After inline directory rename, keep tree on that folder until the user navigates the tree.
         private var pinnedDirectoryAfterRename: String?
+        private var treePaneContentVisible = true
+        private var frozenScrollOrigin: NSPoint?
+
+        var hasLoadedRoots: Bool { !roots.isEmpty }
 
         init(appState: AppState) {
             self.appState = appState
@@ -782,7 +809,49 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
-        func reloadRoots(preserveExpansion: Bool = false) {
+        func syncOutlineAfterReattach() {
+            guard let outlineView else { return }
+            publishExpandedPathsForDiscovery()
+            outlineView.reloadData()
+            restoreTrackedExpansion(outlineView: outlineView)
+            let imagePath = appState.fileData.currentImagePath
+            let directory = directoryToHighlightForTreeSync()
+            if !treeHighlightAlreadySynced(imagePath: imagePath, directory: directory) {
+                syncSelection(retryCount: 0, force: false, scrollSelectionIntoView: true)
+            }
+        }
+
+        /// Hide/show tree body without resyncing expansion or scroll when highlight state is unchanged.
+        func updateTreePaneContentVisibility(_ visible: Bool) {
+            guard visible != treePaneContentVisible else { return }
+            guard let outlineView, let scrollView = outlineView.enclosingScrollView else {
+                treePaneContentVisible = visible
+                return
+            }
+
+            if treePaneContentVisible, !visible {
+                frozenScrollOrigin = scrollView.documentVisibleRect.origin
+            } else if !treePaneContentVisible, visible {
+                let imagePath = appState.fileData.currentImagePath
+                let directory = directoryToHighlightForTreeSync()
+                if treeHighlightAlreadySynced(imagePath: imagePath, directory: directory),
+                   let origin = frozenScrollOrigin {
+                    let originToRestore = origin
+                    DispatchQueue.main.async { [weak self, weak scrollView] in
+                        guard let self, let scrollView, let outlineView = self.outlineView else { return }
+                        scrollView.layoutSubtreeIfNeeded()
+                        outlineView.layoutSubtreeIfNeeded()
+                        scrollView.contentView.scroll(to: originToRestore)
+                        scrollView.reflectScrolledClipView(scrollView.contentView)
+                    }
+                }
+                frozenScrollOrigin = nil
+            }
+            treePaneContentVisible = visible
+        }
+
+        func reloadRoots(preserveExpansion: Bool = false, reason: String = "unspecified") {
+            debugPrint("[FileTreeView] reloadRoots reason=\(reason) preserveExpansion=\(preserveExpansion)")
             let savedExpansion = preserveExpansion ? expandedDirectoryPaths : nil
             lastExpandedHighlightDirectory = nil
             FileTreeFilter.invalidateCache()
@@ -811,7 +880,11 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
-        func syncSelection(retryCount: Int = 0, force: Bool = false) {
+        func syncSelection(
+            retryCount: Int = 0,
+            force: Bool = false,
+            scrollSelectionIntoView: Bool = true
+        ) {
             if pinnedDirectoryAfterRename != nil { return }
             switch appState.fileData.currentViewMode {
             case .slideshow, .slideshow2, .slideshow3, .browse:
@@ -834,12 +907,19 @@ struct FileTreeView: NSViewRepresentable {
 
                 guard let match = nodeForHighlight(path: directory, retryCount: retryCount) else { return }
 
-                expandPath(to: match, outlineView: outlineView, preserveSelection: false)
+                expandPath(
+                    to: match,
+                    outlineView: outlineView,
+                    preserveSelection: false,
+                    scrollIntoView: scrollSelectionIntoView
+                )
 
                 let row = outlineView.row(forItem: match)
                 if row >= 0 {
                     outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                    outlineView.scrollRowToVisible(row)
+                    if scrollSelectionIntoView {
+                        outlineView.scrollRowToVisible(row)
+                    }
                 }
 
                 lastSyncedDirectory = directoryNorm
@@ -1070,7 +1150,8 @@ struct FileTreeView: NSViewRepresentable {
         private func expandPath(
             to node: FileTreeNode,
             outlineView: NSOutlineView,
-            preserveSelection: Bool = true
+            preserveSelection: Bool = true,
+            scrollIntoView: Bool = true
         ) {
             let normalized = standardizedPath(node.path)
             if normalized == lastExpandedHighlightDirectory {
@@ -1079,7 +1160,9 @@ struct FileTreeView: NSViewRepresentable {
                     if outlineView.selectedRow != row {
                         outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                     }
-                    outlineView.scrollRowToVisible(row)
+                    if scrollIntoView {
+                        outlineView.scrollRowToVisible(row)
+                    }
                     return
                 }
                 lastExpandedHighlightDirectory = nil
@@ -1230,7 +1313,7 @@ struct FileTreeView: NSViewRepresentable {
             }()
 
             if let node = item as? FileTreeNode {
-                cell.imageView?.image = NSWorkspace.shared.icon(forFile: node.path)
+                cell.imageView?.image = FileTreeIconCache.icon(forPath: node.path)
                 var label = node.name
                 if appState.renameStatusManager.isEnabled,
                    appState.renameStatusManager.directoryStatus(node.path) == true {
@@ -1247,7 +1330,14 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-            let rowView = FileTreeDropHighlightRowView()
+            let identifier = NSUserInterfaceItemIdentifier("FileTreeRow")
+            let rowView: FileTreeDropHighlightRowView
+            if let reused = outlineView.makeView(withIdentifier: identifier, owner: self) as? FileTreeDropHighlightRowView {
+                rowView = reused
+            } else {
+                rowView = FileTreeDropHighlightRowView()
+                rowView.identifier = identifier
+            }
             if let node = item as? FileTreeNode,
                let outline = outlineView as? FileTreeOutlineView {
                 rowView.isDropTarget = outline.dropHighlightPath == node.path
@@ -1783,6 +1873,21 @@ extension FileTreeOutlineView: NSTextFieldDelegate {
 }
 
 @MainActor
+private enum FileTreeIconCache {
+    private static let cache = NSCache<NSString, NSImage>()
+
+    static func icon(forPath path: String) -> NSImage {
+        let key = path as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        cache.setObject(image, forKey: key)
+        return image
+    }
+}
+
+@MainActor
 final class FileTreeNode: NSObject {
     var path: String
     var name: String
@@ -1830,6 +1935,11 @@ final class FileTreeNode: NSObject {
     /// Rescan and replace children in case-insensitive name order (used on filter/root refresh).
     func reloadChildren(appState: AppState, rootPaths: [String]) {
         guard isDirectory else { return }
+        FileTreeFilter.invalidateExpandableChildCache(path: path)
+        let parentPath = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+        if parentPath != path {
+            FileTreeFilter.invalidateExpandableChildCache(path: parentPath)
+        }
         didLoad = false
         children = nil
         loadChildrenIfNeeded(appState: appState, rootPaths: rootPaths)

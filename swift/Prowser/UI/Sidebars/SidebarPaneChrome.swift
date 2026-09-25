@@ -17,7 +17,7 @@ struct SidebarPaneTitlebar: View {
     var status: String? = nil
     var omitLeftBorder: Bool = false
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
-    /// Python `TREE_HEADER_FOCUS_BG_HEX` when the file tree has keyboard focus.
+    /// File tree keyboard focus: `current_image_background_color_hex` (active image background).
     var titlebarFocusHighlighted: Bool = false
 
     @State private var dragStartY: CGFloat?
@@ -73,7 +73,7 @@ struct SidebarPaneTitlebar: View {
         }
         .background(
             titlebarFocusHighlighted
-                ? colors.sidebarHeaderFocusBackground
+                ? colors.currentImageBackground
                 : colors.sidebarHeaderBackground
         )
         .overlay(alignment: .bottom) {
@@ -118,7 +118,7 @@ struct SidebarPaneTitlebar: View {
     }
 }
 
-/// Titlebar + content for an open sidebar pane (closed panes are omitted from the stack).
+/// Titlebar + content for a sidebar pane in the stack (collapsed panes may keep content mounted).
 struct SidebarPaneSection<Content: View>: View {
     @Environment(AppState.self) private var appState
 
@@ -157,24 +157,25 @@ struct SidebarPaneSection<Content: View>: View {
                 titlebarFocusHighlighted: titlebarFocusHighlighted
             )
 
-            if isExpanded {
-                content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .clipped()
-                    .background(appState.theme.colors.sidebarBackground)
-                    .overlay(alignment: .leading) {
-                        if !omitLeftBorder {
-                            Rectangle()
-                                .fill(appState.theme.colors.sidebarHeaderBorder)
-                                .frame(width: 1)
-                        }
-                    }
-                    .overlay(alignment: .trailing) {
+            content()
+                .frame(maxWidth: .infinity, maxHeight: isExpanded ? .infinity : 0, alignment: .top)
+                .opacity(isExpanded ? 1 : 0)
+                .allowsHitTesting(isExpanded)
+                .accessibilityHidden(!isExpanded)
+                .clipped()
+                .background(appState.theme.colors.sidebarBackground)
+                .overlay(alignment: .leading) {
+                    if !omitLeftBorder {
                         Rectangle()
                             .fill(appState.theme.colors.sidebarHeaderBorder)
                             .frame(width: 1)
                     }
-            }
+                }
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(appState.theme.colors.sidebarHeaderBorder)
+                        .frame(width: 1)
+                }
         }
         .frame(
             maxWidth: .infinity,
