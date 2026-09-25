@@ -24,7 +24,9 @@ enum SimilaritySearchService {
             recursive: resolvedOptions.recursive,
             customDirectory: resolvedOptions.customDirectory,
             useCustomDirectory: resolvedOptions.useCustomDirectory,
-            includeDisplayed: resolvedOptions.useCustomDirectory ? [] : refs
+            // Python always injects the reference image(s) into the candidate list,
+            // even when searching a custom directory that does not contain them.
+            includeDisplayed: refs
         )
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "No Images Found", message: "No images found to search.")

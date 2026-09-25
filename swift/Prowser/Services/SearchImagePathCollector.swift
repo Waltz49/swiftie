@@ -34,7 +34,7 @@ enum SearchImagePathCollector {
             return DirectoryScanner.matchesGlob(name, pattern: pattern)
         }
 
-        for p in includeDisplayed where !useCustomDirectory { add(p) }
+        for p in includeDisplayed { add(p) }
 
         let extensions = appState.config.imageExtensions
         let pattern = appState.filterSettings.filterPattern
