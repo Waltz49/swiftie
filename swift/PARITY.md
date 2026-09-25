@@ -362,6 +362,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `thumbnail_cell_size`, `manual_thumbnail_size` | done | done |
 | `list_view_row_height` | done | done |
 | `browse_view_actual_size` | done | done |
+| `browse_preserve_zoom_on_image_change` | done | pending |
 | `sort_mode`, `sort_reversed`, `use_exif_date`, `ignore_exif_rotation` | done | done |
 | `filter_pattern`, `filtered_tree`, `saved_filters` | done | done |
 | `space_key_mode`, `browse_image_history_save_after_ms` | done | done |

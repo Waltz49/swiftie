@@ -32,6 +32,20 @@ final class BrowseImageNSView: NSView {
     private var themeColors = ThemeColors.dark
     private var loadTask: Task<Void, Never>?
     private var emptyStateMessage = "No image selected"
+    /// Manual zoom active (Python `browse_zoom_pinned`).
+    private var zoomPinned = false
+    /// Last anchor used for cursor/pinch zoom; reused when preserving view across images.
+    private var lastZoomAnchorInView = CGPoint.zero
+
+    private struct PreservedViewState {
+        let targetPath: String
+        let scaleFactor: CGFloat
+        let anchor: CGPoint
+        let nx: CGFloat
+        let ny: CGFloat
+    }
+
+    private var pendingPreservedView: PreservedViewState?
 
     override var isFlipped: Bool { true }
 
@@ -54,6 +68,8 @@ final class BrowseImageNSView: NSView {
         scaleFactor = 1.0
         scrollOffset = .zero
         isActualSize = false
+        zoomPinned = false
+        pendingPreservedView = nil
         resetTransforms()
         needsDisplay = true
     }
@@ -82,6 +98,7 @@ final class BrowseImageNSView: NSView {
         preferredActualSize = actualSize
         self.contentRevision = contentRevision
         if pathChanged {
+            capturePreserveSnapshot(forNewPath: path)
             imagePath = path
         } else if contentChanged {
             loadImage()
@@ -94,12 +111,66 @@ final class BrowseImageNSView: NSView {
         guard sourceImage != nil else { return }
         isActualSize = preferredActualSize
         if preferredActualSize {
+            zoomPinned = false
             scaleFactor = 1.0
             scrollOffset = .zero
         } else {
             fitToWindow()
         }
         needsDisplay = true
+    }
+
+    private func finishImageLoad() {
+        guard sourceImage != nil else { return }
+        if let pending = pendingPreservedView, pending.targetPath == imagePath {
+            pendingPreservedView = nil
+            preferredActualSize = false
+            isActualSize = false
+            applyScaleAndScroll(
+                scale: pending.scaleFactor,
+                anchor: pending.anchor,
+                nx: pending.nx,
+                ny: pending.ny,
+                image: sourceImage!
+            )
+            zoomPinned = true
+            clampScroll()
+        } else {
+            pendingPreservedView = nil
+            applyCurrentDisplayMode()
+        }
+        needsDisplay = true
+    }
+
+    private func capturePreserveSnapshot(forNewPath path: String?) {
+        guard let path,
+              appState?.config.bool(forKey: "browse_preserve_zoom_on_image_change", default: false) == true,
+              zoomPinned,
+              let image = sourceImage else {
+            pendingPreservedView = nil
+            return
+        }
+        let draw = imageDrawRect(for: image)
+        guard draw.width > 0, draw.height > 0 else {
+            pendingPreservedView = nil
+            return
+        }
+        let anchor = preserveAnchorForNavigation()
+        let (nx, ny) = normalizedImagePoint(in: draw, anchor: anchor)
+        pendingPreservedView = PreservedViewState(
+            targetPath: path,
+            scaleFactor: scaleFactor,
+            anchor: anchor,
+            nx: nx,
+            ny: ny
+        )
+    }
+
+    private func preserveAnchorForNavigation() -> CGPoint {
+        if bounds.contains(lastZoomAnchorInView) {
+            return lastZoomAnchorInView
+        }
+        return bounds.center
     }
 
     func rotateClockwise() {
@@ -147,6 +218,7 @@ final class BrowseImageNSView: NSView {
         onActualSizeModeChanged?(false)
         scaleFactor = bounds.width / imageSize.width
         scrollOffset = CGPoint(x: 0, y: 0)
+        zoomPinned = true
         needsDisplay = true
     }
 
@@ -155,6 +227,7 @@ final class BrowseImageNSView: NSView {
         resetTransforms()
         guard let imagePath else {
             sourceImage = nil
+            pendingPreservedView = nil
             needsDisplay = true
             return
         }
@@ -162,7 +235,7 @@ final class BrowseImageNSView: NSView {
         if let image = BrowseImageLoader.loadImage(from: imagePath, ignoreExifRotation: ignoreExif) {
             emptyStateMessage = "No image selected"
             sourceImage = image
-            applyCurrentDisplayMode()
+            finishImageLoad()
             return
         }
         loadImageFromCacheOrAsync(path: imagePath)
@@ -176,7 +249,7 @@ final class BrowseImageNSView: NSView {
         }
         if let preview = appState.previewPaneCache.cachedImage(for: path) {
             sourceImage = preview
-            applyCurrentDisplayMode()
+            finishImageLoad()
             return
         }
 
@@ -191,17 +264,18 @@ final class BrowseImageNSView: NSView {
                         cgImage: cg,
                         size: NSSize(width: cg.width, height: cg.height)
                     )
-                    self.applyCurrentDisplayMode()
+                    self.finishImageLoad()
                     return
                 }
             }
             if let cg = await appState.thumbnailCache.generateThumbnail(for: normalized, size: 8192) {
                 guard !Task.isCancelled, self.imagePath == path else { return }
                 self.sourceImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-                self.applyCurrentDisplayMode()
+                self.finishImageLoad()
                 return
             }
             guard !Task.isCancelled, self.imagePath == path else { return }
+            self.pendingPreservedView = nil
             self.applyEmptyBrowseState(for: path)
         }
     }
@@ -227,11 +301,17 @@ final class BrowseImageNSView: NSView {
         scaleFactor = fit
         scrollOffset = .zero
         isActualSize = false
+        zoomPinned = false
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        let oldSize = bounds.size
         super.setFrameSize(newSize)
-        if !isActualSize, sourceImage != nil {
+        if zoomPinned, sourceImage != nil {
+            scrollOffset.x -= (newSize.width - oldSize.width) / 2
+            scrollOffset.y -= (newSize.height - oldSize.height) / 2
+            clampScroll()
+        } else if !isActualSize, sourceImage != nil {
             fitToWindow()
         }
         needsDisplay = true
@@ -488,28 +568,42 @@ final class BrowseImageNSView: NSView {
         return convert(event.locationInWindow, from: nil)
     }
 
+    private func normalizedImagePoint(in drawRect: NSRect, anchor: CGPoint) -> (CGFloat, CGFloat) {
+        let nx = min(max((anchor.x - drawRect.minX) / drawRect.width, 0), 1)
+        let ny = min(max((anchor.y - drawRect.minY) / drawRect.height, 0), 1)
+        return (nx, ny)
+    }
+
+    private func applyScaleAndScroll(
+        scale: CGFloat,
+        anchor: CGPoint,
+        nx: CGFloat,
+        ny: CGFloat,
+        image: NSImage
+    ) {
+        scaleFactor = min(max(scale, 0.05), 20.0)
+        let imageSize = image.size
+        let afterW = imageSize.width * scaleFactor
+        let afterH = imageSize.height * scaleFactor
+        scrollOffset.x = (bounds.width - afterW) / 2 - (anchor.x - nx * afterW)
+        scrollOffset.y = (bounds.height - afterH) / 2 - (anchor.y - ny * afterH)
+    }
+
     private func applyZoom(factor: CGFloat, anchor: CGPoint) {
         guard let image = sourceImage else { return }
-        let clamped = min(max(factor, 0.05), 20.0)
         let before = imageDrawRect(for: image)
         guard before.width > 0, before.height > 0 else { return }
 
-        let fracX = min(max((anchor.x - before.minX) / before.width, 0), 1)
-        let fracY = min(max((anchor.y - before.minY) / before.height, 0), 1)
-
-        scaleFactor = clamped
+        let (nx, ny) = normalizedImagePoint(in: before, anchor: anchor)
         if preferredActualSize {
             preferredActualSize = false
             isActualSize = false
             onActualSizeModeChanged?(false)
         }
 
-        let imageSize = image.size
-        let afterW = imageSize.width * scaleFactor
-        let afterH = imageSize.height * scaleFactor
-        // Keep the image pixel under `anchor` at the same view position (Python `zoom_at_point`).
-        scrollOffset.x = (bounds.width - afterW) / 2 - (anchor.x - fracX * afterW)
-        scrollOffset.y = (bounds.height - afterH) / 2 - (anchor.y - fracY * afterH)
+        applyScaleAndScroll(scale: factor, anchor: anchor, nx: nx, ny: ny, image: image)
+        lastZoomAnchorInView = anchor
+        zoomPinned = true
         clampScroll()
         needsDisplay = true
     }

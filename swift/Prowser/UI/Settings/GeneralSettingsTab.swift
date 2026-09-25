@@ -144,6 +144,12 @@ struct GeneralSettingsTab: View {
                             }
                         }
                         SettingsPreferenceToggleRow(
+                            title: "Preserve zoom when changing images",
+                            subtitle: "When zoomed (wheel, pinch, or +/-), keep zoom and pan anchor on arrow keys, H, and E.",
+                            tooltip: "Applies only after manual zoom in browse mode, not in fit-to-window or actual size.",
+                            isOn: boolBinding("browse_preserve_zoom_on_image_change")
+                        )
+                        SettingsPreferenceToggleRow(
                             title: "Use EXIF rotation",
                             subtitle: "Rotate images based on EXIF data if available.",
                             tooltip: "Apply automatic EXIF rotation correction. Manual rotation (Shift+arrow keys) still works in fullscreen.",
