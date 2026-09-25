@@ -311,6 +311,8 @@ final class AppConfig {
     /// Console output for `--debug` / Settings → Debug mode.
     func debugLog(_ message: String) {
         guard bool(forKey: "debug_mode") else { return }
+        let line = "\(SessionViewLog.debugTimestamp()) \(message)"
+        SessionViewLog.appendLine(line, config: self)
         NSLog("%@", message)
     }
 

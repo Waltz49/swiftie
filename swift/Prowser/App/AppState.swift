@@ -189,6 +189,7 @@ final class AppState {
 
         config.loadSettings()
         config.applyLaunchDebugFlag(launchOptions.debug)
+        SessionViewLog.install(config: config)
         migrateSwiftSidebarDefaults(config: config)
         discardPersistedLastDropLocation(config: config)
         leftSidebarSplit = SidebarPaneSplitModel(side: .left, config: config)
@@ -737,16 +738,7 @@ final class AppState {
     }
 
     func openLiveLog() {
-        let logPath = config.logsDirectory
-            .appendingPathComponent("image_browser_print_\(getuid()).log")
-        if FileManager.default.fileExists(atPath: logPath.path) {
-            NSWorkspace.shared.open(logPath)
-        } else {
-            StyledMessageDialog.showWarning(
-                title: "Log file not found",
-                message: logPath.path
-            )
-        }
+        ViewLogDialogController.show(appState: self)
     }
 
     func removeFacialRecognitionModels() {

@@ -20,6 +20,8 @@ final class LmStudioCaptionService {
     private(set) var sessionState: SessionState = .unknown
     private var activeTask: Task<Void, Never>?
 
+    private static let logTag = "imagegen_plugins.lmstudio_caption"
+
     var isCaptionInProgress: Bool { activeTask != nil }
 
     private init() {}
@@ -70,6 +72,7 @@ final class LmStudioCaptionService {
                     onFinished(.failure(CaptionError.cancelled))
                 } else {
                     sessionState = .unavailable
+                    logCaptionFailure(error, config: config)
                     onFinished(.failure(error))
                 }
             }
@@ -77,14 +80,35 @@ final class LmStudioCaptionService {
         }
     }
 
+    private func logCaptionFailure(_ error: Error, config: AppConfig) {
+        if error is CancellationError || (error as? CaptionError) == .cancelled { return }
+        let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        SessionViewLog.logLMStudioError(message, detail: nil, config: config)
+    }
+
     // MARK: - Network
 
     private func networkProbe(config: AppConfig) async -> Bool {
         guard let base = apiBaseURL(host: captionHost(config: config)) else { return false }
         let modelsURL = base.appending(path: "models")
+        SessionViewLog.logLMStudioCall(
+            method: "GET \(modelsURL.path)",
+            payload: ["url": modelsURL.absoluteString],
+            config: config
+        )
         do {
             let (data, response) = try await URLSession.shared.data(from: modelsURL)
-            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
+                SessionViewLog.logLMStudioError("Probe failed: no HTTP response", config: config)
+                return false
+            }
+            logHTTPResponseData(data, status: http.statusCode, config: config)
+            guard (200 ..< 300).contains(http.statusCode) else {
+                SessionViewLog.logLMStudioError(
+                    "Probe failed: HTTP \(http.statusCode)",
+                    detail: String(data: data, encoding: .utf8),
+                    config: config
+                )
                 return false
             }
             let ids = parseModelIDs(from: data)
@@ -92,6 +116,7 @@ final class LmStudioCaptionService {
             let saved = savedModelKey(config: config)
             return !saved.isEmpty
         } catch {
+            SessionViewLog.logLMStudioError("Probe failed", detail: error.localizedDescription, config: config)
             return false
         }
     }
@@ -121,8 +146,24 @@ final class LmStudioCaptionService {
         let encoded = try prepareVisionImagePayloads(imagePath: imagePath)
         let imageURLCandidates = lmStudioImageURLCandidates(jpegBase64: encoded.jpegBase64, pngBase64: encoded.pngBase64)
 
+        SessionViewLog.logModelInput(
+            tag: Self.logTag,
+            payload: [
+                "system_prompt": systemPrompt,
+                "user_prompt": userPrompt,
+                "image_path": imagePath,
+                "config": ["temperature": settings.temperature, "model": modelID],
+            ],
+            config: config
+        )
+
         var lastImageError = ""
         for imageURL in imageURLCandidates {
+            SessionViewLog.appendTimestampedBlock(
+                header: "\(Self.logTag) image_url_candidate",
+                body: SessionViewLog.sanitizeStringForLog(imageURL),
+                config: config
+            )
             do {
                 return try await streamCaptionRequest(
                     baseURL: base,
@@ -140,16 +181,17 @@ final class LmStudioCaptionService {
                 }
                 if isLMStudioImagePayloadError(message) {
                     lastImageError = message
+                    SessionViewLog.logLMStudioError("Image payload rejected", detail: message, config: config)
                     continue
                 }
                 throw CaptionError.runtime(message)
             }
         }
-        throw CaptionError.runtime(
-            lastImageError.isEmpty
-                ? "Caption generation failed.\n\nCould not send image to LM Studio."
-                : "Caption generation failed.\n\nDetail: \(lastImageError)"
-        )
+        let finalMessage = lastImageError.isEmpty
+            ? "Caption generation failed.\n\nCould not send image to LM Studio."
+            : "Caption generation failed.\n\nDetail: \(lastImageError)"
+        SessionViewLog.logLMStudioError(finalMessage, config: config)
+        throw CaptionError.runtime(finalMessage)
     }
 
     private struct VisionImagePayloads {
@@ -165,7 +207,8 @@ final class LmStudioCaptionService {
         temperature: Double,
         imageURL: String,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void
+        onChunk: @escaping @MainActor (String) -> Void,
+        retriedModelLoad: Bool = false
     ) async throws -> String {
         let url = baseURL.appending(path: "chat/completions")
 
@@ -189,20 +232,63 @@ final class LmStudioCaptionService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        SessionViewLog.logLMStudioCall(
+            method: "POST \(url.path)",
+            payload: body,
+            config: config
+        )
+
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard let http = response as? HTTPURLResponse else {
+            SessionViewLog.logLMStudioError("No response from LM Studio.", config: config)
             throw CaptionError.runtime("No response from LM Studio.")
         }
         if http.statusCode == 400 || http.statusCode == 422 {
             let msg = try await readErrorBody(from: bytes)
+            SessionViewLog.logLMStudioError(
+                "Caption HTTP \(http.statusCode)",
+                detail: msg,
+                config: config
+            )
             if impliesVisionRequired(msg) {
                 throw CaptionError.runtime(Self.visionRequiredMessage)
             }
-            throw CaptionError.runtime("Caption generation failed.\n\nDetail: \(msg)")
+            return try await retryCaptionAfterModelLoadIfNeeded(
+                errorMessage: msg,
+                baseURL: baseURL,
+                modelID: modelID,
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt,
+                temperature: temperature,
+                imageURL: imageURL,
+                config: config,
+                onChunk: onChunk,
+                retriedModelLoad: retriedModelLoad
+            ) {
+                throw CaptionError.runtime("Caption generation failed.\n\nDetail: \(msg)")
+            }
         }
         guard (200 ..< 300).contains(http.statusCode) else {
             let msg = try await readErrorBody(from: bytes)
-            throw CaptionError.runtime("Caption generation failed.\n\nDetail: \(msg)")
+            SessionViewLog.logLMStudioError(
+                "Caption HTTP \(http.statusCode)",
+                detail: msg,
+                config: config
+            )
+            return try await retryCaptionAfterModelLoadIfNeeded(
+                errorMessage: msg,
+                baseURL: baseURL,
+                modelID: modelID,
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt,
+                temperature: temperature,
+                imageURL: imageURL,
+                config: config,
+                onChunk: onChunk,
+                retriedModelLoad: retriedModelLoad
+            ) {
+                throw CaptionError.runtime("Caption generation failed.\n\nDetail: \(msg)")
+            }
         }
 
         var accumulated = ""
@@ -210,6 +296,7 @@ final class LmStudioCaptionService {
             try Task.checkCancellation()
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            SessionViewLog.logLMStudioSSELine(String(payload), config: config)
             if payload == "[DONE]" { break }
             guard let data = payload.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -226,23 +313,53 @@ final class LmStudioCaptionService {
 
         let final = Self.stripThinkTags(accumulated).trimmingCharacters(in: .whitespacesAndNewlines)
         if final.isEmpty {
+            SessionViewLog.logLMStudioError("Empty caption.", config: config)
             throw CaptionError.runtime("Empty caption.")
         }
-        config.updateSetting("caption_last_lm_model_key", value: modelID)
+        SessionViewLog.logModelOutput(tag: Self.logTag, text: final, config: config)
+        persistLastModelKey(modelID, config: config)
         return final
     }
 
-    private func resolveModelID(baseURL: URL, config: AppConfig) async throws -> String {
-        let modelsURL = baseURL.appending(path: "models")
-        let (data, response) = try await URLSession.shared.data(from: modelsURL)
-        guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-            throw CaptionError.runtime(
-                "Could not contact LMStudio server at \(captionHost(config: config)).\n\n"
-                    + "Please start LMStudio and enable the local API server."
-            )
+    private func retryCaptionAfterModelLoadIfNeeded(
+        errorMessage: String,
+        baseURL: URL,
+        modelID: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double,
+        imageURL: String,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void,
+        retriedModelLoad: Bool,
+        onFailure: () throws -> Void
+    ) async throws -> String {
+        if retriedModelLoad || !isNoModelLoadedMessage(errorMessage) {
+            try onFailure()
         }
-        let ids = parseModelIDs(from: data)
+        let saved = savedModelKey(config: config)
+        let reloadKey = saved.isEmpty ? modelID : saved
+        if reloadKey.isEmpty {
+            try onFailure()
+        }
+        try await reloadSavedCaptionModel(savedKey: reloadKey, config: config)
+        return try await streamCaptionRequest(
+            baseURL: baseURL,
+            modelID: reloadKey,
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            temperature: temperature,
+            imageURL: imageURL,
+            config: config,
+            onChunk: onChunk,
+            retriedModelLoad: true
+        )
+    }
+
+    private func resolveModelID(baseURL: URL, config: AppConfig) async throws -> String {
+        let ids = try await fetchLoadedModelIDs(baseURL: baseURL, config: config)
         if let first = ids.first {
+            persistLastModelKey(first, config: config)
             return first
         }
         let saved = savedModelKey(config: config)
@@ -252,7 +369,89 @@ final class LmStudioCaptionService {
                     + "Please load a vision-capable model (VLM) before using AI captioning."
             )
         }
+        try await reloadSavedCaptionModel(savedKey: saved, config: config)
+        let idsAfterLoad = try await fetchLoadedModelIDs(baseURL: baseURL, config: config)
+        if let first = idsAfterLoad.first {
+            persistLastModelKey(first, config: config)
+            return first
+        }
         return saved
+    }
+
+    private func fetchLoadedModelIDs(baseURL: URL, config: AppConfig) async throws -> [String] {
+        let modelsURL = baseURL.appending(path: "models")
+        SessionViewLog.logLMStudioCall(
+            method: "GET \(modelsURL.path)",
+            payload: ["url": modelsURL.absoluteString],
+            config: config
+        )
+        let (data, response) = try await URLSession.shared.data(from: modelsURL)
+        guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+            let detail = String(data: data, encoding: .utf8)
+            SessionViewLog.logLMStudioError(
+                "Could not contact LMStudio server at \(captionHost(config: config)).",
+                detail: detail,
+                config: config
+            )
+            throw CaptionError.runtime(
+                "Could not contact LMStudio server at \(captionHost(config: config)).\n\n"
+                    + "Please start LMStudio and enable the local API server."
+            )
+        }
+        logHTTPResponseData(data, status: http.statusCode, config: config)
+        return parseModelIDs(from: data)
+    }
+
+    /// `POST /api/v1/models/load` — port of Python `client.llm.model(saved_key)`.
+    private func reloadSavedCaptionModel(savedKey: String, config: AppConfig) async throws {
+        guard let nativeBase = nativeAPIBaseURL(host: captionHost(config: config)) else {
+            throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
+        }
+        let loadURL = nativeBase.appending(path: "models/load")
+        let body: [String: Any] = ["model": savedKey]
+        SessionViewLog.logLMStudioCall(
+            method: "POST /api/v1/models/load",
+            payload: body,
+            config: config
+        )
+        var request = URLRequest(url: loadURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CaptionError.runtime(
+                "Could not reload the last LM Studio caption model.\n\n"
+                    + "Saved model: \(savedKey)\n\nDetail: No HTTP response."
+            )
+        }
+        logHTTPResponseData(data, status: http.statusCode, config: config)
+        guard (200 ..< 300).contains(http.statusCode) else {
+            let detail = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            SessionViewLog.logLMStudioError("Model load failed", detail: detail, config: config)
+            throw CaptionError.runtime(
+                "Could not reload the last LM Studio caption model.\n\n"
+                    + "Saved model: \(savedKey)\n\nDetail: \(detail)"
+            )
+        }
+        persistLastModelKey(savedKey, config: config)
+    }
+
+    private func persistLastModelKey(_ modelKey: String, config: AppConfig) {
+        let trimmed = modelKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if savedModelKey(config: config) == trimmed { return }
+        config.updateSetting("caption_last_lm_model_key", value: trimmed)
+    }
+
+    private func isNoModelLoadedMessage(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("no model")
+            || lower.contains("no models")
+            || lower.contains("not loaded")
+            || lower.contains("model is not loaded")
+            || lower.contains("model not found")
+            || lower.contains("no llm")
     }
 
     // MARK: - Settings helpers
@@ -348,6 +547,32 @@ final class LmStudioCaptionService {
             components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/v1"
         }
         return components.url
+    }
+
+    private func nativeAPIBaseURL(host: String) -> URL? {
+        guard let openAI = apiBaseURL(host: host),
+              var components = URLComponents(url: openAI, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = "/api/v1"
+        return components.url
+    }
+
+    private func logHTTPResponseData(_ data: Data, status: Int, config: AppConfig) {
+        if let json = try? JSONSerialization.jsonObject(with: data),
+           let payload = json as? [String: Any] {
+            SessionViewLog.logLMStudioCall(
+                method: "response HTTP \(status)",
+                payload: payload,
+                config: config
+            )
+        } else if let text = String(data: data, encoding: .utf8), !text.isEmpty {
+            SessionViewLog.appendTimestampedBlock(
+                header: "\(Self.logTag) response HTTP \(status)",
+                body: text,
+                config: config
+            )
+        }
     }
 
     private func parseModelIDs(from data: Data) -> [String] {

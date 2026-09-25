@@ -429,7 +429,7 @@ struct ProwserCommands: Commands {
                         Task { @MainActor in appState.loadRandomImagesFromRecents() }
                     }
 
-                    Button("View Live Log") {
+                    Button("View log") {
                         Task { @MainActor in appState.openLiveLog() }
                     }
                     .keyboardShortcut("l", modifiers: .control)
