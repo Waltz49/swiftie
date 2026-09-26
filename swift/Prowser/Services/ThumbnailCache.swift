@@ -65,6 +65,24 @@ actor ThumbnailCache {
         diskSizesByPath.removeValue(forKey: normalized)
     }
 
+    /// Python `clear_cache_for_directory(..., skip_disk_deletion=False)` — drop memory and `{key}_*.jpg` files.
+    @discardableResult
+    func removeDiskThumbnails(for imagePaths: [String]) -> Int {
+        let filenames = (try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path)) ?? []
+        var removed = 0
+        for path in imagePaths {
+            invalidate(for: path)
+            let prefix = "\(cacheKey(for: path))_"
+            for filename in filenames where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
+                let url = thumbnailDirectory.appendingPathComponent(filename)
+                if (try? FileManager.default.removeItem(at: url)) != nil {
+                    removed += 1
+                }
+            }
+        }
+        return removed
+    }
+
     /// Python `clear_cache("thumbnails")` — drop in-memory thumbnails and cancel queued decodes after disk cache changes.
     func resetAfterDiskCacheMutation() async {
         decodeQueueGeneration += 1

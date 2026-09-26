@@ -41,6 +41,12 @@ struct SimilaritySearchSheet: View {
                         .frame(width: SearchSheetCheckboxLayout.width)
                         .disabled(!useCustomDirectory)
                     Text("Search in subdirectories")
+                        .foregroundStyle(useCustomDirectory ? Color.primary : Color.secondary)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard useCustomDirectory else { return }
+                            recursive.toggle()
+                        }
                 }
             }
             HStack {

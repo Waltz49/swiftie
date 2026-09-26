@@ -114,12 +114,19 @@ final class FileTreeOperationsService {
             extensions: appState.config.imageExtensions,
             filterPattern: "*"
         )
-        var cleared = 0
         for path in images {
             appState.metadataCache.invalidate(path: path)
-            cleared += 1
         }
-        appState.status.show("Cleared cache for \(cleared) images in \((directory as NSString).lastPathComponent)")
+        Task { @MainActor in
+            let removed = await appState.thumbnailCache.removeDiskThumbnails(for: images)
+            if !images.isEmpty {
+                appState.thumbnailInvalidationGeneration += 1
+                appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(images))
+            }
+            appState.status.show(
+                "Cleared cache for \(removed) thumbnail\(removed == 1 ? "" : "s") in \((directory as NSString).lastPathComponent)"
+            )
+        }
     }
 
     private func showRestrictedAlert(directory: String) {

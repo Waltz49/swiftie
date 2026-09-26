@@ -4,7 +4,8 @@ import Foundation
 /// Tools > Cache Subdirectories' Thumbnails (⇧⌘C). Port of `cache/cache_prepopulator.py`.
 @MainActor
 enum CachePrepopulatorService {
-    nonisolated private static let scanUIInterval: TimeInterval = 0.05
+    nonisolated private static let uiUpdateInterval: TimeInterval = 1
+    nonisolated private static let messageDelay: TimeInterval = 5
     private static let checkChunkSize = 100
     private static let cacheInFlightLimit = 8
     private static let cachePollInterval: Duration = .milliseconds(250)
@@ -54,6 +55,7 @@ enum CachePrepopulatorService {
             maximum: 100
         )
         panel.show()
+        let progressStartedAt = Date()
 
         // Phase 1: recursive scan, or caller-supplied paths.
         let imageFiles: [String]
@@ -71,13 +73,14 @@ enum CachePrepopulatorService {
                     includeHidden: includeHidden,
                     extensions: extensions,
                     shouldCancel: { panel.cancelRequested },
-                    onDirectoryScanned: { dirIndex, totalDirs, dirName, depth, imagesFound in
+                    onDirectoryScanned: { dirIndex, totalDirs, dirName, imagesFound in
                         panel.setMaximum(totalDirs)
-                        panel.update(
-                            value: dirIndex,
-                            label: "Scanning \(dirName) (depth \(depth))... (\(dirIndex + 1)/\(totalDirs))\n"
-                                + "Total images found: \(imagesFound)"
+                        let label = Self.progressLabel(
+                            firstLine: "Scanning \(dirName)",
+                            secondLine: "\(dirIndex + 1)/\(totalDirs) directories, \(imagesFound) images found",
+                            startedAt: progressStartedAt
                         )
+                        panel.update(value: dirIndex, label: label)
                     }
                 )
             }.value
@@ -109,7 +112,8 @@ enum CachePrepopulatorService {
             size: thumbnailSize,
             cache: cache,
             panel: panel,
-            scanProgress: scanProgress
+            scanProgress: scanProgress,
+            startedAt: progressStartedAt
         )
 
         if panel.cancelRequested {
@@ -141,7 +145,8 @@ enum CachePrepopulatorService {
             size: thumbnailSize,
             cache: cache,
             panel: panel,
-            checkProgress: checkProgress
+            checkProgress: checkProgress,
+            startedAt: progressStartedAt
         )
 
         if result.timedOut {
@@ -193,7 +198,7 @@ enum CachePrepopulatorService {
         includeHidden: Bool,
         extensions: Set<String>,
         shouldCancel: @Sendable () -> Bool,
-        onDirectoryScanned: @Sendable (_ dirIndex: Int, _ totalDirs: Int, _ dirName: String, _ depth: Int, _ imagesFound: Int) -> Void
+        onDirectoryScanned: @Sendable (_ dirIndex: Int, _ totalDirs: Int, _ dirName: String, _ imagesFound: Int) -> Void
     ) -> [String] {
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
         var stack: [(URL, Int)] = [(URL(fileURLWithPath: root), 0)]
@@ -219,7 +224,7 @@ enum CachePrepopulatorService {
         var imageFiles: [String] = []
         var lastUI = Date.distantPast
 
-        for (dirIndex, (dirURL, depth)) in directories.enumerated() {
+        for (dirIndex, (dirURL, _)) in directories.enumerated() {
             if shouldCancel() { break }
             if let entries = try? FileManager.default.contentsOfDirectory(
                 at: dirURL, includingPropertiesForKeys: Array(keys), options: []
@@ -233,10 +238,9 @@ enum CachePrepopulatorService {
                 }
             }
             let now = Date()
-            if dirIndex == totalDirs - 1 || now.timeIntervalSince(lastUI) >= scanUIInterval {
+            if dirIndex == totalDirs - 1 || now.timeIntervalSince(lastUI) >= uiUpdateInterval {
                 lastUI = now
-                let dirName = dirURL.lastPathComponent.isEmpty ? dirURL.path : dirURL.lastPathComponent
-                onDirectoryScanned(dirIndex, totalDirs, dirName, depth, imageFiles.count)
+                onDirectoryScanned(dirIndex, totalDirs, Self.basename(dirURL.path), imageFiles.count)
             }
         }
         return imageFiles
@@ -250,12 +254,14 @@ enum CachePrepopulatorService {
         size: Int,
         cache: ThumbnailCache,
         panel: CancellableProgressPanelController,
-        scanProgress: Int
+        scanProgress: Int,
+        startedAt: Date
     ) async -> [String] {
         let total = imagePaths.count
         let diskIndex = await cache.diskThumbnailIndex()
         var imagesToCache: [String] = []
         var timing = ProgressTimingTracker()
+        var lastUI = Date.distantPast
         var start = 0
         while start < total {
             if panel.cancelRequested { break }
@@ -265,13 +271,21 @@ enum CachePrepopulatorService {
             )
             imagesToCache.append(contentsOf: needed)
             start = end
-            panel.update(
-                value: scanProgress + end,
-                label: labelWithRemainingLine(
-                    "Checking cache status... (\(end)/\(total) images)",
-                    done: end, total: total, timing: &timing
+            timing.record(processed: end)
+            let now = Date()
+            if end == total || now.timeIntervalSince(lastUI) >= uiUpdateInterval {
+                lastUI = now
+                let dirName = Self.basename((imagePaths[end - 1] as NSString).deletingLastPathComponent)
+                panel.update(
+                    value: scanProgress + end,
+                    label: progressLabel(
+                        firstLine: "Checking \(dirName)",
+                        secondLine: remainingLine(done: end, total: total, timing: &timing),
+                        startedAt: startedAt,
+                        now: now
+                    )
                 )
-            )
+            }
         }
         return imagesToCache
     }
@@ -279,7 +293,7 @@ enum CachePrepopulatorService {
     // MARK: - Phase 3: cache
 
     private enum CacheEvent {
-        case finished(Bool)
+        case finished(path: String, ok: Bool)
         case tick
     }
 
@@ -290,7 +304,8 @@ enum CachePrepopulatorService {
         size: Int,
         cache: ThumbnailCache,
         panel: CancellableProgressPanelController,
-        checkProgress: Int
+        checkProgress: Int,
+        startedAt: Date
     ) async -> (cached: Int, cancelled: Bool, timedOut: Bool) {
         let total = imagePaths.count
         var cached = 0
@@ -299,8 +314,9 @@ enum CachePrepopulatorService {
         var timedOut = false
         var timing = ProgressTimingTracker()
         var lastUI = Date.distantPast
-        let startedAt = Date()
-        var lastProgressAt = startedAt
+        var lastPath = imagePaths[0]
+        let stallClockStart = Date()
+        var lastProgressAt = stallClockStart
         let maxTotalTimeout = min(1800, max(120, Double(total) * perImageTimeout))
 
         await withTaskGroup(of: CacheEvent.self) { group in
@@ -309,7 +325,10 @@ enum CachePrepopulatorService {
                 let path = imagePaths[nextIndex]
                 nextIndex += 1
                 group.addTask {
-                    .finished(await cache.generateThumbnail(for: path, size: size, priority: .visible) != nil)
+                    .finished(
+                        path: path,
+                        ok: await cache.generateThumbnail(for: path, size: size, priority: .visible) != nil
+                    )
                 }
             }
             group.addTask {
@@ -320,15 +339,20 @@ enum CachePrepopulatorService {
             while let event = await group.next() {
                 let now = Date()
                 switch event {
-                case .finished(let ok):
+                case .finished(let path, let ok):
+                    lastPath = path
                     done += 1
                     if ok { cached += 1 }
+                    timing.record(processed: done)
                     lastProgressAt = now
                     if nextIndex < total {
-                        let path = imagePaths[nextIndex]
+                        let nextPath = imagePaths[nextIndex]
                         nextIndex += 1
                         group.addTask {
-                            .finished(await cache.generateThumbnail(for: path, size: size, priority: .visible) != nil)
+                            .finished(
+                                path: nextPath,
+                                ok: await cache.generateThumbnail(for: nextPath, size: size, priority: .visible) != nil
+                            )
                         }
                     }
                 case .tick:
@@ -345,20 +369,22 @@ enum CachePrepopulatorService {
                     break
                 }
                 if done < total {
-                    if now.timeIntervalSince(startedAt) >= maxTotalTimeout
+                    if now.timeIntervalSince(stallClockStart) >= maxTotalTimeout
                         || now.timeIntervalSince(lastProgressAt) >= stallTimeout {
                         timedOut = true
                         break
                     }
                 }
-                let milestone = done == 1 || done % 10 == 0 || done == total
-                if milestone || now.timeIntervalSince(lastUI) >= 1 {
+                if done == total || now.timeIntervalSince(lastUI) >= uiUpdateInterval {
                     lastUI = now
+                    let dirName = Self.basename((lastPath as NSString).deletingLastPathComponent)
                     panel.update(
                         value: checkProgress + done,
-                        label: labelWithRemainingLine(
-                            "Caching thumbnails...\n(\(done)/\(total))",
-                            done: done, total: total, timing: &timing
+                        label: progressLabel(
+                            firstLine: "Caching \(dirName)",
+                            secondLine: remainingLine(done: done, total: total, timing: &timing),
+                            startedAt: startedAt,
+                            now: now
                         )
                     )
                 }
@@ -372,66 +398,67 @@ enum CachePrepopulatorService {
 
     // MARK: - Label helpers
 
-    /// Python `_label_with_remaining_line`: append "N images remaining (Est: …)".
-    private static func labelWithRemainingLine(
-        _ description: String,
+    nonisolated private static func basename(_ path: String) -> String {
+        let name = (path as NSString).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+
+    /// First line is the directory basename. The second line waits `messageDelay` seconds.
+    nonisolated private static func progressLabel(
+        firstLine: String,
+        secondLine: String?,
+        startedAt: Date,
+        now: Date = Date()
+    ) -> String {
+        guard now.timeIntervalSince(startedAt) >= messageDelay,
+              let secondLine, !secondLine.isEmpty else { return firstLine }
+        return firstLine + "\n" + secondLine
+    }
+
+    /// Python `_label_with_remaining_line` second line: "N images remaining (Est: …)".
+    private static func remainingLine(
         done: Int,
         total: Int,
         timing: inout ProgressTimingTracker
-    ) -> String {
+    ) -> String? {
         let remaining = max(0, total - done)
-        guard remaining > 0 else { return description }
+        guard remaining > 0 else { return nil }
         let estimate = done > 0 ? timing.timeEstimate(processed: done, total: total) : ""
         var line = "\(remaining) image\(remaining != 1 ? "s" : "") remaining"
         if !estimate.isEmpty {
             line += " (\(estimate))"
         }
-        return description + "\n" + line
+        return line
     }
 }
 
-/// Port of Python `_TimingTracker` (`search/cnn_image_similarity_sorter.py`): rolling 200-item window,
-/// no estimate until 4 s elapsed or 200 items processed. Output is `"Est: m:ss"` / `"Est: h:mm:ss"`.
+/// Remaining-time estimate from the average of up to the last 20 images.
 struct ProgressTimingTracker {
-    private var startTime: Date?
-    private var windowStartTime: Date?
-    private var windowStartCount = 0
+    private static let windowSize = 20
+    private var samples: [(count: Int, time: Date)] = []
 
-    init() {}
+    init() {
+        samples = [(0, Date())]
+    }
 
-    mutating func timeEstimate(processed: Int, total: Int) -> String {
-        let now = Date()
-        guard let startTime, let windowStartTime else {
-            self.startTime = now
-            self.windowStartTime = now
-            windowStartCount = 0
-            return ""
+    mutating func record(processed: Int) {
+        guard processed > (samples.last?.count ?? 0) else { return }
+        samples.append((processed, Date()))
+        let cutoff = processed - Self.windowSize
+        if let keepFrom = samples.lastIndex(where: { $0.count <= cutoff }) {
+            samples.removeFirst(keepFrom)
         }
+    }
 
-        var sinceWindow = processed - windowStartCount
-        var windowStart = windowStartTime
-        if sinceWindow >= 200 {
-            self.windowStartTime = now
-            windowStartCount = processed
-            windowStart = now
-            sinceWindow = 0
-        }
-
-        let totalElapsed = now.timeIntervalSince(startTime)
-        if totalElapsed < 4, processed < 200 { return "" }
-
-        let avgPerItem: TimeInterval
-        if sinceWindow > 0, now.timeIntervalSince(windowStart) > 0 {
-            avgPerItem = now.timeIntervalSince(windowStart) / Double(sinceWindow)
-        } else if processed > 0 {
-            avgPerItem = totalElapsed / Double(processed)
-        } else {
-            return ""
-        }
-
+    func timeEstimate(processed: Int, total: Int) -> String {
         let remaining = total - processed
-        guard remaining > 0 else { return "" }
-        return Self.format(avgPerItem * Double(remaining))
+        guard remaining > 0, processed > 0, samples.count >= 2 else { return "" }
+        let newest = samples[samples.count - 1]
+        let oldest = samples[0]
+        let countDelta = newest.count - oldest.count
+        let timeDelta = newest.time.timeIntervalSince(oldest.time)
+        guard countDelta > 0, timeDelta > 0 else { return "" }
+        return Self.format((timeDelta / Double(countDelta)) * Double(remaining))
     }
 
     private static func format(_ seconds: TimeInterval) -> String {
