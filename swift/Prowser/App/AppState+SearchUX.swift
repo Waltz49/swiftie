@@ -26,7 +26,8 @@ extension AppState {
 
     /// Call from the local key monitor before menu shortcuts or focus changes (Python menu `tree_had_focus` capture).
     func recordSearchInvocationTreeContextFromKeyEvent(_ event: NSEvent) {
-        guard KeyboardHandlerController.isSearchDirectoryPrimingShortcut(event) else { return }
+        guard KeyboardHandlerController.isSearchDirectoryPrimingShortcut(event)
+            || KeyboardHandlerController.isTreeScopedCacheShortcut(event) else { return }
         syncFileTreeKeyboardFocus(from: event.window)
         let focused = fileTreePaneHasKeyboardFocus(in: event.window)
         let scope = focused ? fileTreeSearchScopeDirectory() : nil

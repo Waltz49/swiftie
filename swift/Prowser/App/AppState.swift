@@ -48,7 +48,7 @@ final class AppState {
     var pendingPersonSearchDirectoryPrime: SearchSheetDirectoryPrime?
     var pendingClipSearchDirectoryPrime: SearchSheetDirectoryPrime?
     var pendingSimilaritySearchDirectoryPrime: SearchSheetDirectoryPrime?
-    /// Set on ⌘F/⌘P keyDown before menu routing steals tree focus (Python `_tree_had_focus_when_invoked`).
+    /// Set on ⌘F/⌘P/⇧⌘C keyDown before menu routing steals tree focus (Python `_tree_had_focus_when_invoked`).
     var pendingSearchInvocationTreeContext: SearchInvocationTreeContext?
     var settingsOpenRequestToken = 0
     var requestedSettingsTab: SettingsTab = .general
@@ -451,21 +451,44 @@ final class AppState {
         }
     }
 
-    func prepopulateSubdirectoryThumbnails() {
-        guard let directory = fileData.currentDirectory else {
-            status.show("No directory loaded")
-            return
-        }
-        Task {
-            let depth = config.int(forKey: "search_depth", default: 4)
-            let size = config.int(forKey: "thumbnail_cell_size", default: 256)
-            let count = await thumbnailCache.prepopulateSubdirectories(
-                rootDirectory: directory,
-                extensions: config.imageExtensions,
-                maxDepth: depth,
-                size: size
+    /// Tools > Cache Subdirectories' Thumbnails (⇧⌘C). Tree focus → highlighted folder; otherwise the active image's directory.
+    func prepopulateSubdirectoryThumbnails(directoryOverride: String? = nil) {
+        Task { @MainActor in
+            let treeContext = captureSearchInvocationTreeContext()
+            let directory: String?
+            if let directoryOverride, !directoryOverride.isEmpty {
+                directory = directoryOverride
+            } else if treeContext.hadTreeFocus {
+                if let scoped = treeContext.scopeDirectory {
+                    directory = scoped
+                } else if let raw = fileTreeOutlineView?.coordinator?.treeSearchScopeDirectoryPath(),
+                          FileTreePathRestrictions.isRootOrSystemVolume(raw) {
+                    StyledMessageDialog.showWarning(
+                        title: "Action Not Available",
+                        message: FileTreePathRestrictions.restrictedActionMessage(for: raw)
+                    )
+                    return
+                } else {
+                    StyledMessageDialog.showWarning(
+                        title: "No Directory",
+                        message: "No current directory available for cache prepopulation."
+                    )
+                    return
+                }
+            } else {
+                directory = fileData.currentImagePath.map { ($0 as NSString).deletingLastPathComponent }
+            }
+            if let directory, FileTreePathRestrictions.isRootOrSystemVolume(directory) {
+                StyledMessageDialog.showWarning(
+                    title: "Action Not Available",
+                    message: FileTreePathRestrictions.restrictedActionMessage(for: directory)
+                )
+                return
+            }
+            await CachePrepopulatorService.prepopulateCache(
+                appState: self,
+                directoryOverride: directory
             )
-            status.show("Cached thumbnails for \(count) subdirectory image(s)")
         }
     }
 

@@ -79,6 +79,14 @@ enum FileTreeContextMenu {
         )
         addAction(
             menu,
+            title: "Cache Subdirectories' Thumbnails",
+            shortcut: "⇧⌘C",
+            enabled: !restricted,
+            representedObject: directoryPath,
+            action: #selector(FileTreeMenuActions.cacheSubdirectoryThumbnails(_:))
+        )
+        addAction(
+            menu,
             title: "Clear Cache",
             enabled: !restricted,
             representedObject: directoryPath,
@@ -167,6 +175,15 @@ final class FileTreeMenuActions: NSObject {
     @objc func findSimilarImages(_ sender: NSMenuItem) {
         guard let appState, let path = sender.representedObject as? String else { return }
         appState.fileTreeOperations.findSimilarImages(in: path)
+    }
+
+    @objc func cacheSubdirectoryThumbnails(_ sender: NSMenuItem) {
+        guard let appState, let path = sender.representedObject as? String else { return }
+        if FileTreePathRestrictions.isRootOrSystemVolume(path) {
+            showRestrictedAlert(path: path)
+            return
+        }
+        appState.prepopulateSubdirectoryThumbnails(directoryOverride: path)
     }
 
     @objc func clearCache(_ sender: NSMenuItem) {

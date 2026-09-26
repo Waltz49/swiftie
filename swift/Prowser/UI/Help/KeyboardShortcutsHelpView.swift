@@ -96,6 +96,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘P", "Search for Known Person in selected folder"),
                         ("⌘C", "Copy path of selected row"),
                         ("⇧A", "Show all images including subdirectories"),
+                        ("⇧⌘C", "Cache thumbnails for the highlighted folder and subdirectories"),
                         ("⇧F", "Find duplicate image files (recursive from highlighted folder)"),
                         ("Return / Space", "Open folder or expand/collapse"),
                         ("Tab", "Move focus to thumbnail grid"),
@@ -121,6 +122,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("⌘E", "Edit in external editor"),
                         ("⌘G", "Show GPS location on map"),
                         ("⇧⌘E", "Edit EXIF user comment"),
+                        ("⇧⌘C", "Cache thumbnails (tree folder if focused, else active image directory)"),
                     ])
                 }
             }

@@ -30,6 +30,32 @@ final class FileTreeOperationsService {
             includeHidden: showHidden
         )
 
+        Task { @MainActor in
+            await self.presentShowAllImages(
+                directory: directory,
+                images: images,
+                filterPattern: filterPattern,
+                appState: appState
+            )
+        }
+    }
+
+    private func presentShowAllImages(
+        directory: String,
+        images: [String],
+        filterPattern: String,
+        appState: AppState
+    ) async {
+        if images.count > 100 {
+            let cancelled = await CachePrepopulatorService.prepopulateCache(
+                appState: appState,
+                suppressSuccessMessages: true,
+                imagePaths: images,
+                directoryOverride: directory
+            )
+            if cancelled { return }
+        }
+
         guard !images.isEmpty else {
             let message = filterPattern == "*"
                 ? "No images found in \(directory) and its subdirectories."

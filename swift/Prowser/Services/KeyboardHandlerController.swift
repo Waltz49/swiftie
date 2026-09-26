@@ -99,6 +99,14 @@ final class KeyboardHandlerController {
         return false
     }
 
+    /// ⇧⌘C — Cache Subdirectories' Thumbnails; tree focus is captured before the menu steals it.
+    static func isTreeScopedCacheShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), flags.contains(.shift),
+              !flags.contains(.option), !flags.contains(.control) else { return false }
+        return event.charactersIgnoringModifiers?.lowercased() == "c"
+    }
+
     /// Returns true when the event was handled (and should be consumed).
     private func handleKeyDown(_ event: NSEvent, fromTreeFocus: Bool = false) -> Bool {
         guard appState != nil else { return false }

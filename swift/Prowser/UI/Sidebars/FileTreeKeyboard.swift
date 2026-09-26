@@ -58,6 +58,17 @@ enum FileTreeKeyboard {
             return true
         }
 
+        if hasCommand, hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "c",
+           let path = coordinator.treeSearchScopeDirectoryPath() {
+            if FileTreePathRestrictions.isRootOrSystemVolume(path) {
+                showRestrictedAlert(path: path)
+            } else {
+                appState.prepopulateSubdirectoryThumbnails(directoryOverride: path)
+            }
+            return true
+        }
+
         if event.keyCode == 120, !hasCommand, !hasShift, !hasOption, !hasControl {
             coordinator.renameSelectedDirectory()
             return true
