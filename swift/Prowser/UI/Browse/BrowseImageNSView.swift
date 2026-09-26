@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import Foundation
 
 /// Browse view with zoom and pan. Port of `files/browse_view_handler.py` (phase 1).
@@ -17,7 +18,14 @@ final class BrowseImageNSView: NSView {
     var onActualSizeModeChanged: ((Bool) -> Void)?
     var onExitBrowse: (() -> Void)?
 
-    private var sourceImage: NSImage?
+    private var sourceImage: NSImage? {
+        didSet {
+            cachedCIImage = nil
+            cachedCIImageIdentity = nil
+        }
+    }
+    private var cachedCIImage: CIImage?
+    private var cachedCIImageIdentity: ObjectIdentifier?
     private var scaleFactor: CGFloat = 1.0
     private var scrollOffset = CGPoint.zero
     private var isActualSize = false
@@ -349,7 +357,12 @@ final class BrowseImageNSView: NSView {
             width: drawRect.width,
             height: drawRect.height
         )
-        image.draw(in: centered, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+        let debugSharpen = appState?.config.bool(forKey: "debug_mode") == true
+        let drewSharpened = debugSharpen && scaleFactor > 1.0
+            && drawSharpenedZoomedImage(image, in: centered, context: context)
+        if !drewSharpened {
+            image.draw(in: centered, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+        }
         context.restoreGState()
 
         if numberOverlayVisible {
@@ -549,6 +562,75 @@ final class BrowseImageNSView: NSView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    private static let unsharpIntensity: NSNumber = 0.55
+
+    private func unsharpRadius(forScale scale: CGFloat) -> NSNumber {
+        NSNumber(value: Double(min(2.5, 0.9 + scale * 0.3)))
+    }
+
+    private func ciImage(for image: NSImage) -> CIImage? {
+        if let cachedCIImage, cachedCIImageIdentity == ObjectIdentifier(image) {
+            return cachedCIImage
+        }
+        var rect = CGRect(origin: .zero, size: image.size)
+        guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+            return nil
+        }
+        let ciImage = CIImage(cgImage: cgImage)
+        cachedCIImage = ciImage
+        cachedCIImageIdentity = ObjectIdentifier(image)
+        return ciImage
+    }
+
+    /// Scale the visible region first, then apply `CIUnsharpMask` so zoomed-in pixels stay crisp.
+    private func drawSharpenedZoomedImage(_ image: NSImage, in centered: NSRect, context: CGContext) -> Bool {
+        guard let ciImage = ciImage(for: image) else { return false }
+        let srcExtent = ciImage.extent
+        guard srcExtent.width > 1, srcExtent.height > 1, centered.width > 1, centered.height > 1 else {
+            return false
+        }
+
+        let clip = context.boundingBoxOfClipPath.intersection(centered)
+        guard clip.width > 1, clip.height > 1 else { return true }
+        // Avoid allocating a full scaled bitmap if the clip box is unbounded.
+        guard clip.width <= 8192, clip.height <= 8192 else { return false }
+
+        let u0 = (clip.minX - centered.minX) / centered.width
+        let v0 = (clip.minY - centered.minY) / centered.height
+        let u1 = (clip.maxX - centered.minX) / centered.width
+        let v1 = (clip.maxY - centered.minY) / centered.height
+        let crop = CGRect(
+            x: srcExtent.minX + u0 * srcExtent.width,
+            y: srcExtent.minY + (1 - v1) * srcExtent.height,
+            width: (u1 - u0) * srcExtent.width,
+            height: (v1 - v0) * srcExtent.height
+        )
+        guard crop.width > 0, crop.height > 0 else { return true }
+
+        let cropped = ciImage.cropped(to: crop)
+        let croppedExtent = cropped.extent
+        guard croppedExtent.width > 0, croppedExtent.height > 0 else { return true }
+
+        let sx = clip.width / croppedExtent.width
+        let sy = clip.height / croppedExtent.height
+        var scaled = cropped.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+        scaled = scaled.transformed(
+            by: CGAffineTransform(translationX: -scaled.extent.origin.x, y: -scaled.extent.origin.y)
+        )
+        let sharpened = scaled.applyingFilter("CIUnsharpMask", parameters: [
+            kCIInputRadiusKey: unsharpRadius(forScale: scaleFactor),
+            kCIInputIntensityKey: Self.unsharpIntensity,
+        ])
+
+        context.saveGState()
+        context.translateBy(x: clip.minX, y: clip.maxY)
+        context.scaleBy(x: 1, y: -1)
+        let ciContext = CIContext(cgContext: context, options: [.cacheIntermediates: false])
+        ciContext.draw(sharpened, in: CGRect(origin: .zero, size: clip.size), from: sharpened.extent)
+        context.restoreGState()
+        return true
     }
 
     private func imageDrawRect(for image: NSImage) -> NSRect {

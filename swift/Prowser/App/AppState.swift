@@ -233,6 +233,16 @@ final class AppState {
                 appState.refreshImageRecognitionForCurrentSettings()
             }
         }
+        NotificationCenter.default.addObserver(
+            forName: .faceModelsInstalled,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let appState = self else { return }
+            Task { @MainActor in
+                appState.backgroundImageRecognition.applyEnabledFromSettings()
+            }
+        }
         fileTreeOperations.bind(self)
         renamePrefixService.bind(self)
         menuRefresh.bind(self)
@@ -713,6 +723,7 @@ final class AppState {
         config.applyLaunchDebugFlag(enabled)
         KeyboardInputTracer.installIfNeeded(config: config)
         status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
+        browseImageHost?.needsDisplay = true
     }
 
     func printCacheStatus() {
