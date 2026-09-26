@@ -82,6 +82,9 @@ enum DirectoryRefreshService {
         let added = rawAdded
 
         if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
+            if ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState) {
+                return
+            }
             if appState.fileData.currentViewMode == .browse {
                 if let current = appState.fileData.currentImagePath,
                    appState.metadataCache.fileChangedOnDisk(path: current) {
@@ -98,11 +101,7 @@ enum DirectoryRefreshService {
             return
         }
 
-        let diskList = SortingService.sorted(
-            scanned,
-            options: SortingService.Options.from(config: appState.config),
-            metadataCache: appState.metadataCache
-        )
+        let diskList = DisplayOrderService.applyDisplayOrder(scanned, appState: appState)
         efficientRefreshWithChanges(
             appState: appState,
             diskList: diskList,

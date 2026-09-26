@@ -501,14 +501,9 @@ extension AppState {
     func applyCurrentSort() {
         let current = fileData.currentImagePath
         let options = SortingService.Options.from(config: config)
-        let commentRanks = options.mode == .comments
-            ? listViewHost?.commentColumnSortRanks()
-            : nil
-        let sorted = SortingService.sorted(
+        let sorted = DisplayOrderService.applyDisplayOrder(
             fileData.displayedImages,
-            options: options,
-            metadataCache: metadataCache,
-            commentRanks: commentRanks
+            appState: self
         )
         metadataCache.saveIfNeeded()
         fileData.setDisplayedImages(sorted)

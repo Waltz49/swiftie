@@ -49,6 +49,20 @@ enum SelectionService {
         return []
     }
 
+    /// Lock/unlock targets: multi-select uses the selection set; otherwise the highlighted image only
+    /// (avoids stale `selectedFiles` when the grid moved without updating selection).
+    static func pathsForLockUnlock(appState: AppState) -> [String] {
+        if appState.selection.multiSelectMode {
+            let ordered = orderedSelectedFiles(appState: appState)
+            if !ordered.isEmpty { return ordered }
+        }
+        if let current = appState.fileData.currentImagePath,
+           appState.fileData.displayedImages.contains(current) {
+            return [current]
+        }
+        return selectedFilesOrCurrent(appState: appState)
+    }
+
     static func selectedIndices(appState: AppState) -> Set<Int> {
         let images = appState.fileData.displayedImages
         var indices = Set<Int>()

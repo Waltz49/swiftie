@@ -227,9 +227,10 @@ final class DirectoryLoadCoordinator {
         guard generation == activeLoadGeneration else { return }
 
         appState.fileData.setCurrentDirectory(path)
-        appState.fileData.setDisplayedImages(images)
+        let ordered = DisplayOrderService.applyDisplayOrder(images, appState: appState)
+        appState.fileData.setDisplayedImages(ordered)
         let resolvedActive = Self.resolveActiveImageAfterDirectoryLoad(
-            images: images,
+            images: appState.fileData.getDisplayedImages(),
             pinnedPath: pinnedPath,
             currentPath: appState.fileData.currentImagePath
         )

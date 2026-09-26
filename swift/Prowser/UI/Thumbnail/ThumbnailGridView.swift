@@ -103,6 +103,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             var showDirectoryLoadingCanvas: Bool
             var thumbnailCellSize: Double
             var manualThumbnailSize: Bool
+            var thumbnailLockPaintRevision: Int
         }
 
         private struct SelectionFingerprint: Equatable {
@@ -265,7 +266,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                     forKey: "thumbnail_cell_size",
                     default: ThumbnailLayout.defaultCellSize
                 ),
-                manualThumbnailSize: appState.config.bool(forKey: "manual_thumbnail_size", default: false)
+                manualThumbnailSize: appState.config.bool(forKey: "manual_thumbnail_size", default: false),
+                thumbnailLockPaintRevision: appState.thumbnailLockPaintRevision
             )
             if !force, fingerprint == lastGridSyncFingerprint {
                 syncSelectionVisualsIfNeeded(to: gridView)

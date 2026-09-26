@@ -207,6 +207,24 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘L / ⇧⌘L — lock / unlock (Python `keyboard_handler`; thumbnail grid focus may not reach SwiftUI menus).
+        if hasCommand, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "l" {
+            switch appState.fileData.currentViewMode {
+            case .thumbnail, .browse:
+                if hasShift {
+                    appState.fileOperations.unlockSelectedFiles()
+                    return true
+                }
+                if appState.config.bool(forKey: "allow_thumbnail_locking", default: false) {
+                    appState.fileOperations.lockSelectedFiles()
+                    return true
+                }
+            default:
+                break
+            }
+        }
+
         // ⌘⇧E — edit EXIF user comment (Python ShiftCmdEShortcutFilter).
         if hasCommand, hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "e" {

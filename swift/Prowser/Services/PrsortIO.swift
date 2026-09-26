@@ -8,6 +8,19 @@ enum PrsortIO {
         "# THIS FILE MUST NOT BE USED",
     ]
     private static let doNotUsePrefix = "# DO NOT USE"
+    private static let warningHeaderLines = [
+        "# THIS FILE IS ONLY FOR CUSTOM SORT ORDERING AND FILE LOCKING",
+        "# DO NOT USE .prsort TO ORDER UNLOCKED FILES",
+    ]
+
+    private static let cacheLock = NSLock()
+    private static var customSortCache: [String: (mtime: TimeInterval, custom: CustomSort?)] = [:]
+
+    static func invalidateCache(in directory: String) {
+        cacheLock.lock()
+        customSortCache.removeValue(forKey: directory)
+        cacheLock.unlock()
+    }
 
     struct CustomSort {
         var orderedFilenames: [String]
@@ -51,8 +64,26 @@ enum PrsortIO {
 
     static func readCustomSort(in directory: String) -> CustomSort? {
         let path = prsortPath(in: directory)
-        guard let lines = readLines(at: path) else { return nil }
-        return parseCustomSort(lines: lines)
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        cacheLock.lock()
+        if let cached = customSortCache[directory], cached.mtime == mtime {
+            let custom = cached.custom
+            cacheLock.unlock()
+            return custom
+        }
+        cacheLock.unlock()
+        guard let lines = readLines(at: path) else {
+            cacheLock.lock()
+            customSortCache[directory] = (mtime, nil)
+            cacheLock.unlock()
+            return nil
+        }
+        let custom = parseCustomSort(lines: lines)
+        cacheLock.lock()
+        customSortCache[directory] = (mtime, custom)
+        cacheLock.unlock()
+        return custom
     }
 
     /// Apply custom `.prsort` order to full paths in a directory.
@@ -110,6 +141,25 @@ enum PrsortIO {
         return (locked, unlocked)
     }
 
+    /// Port of `sorting_manager._apply_custom_sort_unlocked` (unlocked files only).
+    static func applyCustomSortUnlocked(_ paths: [String], directory: String) -> [String] {
+        guard let custom = readCustomSort(in: directory) else { return paths }
+        let lockedNames = custom.lockedFilenames
+        let nameToPath = Dictionary(paths.map { (($0 as NSString).lastPathComponent, $0) }, uniquingKeysWith: { a, _ in a })
+        var unlockedInPrsort: [String] = []
+        var seen = Set<String>()
+        for name in custom.orderedFilenames where !lockedNames.contains(name) {
+            if let path = nameToPath[name], seen.insert(path).inserted {
+                unlockedInPrsort.append(path)
+            }
+        }
+        var result = unlockedInPrsort
+        for path in paths where !seen.contains(path) {
+            result.append(path)
+        }
+        return result
+    }
+
     /// Update lock markers for files in `directory`, preserving displayed order when possible.
     static func writeLocks(
         in directory: String,
@@ -132,7 +182,7 @@ enum PrsortIO {
         isReversed: Bool,
         locked: Set<String> = []
     ) throws {
-        var lines = ["#reversed:\(isReversed ? "true" : "false")"]
+        var lines = warningHeaderLines + ["#reversed:\(isReversed ? "true" : "false")"]
         for name in filenames {
             if locked.contains(name) {
                 lines.append("\(lockPrefix)\(name)")
@@ -143,5 +193,6 @@ enum PrsortIO {
         let path = prsortPath(in: directory)
         let body = lines.joined(separator: "\n") + "\n"
         try body.write(toFile: path, atomically: true, encoding: .utf8)
+        invalidateCache(in: directory)
     }
 }

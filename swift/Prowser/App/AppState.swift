@@ -149,6 +149,8 @@ final class AppState {
     var sidebarLayoutRevision = 0
     /// Bumped when command-menu enablement changes so SwiftUI `Commands` re-evaluate `.disabled`.
     var menuCommandsRevision = 0
+    /// Bumped when lock markers change so thumbnail padlock overlays repaint.
+    var thumbnailLockPaintRevision = 0
     /// Directory scan/sort in flight (Python `_loading_directory_mode`).
     var isLoadingDirectory = false
     /// First thumbnail folder open this session — show loading canvas.
@@ -723,6 +725,13 @@ final class AppState {
         config.applyLaunchDebugFlag(enabled)
         KeyboardInputTracer.installIfNeeded(config: config)
         status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
+        browseImageHost?.needsDisplay = true
+    }
+
+    /// Repaint padlock overlays after lock/unlock without reloading the directory.
+    func repaintThumbnailLockIndicators() {
+        thumbnailLockPaintRevision += 1
+        thumbnailGridHost?.setNeedsDisplay(thumbnailGridHost?.bounds ?? .zero)
         browseImageHost?.needsDisplay = true
     }
 

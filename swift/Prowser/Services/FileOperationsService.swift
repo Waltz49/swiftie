@@ -146,9 +146,10 @@ final class FileOperationsService {
     }
 
     func toggleLockSelectedFiles() {
-        let paths = selectedPaths()
+        guard let appState else { return }
+        let paths = SelectionService.pathsForLockUnlock(appState: appState)
         guard !paths.isEmpty else {
-            appState?.status.show("No files selected")
+            appState.status.show("No files selected")
             return
         }
         let shouldLock = paths.contains { !PrsortIO.isFileLocked($0) }
@@ -779,7 +780,15 @@ final class FileOperationsService {
 
     private func setLockState(locked: Bool, paths: [String]? = nil) {
         guard let appState else { return }
-        let selected = paths ?? selectedPaths(appState: appState)
+        if locked {
+            guard appState.config.bool(forKey: "allow_thumbnail_locking", default: false) else { return }
+        }
+
+        if appState.fileData.currentViewMode == .thumbnail, appState.specificFilesActive {
+            return
+        }
+
+        let selected = paths ?? SelectionService.pathsForLockUnlock(appState: appState)
         guard !selected.isEmpty else {
             appState.status.show("No files selected")
             return
@@ -788,6 +797,12 @@ final class FileOperationsService {
         guard directories.count == 1, let directory = directories.first else {
             showAlert("Lock Files", "Select files from a single directory to lock or unlock.")
             return
+        }
+
+        if locked,
+           appState.fileData.currentViewMode == .thumbnail,
+           appState.config.string(forKey: "sort_mode", default: SortMode.date.rawValue) != SortMode.custom.rawValue {
+            appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         }
 
         var lockedSet = PrsortIO.lockedFilenames(in: directory)
@@ -807,7 +822,10 @@ final class FileOperationsService {
                 lockedFilenames: lockedSet
             )
             appState.status.show(locked ? "Locked \(selected.count) file(s)" : "Unlocked \(selected.count) file(s)")
-            refreshAfterChange()
+            appState.beginSuppressDirectoryRefresh()
+            defer { appState.endSuppressDirectoryRefresh() }
+            _ = ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState)
+            appState.repaintThumbnailLockIndicators()
         } catch {
             showAlert("Lock Failed", error.localizedDescription)
         }

@@ -579,6 +579,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
 
         let indicesToPaint = indicesIntersectingDocumentRect(dirtyRect)
+        let thumbnailLockingEnabled = appState?.config.bool(forKey: "allow_thumbnail_locking", default: false) ?? false
+        let lockedFilenames: Set<String> = {
+            guard thumbnailLockingEnabled, let directory = currentDirectory else { return [] }
+            return PrsortIO.lockedFilenames(in: directory)
+        }()
         if let sectionedLayoutResult {
             for separator in sectionedLayoutResult.separators where separator.rect.intersects(dirtyRect) {
                 drawSectionSeparator(separator)
@@ -616,6 +621,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
             if isDeletedPlaceholder(path) {
                 drawDeletedOverlay(in: contentRect)
+            }
+
+            if thumbnailLockingEnabled,
+               thumbnails[path] != nil,
+               lockedFilenames.contains((path as NSString).lastPathComponent) {
+                PadlockOverlayRenderer.draw(in: borderRect, style: .thumbnail)
             }
 
             if showFilenames || showImageSize {
@@ -987,6 +998,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         guard !imagePaths.isEmpty else {
             super.keyDown(with: event)
+            return
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
+           event.charactersIgnoringModifiers?.lowercased() == "l" {
+            if flags.contains(.shift) {
+                appState?.fileOperations.unlockSelectedFiles()
+            } else if appState?.config.bool(forKey: "allow_thumbnail_locking", default: false) == true {
+                appState?.fileOperations.lockSelectedFiles()
+            }
             return
         }
         switch event.keyCode {

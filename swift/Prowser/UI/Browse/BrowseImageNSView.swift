@@ -368,6 +368,18 @@ final class BrowseImageNSView: NSView {
         if numberOverlayVisible {
             drawNumberOverlay(in: bounds)
         }
+
+        if shouldDrawBrowseLockOverlay() {
+            PadlockOverlayRenderer.draw(in: bounds, style: .browse)
+        }
+    }
+
+    private func shouldDrawBrowseLockOverlay() -> Bool {
+        guard let appState,
+              appState.config.bool(forKey: "allow_thumbnail_locking", default: false),
+              appState.fileData.currentViewMode == .browse,
+              let path = imagePath else { return false }
+        return PrsortIO.isFileLocked(path)
     }
 
     private static let browseOverlayBaseFontSize: CGFloat = 196

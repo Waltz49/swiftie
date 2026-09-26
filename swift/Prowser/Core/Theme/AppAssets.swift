@@ -3,6 +3,9 @@ import SwiftUI
 
 /// Bundled UI assets copied from repo-root `assets/`.
 enum AppAssets {
+    /// Locked-file overlay (`assets/padlock_bright.png`).
+    static var padlockBright: NSImage? { nsImage(name: "padlock_bright") }
+
     private static var bundle: Bundle {
         #if SWIFT_PACKAGE
         Bundle.module
