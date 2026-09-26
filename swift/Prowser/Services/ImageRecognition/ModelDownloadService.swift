@@ -397,6 +397,10 @@ private enum ModelInstallBackend {
                 try fm.removeItem(at: target)
             }
             try fm.copyItem(at: found, to: target)
+            if artifact.fileName.hasSuffix(".mlpackage"), !ImageRecognitionPaths.isValidMLPackage(at: target) {
+                try? fm.removeItem(at: target)
+                throw ModelDownloadError.unzipFailed
+            }
         }
     }
 

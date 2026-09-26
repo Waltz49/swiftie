@@ -22,8 +22,18 @@ enum ImageRecognitionPaths {
             guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDir) else {
                 return false
             }
+            if artifact.fileName.hasSuffix(".mlpackage"), !isValidMLPackage(at: path) {
+                return false
+            }
         }
         return true
+    }
+
+    /// Core ML requires `Manifest.json` at the package root; partial copies often omit it.
+    static func isValidMLPackage(at packageURL: URL) -> Bool {
+        let manifest = packageURL.appendingPathComponent("Manifest.json")
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: manifest.path, isDirectory: &isDir) && !isDir.boolValue
     }
 
     static func missingModelIDs(profile: ProfilePaths, ids: [String]) -> [String] {
