@@ -11,6 +11,8 @@ var dlibBridgeCXX: [CXXSetting] = [
     .headerSearchPath("include"),
     // dlib requires C++14+; SPM C++ targets default to an older dialect without this flag.
     .unsafeFlags(["-std=c++17"], .when(platforms: [.macOS])),
+    // Vendor libdlib.a is always CMake Release; compile bridge + header templates the same way in debug.
+    .unsafeFlags(["-O3", "-DNDEBUG"], .when(platforms: [.macOS], configuration: .debug)),
 ]
 var dlibBridgeLinker: [LinkerSetting] = []
 if hasVendorDlib {
