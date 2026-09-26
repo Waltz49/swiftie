@@ -23,6 +23,9 @@ enum InformationPaneHTMLBuilder {
         "font-size: \(bodyFontSize); font-family: \(fontFamily);"
     }
 
+    /// Standard HTML hyperlink blue (`reflevel://` only; seed `copyseed://` links use body text color).
+    private static let referenceLinkColorHex = "#3399FF"
+
     private static func globalStyles(textHex: String, backgroundHex: String) -> String {
         """
         html { -webkit-text-size-adjust: none; text-size-adjust: none; }
@@ -120,7 +123,6 @@ enum InformationPaneHTMLBuilder {
         let textHex = colorHex(colors.sidebarText)
         let borderHex = colorHex(colors.sidebarMutedText)
         let backgroundHex = colorHex(colors.sidebarBackground)
-        let accentHex = colorHex(colors.sidebarHeaderText)
         var parts: [String] = [
             "<html><head><meta charset=\"utf-8\"><style>",
             globalStyles(textHex: textHex, backgroundHex: backgroundHex),
@@ -181,7 +183,6 @@ enum InformationPaneHTMLBuilder {
                 from: speakable,
                 imageDirectory: data.imageDirectory,
                 imagePath: data.imagePath,
-                accentHex: accentHex,
                 textHex: textHex,
                 contentWidth: contentWidth
                ) {
@@ -240,7 +241,6 @@ enum InformationPaneHTMLBuilder {
         from text: String,
         imageDirectory: String,
         imagePath: String,
-        accentHex: String,
         textHex: String,
         contentWidth: Int
     ) -> String? {
@@ -259,7 +259,7 @@ enum InformationPaneHTMLBuilder {
             disp = regex.stringByReplacingMatches(in: disp, range: range, withTemplate: "$1<h4>Negative prompt</h4>")
         }
         disp = highlightImageModelElapsedHTML(disp)
-        disp = applyReferencesMarkup(disp, imageDirectory: imageDirectory, imagePath: imagePath, accentHex: accentHex)
+        disp = applyReferencesMarkup(disp, imageDirectory: imageDirectory, imagePath: imagePath)
         disp = formatImageModelSectionAsTable(disp, textHex: textHex, contentWidth: contentWidth, hoveredAnchor: nil)
         return disp
     }
@@ -366,7 +366,8 @@ enum InformationPaneHTMLBuilder {
         return "<a href=\"\(href)\" style=\"\(style)\">\(display)</a>"
     }
 
-    private static func applyReferencesMarkup(_ disp: String, imageDirectory: String, imagePath: String, accentHex: String) -> String {
+    private static func applyReferencesMarkup(_ disp: String, imageDirectory: String, imagePath: String) -> String {
+        let linkHex = referenceLinkColorHex
         let key = "<h4>References</h4>"
         guard let pos = disp.range(of: key) else { return disp }
         let bodyStart = pos.upperBound
@@ -401,7 +402,7 @@ enum InformationPaneHTMLBuilder {
                     let label = unescapeHTML(trimmed)
                     if ReferenceGraphService.resolveReferencePath(imageDir: imageDirectory, label: label) != nil {
                         newSegments.append(
-                            "<a href=\"reflevel://\" style=\"color:\(accentHex);text-decoration:underline;\">\(segment)</a>"
+                            "<a href=\"reflevel://\" style=\"color:\(linkHex);text-decoration:none;\">\(segment)</a>"
                         )
                     } else {
                         newSegments.append(segment)
@@ -413,7 +414,7 @@ enum InformationPaneHTMLBuilder {
             let label = unescapeHTML(trimmed)
             if ReferenceGraphService.resolveReferencePath(imageDir: imageDirectory, label: label) != nil {
                 newSegments.append(
-                    "<a href=\"reflevel://\" style=\"color:\(accentHex);text-decoration:underline;\">\(segment)</a>"
+                    "<a href=\"reflevel://\" style=\"color:\(linkHex);text-decoration:none;\">\(segment)</a>"
                 )
             } else {
                 newSegments.append(segment)
