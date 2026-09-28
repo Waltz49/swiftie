@@ -45,6 +45,7 @@ enum ThumbnailSectionedLayout {
         var columns: Int
         var contentSize: NSSize
         var overlayHeights: [Int: CGFloat]
+        var wrappedLines: [Int: [String]]
         var rowLayout: RowLayout
     }
 
@@ -53,24 +54,26 @@ enum ThumbnailSectionedLayout {
         paths: [String],
         showFilename: Bool,
         showImageSize: Bool,
-        thumbnailSize: CGFloat
+        thumbnailSize: CGFloat,
+        showExtensions: Bool = true,
+        basenamesNeedingExtensions: Set<String> = [],
+        duplicatePathDisplay: Bool = true
     ) -> CGFloat {
         guard showFilename || showImageSize else { return 0 }
-        let font = NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14)
-        let maxTextWidth = min(thumbnailSize * 2, ThumbnailLayout.maxCellSize)
+        let thumb = Int(thumbnailSize.rounded(.up))
         var maxOverlay: CGFloat = 0
         for path in paths {
-            maxOverlay = max(
-                maxOverlay,
-                overlayHeight(
-                    for: path,
-                    showFilename: showFilename,
-                    showImageSize: showImageSize,
-                    font: font,
-                    maxTextWidth: maxTextWidth,
-                    duplicateMode: true
-                )
+            let overlay = ThumbnailFilenameOverlayService.overlay(
+                for: path,
+                cellWidth: min(thumbnailSize * 2, ThumbnailLayout.maxCellSize),
+                showFilename: showFilename,
+                showImageSize: showImageSize,
+                showExtensions: showExtensions,
+                basenamesNeedingExtensions: basenamesNeedingExtensions,
+                displayStyle: duplicatePathDisplay ? .duplicatePath : .basename,
+                wrapMode: .sectionedMax(thumbnailSize: thumb)
             )
+            maxOverlay = max(maxOverlay, overlay.overlayHeight)
         }
         return maxOverlay
     }
@@ -171,7 +174,86 @@ enum ThumbnailSectionedLayout {
         thumbnailSize: CGFloat,
         showFilename: Bool,
         showImageSize: Bool,
+        showExtensions: Bool,
+        basenamesNeedingExtensions: Set<String>,
         currentImagePath: String?
+    ) -> Result {
+        computeSectionedGridLayout(
+            paths: paths,
+            sectionStarts: sections.map(\.startIndex),
+            separatorLabels: sections.map { _ in nil as String? },
+            duplicateSeparatorLine: true,
+            viewportWidth: viewportWidth,
+            thumbnailSize: thumbnailSize,
+            showFilename: showFilename,
+            showImageSize: showImageSize,
+            showExtensions: showExtensions,
+            basenamesNeedingExtensions: basenamesNeedingExtensions,
+            displayStyle: .duplicatePath,
+            currentImagePath: currentImagePath,
+            sectionIndexForPath: { pathIndex, sectionStarts, pathCount in
+                exifSectionIndex(for: pathIndex, sectionStarts: sectionStarts, pathCount: pathCount)
+            },
+            sectionContainsActive: { pathIndex, sectionIndex, sectionStarts, pathCount in
+                guard pathIndex >= 0, sectionIndex < sectionStarts.count else { return false }
+                let start = sectionStarts[sectionIndex]
+                let end = sectionIndex + 1 < sectionStarts.count ? sectionStarts[sectionIndex + 1] : pathCount
+                return start <= pathIndex && pathIndex < end
+            }
+        )
+    }
+
+    static func computeExifSectionLayout(
+        paths: [String],
+        sections: [ExifSectionPresentation.Section],
+        viewportWidth: CGFloat,
+        thumbnailSize: CGFloat,
+        showFilename: Bool,
+        showImageSize: Bool,
+        showExtensions: Bool,
+        basenamesNeedingExtensions: Set<String>,
+        currentImagePath: String?
+    ) -> Result {
+        computeSectionedGridLayout(
+            paths: paths,
+            sectionStarts: sections.map(\.startIndex),
+            separatorLabels: sections.map(\.sectionKey),
+            duplicateSeparatorLine: false,
+            viewportWidth: viewportWidth,
+            thumbnailSize: thumbnailSize,
+            showFilename: showFilename,
+            showImageSize: showImageSize,
+            showExtensions: showExtensions,
+            basenamesNeedingExtensions: basenamesNeedingExtensions,
+            displayStyle: .basename,
+            currentImagePath: currentImagePath,
+            sectionIndexForPath: { pathIndex, sectionStarts, pathCount in
+                exifSectionIndex(for: pathIndex, sectionStarts: sectionStarts, pathCount: pathCount)
+            },
+            sectionContainsActive: { pathIndex, sectionIndex, sectionStarts, pathCount in
+                guard pathIndex >= 0, sectionIndex < sectionStarts.count else { return false }
+                let start = sectionStarts[sectionIndex]
+                let end = sectionIndex + 1 < sectionStarts.count ? sectionStarts[sectionIndex + 1] : pathCount
+                return start <= pathIndex && pathIndex < end
+            }
+        )
+    }
+
+    private static func computeSectionedGridLayout(
+        paths: [String],
+        sectionStarts: [Int],
+        separatorLabels: [String?],
+        duplicateSeparatorLine: Bool,
+        viewportWidth: CGFloat,
+        thumbnailSize: CGFloat,
+        showFilename: Bool,
+        showImageSize: Bool,
+        showExtensions: Bool,
+        basenamesNeedingExtensions: Set<String>,
+        displayStyle: ThumbnailFilenameOverlayDisplayStyle,
+        currentImagePath: String?,
+        sectionIndexForPath: (_ pathIndex: Int, _ sectionStarts: [Int], _ pathCount: Int) -> Int?,
+        sectionContainsActive: (_ pathIndex: Int, _ sectionIndex: Int, _ sectionStarts: [Int], _ pathCount: Int) -> Bool
     ) -> Result {
         let spacing = ThumbnailLayout.thumbnailSpacing
         let border = ThumbnailLayout.borderSpace
@@ -184,7 +266,17 @@ enum ThumbnailSectionedLayout {
         var maxCellTextWidth: CGFloat = 0
         if showFilename {
             for path in paths {
-                let text = duplicateFilenameOverlay(for: path)
+                let text: String
+                switch displayStyle {
+                case .basename:
+                    text = ThumbnailLayout.overlayDisplayFilename(
+                        for: path,
+                        showExtensions: showExtensions,
+                        basenamesNeedingExtensions: basenamesNeedingExtensions
+                    )
+                case .duplicatePath:
+                    text = duplicateFilenameOverlay(for: path)
+                }
                 for part in text.split(separator: "\n", omittingEmptySubsequences: false) {
                     let segment = String(part)
                     guard !segment.isEmpty else { continue }
@@ -215,19 +307,18 @@ enum ThumbnailSectionedLayout {
 
         var sectionStartToSeparatorIndex: [Int: Int] = [:]
         var separators: [SeparatorItem] = []
-        for (sepIndex, section) in sections.enumerated() {
-            sectionStartToSeparatorIndex[section.startIndex] = sepIndex
-            let containsActive = sectionContains(
-                pathIndex: paths.firstIndex(of: currentImagePath ?? "") ?? -1,
-                sectionStart: section.startIndex,
-                sectionIndex: sepIndex,
-                sections: sections,
-                pathCount: paths.count
+        for (sepIndex, startIndex) in sectionStarts.enumerated() {
+            sectionStartToSeparatorIndex[startIndex] = sepIndex
+            let containsActive = sectionContainsActive(
+                paths.firstIndex(of: currentImagePath ?? "") ?? -1,
+                sepIndex,
+                sectionStarts,
+                paths.count
             )
             separators.append(
                 SeparatorItem(
-                    isDuplicateLine: true,
-                    label: nil,
+                    isDuplicateLine: duplicateSeparatorLine,
+                    label: separatorLabels.indices.contains(sepIndex) ? separatorLabels[sepIndex] : nil,
                     isBold: containsActive
                 )
             )
@@ -235,6 +326,7 @@ enum ThumbnailSectionedLayout {
 
         var itemFrames: [Int: NSRect] = [:]
         var overlayHeights: [Int: CGFloat] = [:]
+        var wrappedLines: [Int: [String]] = [:]
         var indexToRow: [Int: Int] = [:]
         var rowToIndices: [Int: [Int]] = [:]
         var currentRowNumber = 0
@@ -273,25 +365,29 @@ enum ThumbnailSectionedLayout {
                 yOffset += separatorHeight
             }
 
-            let overlayH = overlayHeight(
+            let overlay = ThumbnailFilenameOverlayService.overlay(
                 for: path,
+                cellWidth: min(thumbnailSize * 2, ThumbnailLayout.maxCellSize),
                 showFilename: showFilename,
                 showImageSize: showImageSize,
-                font: font,
-                maxTextWidth: maxTextWidth,
-                duplicateMode: true
+                showExtensions: showExtensions,
+                basenamesNeedingExtensions: basenamesNeedingExtensions,
+                displayStyle: displayStyle,
+                wrapMode: .sectionedMax(thumbnailSize: Int(thumbnailSize.rounded(.up)))
             )
-            overlayHeights[thumbIndex] = overlayH
+            overlayHeights[thumbIndex] = overlay.overlayHeight
+            wrappedLines[thumbIndex] = overlay.wrappedLines
 
             if col == 0, thumbIndex > 0, sectionStartToSeparatorIndex[thumbIndex] == nil {
                 let prevIndex = thumbIndex - 1
-                if sectionIndex(for: prevIndex, sections: sections) == sectionIndex(for: thumbIndex, sections: sections) {
+                if sectionIndexForPath(prevIndex, sectionStarts, paths.count)
+                    == sectionIndexForPath(thumbIndex, sectionStarts, paths.count) {
                     yOffset += spacing
                 }
             }
 
             let x = xOffset + CGFloat(col) * (cellWidth + sectionedColumnSpacing)
-            let rowH = rectSize + overlayH
+            let rowH = rectSize + overlay.overlayHeight
             itemFrames[thumbIndex] = NSRect(x: x, y: yOffset, width: cellWidth, height: rowH)
             currentRowMaxHeight = max(currentRowMaxHeight, rowH)
             currentRowIndices.append(thumbIndex)
@@ -326,97 +422,19 @@ enum ThumbnailSectionedLayout {
             columns: actualColumns,
             contentSize: NSSize(width: viewportWidth, height: contentHeight),
             overlayHeights: overlayHeights,
+            wrappedLines: wrappedLines,
             rowLayout: RowLayout(indexToRow: indexToRow, rowToIndices: rowToIndices)
         )
     }
 
-    private static func sectionIndex(
-        for pathIndex: Int,
-        sections: [DuplicateGroupPresentation.DuplicateSection]
-    ) -> Int? {
+    private static func exifSectionIndex(for pathIndex: Int, sectionStarts: [Int], pathCount: Int) -> Int? {
         guard pathIndex >= 0 else { return nil }
         var result: Int?
-        for (idx, section) in sections.enumerated() {
-            if section.startIndex <= pathIndex {
+        for (idx, start) in sectionStarts.enumerated() {
+            if start <= pathIndex {
                 result = idx
             }
         }
         return result
-    }
-
-    private static func sectionContains(
-        pathIndex: Int,
-        sectionStart: Int,
-        sectionIndex: Int,
-        sections: [DuplicateGroupPresentation.DuplicateSection],
-        pathCount: Int
-    ) -> Bool {
-        guard pathIndex >= 0 else { return false }
-        let end: Int
-        if sectionIndex + 1 < sections.count {
-            end = sections[sectionIndex + 1].startIndex
-        } else {
-            end = pathCount
-        }
-        return sectionStart <= pathIndex && pathIndex < end
-    }
-
-    private static func rowHeight(
-        paths: [String],
-        indices: Range<Int>,
-        rectSize: CGFloat,
-        showFilename: Bool,
-        showImageSize: Bool,
-        font: NSFont,
-        maxTextWidth: CGFloat
-    ) -> CGFloat {
-        var maxOverlay: CGFloat = 0
-        for index in indices {
-            guard paths.indices.contains(index) else { continue }
-            maxOverlay = max(
-                maxOverlay,
-                overlayHeight(
-                    for: paths[index],
-                    showFilename: showFilename,
-                    showImageSize: showImageSize,
-                    font: font,
-                    maxTextWidth: maxTextWidth,
-                    duplicateMode: true
-                )
-            )
-        }
-        return rectSize + maxOverlay
-    }
-
-    private static func overlayHeight(
-        for path: String,
-        showFilename: Bool,
-        showImageSize: Bool,
-        font: NSFont,
-        maxTextWidth: CGFloat,
-        duplicateMode: Bool
-    ) -> CGFloat {
-        guard showFilename || showImageSize else { return 0 }
-        var lineCount = 0
-        if showFilename {
-            if duplicateMode {
-                lineCount += duplicateOverlayWrappedLines(
-                    for: path,
-                    font: font,
-                    lineWrapWidth: max(1, maxTextWidth - 8)
-                ).count
-            } else {
-                lineCount += 1
-            }
-        }
-        if showImageSize {
-            lineCount += 1
-        }
-        guard lineCount > 0 else { return 0 }
-        return CGFloat(lineCount) * ThumbnailLayout.labelHeight + 4
-    }
-
-    private static func measureTextWidth(_ text: String, font: NSFont, maxWidth: CGFloat) -> CGFloat {
-        min(measureAdvance(text, font: font), maxWidth)
     }
 }

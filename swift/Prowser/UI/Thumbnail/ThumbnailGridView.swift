@@ -99,6 +99,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             var showExtensions: Bool
             var imageExtensions: [String]
             var duplicateSections: [DuplicateGroupPresentation.DuplicateSection]
+            var exifDateSections: [ExifSectionPresentation.Section]
             var sortMode: String
             var showDirectoryLoadingCanvas: Bool
             var thumbnailCellSize: Double
@@ -159,7 +160,8 @@ struct ThumbnailGridView: NSViewRepresentable {
             bag.subscribe(.deletedPlaceholdersChanged) { [weak self] _ in
                 guard let self else { return }
                 self.syncDeletedPlaceholders()
-                if self.appState.isFormattedListMode(), !self.appState.duplicateSections.isEmpty {
+                if self.appState.isFormattedListMode(),
+                   !self.appState.duplicateSections.isEmpty || !self.appState.exifDateSections.isEmpty {
                     self.gridView?.reloadLayoutIfNeeded()
                     self.gridView?.publishNavigationLayoutToAppState()
                 }
@@ -261,6 +263,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 showExtensions: appState.config.bool(forKey: "show_extensions", default: true),
                 imageExtensions: appState.config.imageExtensions,
                 duplicateSections: appState.duplicateSections,
+                exifDateSections: appState.exifDateSections,
                 sortMode: appState.config.string(forKey: "sort_mode", default: SortMode.date.rawValue),
                 showDirectoryLoadingCanvas: appState.showThumbnailDirectoryLoadingCanvas,
                 thumbnailCellSize: appState.config.double(
@@ -305,8 +308,12 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
             gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
             let duplicateMode = fingerprint.sortMode == SortMode.duplicates.rawValue
+            let exifMode = fingerprint.sortMode == SortMode.exifDate.rawValue
+                || fingerprint.sortMode == SortMode.exifYear.rawValue
             gridView.isDuplicateSectionMode = duplicateMode && !fingerprint.duplicateSections.isEmpty
             gridView.duplicateSections = fingerprint.duplicateSections
+            gridView.isExifSectionMode = exifMode && !fingerprint.exifDateSections.isEmpty
+            gridView.exifDateSections = fingerprint.exifDateSections
             gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
             gridView.updateEmptyStateContext()
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
@@ -319,7 +326,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.showExtensions = fingerprint.showExtensions
             gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
             gridView.reloadLayoutIfNeeded()
-            if duplicateMode, !fingerprint.duplicateSections.isEmpty {
+            if canvasLayoutUsesRowNavigation(gridView) {
                 gridView.publishNavigationLayoutToAppState()
             }
             let columns = max(1, gridView.gridColumnCount)
@@ -367,6 +374,11 @@ struct ThumbnailGridView: NSViewRepresentable {
             gridView.selectedIndices = fingerprint.selectedIndices
             gridView.multiSelectMode = fingerprint.multiSelectMode
             gridView.needsDisplay = true
+        }
+
+        private func canvasLayoutUsesRowNavigation(_ gridView: ThumbnailGridNSView) -> Bool {
+            !gridView.imagePaths.isEmpty
+                && gridView.referenceGraph == nil
         }
 
         private func resolvedHighlightIndex(in paths: [String]) -> Int {

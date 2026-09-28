@@ -16,6 +16,15 @@ struct ReferenceGraphLayoutResult {
     var canvasWidth: Int = 800
     var canvasHeight: Int = 600
     var layers: [String: Int] = [:]
+    var overlayHeightsByPath: [String: CGFloat] = [:]
+    var wrappedLinesByPath: [String: [String]] = [:]
+}
+
+struct ReferenceGraphOverlayLayoutContext: Equatable {
+    var showFilename: Bool
+    var showImageSize: Bool
+    var showExtensions: Bool
+    var basenamesNeedingExtensions: Set<String>
 }
 
 /// Layered DAG layout and orthogonal edge routing for reference dependency graphs.
@@ -122,8 +131,10 @@ enum ReferenceGraphLayout {
         viewportWidth: Int,
         thumbnailSize: Int,
         overlayHeight: Int = 0,
+        overlayContext: ReferenceGraphOverlayLayoutContext? = nil,
         fitToViewportWidth: Bool = true,
-        edgeColorTheme: String = "dark"
+        edgeColorTheme: String = "dark",
+        overlayCache: ThumbnailFilenameOverlayCache = .shared
     ) -> ReferenceGraphLayoutResult {
         if graph.nodes.isEmpty {
             return ReferenceGraphLayoutResult()
@@ -161,8 +172,7 @@ enum ReferenceGraphLayout {
         let spacing = thumbnailSpacing
         var nodeW = CGFloat(thumbnailSize) + ThumbnailLayout.borderSpace
         var cellOuter = nodeW + spacing
-        let overlay = CGFloat(max(0, overlayHeight))
-        let cellH = CGFloat(thumbnailSize) + ThumbnailLayout.borderSpace + overlay
+        let uniformOverlay = CGFloat(max(0, overlayHeight))
         let contentWidth = max(200, CGFloat(viewportWidth) - 2 * margin)
         let contentLeft = margin
 
@@ -180,14 +190,41 @@ enum ReferenceGraphLayout {
             : max(contentWidth, neededRowWidth)
 
         var nodeRects: [String: CGRect] = [:]
+        var overlayHeightsByPath: [String: CGFloat] = [:]
+        var wrappedLinesByPath: [String: [String]] = [:]
         var gutterCenters: [Int: CGFloat] = [:]
         var layerCenters: [String: CGFloat] = [:]
         var y = canvasTotalTopMargin
         let maxLayer = byLayer.keys.max() ?? 0
+        let rectSize = CGFloat(thumbnailSize) + ThumbnailLayout.borderSpace
 
         for layer in 0...maxLayer {
             let layerNodes = byLayer[layer] ?? []
             if layerNodes.isEmpty { continue }
+
+            var layerMaxOverlay: CGFloat = 0
+            if let overlayContext {
+                for nNorm in layerNodes {
+                    guard let path = normToPath[nNorm] else { continue }
+                    let overlay = ThumbnailFilenameOverlayService.overlay(
+                        for: path,
+                        cellWidth: nodeW,
+                        showFilename: overlayContext.showFilename,
+                        showImageSize: overlayContext.showImageSize,
+                        showExtensions: overlayContext.showExtensions,
+                        basenamesNeedingExtensions: overlayContext.basenamesNeedingExtensions,
+                        displayStyle: .basename,
+                        wrapMode: .cellWidth,
+                        cache: overlayCache
+                    )
+                    overlayHeightsByPath[path] = overlay.overlayHeight
+                    wrappedLinesByPath[path] = overlay.wrappedLines
+                    layerMaxOverlay = max(layerMaxOverlay, overlay.overlayHeight)
+                }
+            } else {
+                layerMaxOverlay = uniformOverlay
+            }
+            let layerCellH = rectSize + layerMaxOverlay
 
             let layerOfNode = Dictionary(
                 uniqueKeysWithValues: layers.compactMap { norm, layerIndex in
@@ -220,11 +257,14 @@ enum ReferenceGraphLayout {
                     x: left,
                     y: rowTop,
                     width: nodeW,
-                    height: cellH
+                    height: layerCellH
                 )
+                if overlayContext == nil {
+                    overlayHeightsByPath[path] = uniformOverlay
+                }
                 layerCenters[nNorm] = left + nodeW / 2
             }
-            let rowBottom = rowTop + cellH
+            let rowBottom = rowTop + layerCellH
             gutterCenters[layer] = rowBottom + layerGap / 2
             y = rowBottom + spacing + layerGap
         }
@@ -259,7 +299,9 @@ enum ReferenceGraphLayout {
             edgeRoutes: edgeRoutes,
             canvasWidth: canvasW,
             canvasHeight: max(canvasH, 200),
-            layers: layersByPath
+            layers: layersByPath,
+            overlayHeightsByPath: overlayHeightsByPath,
+            wrappedLinesByPath: wrappedLinesByPath
         )
     }
 

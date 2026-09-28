@@ -23,7 +23,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 
 ## View modes
 
-- [~] Thumbnail grid (`ThumbnailGridNSView` — cache-backed, selection, arrow/return keyboard nav + wrap-around + menu sync + drag-reorder → `.prsort`, browse-exit scroll restore; ⌘X session filter via `exclude_directories` + `ThumbnailExcludeService`)
+- [~] Thumbnail grid (`ThumbnailGridNSView` — cache-backed, selection, arrow/return keyboard nav + wrap-around + menu sync + drag-reorder → `.prsort`, browse-exit scroll restore; ⌘X session filter via `exclude_directories` + `ThumbnailExcludeService`; filename overlay wraps full basename with variable row heights in standard/duplicate/EXIF/reference-graph layouts)
 - [~] List view (`ImageListView` with thumbnails)
 - [~] Browse (`BrowseImageNSView` — zoom, pan, pinch, checkerboard, actual size toggle A + persist across images)
 - [~] Slideshow (multiple images — `SlideshowView`, Tools → Slideshow / S key)

@@ -456,6 +456,9 @@ extension AppState {
         if mode != .duplicates {
             duplicateSections = []
         }
+        if mode != .exifDate && mode != .exifYear {
+            exifDateSections = []
+        }
         applyCurrentSort()
         status.show(Self.sortStatusMessage(mode: mode, reversed: reversed))
         menuRefresh.refreshAll()
@@ -481,6 +484,9 @@ extension AppState {
         }
         if mode != .duplicates {
             duplicateSections = []
+        }
+        if mode != .exifDate && mode != .exifYear {
+            exifDateSections = []
         }
         applyCurrentSort()
         let reversed = config.bool(forKey: "sort_reversed", default: false)
@@ -510,8 +516,21 @@ extension AppState {
         if options.mode == .duplicates {
             let pairs = DuplicateHashService.duplicateGroupPairs(sorted)
             duplicateSections = DuplicateGroupPresentation.duplicateSections(from: pairs)
-        } else if !duplicateSections.isEmpty {
+            exifDateSections = []
+        } else if options.mode == .exifDate || options.mode == .exifYear {
+            exifDateSections = ExifSectionPresentation.sections(
+                for: sorted,
+                mode: options.mode,
+                metadataCache: metadataCache
+            )
             duplicateSections = []
+        } else {
+            if !duplicateSections.isEmpty {
+                duplicateSections = []
+            }
+            if !exifDateSections.isEmpty {
+                exifDateSections = []
+            }
         }
         if let current, sorted.contains(current) {
             fileData.setCurrentImagePath(current)

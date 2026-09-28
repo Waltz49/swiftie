@@ -45,6 +45,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             let keeping = Set(imagePaths)
             imageDimensionCache = imageDimensionCache.filter { keeping.contains($0.key) }
             basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: imagePaths)
+            ThumbnailFilenameOverlayCache.shared.clear()
             reloadLayoutIfNeeded()
         }
     }
@@ -83,7 +84,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     var showExtensions: Bool = true {
-        didSet { needsDisplay = true }
+        didSet { reloadLayoutIfNeeded() }
     }
 
     var overlayBoxColor: NSColor = NSColor.black.withAlphaComponent(0.94)
@@ -108,10 +109,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     var duplicateSections: [DuplicateGroupPresentation.DuplicateSection] = [] {
         didSet { reloadLayoutIfNeeded() }
     }
+    var exifDateSections: [ExifSectionPresentation.Section] = [] {
+        didSet { reloadLayoutIfNeeded() }
+    }
+    var isExifSectionMode: Bool = false {
+        didSet { reloadLayoutIfNeeded() }
+    }
     var isDuplicateSectionMode: Bool = false {
         didSet { reloadLayoutIfNeeded() }
     }
-    private var sectionedLayoutResult: ThumbnailSectionedLayout.Result?
+    private var canvasLayoutResult: ThumbnailSectionedLayout.Result?
+    private var referenceOverlayHeightsByIndex: [Int: CGFloat] = [:]
+    private var referenceWrappedLinesByIndex: [Int: [String]] = [:]
     var deletedPlaceholderPaths: Set<String> = [] {
         didSet { needsDisplay = true }
     }
@@ -131,8 +140,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var referenceNodeFrames: [Int: NSRect] = [:]
 
     var gridColumnCount: Int {
-        if let sectionedLayoutResult {
-            return max(1, sectionedLayoutResult.columns)
+        if let canvasLayoutResult {
+            return max(1, canvasLayoutResult.columns)
         }
         return max(1, isReferenceGraphMode ? 1 : metrics.columns)
     }
@@ -141,7 +150,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     func keyboardPageScrollDelta() -> Int {
         let columns = max(1, gridColumnCount)
         let viewportHeight = viewportSizeForLayout().height
-        let rowStride = metrics.cellHeight + ThumbnailLayout.verticalSpacing
+        let rowStride: CGFloat
+        if let layout = canvasLayoutResult, layout.rowLayout.totalRows > 0 {
+            rowStride = max(1, layout.contentSize.height / CGFloat(layout.rowLayout.totalRows))
+        } else {
+            rowStride = metrics.cellHeight + ThumbnailLayout.verticalSpacing
+        }
         guard rowStride > 0 else { return columns }
         let effectiveHeight = max(1, viewportHeight - ThumbnailLayout.topCoverBandHeight)
         let rowsPerPage = max(1, Int(effectiveHeight / rowStride))
@@ -181,6 +195,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let duplicateSectionCount: Int
         let duplicateSectionStarts: [Int]
         let isDuplicateSectionMode: Bool
+        let exifSectionStarts: [Int]
+        let isExifSectionMode: Bool
+        let showExtensions: Bool
     }
 
     /// File path under the first mouse-down of a press–drag–click gesture (cleared on mouse up).
@@ -223,7 +240,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         isLoadingDirectory = true
         imagePaths = []
         clearThumbnails()
-        sectionedLayoutResult = nil
+        canvasLayoutResult = nil
         referenceLayout = nil
         reloadLayout()
         needsDisplay = true
@@ -305,7 +322,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         if showsEmptyCanvas {
             referenceLayout = nil
             referenceNodeFrames = [:]
-            sectionedLayoutResult = nil
+            referenceOverlayHeightsByIndex = [:]
+            referenceWrappedLinesByIndex = [:]
+            canvasLayoutResult = nil
             let viewport = emptyStateViewportSize()
             applyDocumentSize(
                 NSSize(
@@ -319,53 +338,69 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         if let graph = referenceGraph {
             reloadReferenceGraphLayout(graph: graph, viewportWidth: viewportWidth)
-            sectionedLayoutResult = nil
+            canvasLayoutResult = nil
             return
         }
         referenceLayout = nil
         referenceNodeFrames = [:]
+        referenceOverlayHeightsByIndex = [:]
+        referenceWrappedLinesByIndex = [:]
         let viewport = viewportSizeForLayout()
         let sectionedDuplicate = isDuplicateSectionMode && !duplicateSections.isEmpty
+        let sectionedExif = isExifSectionMode && !exifDateSections.isEmpty
+        let sectionedFilenames = (sectionedDuplicate || sectionedExif) && showFilenames
         let cellSize = resolvedLayoutCellSize(
             viewportWidth: viewportWidth,
             viewportHeight: viewport.height,
-            sectionedDuplicateFilenames: sectionedDuplicate && showFilenames
+            sectionedDuplicateFilenames: sectionedFilenames
         )
+        let layout: ThumbnailSectionedLayout.Result
         if sectionedDuplicate {
-            let layout = ThumbnailSectionedLayout.computeDuplicateLayout(
+            layout = ThumbnailSectionedLayout.computeDuplicateLayout(
                 paths: imagePaths,
                 sections: duplicateSections,
                 viewportWidth: viewportWidth,
                 thumbnailSize: cellSize,
                 showFilename: showFilenames,
                 showImageSize: showImageSize,
+                showExtensions: showExtensions,
+                basenamesNeedingExtensions: basenamesNeedingExtensions,
                 currentImagePath: appState?.fileData.currentImagePath
             )
-            sectionedLayoutResult = layout
-            metrics = ThumbnailLayout.metrics(
-                for: viewportWidth,
-                itemCount: imagePaths.count,
+        } else if sectionedExif {
+            layout = ThumbnailSectionedLayout.computeExifSectionLayout(
+                paths: imagePaths,
+                sections: exifDateSections,
+                viewportWidth: viewportWidth,
+                thumbnailSize: cellSize,
                 showFilename: showFilenames,
                 showImageSize: showImageSize,
-                cellSize: cellSize,
+                showExtensions: showExtensions,
+                basenamesNeedingExtensions: basenamesNeedingExtensions,
+                currentImagePath: appState?.fileData.currentImagePath
+            )
+        } else {
+            let standard = ThumbnailStandardGridLayout.compute(
+                paths: imagePaths,
+                viewportWidth: viewportWidth,
+                thumbnailSize: cellSize,
+                showFilename: showFilenames,
+                showImageSize: showImageSize,
+                showExtensions: showExtensions,
+                basenamesNeedingExtensions: basenamesNeedingExtensions,
                 scrollbarWidth: verticalScrollbarReservedWidth()
             )
-            let docHeight = max(layout.contentSize.height, viewport.height)
-            applyDocumentSize(
-                NSSize(
-                    width: max(layout.contentSize.width, viewport.width),
-                    height: docHeight
-                )
+            layout = ThumbnailSectionedLayout.Result(
+                itemFrames: standard.itemFrames,
+                separators: [],
+                columns: standard.columns,
+                contentSize: standard.contentSize,
+                overlayHeights: standard.overlayHeights,
+                wrappedLines: standard.wrappedLines,
+                rowLayout: standard.rowLayout
             )
-            needsDisplay = true
-            scheduleLoadVisibleThumbnails(debounced: false)
-            gridDelegate?.thumbnailGridDidUpdateLayout(
-                columns: layout.columns,
-                sectionedRowLayout: layout.rowLayout
-            )
-            return
         }
-        sectionedLayoutResult = nil
+        canvasLayoutResult = layout
         metrics = ThumbnailLayout.metrics(
             for: viewportWidth,
             itemCount: imagePaths.count,
@@ -374,22 +409,32 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             cellSize: cellSize,
             scrollbarWidth: verticalScrollbarReservedWidth()
         )
+        let docHeight = max(layout.contentSize.height, viewport.height)
         applyDocumentSize(
             NSSize(
-                width: max(metrics.contentSize.width, viewport.width),
-                height: max(metrics.contentSize.height, viewport.height)
+                width: max(layout.contentSize.width, viewport.width),
+                height: docHeight
             )
         )
         needsDisplay = true
         scheduleLoadVisibleThumbnails(debounced: false)
-        gridDelegate?.thumbnailGridDidUpdateLayout(columns: gridColumnCount, sectionedRowLayout: nil)
+        gridDelegate?.thumbnailGridDidUpdateLayout(
+            columns: layout.columns,
+            sectionedRowLayout: layout.rowLayout
+        )
     }
 
     private func reloadReferenceGraphLayout(graph: ReferenceGraph, viewportWidth: CGFloat) {
         let viewport = viewportSizeForLayout()
-        let overlayHeight = ThumbnailLayout.overlayLabelHeight(
+        let conservativeOverlay = ThumbnailFilenameOverlayService.conservativeOverlayHeight(
             showFilename: showFilenames,
             showImageSize: showImageSize
+        )
+        let overlayContext = ReferenceGraphOverlayLayoutContext(
+            showFilename: showFilenames,
+            showImageSize: showImageSize,
+            showExtensions: showExtensions,
+            basenamesNeedingExtensions: basenamesNeedingExtensions
         )
         let manualSize = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
         let thumbSize: Int
@@ -403,32 +448,37 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 graph: graph,
                 viewportWidth: Int(viewportWidth),
                 viewportHeight: Int(max(viewport.height, 300)),
-                overlayHeight: Int(overlayHeight)
+                overlayHeight: Int(conservativeOverlay)
             )
         }
-        // Python `reference_graph_edge_color_theme`: light palette only for the resolved light theme.
         let isLight = themeColors.themeID.lowercased() == "light"
         let layout = ReferenceGraphLayout.computeLayout(
             graph: graph,
             viewportWidth: Int(viewportWidth),
             thumbnailSize: thumbSize,
-            overlayHeight: Int(overlayHeight),
+            overlayHeight: Int(conservativeOverlay),
+            overlayContext: overlayContext,
             fitToViewportWidth: !manualSize,
             edgeColorTheme: ReferenceGraphLayout.edgeColorTheme(isLight: isLight)
         )
         referenceLayout = layout
         referenceNodeFrames = [:]
+        referenceOverlayHeightsByIndex = [:]
+        referenceWrappedLinesByIndex = [:]
         for (index, path) in imagePaths.enumerated() {
-            if let rect = layout.nodeRects[path] {
-                referenceNodeFrames[index] = rect
-                continue
+            let resolvedPath: String?
+            if layout.nodeRects[path] != nil {
+                resolvedPath = path
+            } else {
+                let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+                resolvedPath = layout.nodeRects.keys.first {
+                    URL(fileURLWithPath: $0).standardizedFileURL.path == normalized
+                }
             }
-            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
-            if let rect = layout.nodeRects.first(where: {
-                URL(fileURLWithPath: $0.key).standardizedFileURL.path == normalized
-            })?.value {
-                referenceNodeFrames[index] = rect
-            }
+            guard let resolvedPath, let rect = layout.nodeRects[resolvedPath] else { continue }
+            referenceNodeFrames[index] = rect
+            referenceOverlayHeightsByIndex[index] = layout.overlayHeightsByPath[resolvedPath] ?? 0
+            referenceWrappedLinesByIndex[index] = layout.wrappedLinesByPath[resolvedPath] ?? []
         }
         applyDocumentSize(
             NSSize(
@@ -474,7 +524,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     /// Pushes column count and sectioned row map to `AppState` (keyboard ↑/↓ uses the row map).
     func publishNavigationLayoutToAppState() {
-        if let layout = sectionedLayoutResult {
+        if let layout = canvasLayoutResult {
             gridDelegate?.thumbnailGridDidUpdateLayout(
                 columns: layout.columns,
                 sectionedRowLayout: layout.rowLayout
@@ -482,7 +532,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         } else {
             gridDelegate?.thumbnailGridDidUpdateLayout(
                 columns: max(1, gridColumnCount),
-                sectionedRowLayout: nil
+                sectionedRowLayout: canvasLayoutResult?.rowLayout
             )
         }
     }
@@ -641,8 +691,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             guard thumbnailLockingEnabled, let directory = currentDirectory else { return [] }
             return PrsortIO.lockedFilenames(in: directory)
         }()
-        if let sectionedLayoutResult {
-            for separator in sectionedLayoutResult.separators where separator.rect.intersects(dirtyRect) {
+        if let canvasLayoutResult {
+            for separator in canvasLayoutResult.separators where separator.rect.intersects(dirtyRect) {
                 drawSectionSeparator(separator)
             }
         }
@@ -812,8 +862,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
            !flags.contains(.shift), !flags.contains(.command), !flags.contains(.control),
            let index = indexAt(point: point),
            index < imagePaths.count,
-           let overlayRect = filenameOverlayRect(for: index),
-           overlayRect.contains(point),
+           let pillRect = filenamePillRect(for: index),
+           pillRect.contains(point),
            showFilenames || showImageSize {
             beginInlineRename(path: imagePaths[index])
             return
@@ -1114,7 +1164,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         case .right:
             applySelectionDelta(1, wrap: wrapAround)
         case .up, .down:
-            if let rowLayout = sectionedLayoutResult?.rowLayout {
+            if let rowLayout = canvasLayoutResult?.rowLayout, !rowLayout.rowToIndices.isEmpty {
                 let step = direction == .up ? -1 : 1
                 let next = rowLayout.verticalTarget(currentIndex: base, stepSign: step)
                 guard next != base else { return }
@@ -1213,7 +1263,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func cellFrame(for index: Int) -> NSRect {
-        if let rect = sectionedLayoutResult?.itemFrames[index] {
+        if let rect = canvasLayoutResult?.itemFrames[index] {
             return rect
         }
         if let rect = referenceNodeFrames[index] {
@@ -1222,16 +1272,42 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         return ThumbnailLayout.frame(for: index, metrics: metrics)
     }
 
-    private func imageFrame(in cell: NSRect, at index: Int) -> NSRect {
-        let overlay: CGFloat
-        if let sectionedLayoutResult, let custom = sectionedLayoutResult.overlayHeights[index] {
-            overlay = custom
-        } else {
-            overlay = ThumbnailLayout.overlayLabelHeight(
-                showFilename: showFilenames,
-                showImageSize: showImageSize
+    private func overlayHeight(for index: Int, path: String) -> CGFloat {
+        if let custom = canvasLayoutResult?.overlayHeights[index] {
+            return custom
+        }
+        if let custom = referenceOverlayHeightsByIndex[index] {
+            return custom
+        }
+        return ThumbnailLayout.overlayLabelHeight(
+            showFilename: showFilenames,
+            showImageSize: showImageSize
+        )
+    }
+
+    private func wrappedOverlayLines(for index: Int, path: String) -> [String] {
+        if let lines = canvasLayoutResult?.wrappedLines[index], !lines.isEmpty {
+            return ThumbnailFilenameOverlayService.linesForDrawing(
+                overlay: ThumbnailFilenameOverlay(wrappedLines: lines, overlayHeight: overlayHeight(for: index, path: path)),
+                path: path,
+                showImageSize: showImageSize,
+                dimensionText: dimensionText(for: path)
             )
         }
+        if let lines = referenceWrappedLinesByIndex[index], !lines.isEmpty {
+            return ThumbnailFilenameOverlayService.linesForDrawing(
+                overlay: ThumbnailFilenameOverlay(wrappedLines: lines, overlayHeight: overlayHeight(for: index, path: path)),
+                path: path,
+                showImageSize: showImageSize,
+                dimensionText: dimensionText(for: path)
+            )
+        }
+        return []
+    }
+
+    private func imageFrame(in cell: NSRect, at index: Int) -> NSRect {
+        let path = imagePaths.indices.contains(index) ? imagePaths[index] : ""
+        let overlay = overlayHeight(for: index, path: path)
         return NSRect(
             x: cell.minX,
             y: cell.minY,
@@ -1242,6 +1318,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func drawSectionSeparator(_ separator: ThumbnailSectionedLayout.SeparatorItem) {
         let rect = separator.rect
+        if let label = separator.label, !label.isEmpty {
+            let font = NSFont.boldSystemFont(ofSize: 13)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.labelColor,
+            ]
+            let textRect = NSRect(x: rect.minX + 12, y: rect.minY + 6, width: rect.width - 24, height: rect.height - 8)
+            (label as NSString).draw(in: textRect, withAttributes: attrs)
+        }
         NSColor.labelColor.withAlphaComponent(0.35).setStroke()
         let path = NSBezierPath()
         let lineY = rect.midY
@@ -1380,7 +1465,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 max(ThumbnailLayout.minCellSize, CGFloat(raw))
             )
         }
-        var overlay = ThumbnailLayout.overlayLabelHeight(
+        var overlay = ThumbnailFilenameOverlayService.conservativeOverlayHeight(
             showFilename: showFilenames,
             showImageSize: showImageSize
         )
@@ -1391,7 +1476,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     paths: imagePaths,
                     showFilename: showFilenames,
                     showImageSize: showImageSize,
-                    thumbnailSize: ThumbnailLayout.defaultCellSize
+                    thumbnailSize: ThumbnailLayout.defaultCellSize,
+                    showExtensions: showExtensions,
+                    basenamesNeedingExtensions: basenamesNeedingExtensions,
+                    duplicatePathDisplay: false
                 )
             )
         }
@@ -1425,7 +1513,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             duplicateSectionStarts: isDuplicateSectionMode
                 ? duplicateSections.map(\.startIndex)
                 : [],
-            isDuplicateSectionMode: isDuplicateSectionMode
+            isDuplicateSectionMode: isDuplicateSectionMode,
+            exifSectionStarts: isExifSectionMode ? exifDateSections.map(\.startIndex) : [],
+            isExifSectionMode: isExifSectionMode,
+            showExtensions: showExtensions
         )
     }
 
@@ -1439,9 +1530,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func indicesIntersectingDocumentRect(_ rect: NSRect, expandBy: CGFloat? = nil) -> [Int] {
         let pad = expandBy ?? 0
         let query = pad > 0 ? rect.insetBy(dx: -pad, dy: -pad) : rect
-        if let sectionedLayoutResult {
+        if let canvasLayoutResult {
             return (0..<imagePaths.count).filter { index in
-                guard let frame = sectionedLayoutResult.itemFrames[index] else { return false }
+                guard let frame = canvasLayoutResult.itemFrames[index] else { return false }
                 return frame.intersects(query)
             }
         }
@@ -1471,7 +1562,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         visibleRect: NSRect,
         visible: Set<Int>
     ) -> [Int] {
-        if sectionedLayoutResult != nil {
+        if canvasLayoutResult != nil {
             let pad = max(metrics.cellWidth, metrics.cellHeight) * 2
             return indicesIntersectingDocumentRect(visibleRect, expandBy: pad)
                 .filter { !visible.contains($0) }
@@ -1785,16 +1876,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         showFilename: Bool,
         showImageSize: Bool
     ) {
-        let font = NSFont(name: "Arial", size: 14) ?? NSFont.systemFont(ofSize: 14)
-        let overlayBandHeight: CGFloat
-        if isDuplicateSectionMode, let custom = sectionedLayoutResult?.overlayHeights[index] {
-            overlayBandHeight = custom
-        } else {
-            overlayBandHeight = ThumbnailLayout.overlayLabelHeight(
-                showFilename: showFilename,
-                showImageSize: showImageSize
-            )
-        }
+        let overlayBandHeight = overlayHeight(for: index, path: path)
         guard overlayBandHeight > 0 else { return }
 
         let labelRect = NSRect(
@@ -1804,30 +1886,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             height: overlayBandHeight
         )
 
-        var wrappedLines: [String] = []
-        let innerTextWidth = max(1, labelRect.width - 8)
-        if showFilename {
-            if isDuplicateSectionMode {
-                wrappedLines = ThumbnailSectionedLayout.duplicateOverlayWrappedLines(
-                    for: path,
-                    font: font,
-                    lineWrapWidth: innerTextWidth
-                )
-            } else {
-                wrappedLines = [
-                    ThumbnailLayout.overlayDisplayFilename(
-                        for: path,
-                        showExtensions: showExtensions,
-                        basenamesNeedingExtensions: basenamesNeedingExtensions
-                    ),
-                ]
-            }
-        }
-        if showImageSize, let sizeText = dimensionText(for: path) {
-            wrappedLines.append(sizeText)
-        }
+        let wrappedLines = resolvedOverlayLines(for: index, path: path, labelWidth: labelRect.width)
         guard !wrappedLines.isEmpty else { return }
 
+        let font = ThumbnailFilenameOverlayService.overlayFont
         let lineHeight = ThumbnailLayout.labelHeight
         let totalTextHeight = CGFloat(wrappedLines.count) * lineHeight
         let pillRect = NSRect(
@@ -1850,26 +1912,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         ]
         var y = pillRect.minY + 2
         for line in wrappedLines {
-            if isDuplicateSectionMode {
-                let lineWidth = (line as NSString).size(withAttributes: attrs).width
-                let drawX = pillRect.midX - lineWidth / 2
-                let drawY = y + (lineHeight - font.boundingRectForFont.height) / 2
-                (line as NSString).draw(at: NSPoint(x: drawX, y: drawY), withAttributes: attrs)
-            } else {
-                let lineRect = NSRect(
-                    x: pillRect.minX + 4,
-                    y: y,
-                    width: pillRect.width - 8,
-                    height: lineHeight
-                )
-                paragraph.alignment = .center
-                paragraph.lineBreakMode = .byTruncatingTail
-                (line as NSString).draw(
-                    with: lineRect,
-                    options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin],
-                    attributes: attrs
-                )
-            }
+            let lineWidth = (line as NSString).size(withAttributes: attrs).width
+            let drawX = pillRect.midX - lineWidth / 2
+            let drawY = y + (lineHeight - font.boundingRectForFont.height) / 2
+            (line as NSString).draw(at: NSPoint(x: drawX, y: drawY), withAttributes: attrs)
             y += lineHeight
         }
     }
@@ -1950,12 +1996,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             }
             return
         }
-        guard let overlayRect = filenameOverlayRect(for: index) else { return }
+        guard let editorRect = inlineRenameEditorRect(for: index) else { return }
         cancelInlineRename(restoreFocus: false)
         selectIndex(index, scroll: true, notifyDelegate: false)
         layoutSubtreeIfNeeded()
         let basename = URL(fileURLWithPath: imagePaths[index]).deletingPathExtension().lastPathComponent
-        let editor = NSTextField(frame: overlayRect)
+        let editor = NSTextField(frame: editorRect)
         editor.stringValue = basename
         editor.isEditable = true
         editor.isSelectable = true
@@ -2016,18 +2062,37 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         onInlineRenameCommitted?(originalPath, newBase)
     }
 
-    private func filenameOverlayRect(for index: Int) -> NSRect? {
+    /// Pill rect matching `drawOverlay` (for hit-testing rename on the label).
+    private func filenamePillRect(for index: Int) -> NSRect? {
+        guard imagePaths.indices.contains(index) else { return nil }
+        let path = imagePaths[index]
         let cell = cellFrame(for: index)
-        let overlayBandHeight: CGFloat
-        if isDuplicateSectionMode, let custom = sectionedLayoutResult?.overlayHeights[index] {
-            overlayBandHeight = custom
-        } else {
-            overlayBandHeight = ThumbnailLayout.overlayLabelHeight(
-                showFilename: showFilenames,
-                showImageSize: showImageSize
-            )
-        }
-        if overlayBandHeight <= 0 {
+        let overlayBandHeight = overlayHeight(for: index, path: path)
+        guard overlayBandHeight > 0 else { return nil }
+
+        let labelRect = NSRect(
+            x: cell.minX + 4,
+            y: cell.minY + cell.height - overlayBandHeight,
+            width: max(0, cell.width - 8),
+            height: overlayBandHeight
+        )
+        let wrappedLines = resolvedOverlayLines(for: index, path: path, labelWidth: labelRect.width)
+        guard !wrappedLines.isEmpty else { return nil }
+
+        let lineHeight = ThumbnailLayout.labelHeight
+        let totalTextHeight = CGFloat(wrappedLines.count) * lineHeight
+        return NSRect(
+            x: labelRect.minX,
+            y: labelRect.minY,
+            width: labelRect.width,
+            height: min(labelRect.height, totalTextHeight + 4)
+        )
+    }
+
+    /// Single-line editor band aligned with the basename line in the pill (F2 / overlay click).
+    private func inlineRenameEditorRect(for index: Int) -> NSRect? {
+        guard let pill = filenamePillRect(for: index) else {
+            let cell = cellFrame(for: index)
             return NSRect(
                 x: cell.minX + 4,
                 y: cell.minY + 4,
@@ -2035,12 +2100,56 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 height: 22
             )
         }
+        let path = imagePaths[index]
+        let lines = resolvedOverlayLines(for: index, path: path, labelWidth: pill.width)
+        let lineHeight = ThumbnailLayout.labelHeight
+        var firstBasenameLine = 0
+        if isDuplicateSectionMode, showFilenames {
+            if let separatorIndex = lines.firstIndex(where: { $0.contains("──────────") }) {
+                firstBasenameLine = min(separatorIndex + 1, max(0, lines.count - 1))
+            }
+        } else if showFilenames, showImageSize, lines.count > 1,
+                  lines.last?.contains("x") == true,
+                  lines.last?.first?.isNumber == true {
+            // Dimension line is last; edit basename on the first filename line.
+            firstBasenameLine = 0
+        }
+        let y = pill.minY + 2 + CGFloat(firstBasenameLine) * lineHeight
         return NSRect(
-            x: cell.minX + 4,
-            y: cell.minY + cell.height - overlayBandHeight,
-            width: max(40, cell.width - 8),
-            height: overlayBandHeight
+            x: pill.minX + 4,
+            y: y,
+            width: max(40, pill.width - 8),
+            height: lineHeight + 2
         )
+    }
+
+    private func resolvedOverlayLines(for index: Int, path: String, labelWidth: CGFloat) -> [String] {
+        var wrappedLines = wrappedOverlayLines(for: index, path: path)
+        if wrappedLines.isEmpty, showFilenames || showImageSize {
+            let overlay = ThumbnailFilenameOverlayService.overlay(
+                for: path,
+                cellWidth: labelWidth + 8,
+                showFilename: showFilenames,
+                showImageSize: showImageSize,
+                showExtensions: showExtensions,
+                basenamesNeedingExtensions: basenamesNeedingExtensions,
+                displayStyle: isDuplicateSectionMode ? .duplicatePath : .basename,
+                wrapMode: isDuplicateSectionMode || isExifSectionMode
+                    ? .sectionedMax(thumbnailSize: thumbnailGenerationPixelSize())
+                    : .cellWidth
+            )
+            wrappedLines = ThumbnailFilenameOverlayService.linesForDrawing(
+                overlay: overlay,
+                path: path,
+                showImageSize: showImageSize,
+                dimensionText: dimensionText(for: path)
+            )
+        }
+        return wrappedLines
+    }
+
+    private func filenameOverlayRect(for index: Int) -> NSRect? {
+        inlineRenameEditorRect(for: index)
     }
 }
 

@@ -135,6 +135,8 @@ final class AppState {
     var deletedFilePlaceholders: Set<String> = []
     /// Section boundaries for duplicate-group thumbnail layout (Python `duplicate_sections`).
     var duplicateSections: [DuplicateGroupPresentation.DuplicateSection] = []
+    /// Section boundaries for EXIF date/year thumbnail layout (Python `exif_date_sections`).
+    var exifDateSections: [ExifSectionPresentation.Section] = []
     let menuRefresh = MenuRefreshState()
     let renameStatusManager: RenameStatusManager
     weak var thumbnailGridHost: ThumbnailGridNSView?

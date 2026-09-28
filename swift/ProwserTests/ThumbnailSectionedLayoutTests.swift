@@ -15,6 +15,8 @@ final class ThumbnailSectionedLayoutTests: XCTestCase {
             thumbnailSize: 120,
             showFilename: false,
             showImageSize: false,
+            showExtensions: true,
+            basenamesNeedingExtensions: [],
             currentImagePath: nil
         )
         XCTAssertGreaterThanOrEqual(layout.columns, 2)
@@ -36,6 +38,8 @@ final class ThumbnailSectionedLayoutTests: XCTestCase {
             thumbnailSize: 120,
             showFilename: false,
             showImageSize: false,
+            showExtensions: true,
+            basenamesNeedingExtensions: [],
             currentImagePath: nil
         )
         let wide = ThumbnailSectionedLayout.computeDuplicateLayout(
@@ -45,6 +49,8 @@ final class ThumbnailSectionedLayoutTests: XCTestCase {
             thumbnailSize: 120,
             showFilename: false,
             showImageSize: false,
+            showExtensions: true,
+            basenamesNeedingExtensions: [],
             currentImagePath: nil
         )
         XCTAssertNotEqual(narrow.columns, wide.columns)
@@ -68,5 +74,24 @@ final class ThumbnailSectionedLayoutTests: XCTestCase {
         XCTAssertTrue(joined.contains("Vacation"))
         XCTAssertTrue(joined.contains("2024"))
         XCTAssertTrue(joined.contains(".jpg"))
+    }
+
+    func testDuplicateOverlayHeightUsesWrappedLines() {
+        let paths = ["/tmp/a/very_long_filename_that_should_wrap_in_duplicate_mode.jpg"]
+        let sections = [DuplicateGroupPresentation.DuplicateSection(startIndex: 0, groupKey: "a")]
+        let layout = ThumbnailSectionedLayout.computeDuplicateLayout(
+            paths: paths,
+            sections: sections,
+            viewportWidth: 900,
+            thumbnailSize: 120,
+            showFilename: true,
+            showImageSize: false,
+            showExtensions: true,
+            basenamesNeedingExtensions: [],
+            currentImagePath: nil
+        )
+        let lines = layout.wrappedLines[0] ?? []
+        XCTAssertGreaterThan(lines.count, 1)
+        XCTAssertGreaterThan(layout.overlayHeights[0] ?? 0, ThumbnailLayout.labelHeight + 4)
     }
 }
