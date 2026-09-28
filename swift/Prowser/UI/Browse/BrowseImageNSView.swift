@@ -357,8 +357,8 @@ final class BrowseImageNSView: NSView {
             width: drawRect.width,
             height: drawRect.height
         )
-        let debugSharpen = appState?.config.bool(forKey: "debug_mode") == true
-        let drewSharpened = debugSharpen && scaleFactor > 1.0
+        let zoomSharpen = appState?.config.bool(forKey: "browse_zoom_sharpen", default: false) == true
+        let drewSharpened = zoomSharpen && scaleFactor > 1.0
             && drawSharpenedZoomedImage(image, in: centered, context: context)
         if !drewSharpened {
             image.draw(in: centered, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)

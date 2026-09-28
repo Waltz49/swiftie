@@ -182,6 +182,7 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 |-----|--------|
 | +/- or = | Zoom in/out |
 | A | Actual size (1:1 pixels) |
+| F6 | Toggle sharpen when zoomed in |
 | ⌃W | Fit image to canvas width |
 | Mouse wheel | Zoom in/out |
 | Right-click | Return to thumbnails |

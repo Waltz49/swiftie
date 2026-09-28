@@ -728,7 +728,14 @@ final class AppState {
         config.applyLaunchDebugFlag(enabled)
         KeyboardInputTracer.installIfNeeded(config: config)
         status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
+    }
+
+    func toggleBrowseZoomSharpen() {
+        guard fileData.currentViewMode == .browse else { return }
+        let enabled = !config.bool(forKey: "browse_zoom_sharpen", default: false)
+        config.updateSetting("browse_zoom_sharpen", value: enabled)
         browseImageHost?.needsDisplay = true
+        status.show(enabled ? "Zoom sharpen: on" : "Zoom sharpen: off")
     }
 
     /// Repaint padlock overlays after lock/unlock without reloading the directory.

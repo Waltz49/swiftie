@@ -684,6 +684,7 @@ final class AppConfig {
             "sort_reversed": false,
             "image_extensions": defaultImageExtensions,
             "browse_view_actual_size": false,
+            "browse_zoom_sharpen": false,
             "browse_preserve_zoom_on_image_change": false,
             "thumbnail_filename_visible": false,
             "show_extensions": true,

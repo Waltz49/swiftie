@@ -68,6 +68,7 @@ struct KeyboardShortcutsHelpView: View {
                         ("⇧R", "Reset transforms"),
                         ("A", "Toggle actual size"),
                         ("+ / −", "Zoom in / out"),
+                        ("F6", "Toggle sharpen when zoomed in"),
                         ("⌘← → ↑ ↓", "Pan when zoomed"),
                         ("^W", "Fit image width to canvas"),
                         ("T / P (double-tap)", "Exit browse, show file tree / preview"),

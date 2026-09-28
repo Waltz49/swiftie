@@ -743,6 +743,9 @@ final class KeyboardHandlerController {
                 appState.showReferenceGraph(for: path)
                 return true
             }
+        case 97: // F6 — sharpen when zoomed in browse view
+            appState.toggleBrowseZoomSharpen()
+            return true
         case 109: // F10
             appState.clearDirectoryHistory()
             return true
