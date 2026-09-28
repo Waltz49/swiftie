@@ -35,7 +35,17 @@ extension AppState {
                 rootPath: path,
                 entries: entries
             )
-            guard paths.count >= 2 else { return }
+            guard paths.count >= 2 else {
+                StyledMessageDialog.showInformation(
+                    title: "No References Found",
+                    message: """
+                    This image has no reference information in its EXIF user comment. \
+                    References are saved there by the image generation functions when \
+                    an image is created from other images.
+                    """
+                )
+                return
+            }
             if extensionSwapped {
                 status.show(
                     "Some references were found with a different file extension",
@@ -194,7 +204,10 @@ extension AppState {
     }
 
     func findReferences(to targetPath: String) {
-        let candidates = fileData.displayedImages.filter { $0 != targetPath }
+        let candidates = ReferenceGraphService.findReferencesCandidatePaths(
+            appState: self,
+            excluding: targetPath
+        )
         guard !candidates.isEmpty else {
             status.show("No images are available to search")
             return

@@ -40,7 +40,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 ## Right sidebar panes
 
 - [~] Shortcuts (`ShortcutsSidebarView` — favorites + destinations, Click Mode, gear → settings, path tooltips, scroll position persist)
-- [~] Information (EXIF, metadata, actions — `InformationPaneView`)
+- [~] Information (EXIF, metadata, actions — native SwiftUI `InformationPaneView`, no WebKit)
 - [x] Jobs queue panel (`JobQueuePanelView` — strip/one/all size modes, ^J cycle, ⌥[/]\\, floating panel ⌘J, progressive preview image)
 
 ## Pane titlebars & inline toolbars
@@ -475,6 +475,8 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] `--min` build (browser + search only, no imagegen/LM Studio/voice UI)
 
 ## Information pane (exact Python layout)
+
+Swift renders via structured SwiftUI (`InformationPaneContentView`); Python uses `QTextBrowser` HTML.
 
 Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 

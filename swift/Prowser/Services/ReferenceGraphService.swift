@@ -52,6 +52,36 @@ enum ReferenceGraphService {
         return out.isEmpty ? [normalized] : out
     }
 
+    /// Python ``find_references_dialog._collect_search_candidate_paths``.
+    @MainActor
+    static func findReferencesCandidatePaths(appState: AppState, excluding targetPath: String) -> [String] {
+        let targetNorm = normalizePath(targetPath)
+        var seen = Set<String>()
+        var out: [String] = []
+
+        func add(_ path: String) {
+            let norm = normalizePath(path)
+            guard norm != targetNorm, FileManager.default.isReadableFile(atPath: path) else { return }
+            guard seen.insert(norm).inserted else { return }
+            out.append(path)
+        }
+
+        if let directory = appState.fileData.currentDirectory {
+            let directoryFiles = DirectoryScanner.scanDirectory(
+                at: directory,
+                extensions: appState.config.imageExtensions,
+                filterPattern: "*"
+            )
+            for path in directoryFiles {
+                add(path)
+            }
+        }
+        for path in appState.fileData.displayedImages {
+            add(path)
+        }
+        return out
+    }
+
     @MainActor
     static func imagesReferencing(targetPath: String, in candidates: [String]) async -> [String] {
         let targetNorm = normalizePath(targetPath)
@@ -90,6 +120,12 @@ enum ReferenceGraphService {
     private static func referenceEntries(for path: String) async -> [(String, Double?)] {
         guard let text = await ExifService.userDescription(path: path), !text.isEmpty else { return [] }
         return parseReferenceEntries(from: text)
+    }
+
+    static func isReferenceFileDateLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return fileDateLine?.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil
     }
 
     static func parseReferenceEntries(from text: String) -> [(String, Double?)] {
@@ -206,6 +242,10 @@ enum ReferenceGraphService {
                 if passesMtime(normalized, expected: expectedMtime) {
                     return (normalized, false)
                 }
+                // EXIF file-date mismatch: accept only when a file exists at this path (F5 / info pane).
+                if expectedMtime != nil {
+                    return (normalized, false)
+                }
                 continue
             }
             let root = (normalized as NSString).deletingPathExtension
@@ -213,7 +253,11 @@ enum ReferenceGraphService {
             guard !ext.isEmpty else { continue }
             for alt in imageExtensions where alt != ".\(ext.lowercased())" {
                 let altPath = root + alt
-                if FileManager.default.fileExists(atPath: altPath), passesMtime(altPath, expected: expectedMtime) {
+                guard FileManager.default.fileExists(atPath: altPath) else { continue }
+                if passesMtime(altPath, expected: expectedMtime) {
+                    return (altPath, true)
+                }
+                if expectedMtime != nil {
                     return (altPath, true)
                 }
             }

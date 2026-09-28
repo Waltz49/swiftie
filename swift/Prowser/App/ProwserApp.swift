@@ -289,6 +289,9 @@ final class DirectoryLoadCoordinator {
             self.appState.directoryHistory.applyEntry(entry, to: self.appState.fileData)
             self.appState.fileData.setViewMode(entry.viewMode)
             SelectionService.restoreSelections(appState: self.appState, selectedFiles: entry.selectedFiles)
+            if entry.viewMode == .thumbnail {
+                self.appState.scheduleScrollThumbnailGridToActiveImageAfterLayout()
+            }
         }
 
         if !entry.displayedImages.isEmpty {
@@ -313,6 +316,7 @@ final class DirectoryLoadCoordinator {
                 let focus = entry.referenceGraphFocusPath ?? entry.currentPath
                 Task { @MainActor in
                     await appState.setReferenceGraphPresentation(paths: paths, focusPath: focus)
+                    appState.scheduleScrollThumbnailGridToActiveImageAfterLayout()
                 }
             } else {
                 appState.clearReferenceGraphPresentation()

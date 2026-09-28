@@ -4,11 +4,11 @@ struct InformationPaneView: View {
     @Environment(AppState.self) private var appState
     @State private var record: ExifRecord = .empty
     @State private var overlayData = InformationOverlayData(filename: "", fieldValuePairs: [])
-    @State private var html = ""
+    @State private var content: InformationPaneContent?
     @State private var errorMessage: String?
     @State private var metadataRefreshTask: Task<Void, Never>?
     @State private var fileMetadataToken: UUID?
-    @State private var themeRevision = 0
+    @State private var scrollCoordinator = InformationPaneScrollCoordinator()
 
     private var sectionState: InformationSectionState {
         appState.informationSectionState
@@ -22,12 +22,23 @@ struct InformationPaneView: View {
                     .padding(.horizontal, 18)
                     .padding(.vertical, 15)
                 Spacer()
-            } else if html.isEmpty {
+            } else if content == nil {
                 Spacer()
-            } else {
-                InformationPaneWebView(html: html) { action, _ in
-                    handleLink(action)
-                }
+            } else if let content {
+                InformationPaneContentView(
+                    content: content,
+                    colors: appState.theme.colors,
+                    onToggleSection: { key, expandAll in
+                        handleLink(.toggleSection(key, expandAll: expandAll))
+                    },
+                    onCopySeed: { seed in
+                        handleLink(.copySeed(seed))
+                    },
+                    onReferenceLevel: { optionHeld in
+                        handleLink(.refLevel(optionHeld: optionHeld))
+                    }
+                )
+                .environment(\.informationPaneScrollCoordinator, scrollCoordinator)
             }
         }
         .onChange(of: appState.fileData.currentImagePath) { _, newPath in
@@ -55,10 +66,7 @@ struct InformationPaneView: View {
             }
         }
         .onChange(of: appState.theme.colors) { _, _ in
-            Task { @MainActor in
-                themeRevision += 1
-                rebuildHTML()
-            }
+            rebuildContent()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
@@ -98,7 +106,7 @@ struct InformationPaneView: View {
         guard let path else {
             record = .empty
             overlayData = InformationOverlayData(filename: "", fieldValuePairs: [])
-            html = ""
+            content = nil
             return
         }
         let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
@@ -111,27 +119,26 @@ struct InformationPaneView: View {
               appState.fileData.currentImagePath.map({
                   URL(fileURLWithPath: $0).standardizedFileURL.path
               }) == normalizedPath else { return }
-        overlayData = InformationPaneHTMLBuilder.buildOverlayData(
+        overlayData = InformationOverlayBuilder.buildOverlayData(
             from: record,
             imageDirectory: (path as NSString).deletingLastPathComponent,
             imagePath: path
         )
-        rebuildHTML()
+        rebuildContent()
     }
 
     @MainActor
-    private func rebuildHTML() {
+    private func rebuildContent() {
         guard appState.fileData.currentImagePath != nil else {
-            html = ""
+            content = nil
             return
         }
-            html = InformationPaneHTMLBuilder.buildHTML(
+        content = InformationPaneLayoutBuilder.buildContent(
             data: overlayData,
-            colors: appState.theme.colors,
             sectionState: sectionState,
-            activeJobHeading: nil,
             contentWidth: max(160, Int(appState.rightSidebarWidth) - 36)
         )
+        scrollCoordinator.restoreOffset()
     }
 
     @MainActor
@@ -140,8 +147,9 @@ struct InformationPaneView: View {
         case .copySeed(let seed):
             appState.copyTextToClipboard(seed)
         case .toggleSection(let key, let expandAll):
+            scrollCoordinator.captureOffset()
             sectionState.toggleSection(key, expandAll: expandAll)
-            rebuildHTML()
+            rebuildContent()
         case .refLevel(let optionHeld):
             appState.handleInformationReferenceLevelClick(optionHeld: optionHeld)
         case .copy(let full):

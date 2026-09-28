@@ -738,9 +738,9 @@ final class KeyboardHandlerController {
         case 24, 69: // equals/plus, keypad =
             appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.zoomIn))
             return true
-        case 96: // F5
+        case 96: // F5 — reference graph for active image (Python thumbnail + browse)
             if let path = appState.fileData.currentImagePath {
-                appState.findReferences(to: path)
+                appState.showReferenceGraph(for: path)
                 return true
             }
         case 109: // F10

@@ -127,6 +127,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 guard let self, case .string(let mode) = event.payload else { return }
                 self.applyThumbnailLoadingActive(mode == ViewMode.thumbnail.rawValue)
                 if mode == ViewMode.thumbnail.rawValue {
+                    self.lastSyncedIndex = -1
                     self.ensureHighlightedVisible()
                 }
             }

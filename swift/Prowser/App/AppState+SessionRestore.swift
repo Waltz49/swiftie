@@ -38,6 +38,7 @@ extension AppState {
             reconcileUserRequestedTreeDirectoryWithActiveImage()
             if newMode == .thumbnail {
                 finalizeThumbnailHighlightAfterBrowseExit(preferredPath: browseExitPath)
+                scheduleScrollThumbnailGridToActiveImageAfterLayout()
             }
             syncFileTreeToActiveImage()
             focusMainCanvas()
@@ -137,6 +138,40 @@ extension AppState {
             return normalized
         }
         return nil
+    }
+
+    /// Python ``highlight_image`` / ``ensure_highlighted_visible`` after browse exit or history restore.
+    func scrollThumbnailGridToActiveImageAfterLayout() {
+        guard fileData.currentViewMode == .thumbnail else { return }
+        fileData.reconcileCurrentIndexWithPath()
+        guard let grid = thumbnailGridHost else { return }
+        let paths = fileData.displayedImages
+        guard !paths.isEmpty,
+              let path = fileData.currentImagePath,
+              let normalized = FileDataModel.normalizePath(path),
+              let index = FileDataModel.indexOfPath(normalized, in: paths) else { return }
+
+        grid.referenceGraph = referenceGraphActive ? referenceGraphData : nil
+        let scroll = { [weak grid] in
+            guard let grid else { return }
+            grid.reloadLayoutIfNeeded()
+            grid.selectIndex(index, scroll: true, notifyDelegate: false)
+            grid.scrollToSelectionAfterLayout()
+        }
+        scroll()
+    }
+
+    /// Defer scroll until after layout/settings subscribers run (splitter, reference graph layout).
+    func scheduleScrollThumbnailGridToActiveImageAfterLayout() {
+        DispatchQueue.main.async { [weak self] in
+            self?.scrollThumbnailGridToActiveImageAfterLayout()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.scrollThumbnailGridToActiveImageAfterLayout()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.scrollThumbnailGridToActiveImageAfterLayout()
+        }
     }
 
     /// Re-highlight the browse exit file by path (never by stale list index).
