@@ -123,7 +123,8 @@ enum ModelDownloadService {
         let panel = CancellableProgressPanelController(
             title: "Download Search Models",
             labelText: "Preparing…",
-            maximum: progressScale
+            maximum: progressScale,
+            minimumProgressUpdateInterval: 1.0
         )
         panel.onCancel = { ActiveModelDownload.shared.cancelInFlight() }
         panel.show()
@@ -223,7 +224,7 @@ private final class DownloadProgressThrottle: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let now = DispatchTime.now().uptimeNanoseconds
-        if expected > 0, written < expected, now - lastEmitUptime < 80_000_000 {
+        if expected > 0, written < expected, now - lastEmitUptime < 1_000_000_000 {
             return false
         }
         lastEmitUptime = now

@@ -6,7 +6,7 @@ final class CancellableProgressPanelController {
     private static let lineMaxChars = 64
     private static let labelMaxWidth: CGFloat = 400
     private static let etaWarmupSeconds: TimeInterval = 5
-    private static let etaRefreshInterval: TimeInterval = 0.5
+    private static let etaRefreshInterval: TimeInterval = 1.0
 
     private let panel: NSPanel
     private let label: NSTextField
@@ -25,6 +25,12 @@ final class CancellableProgressPanelController {
     private var progressStartDate: Date?
     private var etaTimer: Timer?
     private let etaTimerTarget = ETATimerTarget()
+    private let minimumProgressUpdateInterval: TimeInterval?
+    private var pendingProgressValue: Int?
+    private var pendingProgressLabel: String?
+    private var lastProgressUIEmitDate: Date?
+    private var progressFlushTimer: Timer?
+    private let progressFlushTimerTarget = ProgressFlushTimerTarget()
     private let extractionTimeEstimator = ExtractionTimeEstimator()
     private let mutedNoteColor: NSColor
     /// Readable from background extraction tasks (CLIP/CNN).
@@ -46,11 +52,13 @@ final class CancellableProgressPanelController {
         showsLongCompareNoteLine: Bool = false,
         showsBucketProgressLine: Bool = false,
         showsTimeRemainingEstimate: Bool? = nil,
-        usesExtractionBasedTimeEstimate: Bool = false
+        usesExtractionBasedTimeEstimate: Bool = false,
+        minimumProgressUpdateInterval: TimeInterval? = nil
     ) {
         let showETA = showsTimeRemainingEstimate ?? (detailText != nil)
         self.showsTimeRemainingEstimate = showETA
         self.usesExtractionBasedTimeEstimate = usesExtractionBasedTimeEstimate
+        self.minimumProgressUpdateInterval = minimumProgressUpdateInterval
         isIndeterminateMode = indeterminate
         self.mutedNoteColor = mutedNoteColor
         var panelHeight: CGFloat = 120
@@ -244,16 +252,10 @@ final class CancellableProgressPanelController {
     func show() {
         progressStartDate = Date()
         if showsTimeRemainingEstimate {
-            etaTimerTarget.owner = self
-            let timer = Timer(
-                timeInterval: Self.etaRefreshInterval,
-                target: etaTimerTarget,
-                selector: #selector(ETATimerTarget.tick),
-                userInfo: nil,
-                repeats: true
-            )
-            RunLoop.main.add(timer, forMode: .common)
-            etaTimer = timer
+            startETATimer()
+        }
+        if minimumProgressUpdateInterval != nil {
+            startProgressFlushTimerIfNeeded()
         }
         panel.center()
         keyboardMonitor = AppKitDialogKeyboardNavigation.install(
@@ -280,6 +282,8 @@ final class CancellableProgressPanelController {
         isClosed = true
         etaTimer?.invalidate()
         etaTimer = nil
+        progressFlushTimer?.invalidate()
+        progressFlushTimer = nil
         progressStartDate = nil
         if let keyboardMonitor {
             NSEvent.removeMonitor(keyboardMonitor)
@@ -364,9 +368,87 @@ final class CancellableProgressPanelController {
     }
 
     private func updateOnMain(value: Int? = nil, label text: String? = nil) {
-        if let value { setValueOnMain(value) }
-        if let text { setLabelOnMain(text) }
+        if let value { pendingProgressValue = value }
+        if let text { pendingProgressLabel = text }
+
+        guard let interval = minimumProgressUpdateInterval else {
+            applyPendingProgressOnMain()
+            return
+        }
+
+        // Status-only updates (verify/unpack phases) should not wait for the progress tick.
+        if value == nil, text != nil {
+            flushPendingProgressOnMain()
+            return
+        }
+
+        let forceImmediate = shouldFlushProgressImmediately(value: value, interval: interval)
+        if forceImmediate {
+            flushPendingProgressOnMain()
+            return
+        }
+        startProgressFlushTimerIfNeeded()
+    }
+
+    private func shouldFlushProgressImmediately(value: Int?, interval: TimeInterval) -> Bool {
+        if let value, !isIndeterminateMode, value >= Int(indicator.maxValue.rounded()) {
+            return true
+        }
+        guard let last = lastProgressUIEmitDate else { return true }
+        return Date().timeIntervalSince(last) >= interval
+    }
+
+    private func applyPendingProgressOnMain() {
+        if let value = pendingProgressValue {
+            setValueOnMain(value)
+            pendingProgressValue = nil
+        }
+        if let text = pendingProgressLabel {
+            setLabelOnMain(text)
+            pendingProgressLabel = nil
+        }
         refreshOnMain()
+    }
+
+    private func flushPendingProgressOnMain() {
+        applyPendingProgressOnMain()
+        lastProgressUIEmitDate = Date()
+    }
+
+    private func startETATimer() {
+        etaTimerTarget.owner = self
+        let timer = Timer(
+            timeInterval: Self.etaRefreshInterval,
+            target: etaTimerTarget,
+            selector: #selector(ETATimerTarget.tick),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        etaTimer = timer
+    }
+
+    private func startProgressFlushTimerIfNeeded() {
+        guard minimumProgressUpdateInterval != nil, progressFlushTimer == nil else { return }
+        progressFlushTimerTarget.owner = self
+        let timer = Timer(
+            timeInterval: minimumProgressUpdateInterval ?? Self.etaRefreshInterval,
+            target: progressFlushTimerTarget,
+            selector: #selector(ProgressFlushTimerTarget.tick),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        progressFlushTimer = timer
+    }
+
+    private func flushPendingProgressIfDue() {
+        guard !isClosed, minimumProgressUpdateInterval != nil else { return }
+        guard pendingProgressValue != nil || pendingProgressLabel != nil else { return }
+        let interval = minimumProgressUpdateInterval ?? Self.etaRefreshInterval
+        if shouldFlushProgressImmediately(value: pendingProgressValue, interval: interval) {
+            flushPendingProgressOnMain()
+        }
     }
 
     private func beginIndeterminatePhaseOnMain(label: String) {
@@ -459,6 +541,14 @@ final class CancellableProgressPanelController {
 
         @MainActor @objc func tick() {
             owner?.refreshTimeRemainingEstimate()
+        }
+    }
+
+    private final class ProgressFlushTimerTarget: NSObject {
+        weak var owner: CancellableProgressPanelController?
+
+        @MainActor @objc func tick() {
+            owner?.flushPendingProgressIfDue()
         }
     }
 

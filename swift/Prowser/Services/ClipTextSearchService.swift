@@ -67,7 +67,8 @@ enum ClipTextSearchService {
             labelText: "Encoding prompt…",
             maximum: paths.count,
             detailText: ImageSearchResultPresentation.searchIndexingDetailText,
-            mutedNoteColor: NSColor(appState.theme.colors.dialogMutedText)
+            mutedNoteColor: NSColor(appState.theme.colors.dialogMutedText),
+            minimumProgressUpdateInterval: 1.0
         )
         panel.show()
         func closeProgressPanel() {
