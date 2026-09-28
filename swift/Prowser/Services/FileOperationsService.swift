@@ -799,10 +799,14 @@ final class FileOperationsService {
             return
         }
 
+        let switchedToCustom: Bool
         if locked,
            appState.fileData.currentViewMode == .thumbnail,
            appState.config.string(forKey: "sort_mode", default: SortMode.date.rawValue) != SortMode.custom.rawValue {
             appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+            switchedToCustom = true
+        } else {
+            switchedToCustom = false
         }
 
         var lockedSet = PrsortIO.lockedFilenames(in: directory)
@@ -824,7 +828,11 @@ final class FileOperationsService {
             appState.status.show(locked ? "Locked \(selected.count) file(s)" : "Unlocked \(selected.count) file(s)")
             appState.beginSuppressDirectoryRefresh()
             defer { appState.endSuppressDirectoryRefresh() }
-            _ = ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState)
+            if switchedToCustom {
+                appState.scheduleDeferredMenuRefresh()
+            } else if !locked {
+                _ = ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState)
+            }
             appState.repaintThumbnailLockIndicators()
         } catch {
             showAlert("Lock Failed", error.localizedDescription)

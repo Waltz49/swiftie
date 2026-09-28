@@ -101,13 +101,9 @@ enum DirectoryRefreshService {
             return
         }
 
-        let diskList = DisplayOrderService.applyDisplayOrder(scanned, appState: appState)
         efficientRefreshWithChanges(
             appState: appState,
-            diskList: diskList,
-            diskSet: Set(diskList),
             displayed: displayed,
-            displayedSet: displayedSet,
             added: added,
             removed: removed
         )
@@ -142,10 +138,7 @@ enum DirectoryRefreshService {
 
     private static func efficientRefreshWithChanges(
         appState: AppState,
-        diskList: [String],
-        diskSet: Set<String>,
         displayed: [String],
-        displayedSet: Set<String>,
         added: Set<String>,
         removed: Set<String>
     ) {

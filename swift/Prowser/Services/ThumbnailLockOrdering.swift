@@ -1,6 +1,7 @@
 import Foundation
 
-/// Locked-file ordering in thumbnail view. Port of `sorting_manager.py` lock-first helpers.
+/// Lightweight lock pinning when the file set is unchanged (no full re-sort).
+/// Full sort / directory load uses `DisplayOrderService.applyDisplayOrder` instead.
 @MainActor
 enum ThumbnailLockOrdering {
     static func enforceLockedFirstInThumbnailView(appState: AppState) -> Bool {

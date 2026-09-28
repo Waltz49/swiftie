@@ -1000,16 +1000,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             super.keyDown(with: event)
             return
         }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
-           event.charactersIgnoringModifiers?.lowercased() == "l" {
-            if flags.contains(.shift) {
-                appState?.fileOperations.unlockSelectedFiles()
-            } else if appState?.config.bool(forKey: "allow_thumbnail_locking", default: false) == true {
-                appState?.fileOperations.lockSelectedFiles()
-            }
-            return
-        }
         switch event.keyCode {
         case 123: navigate(.left)
         case 124: navigate(.right)
