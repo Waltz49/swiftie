@@ -1,4 +1,10 @@
+import AppKit
 import SwiftUI
+
+extension Notification.Name {
+    /// Preferences OK / dismiss: commit path fields that still have keyboard focus (mouse OK does not blur SwiftUI fields).
+    static let prowserCommitSettingsPathFields = Notification.Name("prowser.commitSettingsPathFields")
+}
 
 /// Visual state for path fields (Python settings dialog validation QLabel).
 enum SettingsPathValidationState: Equatable {
@@ -25,6 +31,148 @@ enum SettingsPathValidation {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         return displayPath(trimmed)
+    }
+
+    /// Display form for typed paths: on-disk component casing for existing prefixes, then `~/…` shortening.
+    static func normalizedTypedPathDisplayPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let cased = pathWithFilesystemNameCasing(trimmed)
+        return displayPath(cased)
+    }
+
+    /// Expanded path with filesystem casing (settings storage).
+    static func normalizedStoredPath(_ path: String) -> String {
+        expandedPath(normalizedTypedPathDisplayPath(path))
+    }
+
+    static func normalizedExitScriptCommandDisplay(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let parsed = ExitScriptUtils.parseExitScriptCommand(trimmed)
+        guard !parsed.path.isEmpty else { return trimmed }
+        let pathForDisplay = displayPath(pathWithFilesystemNameCasing(parsed.path))
+        return ExitScriptUtils.formatExitScriptCommand(prefix: parsed.prefix, path: pathForDisplay)
+    }
+
+    static func normalizedStoredExitScriptCommand(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let parsed = ExitScriptUtils.parseExitScriptCommand(trimmed)
+        guard !parsed.path.isEmpty else { return trimmed }
+        let expandedScriptPath = normalizedStoredPath(parsed.path)
+        return ExitScriptUtils.formatExitScriptCommand(prefix: parsed.prefix, path: expandedScriptPath)
+    }
+
+    static func normalizedOptionalPathSlotsForStorage(_ values: [String?]) -> [String?] {
+        values.map { value in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return normalizedStoredPath(trimmed)
+        }
+    }
+
+    static func normalizedPathDictionaryEntriesForStorage(_ entries: [[String: Any]]) -> [[String: Any]] {
+        entries.map { entry in
+            guard let path = entry["path"] as? String else { return entry }
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return entry }
+            var updated = entry
+            updated["path"] = normalizedStoredPath(trimmed)
+            return updated
+        }
+    }
+
+    static func normalizedRootDirectoriesForStorage(_ paths: [String]) -> [String] {
+        paths.map { path in
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return path }
+            return pathWithFilesystemNameCasing(trimmed)
+        }
+    }
+
+    /// Preferences OK: rewrite path-related settings using on-disk name casing.
+    static func normalizePathRelatedSettings(config: AppConfig) {
+        config.setExcludeDirectories(
+            normalizedPathDictionaryEntriesForStorage(config.excludeDirectories())
+        )
+        config.setIgnoreDirectories(
+            normalizedPathDictionaryEntriesForStorage(config.ignoreDirectories())
+        )
+        config.setOptionalStringArray(
+            "favorite_directories",
+            values: normalizedOptionalPathSlotsForStorage(config.favoriteDirectories())
+        )
+        config.setOptionalStringArray(
+            "move_destinations",
+            values: normalizedOptionalPathSlotsForStorage(config.moveDestinations())
+        )
+        config.setValue(
+            normalizedRootDirectoriesForStorage(config.rootDirectories()),
+            forKey: "root_directories"
+        )
+        if let rawTemp = config.temporaryFilesDirectoryRaw(),
+           !rawTemp.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            config.setTemporaryFilesDirectory(normalizedStoredPath(rawTemp))
+        }
+        config.setValue(
+            normalizedStoredExitScriptCommand(config.string(forKey: ExitScriptUtils.settingTextAIExit)),
+            forKey: ExitScriptUtils.settingTextAIExit
+        )
+        config.setValue(
+            normalizedStoredExitScriptCommand(config.string(forKey: ExitScriptUtils.settingImageAIExit)),
+            forKey: ExitScriptUtils.settingImageAIExit
+        )
+    }
+
+    /// Rewrites each resolved path component to the on-disk name (APFS/HFS+ case-insensitive, case-preserving).
+    /// Non-absolute substrings (folder-name fragments) are returned unchanged aside from trimming.
+    static func pathWithFilesystemNameCasing(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return path }
+        let expanded = expandedPath(trimmed)
+        let hadTrailingSlash = expanded.hasSuffix("/") && expanded != "/"
+        guard expanded.hasPrefix("/") else { return trimmed }
+
+        let fm = FileManager.default
+        var resolved = ""
+        var currentDirectory = URL(fileURLWithPath: "/", isDirectory: true)
+        let components = expanded.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return expanded }
+
+        for (index, component) in components.enumerated() {
+            guard let names = try? fm.contentsOfDirectory(atPath: currentDirectory.path) else {
+                if resolved.isEmpty { return expanded }
+                resolved += "/" + components[index...].joined(separator: "/")
+                break
+            }
+            guard let actualName = names.first(where: {
+                $0.compare(component, options: .caseInsensitive) == .orderedSame
+            }) else {
+                if resolved.isEmpty { return expanded }
+                resolved += "/" + components[index...].joined(separator: "/")
+                break
+            }
+            resolved += "/" + actualName
+            let nextPath = currentDirectory.appendingPathComponent(actualName).path
+            currentDirectory = URL(fileURLWithPath: nextPath, isDirectory: true)
+        }
+
+        if resolved.isEmpty { return expanded }
+        if hadTrailingSlash, !resolved.hasSuffix("/") {
+            resolved += "/"
+        }
+        return resolved
+    }
+
+    /// End field editing and notify `SettingsPathTextField` instances to run blur normalization.
+    static func commitPendingPathFieldEdits() {
+        if let window = NSApp.keyWindow {
+            window.endEditing(for: nil)
+            window.makeFirstResponder(nil)
+        }
+        NotificationCenter.default.post(name: .prowserCommitSettingsPathFields, object: nil)
     }
 
     static func validateMoveDestinationPath(_ path: String) -> SettingsPathValidationState {
@@ -130,6 +278,8 @@ struct SettingsPathTextField: View {
     @Binding var text: String
     var prompt: Text?
     var help: String?
+    /// Exit-script row (`python /path/to/script.py`): normalize the script path token only.
+    var exitScriptCommand = false
     var onCommit: (() -> Void)? = nil
 
     @FocusState private var isFocused: Bool
@@ -150,11 +300,18 @@ struct SettingsPathTextField: View {
             }
         }
         .onSubmit { shortenOnBlur() }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserCommitSettingsPathFields)) { _ in
+            shortenOnBlur()
+        }
         .help(help ?? title)
     }
 
     private func shortenOnBlur() {
-        let normalized = SettingsPathValidation.normalizedDisplayPath(text)
+        let normalized = if exitScriptCommand {
+            SettingsPathValidation.normalizedExitScriptCommandDisplay(text)
+        } else {
+            SettingsPathValidation.normalizedTypedPathDisplayPath(text)
+        }
         if normalized != text {
             text = normalized
         }

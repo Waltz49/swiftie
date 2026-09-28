@@ -20,7 +20,7 @@ enum ThumbnailExcludeService {
         for imagePath in displayed {
             guard FileManager.default.fileExists(atPath: imagePath) else { continue }
             guard let fullPath = FileDataModel.normalizePath(imagePath) else { continue }
-            let shouldExclude = rules.contains { fullPath.contains($0) }
+            let shouldExclude = rules.contains { pathMatchesExcludeRule(fullPath: fullPath, rule: $0) }
             if !shouldExclude {
                 filtered.append(imagePath)
             }
@@ -55,5 +55,13 @@ enum ThumbnailExcludeService {
             guard !trimmed.isEmpty else { return nil }
             return (trimmed as NSString).expandingTildeInPath
         }
+    }
+
+    /// Substring match anywhere in the normalized image path (Python `exclude_string in full_path`), case-insensitive like the default macOS volume.
+    static func pathMatchesExcludeRule(fullPath: String, rule: String) -> Bool {
+        let trimmedRule = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRule.isEmpty else { return false }
+        let expandedRule = (trimmedRule as NSString).expandingTildeInPath
+        return fullPath.localizedStandardContains(expandedRule)
     }
 }

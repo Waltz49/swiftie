@@ -114,6 +114,8 @@ struct SettingsWindowView: View {
     }
 
     private func settingsOK() {
+        SettingsPathValidation.commitPendingPathFieldEdits()
+        SettingsPathValidation.normalizePathRelatedSettings(config: appState.config)
         rememberSettingsTab()
         let refreshFileTree = appState.config.treeRelatedSettingsChangedInCurrentSession()
         appState.theme.commitSettingsOK()

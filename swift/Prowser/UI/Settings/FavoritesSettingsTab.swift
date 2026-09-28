@@ -29,7 +29,13 @@ struct FavoritesSettingsTab: View {
                             SettingsSupport.pickFavoriteDestination(
                                 into: Binding(
                                     get: { favorites[index] ?? "" },
-                                    set: { favorites[index] = $0.isEmpty ? nil : $0; persist() }
+                                    set: {
+                                        let raw = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        favorites[index] = raw.isEmpty
+                                            ? nil
+                                            : SettingsPathValidation.normalizedTypedPathDisplayPath(raw)
+                                        persist()
+                                    }
                                 ),
                                 imageExtensions: appState.config.imageExtensions
                             )

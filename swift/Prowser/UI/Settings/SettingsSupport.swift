@@ -138,7 +138,7 @@ enum SettingsSupport {
             panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true)
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        binding.wrappedValue = SettingsPathValidation.displayPath(url.path)
+        binding.wrappedValue = SettingsPathValidation.normalizedTypedPathDisplayPath(url.path)
     }
 
     static func pickDirectory(into binding: Binding<String>) {
@@ -155,7 +155,7 @@ enum SettingsSupport {
             }
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        binding.wrappedValue = SettingsPathValidation.displayPath(url.path)
+        binding.wrappedValue = SettingsPathValidation.normalizedTypedPathDisplayPath(url.path)
     }
 
     static func pickFile(into binding: Binding<String>, allowedTypes: [String] = []) {
@@ -175,14 +175,14 @@ enum SettingsSupport {
             panel.directoryURL = URL(fileURLWithPath: current).deletingLastPathComponent()
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        binding.wrappedValue = SettingsPathValidation.displayPath(url.path)
+        binding.wrappedValue = SettingsPathValidation.normalizedTypedPathDisplayPath(url.path)
     }
 
     /// Load optional path slots from config for settings text fields (display `~/…` when possible).
     static func loadOptionalPathSlots(_ values: [String?]) -> [String?] {
         values.map { value in
             guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return SettingsPathValidation.displayPath(value)
+            return SettingsPathValidation.normalizedTypedPathDisplayPath(value)
         }
     }
 
@@ -253,13 +253,13 @@ enum SettingsSupport {
         var isDir: ObjCBool = false
         let path = url.path
         if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
-            binding.wrappedValue = SettingsPathValidation.displayPath(path)
+            binding.wrappedValue = SettingsPathValidation.normalizedTypedPathDisplayPath(path)
             return
         }
         let ext = url.pathExtension.lowercased()
         let allowed = Set(imageExtensions.map { normalizeImageExtension($0) })
         if allowed.contains(ext) {
-            binding.wrappedValue = SettingsPathValidation.displayPath(path)
+            binding.wrappedValue = SettingsPathValidation.normalizedTypedPathDisplayPath(path)
             return
         }
         let alert = NSAlert()

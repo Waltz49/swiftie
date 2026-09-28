@@ -39,7 +39,13 @@ struct ExcludesSettingsTab: View {
                         Button("Choose…") {
                             SettingsSupport.pickDirectory(into: Binding(
                                 get: { entries[index].path.isEmpty ? nil : entries[index].path },
-                                set: { entries[index].path = $0 ?? ""; persist() }
+                                set: {
+                                    let raw = $0 ?? ""
+                                    entries[index].path = raw.isEmpty
+                                        ? ""
+                                        : SettingsPathValidation.normalizedTypedPathDisplayPath(raw)
+                                    persist()
+                                }
                             ))
                         }
                     }
@@ -73,7 +79,7 @@ struct ExcludesSettingsTab: View {
             if let path = dict["path"] as? String, !path.isEmpty {
                 return ExcludeEntry(
                     enabled: enabled,
-                    path: SettingsPathValidation.displayPath(path)
+                    path: SettingsPathValidation.normalizedTypedPathDisplayPath(path)
                 )
             }
             return ExcludeEntry(enabled: enabled, path: "")

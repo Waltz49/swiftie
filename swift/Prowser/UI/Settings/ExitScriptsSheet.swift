@@ -22,8 +22,15 @@ struct ExitScriptsSheet: View {
             DialogButtonRow([
                 DialogButton("Cancel", isCancel: true) { dismiss() },
                 DialogButton("OK", isDefault: true) {
-                    appState.config.setValue(textAIExit, forKey: ExitScriptUtils.settingTextAIExit)
-                    appState.config.setValue(imageAIExit, forKey: ExitScriptUtils.settingImageAIExit)
+                    SettingsPathValidation.commitPendingPathFieldEdits()
+                    appState.config.setValue(
+                        SettingsPathValidation.normalizedStoredExitScriptCommand(textAIExit),
+                        forKey: ExitScriptUtils.settingTextAIExit
+                    )
+                    appState.config.setValue(
+                        SettingsPathValidation.normalizedStoredExitScriptCommand(imageAIExit),
+                        forKey: ExitScriptUtils.settingImageAIExit
+                    )
                     appState.config.applySettingsChange(emit: appState.eventBus)
                     dismiss()
                 },
@@ -32,8 +39,12 @@ struct ExitScriptsSheet: View {
         .padding(20)
         .frame(minWidth: 520, minHeight: 240)
         .onAppear {
-            textAIExit = appState.config.string(forKey: ExitScriptUtils.settingTextAIExit)
-            imageAIExit = appState.config.string(forKey: ExitScriptUtils.settingImageAIExit)
+            textAIExit = SettingsPathValidation.normalizedExitScriptCommandDisplay(
+                appState.config.string(forKey: ExitScriptUtils.settingTextAIExit)
+            )
+            imageAIExit = SettingsPathValidation.normalizedExitScriptCommandDisplay(
+                appState.config.string(forKey: ExitScriptUtils.settingImageAIExit)
+            )
         }
     }
 
@@ -46,7 +57,7 @@ struct ExitScriptsSheet: View {
                 SettingsPathTextField(
                     title: "python /path/to/script.py",
                     text: text,
-                    onCommit: nil
+                    exitScriptCommand: true
                 )
                 Button("Browse…") {
                     SettingsSupport.pickFile(into: text, allowedTypes: ["py", "sh", ""])

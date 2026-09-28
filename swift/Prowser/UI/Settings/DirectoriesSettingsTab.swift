@@ -72,7 +72,7 @@ struct DirectoriesSettingsTab: View {
                     HStack {
                         SettingsPathTextField(title: "Custom path", text: $newRootPath)
                         Button("Add") {
-                            let expanded = SettingsPathValidation.expandedPath(newRootPath)
+                            let expanded = SettingsPathValidation.normalizedStoredPath(newRootPath)
                             guard !expanded.isEmpty, !rootDirectories.contains(expanded) else { return }
                             rootDirectories.append(expanded)
                             newRootPath = ""
@@ -161,7 +161,10 @@ struct DirectoriesSettingsTab: View {
                                 guard let index else { return }
                                 SettingsSupport.pickDirectory(into: Binding(
                                     get: { ignoreEntries[index].path },
-                                    set: { ignoreEntries[index].path = $0; persistIgnoreDirectories() }
+                                    set: {
+                                        ignoreEntries[index].path = $0
+                                        persistIgnoreDirectories()
+                                    }
                                 ))
                             }
                         }
@@ -258,7 +261,7 @@ struct DirectoriesSettingsTab: View {
         filesystemRootDirectories = AppConfig.filesystemRootDirectoryPaths()
         rootDirectories = appState.config.rootDirectories()
         if let rawTemp = appState.config.temporaryFilesDirectoryRaw(), !rawTemp.isEmpty {
-            temporaryFilesPath = SettingsPathValidation.displayPath(rawTemp)
+            temporaryFilesPath = SettingsPathValidation.normalizedTypedPathDisplayPath(rawTemp)
         } else {
             temporaryFilesPath = ""
         }
@@ -266,7 +269,7 @@ struct DirectoriesSettingsTab: View {
             let raw = dict["path"] as? String ?? ""
             return IgnoreEntry(
                 enabled: dict["enabled"] as? Bool ?? false,
-                path: raw.isEmpty ? "" : SettingsPathValidation.displayPath(raw)
+                path: raw.isEmpty ? "" : SettingsPathValidation.normalizedTypedPathDisplayPath(raw)
             )
         }
         if ignoreEntries.count < 3 {
