@@ -8,6 +8,40 @@ extension ModelManifest {
 
     private static var userCatalog: Catalog?
 
+    /// Max age of on-disk `image_recognition_models.json` before a foreground search may refresh it from HTTPS.
+    static let remoteCatalogMaxAge: TimeInterval = 24 * 3600
+
+    static func cachedCatalogURL(profile: ProfilePaths) -> URL {
+        profile.imageRecognitionCacheDirectory
+            .appendingPathComponent("image_recognition_models.json")
+    }
+
+    static func shouldRefreshRemoteCatalog(
+        cachedFileURL: URL,
+        maxAge: TimeInterval = remoteCatalogMaxAge
+    ) -> Bool {
+        guard FileManager.default.fileExists(atPath: cachedFileURL.path) else { return true }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: cachedFileURL.path),
+              let modified = attrs[.modificationDate] as? Date else {
+            return true
+        }
+        return Date().timeIntervalSince(modified) > maxAge
+    }
+
+    static func loadLocalCatalog(profile: ProfilePaths) {
+        loadUserCatalog(profile: profile)
+    }
+
+    /// Network fetch only when the cached manifest is missing or older than `remoteCatalogMaxAge`.
+    static func refreshRemoteCatalogIfStale(profile: ProfilePaths, downloadBaseURL: String) async {
+        let dest = cachedCatalogURL(profile: profile)
+        if !shouldRefreshRemoteCatalog(cachedFileURL: dest) {
+            loadUserCatalog(profile: profile)
+            return
+        }
+        await refreshRemoteCatalog(profile: profile, downloadBaseURL: downloadBaseURL)
+    }
+
     /// Fetches `image_recognition_models.json` from the download base (HTTPS) before installs.
     static func refreshRemoteCatalog(profile: ProfilePaths, downloadBaseURL: String) async {
         let base = downloadBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)

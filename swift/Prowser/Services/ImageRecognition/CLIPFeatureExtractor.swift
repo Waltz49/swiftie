@@ -36,9 +36,12 @@ final class CLIPFeatureExtractor: @unchecked Sendable {
         progress: @escaping (Int, Int, String) -> Void,
         shouldCancel: @escaping () -> Bool
     ) throws -> [String: [Float]] {
+        let total = paths.count
+        if total > 0 {
+            progress(0, total, "Loading search model…")
+        }
         let model = try loadImageModel()
         var result: [String: [Float]] = [:]
-        let total = paths.count
         for (index, path) in paths.enumerated() {
             if shouldCancel() { break }
             let name = (path as NSString).lastPathComponent

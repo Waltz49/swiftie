@@ -232,7 +232,8 @@ final class AppState {
         ) { [weak self] _ in
             guard let appState = self else { return }
             Task { @MainActor in
-                appState.refreshImageRecognitionForCurrentSettings()
+                _ = appState.refreshImageRecognitionForCurrentSettings()
+                appState.backgroundImageRecognition.noteSearchModelsChanged()
             }
         }
         NotificationCenter.default.addObserver(
@@ -881,9 +882,13 @@ final class AppState {
 
 
     /// Rebind CNN/CLIP caches and loaded Core ML models to current settings (no app restart).
-    func refreshImageRecognitionForCurrentSettings() {
-        imageRecognition.rebind(config: config)
-        backgroundImageRecognition.noteSearchModelsChanged()
+    @discardableResult
+    func refreshImageRecognitionForCurrentSettings() -> Bool {
+        let changed = imageRecognition.rebind(config: config)
+        if changed {
+            backgroundImageRecognition.noteSearchModelsChanged()
+        }
+        return changed
     }
 
     func loadDirectory(_ path: String, saveHistory: Bool = true, pinnedImagePath: String? = nil) {

@@ -130,7 +130,7 @@ enum SimilaritySearchService {
                 return
             }
 
-            panel.beginIndeterminatePhase(label: "Sorting by similarity…")
+            panel.beginIndeterminatePhase(label: "Sorting by similarity and building thumbnail view...")
 
             let metric = SimilarityOrdering.Metric.fromSettings(
                 appState.config.string(forKey: "similarity_metric", default: "cosine")

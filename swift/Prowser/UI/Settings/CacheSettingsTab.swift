@@ -178,7 +178,7 @@ struct CacheSettingsTab: View {
                 paths: appState.config.profilePaths,
                 includeDownloadedModels: false
             )
-            appState.refreshImageRecognitionForCurrentSettings()
+            appState.imageRecognition.discardInMemoryFeatureCaches(config: appState.config)
             reloadIndexingAvailability()
             statusMessage = "Cleared image recognition cache (\(removed) entries)."
             refreshTotals()
@@ -216,7 +216,7 @@ struct CacheSettingsTab: View {
         ) else { return }
         let removed = CacheManagementService.clearAllCaches(paths: appState.config.profilePaths)
         appState.refreshThumbnailsAfterDiskCacheMutation()
-        appState.refreshImageRecognitionForCurrentSettings()
+        appState.imageRecognition.discardInMemoryFeatureCaches(config: appState.config)
         reloadIndexingAvailability()
         statusMessage = "Cleared \(removed) cache entries."
         refreshTotals()

@@ -27,9 +27,12 @@ final class ResNetFeatureExtractor: @unchecked Sendable {
     }
 
     func extractFeatures(paths: [String], batchSize: Int, progress: @escaping (Int, Int, String) -> Void, shouldCancel: @escaping () -> Bool) throws -> [String: [Float]] {
+        let total = paths.count
+        if total > 0 {
+            progress(0, total, "Loading search model…")
+        }
         let model = try loadModel()
         var result: [String: [Float]] = [:]
-        let total = paths.count
         var index = 0
         while index < paths.count {
             if shouldCancel() { break }

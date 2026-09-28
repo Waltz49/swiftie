@@ -35,10 +35,17 @@ enum WindowFullscreen {
         mainWindow()?.toggleFullScreen(nil)
     }
 
-    static func applyLaunchPreference(noFullscreen: Bool, savedMacOSSpace: Bool?) {
-        guard !noFullscreen else { return }
+    static func applyLaunchPreference(
+        forceFullscreen: Bool,
+        noFullscreen: Bool,
+        savedMacOSSpace: Bool?
+    ) {
         let shouldFullscreen: Bool
-        if let savedMacOSSpace {
+        if forceFullscreen {
+            shouldFullscreen = true
+        } else if noFullscreen {
+            shouldFullscreen = false
+        } else if let savedMacOSSpace {
             shouldFullscreen = savedMacOSSpace
         } else {
             shouldFullscreen = true

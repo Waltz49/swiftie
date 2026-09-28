@@ -61,8 +61,13 @@ enum ModelDownloadService {
         parentWindow: NSWindow? = nil
     ) async throws {
         let downloadBase = config.imageRecognitionModelDownloadBaseURL()
-        await ModelManifest.refreshRemoteCatalog(profile: profile, downloadBaseURL: downloadBase)
-        ModelManifest.loadUserCatalog(profile: profile)
+        let missingBeforeRefresh = ImageRecognitionPaths.missingModelIDs(profile: profile, ids: modelIDs)
+        if missingBeforeRefresh.isEmpty {
+            await ModelManifest.refreshRemoteCatalogIfStale(profile: profile, downloadBaseURL: downloadBase)
+        } else {
+            await ModelManifest.refreshRemoteCatalog(profile: profile, downloadBaseURL: downloadBase)
+        }
+        ModelManifest.loadLocalCatalog(profile: profile)
 
         let missing = ImageRecognitionPaths.missingModelIDs(profile: profile, ids: modelIDs)
         guard !missing.isEmpty else { return }

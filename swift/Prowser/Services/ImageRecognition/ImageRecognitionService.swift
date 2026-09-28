@@ -5,6 +5,7 @@ import Foundation
 final class ImageRecognitionService {
     private let profile: ProfilePaths
     private var cacheManager: FeatureCacheManager?
+    private var boundCacheRoot: URL?
     private var boundResnetModel: String?
     private var boundClipModel: String?
     private var clipExtractor: CLIPFeatureExtractor?
@@ -14,19 +15,45 @@ final class ImageRecognitionService {
         self.profile = profile
     }
 
-    func rebind(config: AppConfig) {
+    /// Rebinds extractors and feature cache to current settings. Returns true when cache binding or model keys changed.
+    @discardableResult
+    func rebind(config: AppConfig) -> Bool {
         let resnet = config.string(forKey: "resnet_model", default: "resnet18")
         let clip = config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        let cacheRoot = profile.imageRecognitionCacheDirectory
+        var modelKeysChanged = false
         if resnet != boundResnetModel {
             boundResnetModel = resnet
             resnetExtractor = nil
+            modelKeysChanged = true
         }
         if clip != boundClipModel {
             boundClipModel = clip
             clipExtractor = nil
+            modelKeysChanged = true
         }
+        let cacheBindingChanged = modelKeysChanged
+            || boundCacheRoot != cacheRoot
+            || cacheManager == nil
+        if cacheBindingChanged {
+            boundCacheRoot = cacheRoot
+            cacheManager = FeatureCacheManager(
+                cacheRoot: cacheRoot,
+                resnetModel: resnet,
+                clipModelName: clip
+            )
+        }
+        return cacheBindingChanged
+    }
+
+    /// Drop in-memory feature indexes after disk cache was cleared (settings); keeps model extractors.
+    func discardInMemoryFeatureCaches(config: AppConfig) {
+        let resnet = config.string(forKey: "resnet_model", default: "resnet18")
+        let clip = config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
+        let cacheRoot = profile.imageRecognitionCacheDirectory
+        boundCacheRoot = cacheRoot
         cacheManager = FeatureCacheManager(
-            cacheRoot: profile.imageRecognitionCacheDirectory,
+            cacheRoot: cacheRoot,
             resnetModel: resnet,
             clipModelName: clip
         )
@@ -63,6 +90,9 @@ final class ImageRecognitionService {
         shouldCancel: @escaping () -> Bool
     ) async throws -> [String: [Float]] {
         guard let cacheManager else { throw VisionFeaturePrintExtractor.ExtractorError.noFeaturePrint }
+        if !paths.isEmpty {
+            progress(0, paths.count, Self.checkingCachedFeaturesLabel(fileCount: paths.count))
+        }
         let pathsCopy = paths
         let cacheLookup = await Task.detached {
             var result: [String: [Float]] = [:]
@@ -168,17 +198,15 @@ final class ImageRecognitionService {
         let batch = min(32, max(8, config.int(forKey: "cnn_feature_batch_size", default: 16)))
         let extractor = resnetExtractor(for: resnet)
 
-        var needExtract: [String] = []
-        var result: [String: [Float]] = [:]
-        for path in paths {
-            guard let attrs = fileAttributes(path: path) else { continue }
-            if let cached = cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size),
-               cached.count == ModelManifest.resnetFeatureDimension(for: resnet) {
-                result[path] = cached
-            } else {
-                needExtract.append(path)
-            }
+        if !paths.isEmpty {
+            progress(0, paths.count, Self.checkingCachedFeaturesLabel(fileCount: paths.count))
         }
+        let pathsCopy = paths
+        let cacheLookup = await Task.detached {
+            Self.partitionCNNCache(paths: pathsCopy, cacheManager: cacheManager, resnetModel: resnet)
+        }.value
+        var result = cacheLookup.cached
+        let needExtract = cacheLookup.needExtract
 
         let cachedCount = result.count
         if cachedCount > 0, needExtract.isEmpty {
@@ -233,17 +261,19 @@ final class ImageRecognitionService {
         guard let cacheManager else { throw CLIPFeatureExtractorError.inferenceFailed }
         let extractor = clipExtractor(for: clipName)
 
-        var needExtract: [String] = []
-        var result: [String: [Float]] = [:]
-        for path in paths {
-            guard let attrs = fileAttributes(path: path) else { continue }
-            if let cached = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size),
-               cached.count == expectedDim {
-                result[path] = cached
-            } else {
-                needExtract.append(path)
-            }
+        if !paths.isEmpty {
+            progress(0, paths.count, Self.checkingCachedFeaturesLabel(fileCount: paths.count))
         }
+        let pathsCopy = paths
+        let cacheLookup = await Task.detached {
+            Self.partitionCLIPCache(
+                paths: pathsCopy,
+                cacheManager: cacheManager,
+                expectedDimension: expectedDim
+            )
+        }.value
+        var result = cacheLookup.cached
+        let needExtract = cacheLookup.needExtract
 
         if !needExtract.isEmpty {
             let pending = needExtract
@@ -284,11 +314,54 @@ final class ImageRecognitionService {
         Self.fileAttributes(for: path)
     }
 
+    private static func checkingCachedFeaturesLabel(fileCount: Int) -> String {
+        "Checking cached features (\(fileCount) files)…"
+    }
+
     nonisolated static func fileAttributes(for path: String) -> (mtime: Double, size: Int)? {
         let url = URL(fileURLWithPath: path)
         guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
               let date = values.contentModificationDate,
               let size = values.fileSize else { return nil }
         return (date.timeIntervalSince1970, size)
+    }
+
+    nonisolated private static func partitionCNNCache(
+        paths: [String],
+        cacheManager: FeatureCacheManager,
+        resnetModel: String
+    ) -> (cached: [String: [Float]], needExtract: [String]) {
+        var cached: [String: [Float]] = [:]
+        var needExtract: [String] = []
+        let expectedDim = ModelManifest.resnetFeatureDimension(for: resnetModel)
+        for path in paths {
+            guard let attrs = fileAttributes(for: path) else { continue }
+            if let feat = cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size),
+               feat.count == expectedDim {
+                cached[path] = feat
+            } else {
+                needExtract.append(path)
+            }
+        }
+        return (cached, needExtract)
+    }
+
+    nonisolated private static func partitionCLIPCache(
+        paths: [String],
+        cacheManager: FeatureCacheManager,
+        expectedDimension: Int
+    ) -> (cached: [String: [Float]], needExtract: [String]) {
+        var cached: [String: [Float]] = [:]
+        var needExtract: [String] = []
+        for path in paths {
+            guard let attrs = fileAttributes(for: path) else { continue }
+            if let feat = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size),
+               feat.count == expectedDimension {
+                cached[path] = feat
+            } else {
+                needExtract.append(path)
+            }
+        }
+        return (cached, needExtract)
     }
 }
