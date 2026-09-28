@@ -66,6 +66,9 @@ enum SimilaritySearchService {
             mutedNoteColor: NSColor(appState.theme.colors.dialogMutedText)
         )
         panel.show()
+        func closeProgressPanel() {
+            panel.close()
+        }
 
         let resnet = appState.config.string(forKey: "resnet_model", default: "resnet18")
         let modelIDs = ModelManifest.resnetBundleIDs(for: resnet)
@@ -86,6 +89,7 @@ enum SimilaritySearchService {
         do {
             let refKeys = refs.compactMap { ImageRecognitionPath.normalize($0) }
             if refKeys.isEmpty {
+                closeProgressPanel()
                 StyledMessageDialog.showWarning(
                     title: "Reference Not Found",
                     message: "Could not resolve the reference image path for similarity search."
@@ -108,15 +112,15 @@ enum SimilaritySearchService {
                 )
             }
             if panel.cancelRequested {
-                panel.close()
+                closeProgressPanel()
                 appState.imageRecognition.flushCaches()
                 appState.status.show("Similar image search cancelled")
                 return
             }
-            panel.close()
 
             let refFeatureCount = refKeys.compactMap { features[$0] }.count
             if refFeatureCount == 0 {
+                closeProgressPanel()
                 StyledMessageDialog.showWarning(
                     title: "Reference Features Missing",
                     message:
@@ -125,6 +129,8 @@ enum SimilaritySearchService {
                 )
                 return
             }
+
+            panel.beginIndeterminatePhase(label: "Sorting by similarity…")
 
             let metric = SimilarityOrdering.Metric.fromSettings(
                 appState.config.string(forKey: "similarity_metric", default: "cosine")
@@ -139,10 +145,20 @@ enum SimilaritySearchService {
                 )
             }.value
 
+            if panel.cancelRequested {
+                closeProgressPanel()
+                appState.imageRecognition.flushCaches()
+                appState.status.show("Similar image search cancelled")
+                return
+            }
+
             guard !ordered.isEmpty else {
+                closeProgressPanel()
                 StyledMessageDialog.showWarning(title: "No Results", message: "No similar images found.")
                 return
             }
+
+            panel.beginIndeterminatePhase(label: "Updating thumbnail view…")
 
             let indexedCount = paths.filter { features[$0] != nil }.count
             let sampleDim = refKeys.compactMap { features[$0] }.first?.count
@@ -180,18 +196,20 @@ enum SimilaritySearchService {
                 )
             }
             let filesChanged = Set(displayedSeed) != Set(ordered)
-            ImageSearchResultPresentation.applyCustomOrderedList(
+            await ImageSearchResultPresentation.applyCustomOrderedList(
                 appState: appState,
                 orderedPaths: ordered,
                 currentImagePath: appState.fileData.currentImagePath,
                 statusMessage: statusMessage,
                 saveHistory: filesChanged || resolvedOptions.recursive,
-                multiSelectReferencePaths: multiSelectRefs.isEmpty ? nil : multiSelectRefs
+                multiSelectReferencePaths: multiSelectRefs.isEmpty ? nil : multiSelectRefs,
+                waitForViewportThumbnails: true
             )
+            closeProgressPanel()
         } catch ModelDownloadError.userDeclined {
-            panel.close()
+            closeProgressPanel()
         } catch {
-            panel.close()
+            closeProgressPanel()
             StyledMessageDialog.showWarning(title: "Search Failed", message: error.localizedDescription)
         }
     }

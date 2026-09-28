@@ -301,6 +301,13 @@ final class CancellableProgressPanelController {
         }
     }
 
+    /// Switch to an indeterminate bar after feature extraction (sorting / thumbnail rebuild).
+    nonisolated func beginIndeterminatePhase(label: String) {
+        Task { @MainActor in
+            self.beginIndeterminatePhaseOnMain(label: label)
+        }
+    }
+
     func setLongCompareNoteVisible(_ visible: Bool) {
         guard let longCompareNoteLabel else { return }
         longCompareNoteLabel.stringValue = Self.longCompareNoteMessage
@@ -359,6 +366,16 @@ final class CancellableProgressPanelController {
     private func updateOnMain(value: Int? = nil, label text: String? = nil) {
         if let value { setValueOnMain(value) }
         if let text { setLabelOnMain(text) }
+        refreshOnMain()
+    }
+
+    private func beginIndeterminatePhaseOnMain(label: String) {
+        guard !isClosed else { return }
+        indicator.isIndeterminate = true
+        indicator.startAnimation(nil)
+        progressStartDate = nil
+        timeRemainingLabel?.stringValue = ""
+        setLabelOnMain(label)
         refreshOnMain()
     }
 

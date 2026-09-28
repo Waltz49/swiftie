@@ -70,6 +70,9 @@ enum ClipTextSearchService {
             mutedNoteColor: NSColor(appState.theme.colors.dialogMutedText)
         )
         panel.show()
+        func closeProgressPanel() {
+            panel.close()
+        }
 
         do {
             var threshold = Float(options.threshold)
@@ -87,11 +90,11 @@ enum ClipTextSearchService {
                 },
                 shouldCancel: { panel.cancelRequested }
             )
-            panel.close()
 
             if let samplePath = paths.first,
                let imageDim = imageFeatures[samplePath]?.count,
                imageDim != textFeature.count {
+                closeProgressPanel()
                 StyledMessageDialog.showWarning(
                     title: "CLIP Feature Mismatch",
                     message:
@@ -101,10 +104,13 @@ enum ClipTextSearchService {
                 return
             }
             if panel.cancelRequested {
+                closeProgressPanel()
                 appState.imageRecognition.flushCaches()
                 appState.status.show("Text search cancelled")
                 return
             }
+
+            panel.beginIndeterminatePhase(label: "Ranking matches…")
 
             var ordered = SimilarityOrdering.clipTextRanked(
                 paths: paths,
@@ -130,12 +136,15 @@ enum ClipTextSearchService {
             }
 
             if ordered.isEmpty {
+                closeProgressPanel()
                 StyledMessageDialog.showInformation(
                     title: "No Matches Found",
                     message: "No images found matching the search criteria."
                 )
                 return
             }
+
+            panel.beginIndeterminatePhase(label: "Updating thumbnail view…")
 
             let indexedCount = paths.filter { imageFeatures[$0] != nil }.count
             SimilaritySearchLog.logFeatureSummary(
@@ -159,17 +168,19 @@ enum ClipTextSearchService {
             )
 
             let filesChanged = Set(displayedSeed) != Set(ordered)
-            ImageSearchResultPresentation.applyCustomOrderedList(
+            await ImageSearchResultPresentation.applyCustomOrderedList(
                 appState: appState,
                 orderedPaths: ordered,
                 currentImagePath: ordered.first,
                 statusMessage: "Text search (\(ordered.count) images)",
-                saveHistory: filesChanged || options.recursive
+                saveHistory: filesChanged || options.recursive,
+                waitForViewportThumbnails: true
             )
+            closeProgressPanel()
         } catch ModelDownloadError.userDeclined {
-            panel.close()
+            closeProgressPanel()
         } catch {
-            panel.close()
+            closeProgressPanel()
             StyledMessageDialog.showWarning(title: "Search Failed", message: error.localizedDescription)
         }
     }

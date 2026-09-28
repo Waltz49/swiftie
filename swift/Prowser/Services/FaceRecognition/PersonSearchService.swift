@@ -164,22 +164,25 @@ enum PersonSearchService {
             return results
         }.value
 
-        panel.close()
-
         matching.sort { $0.distance < $1.distance }
         let ordered = matching.map(\.path)
         if ordered.isEmpty {
+            panel.close()
             StyledMessageDialog.showInformation(title: "No Matches Found", message: "No images found containing this person.")
             return
         }
 
+        panel.beginIndeterminatePhase(label: "Updating thumbnail view…")
+
         let filesChanged = Set(displayedSeed) != Set(ordered)
-        ImageSearchResultPresentation.applyCustomOrderedList(
+        await ImageSearchResultPresentation.applyCustomOrderedList(
             appState: appState,
             orderedPaths: ordered,
             currentImagePath: ordered.first,
             statusMessage: "Search for known person (\(ordered.count) images)",
-            saveHistory: filesChanged || resolvedOptions.recursive
+            saveHistory: filesChanged || resolvedOptions.recursive,
+            waitForViewportThumbnails: true
         )
+        panel.close()
     }
 }

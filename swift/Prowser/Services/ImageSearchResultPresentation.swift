@@ -12,8 +12,9 @@ enum ImageSearchResultPresentation {
         currentImagePath: String?,
         statusMessage: String,
         saveHistory: Bool,
-        multiSelectReferencePaths: [String]? = nil
-    ) {
+        multiSelectReferencePaths: [String]? = nil,
+        waitForViewportThumbnails: Bool = false
+    ) async {
         let normalized = orderedPaths.compactMap { FileDataModel.normalizePath($0) }
         guard !normalized.isEmpty else { return }
         let restoreMultiSelect = (multiSelectReferencePaths?.count ?? 0) > 1
@@ -68,6 +69,12 @@ enum ImageSearchResultPresentation {
         }
         appState.status.show(statusMessage, duration: 5.0, alwaysShow: true)
         appState.menuRefresh.refreshAll()
+
+        if waitForViewportThumbnails,
+           appState.fileData.currentViewMode == .thumbnail,
+           let grid = appState.thumbnailGridHost {
+            await grid.waitForViewportThumbnailsDisplayed()
+        }
     }
 
     private static func syncGridHighlightToCurrentImage(appState: AppState, paths: [String]) {

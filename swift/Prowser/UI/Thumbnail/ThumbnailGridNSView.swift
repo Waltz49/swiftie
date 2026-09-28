@@ -241,6 +241,63 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         reloadLayout()
     }
 
+    /// Waits until visible viewport cells finish loading (used to dismiss CNN/CLIP search progress).
+    func waitForViewportThumbnailsDisplayed(timeout: TimeInterval = 120) async {
+        let pollIntervalNs: UInt64 = 33_000_000
+        let deadline = Date().addingTimeInterval(timeout)
+        var scheduledVisibleLoadPass = false
+
+        while Date() < deadline {
+            if Task.isCancelled { return }
+            if imagePaths.isEmpty || !thumbnailLoadingActive { return }
+            guard appState?.fileData.currentViewMode == .thumbnail else { return }
+
+            layoutSubtreeIfNeeded()
+            enclosingScrollView?.layoutSubtreeIfNeeded()
+
+            guard let scrollView = enclosingScrollView else {
+                scheduledVisibleLoadPass = false
+                scheduleLoadVisibleThumbnails(debounced: false)
+                await Task.yield()
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
+                continue
+            }
+
+            let visibleIndices = visibleThumbnailIndices(in: scrollView.documentVisibleRect)
+            if visibleIndices.isEmpty {
+                scheduledVisibleLoadPass = false
+                scheduleLoadVisibleThumbnails(debounced: false)
+                await Task.yield()
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
+                continue
+            }
+
+            let missingIndices = visibleIndices.filter { thumbnails[imagePaths[$0]] == nil }
+            if missingIndices.isEmpty {
+                return
+            }
+
+            let anyInFlight = missingIndices.contains { loadingPaths.contains(imagePaths[$0]) }
+            if anyInFlight {
+                scheduledVisibleLoadPass = false
+                await Task.yield()
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
+                continue
+            }
+
+            if !scheduledVisibleLoadPass {
+                scheduleLoadVisibleThumbnails(debounced: false)
+                scheduledVisibleLoadPass = true
+                await Task.yield()
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
+                continue
+            }
+
+            // Loads were requested but visible cells still have no image (failed or placeholder).
+            return
+        }
+    }
+
     func reloadLayout() {
         let viewportWidth = viewportWidthForLayout()
         lastLayoutViewportWidth = viewportWidth
