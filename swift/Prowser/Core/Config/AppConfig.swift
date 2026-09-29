@@ -207,6 +207,23 @@ final class AppConfig {
         settingsDraft = Self.deepCopySettings(settings)
     }
 
+    /// ⌘I thumbnail overlay keys — always written to disk immediately (Python `update_setting` on cycle).
+    func setThumbnailOverlayDisplaySettings(filenameVisible: Bool, showImageSize: Bool) {
+        settings["thumbnail_filename_visible"] = filenameVisible
+        settings["show_image_size"] = showImageSize
+        if var draft = settingsDraft {
+            draft["thumbnail_filename_visible"] = filenameVisible
+            draft["show_image_size"] = showImageSize
+            settingsDraft = draft
+        }
+        if var snap = settingsSnapshot {
+            snap["thumbnail_filename_visible"] = filenameVisible
+            snap["show_image_size"] = showImageSize
+            settingsSnapshot = snap
+        }
+        saveSettings()
+    }
+
     func commitSettingsSession() {
         guard let draft = settingsDraft else { return }
         settings = Self.deepCopySettings(draft)

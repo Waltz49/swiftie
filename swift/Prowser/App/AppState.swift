@@ -51,6 +51,8 @@ final class AppState {
     /// Set on ⌘F/⌘P/⇧⌘C keyDown before menu routing steals tree focus (Python `_tree_had_focus_when_invoked`).
     var pendingSearchInvocationTreeContext: SearchInvocationTreeContext?
     var settingsOpenRequestToken = 0
+    /// Bumped when ⌘I changes thumbnail overlay display so preferences toggles re-read config.
+    var thumbnailOverlayDisplayRevision = 0
     var requestedSettingsTab: SettingsTab = .general
     /// Set when opening Settings → Face Recognition for ⇧⌘P Extract Faces (Python `auto_extract_faces`).
     var pendingAutoExamineFaces = false
@@ -1033,9 +1035,9 @@ final class AppState {
         } else {
             (newFilename, newSize) = (false, false)
         }
-        config.updateSetting("thumbnail_filename_visible", value: newFilename)
-        config.updateSetting("show_image_size", value: newSize)
-        config.applySettingsChange(emit: eventBus)
+        config.setThumbnailOverlayDisplaySettings(filenameVisible: newFilename, showImageSize: newSize)
+        thumbnailOverlayDisplayRevision += 1
+        eventBus.emit(.settingsChanged)
         let label: String
         switch (newFilename, newSize) {
         case (false, false): label = "Thumbnail overlay: off"

@@ -284,7 +284,7 @@ struct SlideshowView: View {
 
         let startTime = CFAbsoluteTimeGetCurrent()
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { timer in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 guard generation == transitionGeneration else {
                     timer.invalidate()
                     return

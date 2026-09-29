@@ -18,7 +18,6 @@ var dlibBridgeLinker: [LinkerSetting] = []
 if hasVendorDlib {
     dlibBridgeCXX.append(.headerSearchPath("../Vendor/dlib-install/include", .when(platforms: [.macOS])))
     dlibBridgeLinker = [
-        .linkedLibrary("c++"),
         .linkedFramework("Accelerate"),
         .unsafeFlags([
             dlibInstallLib.path,

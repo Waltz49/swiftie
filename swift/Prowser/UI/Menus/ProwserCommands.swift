@@ -968,10 +968,6 @@ struct ProwserHelpCommands: Commands {
                 }
                 .keyboardShortcut("/", modifiers: [])
 
-                Button("About Prowser") {
-                    Task { @MainActor in appState.showAboutDialog() }
-                }
-
                 Button("Image Search (Native)…") {
                     Task { @MainActor in
                         appState.showImageRecognitionCaveats = true

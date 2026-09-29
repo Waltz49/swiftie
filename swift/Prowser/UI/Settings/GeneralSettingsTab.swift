@@ -66,32 +66,45 @@ struct GeneralSettingsTab: View {
                                 }
                             }
                         }
+                        VStack(spacing: 0) {
+                            SettingsPreferenceSubsectionHeader(
+                                title: "Show",
+                                trailingNote: "(cycle these settings with ⌘I)",
+                                verticalPadding: 6
+                            )
+                            SettingsPreferenceToggleRow(
+                                title: "File Names",
+                                verticalPadding: 5,
+                                leadingInset: 16,
+                                isOn: boolBinding("thumbnail_filename_visible")
+                            )
+                            SettingsPreferenceToggleRow(
+                                title: "File Extensions",
+                                tooltip: "Always show file extensions on file names. If unchecked, extensions are only shown when multiple files share the same base name.",
+                                verticalPadding: 5,
+                                leadingInset: 16,
+                                isOn: boolBinding("show_extensions", default: true)
+                            )
+                            SettingsPreferenceToggleRow(
+                                title: "Image Dimensions",
+                                verticalPadding: 5,
+                                leadingInset: 16,
+                                isOn: boolBinding("show_image_size")
+                            )
+                        }
+                        .id(appState.thumbnailOverlayDisplayRevision)
                         SettingsPreferenceToggleRow(
-                            title: "Show filenames (cycle with ⌘I)",
-                            isOn: boolBinding("thumbnail_filename_visible")
-                        )
-                        SettingsPreferenceToggleRow(
-                            title: "Show file extensions (cycle with ⌘I)",
-                            // subtitle: "Use ⌘-I to cycle display of names, etc.",
-                            // tooltip: "Always show file extensions on file names.",
-                            isOn: boolBinding("show_extensions", default: true)
-                        )
-                        SettingsPreferenceToggleRow(
-                            title: "Show image dimensions (cycle with ⌘I)",
-                            isOn: boolBinding("show_image_size")
-                        )
-                        SettingsPreferenceToggleRow(
-                            title: "Drag/drop changes dates when sorted by date",
+                            title: "Drag/Drop Changes Dates when Sorted by Date",
                             subtitle: "Changes file date when dragging to maintain sort order by date.",
                             tooltip: "When sorted by date, moving icons in thumbnail view automatically adjusts file dates.",
                             isOn: boolBinding("drag_drop_auto_date_change")
                         )
                         SettingsPreferenceToggleRow(
-                            title: "Prefer EXIF date for sorting",
+                            title: "Prefer EXIF Date for Sorting",
                             isOn: boolBinding("use_exif_date", default: true)
                         )
                         SettingsPreferenceToggleRow(
-                            title: "Allow thumbnail locking (⇧-⌘-L) - Experimental",
+                            title: "Allow Thumbnail Locking (⇧-⌘-L) - Experimental",
                             subtitle: "Experimental. Locks thumbnail positions in order.",
                             tooltip: "Allow marking thumbnails as locked to keep them in place while organizing images.",
                             isOn: boolBinding("allow_thumbnail_locking")
@@ -120,7 +133,7 @@ struct GeneralSettingsTab: View {
                             .frame(width: 200)
                         }
                         SettingsPreferenceFormRow(
-                            label: "Remember image after",
+                            label: "Remember Image After",
                             subtitle: "For Image History (F3)",
                             tooltip: "After this time, the current image is added to Image History that you can see by pressing F3."
                         ) {

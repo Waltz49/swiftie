@@ -155,7 +155,7 @@ struct InformationPaneContentView: View {
 
     private func boldMarkedLine(_ line: String) -> AttributedString? {
         guard line.contains("**") else {
-            var plain = AttributedString(line)
+            let plain = AttributedString(line)
             return plain.characters.isEmpty ? nil : plain
         }
         var result = AttributedString()

@@ -54,10 +54,34 @@ struct SettingsPreferenceSwitch: View {
 
 // MARK: - Rows (port of MacPreferenceToggleRow / FormRow / CompactToggleRow)
 
+struct SettingsPreferenceSubsectionHeader: View {
+    let title: String
+    var trailingNote: String?
+    var verticalPadding: CGFloat = 8
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(title)
+                .font(.system(size: 13))
+                .foregroundStyle(SettingsDialogChrome.rowTitle)
+            if let trailingNote, !trailingNote.isEmpty {
+                Text(trailingNote)
+                    .font(.system(size: 11))
+                    .foregroundStyle(SettingsDialogChrome.secondaryText)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, verticalPadding)
+    }
+}
+
 struct SettingsPreferenceToggleRow: View {
     let title: String
     var subtitle: String?
     var tooltip: String?
+    var verticalPadding: CGFloat = 10
+    var leadingInset: CGFloat = 0
     @Binding var isOn: Bool
 
     var body: some View {
@@ -78,8 +102,9 @@ struct SettingsPreferenceToggleRow: View {
 
             SettingsPreferenceSwitch(isOn: $isOn)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.leading, 20 + leadingInset)
+        .padding(.trailing, 20)
+        .padding(.vertical, verticalPadding)
         .help(tooltip ?? title)
     }
 }
