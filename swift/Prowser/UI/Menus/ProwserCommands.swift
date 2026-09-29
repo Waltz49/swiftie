@@ -12,6 +12,13 @@ struct ProwserCommands: Commands {
         }
     }
 
+    private var moveDestinationsMenuTitle: String {
+        MainActor.assumeIsolated {
+            _ = appState.menuCommandsRevision
+            return MenuStateHelpers.moveDestinationsMenuBarTitle(config: appState.config)
+        }
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) { }
 
@@ -92,8 +99,6 @@ struct ProwserCommands: Commands {
                     Task { @MainActor in appState.goForward() }
                 }
                 .keyboardShortcut("]", modifiers: .command)
-
-                DestinationsMenuVisibility(appState: appState)
 
                 Button("Reveal in Finder") {
                     Task { @MainActor in revealSelection() }
@@ -297,6 +302,13 @@ struct ProwserCommands: Commands {
             .disabled(!allowBrowserMenuCommands)
         }
 
+        CommandMenu(moveDestinationsMenuTitle) {
+            Group {
+                MoveDestinationsMenuContent(appState: appState)
+            }
+            .disabled(!allowBrowserMenuCommands)
+        }
+
         CommandMenu("Tools") {
             Group {
                 QuickMassRenameMenuButton(appState: appState)
@@ -455,27 +467,6 @@ struct ProwserCommands: Commands {
                         Button("Remove Facial Rec Models") {
                             Task { @MainActor in appState.removeFacialRecognitionModels() }
                         }
-                    }
-                }
-            }
-            .disabled(!allowBrowserMenuCommands)
-        }
-
-        CommandGroup(replacing: .help) {
-            Group {
-                Button("Keyboard Shortcuts") {
-                    Task { @MainActor in appState.showKeyboardHelp = true }
-                }
-                .keyboardShortcut("/", modifiers: [])
-
-                Button("About Prowser") {
-                    Task { @MainActor in appState.showAboutDialog() }
-                }
-
-                Button("Image Search (Native)…") {
-                    Task { @MainActor in
-                        appState.showImageRecognitionCaveats = true
-                        appState.syncAuxiliaryDialogs()
                     }
                 }
             }
@@ -713,17 +704,6 @@ private struct ChromeToggleMenuButton: View {
 }
 
 @MainActor
-private struct DestinationsMenuVisibility: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        if appState.menuRefresh.destinationsMenuVisible {
-            MoveDestinationsMenu(appState: appState)
-        }
-    }
-}
-
-@MainActor
 private struct TrashViewCopyMenuButton: View {
     @Bindable var appState: AppState
 
@@ -754,7 +734,8 @@ private struct MoveWorkFilesMenuButton: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        if appState.menuRefresh.moveWorkFilesVisible {
+        if appState.menuRefresh.destinationsMenuVisible,
+           appState.menuRefresh.moveWorkFilesVisible {
             Divider()
             Button("Move Work Files…") {
                 appState.showMoveWorkFilesSheet = true
@@ -763,13 +744,12 @@ private struct MoveWorkFilesMenuButton: View {
     }
 }
 
-private struct MoveDestinationsMenu: View {
+@MainActor
+private struct MoveDestinationsMenuContent: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        let action = appState.config.string(forKey: "destination_menu_action", default: "move")
-        let title = action == "copy" ? "Copy to" : "Move to"
-        Menu(title) {
+        if appState.menuRefresh.destinationsMenuVisible {
             ForEach(1...9, id: \.self) { slot in
                 DestinationMenuButton(appState: appState, slot: slot)
             }
@@ -788,9 +768,13 @@ private struct MoveDestinationsMenu: View {
             }
             MoveWorkFilesMenuButton(appState: appState)
             Divider()
-            Button("Edit Destinations…") {
-                Task { @MainActor in appState.openSettingsWindow(tab: .destinations) }
-            }
+        } else {
+            Button("Action is set to None") {}
+                .disabled(true)
+            Divider()
+        }
+        Button("Edit Destinations…") {
+            Task { @MainActor in appState.openSettingsWindow(tab: .destinations) }
         }
     }
 }
@@ -961,6 +945,41 @@ private struct ThemeMenuContent: View {
             }
             Divider()
             Button("Use System Setting") { applyTheme("system") }
+        }
+    }
+}
+
+/// Separate `Commands` type — SwiftUI `CommandsBuilder` supports at most ten top-level entries.
+struct ProwserHelpCommands: Commands {
+    @Bindable var appState: AppState
+
+    private var allowBrowserMenuCommands: Bool {
+        MainActor.assumeIsolated {
+            _ = appState.menuCommandsRevision
+            return appState.menuRefresh.browserMenuCommandsEnabled
+        }
+    }
+
+    var body: some Commands {
+        CommandGroup(replacing: .help) {
+            Group {
+                Button("Keyboard Shortcuts") {
+                    Task { @MainActor in appState.showKeyboardHelp = true }
+                }
+                .keyboardShortcut("/", modifiers: [])
+
+                Button("About Prowser") {
+                    Task { @MainActor in appState.showAboutDialog() }
+                }
+
+                Button("Image Search (Native)…") {
+                    Task { @MainActor in
+                        appState.showImageRecognitionCaveats = true
+                        appState.syncAuxiliaryDialogs()
+                    }
+                }
+            }
+            .disabled(!allowBrowserMenuCommands)
         }
     }
 }

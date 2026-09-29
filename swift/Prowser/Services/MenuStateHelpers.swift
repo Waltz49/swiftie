@@ -74,6 +74,12 @@ enum MenuStateHelpers {
         return "\(actionWord) to Last Drop Location"
     }
 
+    /// Top-level menu title (Python `menu_manager._setup_move_menu` / `update_edit_menu_states`).
+    static func moveDestinationsMenuBarTitle(config: AppConfig) -> String {
+        let action = config.string(forKey: "destination_menu_action", default: "move")
+        return action == "copy" ? "Copy to" : "Move to"
+    }
+
     static func destinationIsVisible(slot: Int, config: AppConfig) -> Bool {
         let action = config.string(forKey: "destination_menu_action", default: "move")
         guard action != "none" else { return false }

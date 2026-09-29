@@ -22,6 +22,7 @@ final class MenuRefreshState {
     var quickMassRenameMenuVisible = false
     var lockUnlockMenuVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
+    private var lastDestinationMenuAction: String?
 
     func bind(_ appState: AppState) {
         self.appState = appState
@@ -48,10 +49,12 @@ final class MenuRefreshState {
         moveWorkFilesVisible = MoveWorkFilesService.canMoveWorkFiles(
             currentDirectory: appState.fileData.currentDirectory
         )
-        destinationsMenuVisible = appState.config.string(
-            forKey: "destination_menu_action",
-            default: "move"
-        ) != "none"
+        let destAction = appState.config.string(forKey: "destination_menu_action", default: "move")
+        if let lastDestinationMenuAction, destAction != lastDestinationMenuAction {
+            appState.bumpMenuCommandsRevision()
+        }
+        lastDestinationMenuAction = destAction
+        destinationsMenuVisible = destAction != "none"
         refreshDeleteExifDate(appState: appState)
         refreshExcludeFilesFromView(appState: appState)
         refreshMoveToTrashMenu(appState: appState)

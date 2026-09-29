@@ -14,6 +14,7 @@ struct ProwserApp: App {
         .commands {
             if let appState = appDelegate.appState, appDelegate.isPrimary {
                 ProwserCommands(appState: appState)
+                ProwserHelpCommands(appState: appState)
             }
         }
     }

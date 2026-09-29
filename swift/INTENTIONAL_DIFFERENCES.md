@@ -33,7 +33,6 @@ If a settings tab or menu item would depend on the above, Swift may show **“no
 ### Menus and naming
 
 - **Settings** are labeled **Preferences…** (standard macOS wording). The window title is **Prowser Preferences**, with explicit **OK** and **Cancel** to apply or discard changes across tabs.
-- **Move to** / **Copy to** destinations live under the **File** menu in Swift. Python often exposes a **separate top-level** Move/Copy menu whose title follows your move-vs-copy preference.
 - Person search uses clearer menu titles: **Search for Known Person…** and **Search for Person in Current Image…** instead of **Search by Person…** and **Quick Person Search**.
 - **Help → Image Search (Native)…** explains how on-device search in Swift relates to the Python app (ranking, models, caches). This item is Swift-specific.
 - **Resize…** appears on the **thumbnail context menu** in Swift as well as in Edit; in Python, resize is typically reached from **Edit** only.

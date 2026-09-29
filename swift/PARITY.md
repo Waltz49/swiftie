@@ -167,7 +167,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [~] Recent… (`directory_menu_history`; dynamic labels on show)
 - [~] Favorites submenu (^1–9 slots)
 - [~] Back / Forward (⌘[ / ⌘])
-- [~] Move to submenu (destinations 1–9, last drop — currently under File; Python uses top-level Move/Copy menu)
+- [x] Move to submenu removed from File (destinations live in top-level Move/Copy menu)
 - [x] Preferences… (⌘, — **Prowser Preferences** window)
 - [~] Reveal in Finder (⇧⌘R)
 - [~] Move File to Trash (⌘Delete; `confirm_delete`)
@@ -214,9 +214,9 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [x] View Last Image (⌘;, browse-only menu item)
 - [~] Dynamic `aboutToShow` enable/check states (`MenuRefreshState` + dynamic menu buttons)
 
-## Menus — Move / Copy (top-level in Python)
+## Menus — Move / Copy (top-level)
 
-Swift folds destinations into File → Move to. Python has a dedicated menu whose title follows `destination_menu_action` (Move to / Copy to / hidden).
+Top-level **Move to** / **Copy to** menu (title follows `destination_menu_action`; between Search and Tools, matching Python).
 
 - [~] Destination slots 1–9 (⌘1–9 move; ⌥⌘1–9 copy via keyboard)
 - [~] Last drop location (⌘0 / ⌥⌘0)
@@ -276,7 +276,7 @@ Swift folds destinations into File → Move to. Python has a dedicated menu whos
 - [ ] Window-level QAction shortcuts for focus-independent keys (Python adds actions to `main_window`)
 - [ ] Menu section headers (UI Elements, Thumbnail Control, etc. — `TextSeparator` widgets)
 - [ ] Edit menu macOS system-item stripping (`_clean_edit_menu_periodically`)
-- [ ] Destination menu title follows move/copy/none setting
+- [x] Destination menu title follows move/copy/none setting
 - [ ] Favorites/Recent menus rebuild from config on each open
 
 ## Sorting & order
@@ -467,8 +467,6 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 3. **Rename-prefix CNN/CLIP/face MD5 cache hand-off** after bulk rename
 4. **PF Keys / Hidden Gems help** dialogs
 5. **Image-gen voice input / favorite prompts** (stubs remain in `ImageGenActionButtons`)
-6. **Top-level Move/Copy menu** (optional; destinations folded under File → Move to)
-
 ## Build variants
 
 - [~] Full build (all AI features)
@@ -503,7 +501,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 | Edit: copy path/image, lock, rename prefix, convert, resize | done | Resize: CG vs Pillow filters (functional, not bit-identical) |
 | View: pane toggles, sort (checkmarks), theme, chrome | done | Hide/Show dynamic labels |
 | Search: similar, CLIP, person, duplicates, show in dir | done | Search for Known Person (⌘P); Search for Person in Current Image (⌃⌘P) |
-| Move/Copy top-level menu | partial | Folded into File → Move to |
+| Move/Copy top-level menu | done | Title follows `destination_menu_action` |
 | Image: create/edit/expand/infill, job queue | partial | Fast-open ⇧⌥/; Check LoRAs + Downloading Models help added |
 | Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting; Exclude Thumbs (⌘X) |
 | Tools: Debug | partial | Check LoRAs headless runner; full Qt probe UI stays Python |

@@ -67,17 +67,17 @@ struct GeneralSettingsTab: View {
                             }
                         }
                         SettingsPreferenceToggleRow(
-                            title: "Show filenames on thumbnails",
+                            title: "Show filenames (cycle with ⌘I)",
                             isOn: boolBinding("thumbnail_filename_visible")
                         )
                         SettingsPreferenceToggleRow(
-                            title: "Always show file extensions (cycle with ⌘-I)",
-                            subtitle: "Use ⌘-I to cycle display of names, etc.",
-                            tooltip: "Always show file extensions on file names.",
+                            title: "Show file extensions (cycle with ⌘I)",
+                            // subtitle: "Use ⌘-I to cycle display of names, etc.",
+                            // tooltip: "Always show file extensions on file names.",
                             isOn: boolBinding("show_extensions", default: true)
                         )
                         SettingsPreferenceToggleRow(
-                            title: "Show image dimensions in overlays",
+                            title: "Show image dimensions (cycle with ⌘I)",
                             isOn: boolBinding("show_image_size")
                         )
                         SettingsPreferenceToggleRow(
