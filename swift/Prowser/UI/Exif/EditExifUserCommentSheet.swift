@@ -272,7 +272,7 @@ struct EditExifUserCommentSheet: View {
                         .frame(maxWidth: 220)
                 }
                 SettingsPreferenceFormRow(
-                    label: "Caption max words:",
+                    label: "Caption max words for {CAPTION_WORD_COUNT} in prompts:",
                     tooltip: "Target word count for the caption (used in prompts)"
                 ) {
                     TextField("", value: $captionMaxWords, format: .number)

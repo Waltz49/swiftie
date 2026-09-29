@@ -44,6 +44,13 @@ enum SlideshowPresetUtils {
         return normalizePreset(settings[configKey], key: key)
     }
 
+    /// Runtime slideshow playback only; does not modify persisted settings.
+    static func effectiveTransitionSpeedMs(transitionSpeedMs: Int, slideRateMs: Int) -> Int {
+        let transition = max(0, transitionSpeedMs)
+        guard slideRateMs > 0 else { return transition }
+        return min(transition, slideRateMs)
+    }
+
     static func overlapPercent(overlapDelay: Int, transitionSpeed: Int) -> Int {
         guard transitionSpeed > 0 else { return 100 }
         return Int(100 - (Double(overlapDelay) / Double(transitionSpeed) * 100))

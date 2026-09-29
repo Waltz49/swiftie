@@ -11,8 +11,6 @@ struct SidebarPaneDescriptor {
     var allowsTitlebarDrag: Bool = false
     var allowsDoubleClickFit: Bool = true
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
-    /// When true, pane stays in the stack with header-only height if collapsed (content stays mounted).
-    var keepContentMountedWhenCollapsed: Bool = false
     /// Measured at double-click time (Python `_needed_pane_height`), not during body evaluation.
     var preferredFitContentHeight: () -> CGFloat = { 120 }
 }
@@ -33,7 +31,6 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         GeometryReader { geometry in
             let displayed = descriptors.filter { descriptor in
                 guard descriptor.isDisplayed else { return false }
-                if descriptor.keepContentMountedWhenCollapsed { return true }
                 return model.paneExpanded(
                     configKey: descriptor.expandedConfigKey,
                     default: descriptor.defaultExpanded

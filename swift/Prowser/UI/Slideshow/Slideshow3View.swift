@@ -22,19 +22,6 @@ struct Slideshow3View: View {
                     FloatingFrameView(path: frame.path, size: frame.size, rotation: frame.rotation)
                         .position(frame.position)
                 }
-
-                VStack {
-                    Spacer()
-                    HStack {
-                        Text("Floating Frames — \(frames.count) active")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.75))
-                        Spacer()
-                        Button("Exit (Esc)") { exitSlideshow() }
-                    }
-                    .padding()
-                    .background(.black.opacity(0.35))
-                }
             }
             .onAppear {
                 viewportSize = geometry.size
@@ -46,6 +33,7 @@ struct Slideshow3View: View {
             }
             .onDisappear { stopAnimation() }
             .onExitCommand { exitSlideshow() }
+            .focusable()
         }
     }
 

@@ -32,14 +32,14 @@ struct SlideshowSettingsTab: View {
                         title: "Slide duration (ms)",
                         key: "slideshow_rate",
                         defaultValue: 5000,
-                        range: 500...15000,
+                        range: 0...15000,
                         step: 250
                     )
                     slideshowIntSlider(
                         title: "Transition speed (ms)",
                         key: "slideshow_transition_speed",
                         defaultValue: 1300,
-                        range: 200...10000,
+                        range: 0...10000,
                         step: 100
                     )
                     slideshowIntSlider(

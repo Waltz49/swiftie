@@ -25,8 +25,8 @@ struct SlideshowPresetEditor: View {
                 .frame(maxWidth: 240)
                 .onSubmit { persistNow() }
 
-            slideshowIntSlider(title: "Slide duration (ms)", value: $rate, range: 500...15000, step: 250)
-            slideshowIntSlider(title: "Transition speed (ms)", value: $transitionSpeed, range: 200...10000, step: 100)
+            slideshowIntSlider(title: "Slide duration (ms)", value: $rate, range: 0...15000, step: 250)
+            slideshowIntSlider(title: "Transition speed (ms)", value: $transitionSpeed, range: 0...10000, step: 100)
             slideshowIntSlider(title: "Max rotation (°)", value: $maxRotation, range: 0...360, step: 15)
             slideshowIntSlider(title: "Overlap %", value: $overlapPercent, range: 0...200, step: 10)
 

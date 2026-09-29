@@ -31,19 +31,6 @@ struct Slideshow2View: View {
                     Text("No images to show")
                         .foregroundStyle(.white.opacity(0.7))
                 }
-
-                VStack {
-                    Spacer()
-                    HStack {
-                        Text("Panning \(slideIndex + 1) / \(max(images.count, 1))")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
-                        Spacer()
-                        Button("Exit (Esc)") { exitSlideshow() }
-                    }
-                    .padding()
-                    .background(.black.opacity(0.35))
-                }
             }
             .onAppear {
                 slideIndex = appState.fileData.currentIndex

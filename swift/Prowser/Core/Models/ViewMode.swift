@@ -18,4 +18,14 @@ enum ViewMode: String, CaseIterable, Sendable {
         case .slideshow3: return "Floating Frames"
         }
     }
+
+    /// Python slideshow managers: hide sidebars and status bar for immersive presentation.
+    var hidesSlideshowChrome: Bool {
+        switch self {
+        case .slideshow, .slideshow2, .slideshow3:
+            return true
+        default:
+            return false
+        }
+    }
 }

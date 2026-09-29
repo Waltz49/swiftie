@@ -311,9 +311,11 @@ final class AppState {
             }
         }
         _ = eventBus.subscribe(.viewModeChanged) { [weak self] _ in
-            self?.browseImageHistory.onViewModeChanged()
-            self?.persistRestoreState()
-            self?.menuRefresh.refreshAll()
+            guard let self else { return }
+            self.browseImageHistory.onViewModeChanged()
+            self.persistRestoreState()
+            self.menuRefresh.refreshAll()
+            self.onViewModeChangedForSidebarLayout()
         }
 
         startNamedPipeListener()

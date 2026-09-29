@@ -4,6 +4,13 @@ import UniformTypeIdentifiers
 
 extension AppState {
     func updateStatusBarPeek(nearBottom: Bool) {
+        guard !fileData.currentViewMode.hidesSlideshowChrome else {
+            if statusBarPeekActive {
+                statusBarPeekActive = false
+                sidebarLayoutRevision += 1
+            }
+            return
+        }
         guard config.bool(forKey: "raise_status_bar_on_cursor_near_bottom", default: true) else { return }
         guard !chromeSuppressed else { return }
         let hidden = !config.bool(forKey: "status_bar_visible", default: true)
@@ -70,6 +77,13 @@ extension AppState {
         sidebarLayoutRevision += 1
     }
 
+    /// Relayout split view / main content when view mode changes (e.g. slideshow chrome).
+    /// Does not call `noteSidebarLayoutChanged()` — that would persist sidebar flags from pane state (browse would clear `left_sidebar_visible`).
+    func onViewModeChangedForSidebarLayout() {
+        sidebarLayoutRevision += 1
+        notifyMainContentLayoutChanged()
+    }
+
     func updateLeftSidebarWidth(_ width: CGFloat) {
         let clamped = SidebarWidthLimits.clampLeft(width)
         guard clamped > 0, abs(clamped - leftSidebarWidth) > 1 else { return }
@@ -121,7 +135,7 @@ extension AppState {
 
     /// Settings + layout say the preview column should exist (not necessarily mounted yet).
     static func previewPaneIsConfiguredVisible(config: AppConfig, viewMode: ViewMode) -> Bool {
-        if viewMode == .browse { return false }
+        if viewMode == .browse || viewMode.hidesSlideshowChrome { return false }
         guard config.bool(forKey: "left_sidebar_visible", default: true) else { return false }
         return config.bool(forKey: "preview_visible", default: true)
     }
@@ -190,17 +204,21 @@ extension AppState {
     }
 
     var statusBarColumnVisible: Bool {
-        !chromeSuppressed && config.bool(forKey: "status_bar_visible", default: true)
+        !fileData.currentViewMode.hidesSlideshowChrome
+            && !chromeSuppressed
+            && config.bool(forKey: "status_bar_visible", default: true)
     }
 
     /// Keep the status bar row in the layout while visible or animating (avoids VStack insert/remove flicker).
     var mountsStatusBarRow: Bool {
-        statusBarColumnVisible
+        guard !fileData.currentViewMode.hidesSlideshowChrome else { return false }
+        return statusBarColumnVisible
             || statusBarPeekActive
             || chromeLayoutOverride != nil
     }
 
     var effectiveStatusBarHeight: CGFloat {
+        guard !fileData.currentViewMode.hidesSlideshowChrome else { return 0 }
         if let override = chromeLayoutOverride {
             return override.statusBarHeight
         }
@@ -213,6 +231,7 @@ extension AppState {
     }
 
     var effectiveLeftSidebarWidth: CGFloat {
+        guard !fileData.currentViewMode.hidesSlideshowChrome else { return 0 }
         if let override = chromeLayoutOverride {
             return override.leftWidth
         }
@@ -220,6 +239,7 @@ extension AppState {
     }
 
     var effectiveRightSidebarWidth: CGFloat {
+        guard !fileData.currentViewMode.hidesSlideshowChrome else { return 0 }
         if let override = chromeLayoutOverride {
             return override.rightWidth
         }
@@ -227,6 +247,7 @@ extension AppState {
     }
 
     var effectiveLeftSidebarVisible: Bool {
+        guard !fileData.currentViewMode.hidesSlideshowChrome else { return false }
         if chromeLayoutOverride != nil {
             return (chromeLayoutOverride?.leftWidth ?? 0) > 0.5
         }
@@ -234,6 +255,7 @@ extension AppState {
     }
 
     var effectiveRightSidebarVisible: Bool {
+        guard !fileData.currentViewMode.hidesSlideshowChrome else { return false }
         if chromeLayoutOverride != nil {
             return (chromeLayoutOverride?.rightWidth ?? 0) > 0.5
         }
@@ -241,13 +263,15 @@ extension AppState {
     }
 
     var leftSidebarColumnVisible: Bool {
-        !chromeSuppressed
+        !fileData.currentViewMode.hidesSlideshowChrome
+            && !chromeSuppressed
             && config.bool(forKey: "left_sidebar_visible", default: true)
             && leftSidebarPaneActive
     }
 
     var rightSidebarColumnVisible: Bool {
-        !chromeSuppressed
+        !fileData.currentViewMode.hidesSlideshowChrome
+            && !chromeSuppressed
             && config.bool(forKey: "right_sidebar_visible", default: true)
             && rightSidebarPaneActive
     }
