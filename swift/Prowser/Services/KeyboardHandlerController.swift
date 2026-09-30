@@ -717,6 +717,19 @@ final class KeyboardHandlerController {
             return true
         }
 
+        if hasOption, !hasShift, !hasControl {
+            switch event.keyCode {
+            case 27, 43: // minus, keypad -
+                appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.fitCanvasWidth))
+                return true
+            case 24, 69: // equals/plus, keypad =
+                appState.eventBus.emit(.browseKeyboard, payload: .browseAction(.fitCanvasHeight))
+                return true
+            default:
+                break
+            }
+        }
+
         switch event.keyCode {
         case 115: // Home
             jumpToFirst(appState: appState)

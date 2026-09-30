@@ -41,6 +41,7 @@ enum BrowseKeyboardAction: Sendable {
     case panUp
     case panDown
     case fitCanvasWidth
+    case fitCanvasHeight
 }
 
 /// Arrow-key navigation in the thumbnail grid (menu shortcuts and grid keyDown).

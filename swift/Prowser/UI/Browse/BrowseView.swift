@@ -71,6 +71,7 @@ struct BrowseView: NSViewRepresentable {
                 case .panUp: self.view?.panBy(dx: 0, dy: -40)
                 case .panDown: self.view?.panBy(dx: 0, dy: 40)
                 case .fitCanvasWidth: self.view?.fitToCanvasWidth()
+                case .fitCanvasHeight: self.view?.fitToCanvasHeight()
                 }
             }
         }

@@ -230,6 +230,20 @@ final class BrowseImageNSView: NSView {
         needsDisplay = true
     }
 
+    /// Fit image height to the browse viewport (Swift-only ⌥=).
+    func fitToCanvasHeight() {
+        guard let image = sourceImage else { return }
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0, bounds.height > 0 else { return }
+        preferredActualSize = false
+        isActualSize = false
+        onActualSizeModeChanged?(false)
+        scaleFactor = bounds.height / imageSize.height
+        scrollOffset = CGPoint(x: 0, y: 0)
+        zoomPinned = true
+        needsDisplay = true
+    }
+
     private func loadImage() {
         loadTask?.cancel()
         resetTransforms()

@@ -44,6 +44,7 @@ If a settings tab or menu item would depend on the above, Swift may show **“no
 - **Copy image pixels**: **⌘C** in Swift vs **⌃C** in Python in many contexts.
 - **Show one sidebar pane only**: **⌥T**, **⌥P**, **⌥O**, **⌥I** hide sibling panes on that side of the window (Swift).
 - **Browse view**: **F6** toggles **sharpening when zoomed in** (persisted in preferences).
+- **Browse view**: **⌥−** / **⌥=** fit the image to **viewport width** / **viewport height** (Swift-only; Python uses **^W** for width only).
 - **EXIF date / year sorts**: available from **View → Sort By** and the status bar in Swift; Python also exposes some of these via **letter keys** that Swift does not assign yet.
 - **Floating Slideshow3**: fewer on-key adjustments than Python (see above).
 
