@@ -19,3 +19,22 @@ enum ProgressDialogTiming {
         return remMin > 0 ? "\(hours) hr \(remMin) min" : "\(hours) hr"
     }
 }
+
+/// Coalesces high-frequency download byte callbacks before they schedule main-thread panel updates.
+final class ProgressByteReportThrottle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastEmitUptime: UInt64 = 0
+
+    func shouldEmit(written: Int64, expected: Int64) -> Bool {
+        if written == 0 { return true }
+        lock.lock()
+        defer { lock.unlock() }
+        let now = DispatchTime.now().uptimeNanoseconds
+        let minIntervalNs = UInt64(ProgressDialogTiming.progressUpdateInterval * 1_000_000_000)
+        if expected > 0, written < expected, now - lastEmitUptime < minIntervalNs {
+            return false
+        }
+        lastEmitUptime = now
+        return true
+    }
+}

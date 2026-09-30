@@ -78,10 +78,14 @@ enum FaceModelDownloadService {
         }
 
         let isCancelled: @Sendable () -> Bool = { panel.cancelRequested }
+        let downloadProgressThrottle = ProgressByteReportThrottle()
         let reportLabel: @Sendable (String) -> Void = { text in
             panel.updateStatus(label: text)
         }
         let reportProgress: @Sendable (Int64, Int64) -> Void = { written, expected in
+            if !downloadProgressThrottle.shouldEmit(written: written, expected: expected) {
+                return
+            }
             let fraction: Double
             if expected > 0 {
                 fraction = min(1, Double(written) / Double(expected))

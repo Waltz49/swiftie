@@ -281,6 +281,9 @@ final class CancellableProgressPanelController {
 
     func close() {
         guard !isClosed else { return }
+        if pendingProgressValue != nil || pendingProgressLabel != nil || pendingBucketValue != nil {
+            flushPendingProgressOnMain()
+        }
         isClosed = true
         etaTimer?.invalidate()
         etaTimer = nil
@@ -423,7 +426,8 @@ final class CancellableProgressPanelController {
     }
 
     private func shouldFlushProgressImmediately(value: Int?, interval: TimeInterval) -> Bool {
-        if let value, !isIndeterminateMode, value >= Int(indicator.maxValue.rounded()) {
+        let effectiveValue = value ?? pendingProgressValue
+        if let effectiveValue, !isIndeterminateMode, effectiveValue >= Int(indicator.maxValue.rounded()) {
             return true
         }
         guard let last = lastProgressUIEmitDate else { return true }
@@ -440,8 +444,18 @@ final class CancellableProgressPanelController {
             pendingProgressLabel = nil
         }
         if pendingBucketValue != nil {
-            applyPendingBucketOnMain()
-            lastBucketUIEmitDate = Date()
+            if let interval = minimumProgressUpdateInterval {
+                if shouldFlushBucketImmediately(
+                    value: pendingBucketValue ?? 0,
+                    maximum: pendingBucketMaximum ?? 1,
+                    interval: interval
+                ) {
+                    applyPendingBucketOnMain()
+                    lastBucketUIEmitDate = Date()
+                }
+            } else {
+                applyPendingBucketOnMain()
+            }
         }
         refreshOnMain()
     }

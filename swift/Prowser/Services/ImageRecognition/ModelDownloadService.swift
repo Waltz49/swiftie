@@ -136,7 +136,7 @@ enum ModelDownloadService {
 
         let isCancelled: @Sendable () -> Bool = { panel.cancelRequested }
         let entryCount = entries.count
-        let downloadProgressThrottle = DownloadProgressThrottle()
+        let downloadProgressThrottle = ProgressByteReportThrottle()
         let reportLabel: @Sendable (String) -> Void = { text in
             panel.updateStatus(label: text)
         }
@@ -217,23 +217,6 @@ enum ModelDownloadService {
             try FileManager.default.removeItem(at: root)
         }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    }
-}
-
-private final class DownloadProgressThrottle: @unchecked Sendable {
-    private let lock = NSLock()
-    private var lastEmitUptime: UInt64 = 0
-
-    func shouldEmit(written: Int64, expected: Int64) -> Bool {
-        if written == 0 { return true }
-        lock.lock()
-        defer { lock.unlock() }
-        let now = DispatchTime.now().uptimeNanoseconds
-        if expected > 0, written < expected, now - lastEmitUptime < 1_000_000_000 {
-            return false
-        }
-        lastEmitUptime = now
-        return true
     }
 }
 

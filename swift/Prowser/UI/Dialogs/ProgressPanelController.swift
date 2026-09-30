@@ -183,7 +183,8 @@ final class ProgressPanelController {
     }
 
     private func shouldFlushImmediately(value: Int?, interval: TimeInterval) -> Bool {
-        if let value, value >= Int(indicator.maxValue.rounded()) {
+        let effectiveValue = value ?? pendingValue
+        if let effectiveValue, effectiveValue >= Int(indicator.maxValue.rounded()) {
             return true
         }
         guard let last = lastProgressUIEmitDate else { return true }

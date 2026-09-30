@@ -135,15 +135,18 @@ enum PersonSearchService {
         var matching = await Task.detached(priority: .userInitiated) {
             var results: [(path: String, distance: Double)] = []
             results.reserveCapacity(paths.count / 4)
+            let lastIndex = paths.count - 1
             for (index, path) in paths.enumerated() {
                 if cancelRequested() { break }
                 if index % 8 == 0 {
                     await Task.yield()
                 }
-                let progressIndex = index
-                let label = (path as NSString).lastPathComponent
-                await MainActor.run {
-                    panel.update(value: progressIndex, label: label)
+                if index % 8 == 0 || index == lastIndex {
+                    let progressIndex = index
+                    let label = (path as NSString).lastPathComponent
+                    await MainActor.run {
+                        panel.update(value: progressIndex, label: label)
+                    }
                 }
                 guard let encodings = faceCache.getEncodings(imagePath: path) else { continue }
                 var bestMean: Double?
