@@ -425,7 +425,8 @@ struct ResizeImagesSheet: View {
             progress = CancellableProgressPanelController(
                 title: paths.count > 1 ? "Resize Images" : "Resize Image",
                 labelText: "Resizing 1 of \(paths.count)",
-                maximum: paths.count
+                maximum: paths.count,
+                showsTimeRemainingEstimate: true
             )
             progress?.show()
         }

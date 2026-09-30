@@ -4,8 +4,8 @@ import Foundation
 /// Tools > Cache Subdirectories' Thumbnails (⇧⌘C). Port of `cache/cache_prepopulator.py`.
 @MainActor
 enum CachePrepopulatorService {
-    nonisolated private static let uiUpdateInterval: TimeInterval = 1
-    nonisolated private static let messageDelay: TimeInterval = 5
+    nonisolated private static let uiUpdateInterval = ProgressDialogTiming.progressUpdateInterval
+    nonisolated private static let messageDelay = ProgressDialogTiming.estimateWarmupInterval
     private static let checkChunkSize = 100
     private static let cacheInFlightLimit = 8
     private static let cachePollInterval: Duration = .milliseconds(250)
@@ -52,7 +52,8 @@ enum CachePrepopulatorService {
         let panel = CancellableProgressPanelController(
             title: "Prepopulate Cache",
             labelText: scanLabel,
-            maximum: 100
+            maximum: 100,
+            throttleProgressUpdates: false
         )
         panel.show()
         let progressStartedAt = Date()

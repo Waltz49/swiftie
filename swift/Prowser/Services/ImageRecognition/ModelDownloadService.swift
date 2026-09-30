@@ -129,7 +129,7 @@ enum ModelDownloadService {
             title: "Download Search Models",
             labelText: "Preparing…",
             maximum: progressScale,
-            minimumProgressUpdateInterval: 1.0
+            showsTimeRemainingEstimate: true
         )
         panel.onCancel = { ActiveModelDownload.shared.cancelInFlight() }
         panel.show()
@@ -138,7 +138,7 @@ enum ModelDownloadService {
         let entryCount = entries.count
         let downloadProgressThrottle = DownloadProgressThrottle()
         let reportLabel: @Sendable (String) -> Void = { text in
-            panel.update(label: text)
+            panel.updateStatus(label: text)
         }
 
         ActiveModelDownload.shared.begin()

@@ -130,7 +130,8 @@ enum SimilarImageUIRunner {
             labelText: "Analyzing images...",
             maximum: max(1, n),
             showsLongCompareNoteLine: true,
-            showsBucketProgressLine: true
+            showsBucketProgressLine: true,
+            showsTimeRemainingEstimate: true
         )
         let noteMonitor = LongCompareNoteMonitor()
         noteMonitor.bind(progress: progress)

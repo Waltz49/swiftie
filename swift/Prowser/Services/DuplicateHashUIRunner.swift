@@ -34,7 +34,8 @@ enum DuplicateHashUIRunner {
         let progress = CancellableProgressPanelController(
             title: title,
             labelText: "Preparing…",
-            maximum: max(1, count)
+            maximum: max(1, count),
+            showsTimeRemainingEstimate: true
         )
         progress.show()
 

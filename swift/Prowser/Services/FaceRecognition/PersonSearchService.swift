@@ -139,11 +139,11 @@ enum PersonSearchService {
                 if cancelRequested() { break }
                 if index % 8 == 0 {
                     await Task.yield()
-                    let progressIndex = index
-                    let label = (path as NSString).lastPathComponent
-                    await MainActor.run {
-                        panel.update(value: progressIndex, label: label)
-                    }
+                }
+                let progressIndex = index
+                let label = (path as NSString).lastPathComponent
+                await MainActor.run {
+                    panel.update(value: progressIndex, label: label)
                 }
                 guard let encodings = faceCache.getEncodings(imagePath: path) else { continue }
                 var bestMean: Double?

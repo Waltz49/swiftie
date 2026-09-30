@@ -141,7 +141,8 @@ enum SimilarImageFilesService {
             title: "Find Similar Image Files",
             labelText: "Scanning…",
             maximum: 1,
-            indeterminate: true
+            indeterminate: true,
+            showsTimeRemainingEstimate: false
         )
         panel.show()
 

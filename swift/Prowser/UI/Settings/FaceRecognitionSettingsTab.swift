@@ -176,7 +176,9 @@ struct FaceRecognitionSettingsTab: View {
             title: "Assign faces",
             labelText: "Detecting faces…",
             maximum: 0,
-            indeterminate: true
+            indeterminate: true,
+            showsTimeRemainingEstimate: false,
+            throttleProgressUpdates: false
         )
         progress.show()
         let encoded = await Task.detached(priority: .userInitiated) {

@@ -5,8 +5,6 @@ import AppKit
 final class CancellableProgressPanelController {
     private static let lineMaxChars = 64
     private static let labelMaxWidth: CGFloat = 400
-    private static let etaWarmupSeconds: TimeInterval = 5
-    private static let etaRefreshInterval: TimeInterval = 1.0
 
     private let panel: NSPanel
     private let label: NSTextField
@@ -28,7 +26,10 @@ final class CancellableProgressPanelController {
     private let minimumProgressUpdateInterval: TimeInterval?
     private var pendingProgressValue: Int?
     private var pendingProgressLabel: String?
+    private var pendingBucketValue: Int?
+    private var pendingBucketMaximum: Int?
     private var lastProgressUIEmitDate: Date?
+    private var lastBucketUIEmitDate: Date?
     private var progressFlushTimer: Timer?
     private let progressFlushTimerTarget = ProgressFlushTimerTarget()
     private let extractionTimeEstimator = ExtractionTimeEstimator()
@@ -53,12 +54,13 @@ final class CancellableProgressPanelController {
         showsBucketProgressLine: Bool = false,
         showsTimeRemainingEstimate: Bool? = nil,
         usesExtractionBasedTimeEstimate: Bool = false,
-        minimumProgressUpdateInterval: TimeInterval? = nil
+        minimumProgressUpdateInterval: TimeInterval = ProgressDialogTiming.progressUpdateInterval,
+        throttleProgressUpdates: Bool = true
     ) {
         let showETA = showsTimeRemainingEstimate ?? (detailText != nil)
         self.showsTimeRemainingEstimate = showETA
         self.usesExtractionBasedTimeEstimate = usesExtractionBasedTimeEstimate
-        self.minimumProgressUpdateInterval = minimumProgressUpdateInterval
+        self.minimumProgressUpdateInterval = throttleProgressUpdates ? minimumProgressUpdateInterval : nil
         isIndeterminateMode = indeterminate
         self.mutedNoteColor = mutedNoteColor
         var panelHeight: CGFloat = 120
@@ -305,6 +307,14 @@ final class CancellableProgressPanelController {
         }
     }
 
+    /// Status text that must appear immediately (verify/unpack phases), not subject to the 1 Hz throttle.
+    nonisolated func updateStatus(label text: String) {
+        Task { @MainActor in
+            self.setLabelOnMain(text)
+            self.refreshOnMain()
+        }
+    }
+
     /// Switch to an indeterminate bar after feature extraction (sorting / thumbnail rebuild).
     nonisolated func beginIndeterminatePhase(label: String) {
         Task { @MainActor in
@@ -342,7 +352,35 @@ final class CancellableProgressPanelController {
     }
 
     private func updateBucketOnMain(value: Int, maximum: Int) {
-        guard !isClosed, let bucketIndicator else { return }
+        guard !isClosed, bucketIndicator != nil else { return }
+        pendingBucketValue = value
+        pendingBucketMaximum = maximum
+
+        guard let interval = minimumProgressUpdateInterval else {
+            applyPendingBucketOnMain()
+            return
+        }
+
+        let forceImmediate = shouldFlushBucketImmediately(value: value, maximum: maximum, interval: interval)
+        if forceImmediate {
+            applyPendingBucketOnMain()
+            lastBucketUIEmitDate = Date()
+            return
+        }
+        startProgressFlushTimerIfNeeded()
+    }
+
+    private func shouldFlushBucketImmediately(value: Int, maximum: Int, interval: TimeInterval) -> Bool {
+        if value >= maximum, maximum > 0 { return true }
+        guard let last = lastBucketUIEmitDate else { return true }
+        return Date().timeIntervalSince(last) >= interval
+    }
+
+    private func applyPendingBucketOnMain() {
+        guard let bucketIndicator else { return }
+        guard let value = pendingBucketValue, let maximum = pendingBucketMaximum else { return }
+        pendingBucketValue = nil
+        pendingBucketMaximum = nil
         bucketIndicator.isHidden = false
         bucketIndicator.maxValue = Double(max(1, maximum))
         bucketIndicator.doubleValue = Double(min(max(0, value), maximum))
@@ -376,12 +414,6 @@ final class CancellableProgressPanelController {
             return
         }
 
-        // Status-only updates (verify/unpack phases) should not wait for the progress tick.
-        if value == nil, text != nil {
-            flushPendingProgressOnMain()
-            return
-        }
-
         let forceImmediate = shouldFlushProgressImmediately(value: value, interval: interval)
         if forceImmediate {
             flushPendingProgressOnMain()
@@ -407,6 +439,10 @@ final class CancellableProgressPanelController {
             setLabelOnMain(text)
             pendingProgressLabel = nil
         }
+        if pendingBucketValue != nil {
+            applyPendingBucketOnMain()
+            lastBucketUIEmitDate = Date()
+        }
         refreshOnMain()
     }
 
@@ -418,7 +454,7 @@ final class CancellableProgressPanelController {
     private func startETATimer() {
         etaTimerTarget.owner = self
         let timer = Timer(
-            timeInterval: Self.etaRefreshInterval,
+            timeInterval: ProgressDialogTiming.estimateRefreshInterval,
             target: etaTimerTarget,
             selector: #selector(ETATimerTarget.tick),
             userInfo: nil,
@@ -432,7 +468,7 @@ final class CancellableProgressPanelController {
         guard minimumProgressUpdateInterval != nil, progressFlushTimer == nil else { return }
         progressFlushTimerTarget.owner = self
         let timer = Timer(
-            timeInterval: minimumProgressUpdateInterval ?? Self.etaRefreshInterval,
+            timeInterval: minimumProgressUpdateInterval ?? ProgressDialogTiming.progressUpdateInterval,
             target: progressFlushTimerTarget,
             selector: #selector(ProgressFlushTimerTarget.tick),
             userInfo: nil,
@@ -444,10 +480,23 @@ final class CancellableProgressPanelController {
 
     private func flushPendingProgressIfDue() {
         guard !isClosed, minimumProgressUpdateInterval != nil else { return }
-        guard pendingProgressValue != nil || pendingProgressLabel != nil else { return }
-        let interval = minimumProgressUpdateInterval ?? Self.etaRefreshInterval
-        if shouldFlushProgressImmediately(value: pendingProgressValue, interval: interval) {
+        guard pendingProgressValue != nil || pendingProgressLabel != nil || pendingBucketValue != nil else { return }
+        let interval = minimumProgressUpdateInterval ?? ProgressDialogTiming.progressUpdateInterval
+        let hasMainPending = pendingProgressValue != nil || pendingProgressLabel != nil
+        let flushMain = hasMainPending
+            && shouldFlushProgressImmediately(value: pendingProgressValue, interval: interval)
+        let flushBucket = pendingBucketValue != nil
+            && shouldFlushBucketImmediately(
+                value: pendingBucketValue ?? 0,
+                maximum: pendingBucketMaximum ?? 1,
+                interval: interval
+            )
+        if flushMain {
             flushPendingProgressOnMain()
+        } else if flushBucket {
+            applyPendingBucketOnMain()
+            lastBucketUIEmitDate = Date()
+            refreshOnMain()
         }
     }
 
@@ -464,7 +513,7 @@ final class CancellableProgressPanelController {
     private func refreshTimeRemainingEstimate() {
         guard !isClosed, let timeRemainingLabel, let start = progressStartDate else { return }
         let elapsed = Date().timeIntervalSince(start)
-        guard elapsed >= Self.etaWarmupSeconds else {
+        guard elapsed >= ProgressDialogTiming.estimateWarmupInterval else {
             timeRemainingLabel.stringValue = ""
             return
         }
@@ -484,21 +533,9 @@ final class CancellableProgressPanelController {
             timeRemainingLabel.stringValue = ""
             return
         }
-        timeRemainingLabel.stringValue = "About \(Self.formatDuration(remaining)) remaining"
+        timeRemainingLabel.stringValue =
+            "About \(ProgressDialogTiming.formatRemainingDuration(remaining)) remaining"
         refreshOnMain()
-    }
-
-    private static func formatDuration(_ seconds: TimeInterval) -> String {
-        let total = max(1, Int(seconds.rounded()))
-        if total < 60 { return "\(total) sec" }
-        let minutes = total / 60
-        let sec = total % 60
-        if minutes < 60 {
-            return sec > 0 ? "\(minutes) min \(sec) sec" : "\(minutes) min"
-        }
-        let hours = minutes / 60
-        let remMin = minutes % 60
-        return remMin > 0 ? "\(hours) hr \(remMin) min" : "\(hours) hr"
     }
 
     private func refreshOnMain() {

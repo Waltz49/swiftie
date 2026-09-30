@@ -65,7 +65,8 @@ enum FaceModelDownloadService {
         let panel = CancellableProgressPanelController(
             title: "Download Face Models",
             labelText: "Preparing…",
-            maximum: progressScale
+            maximum: progressScale,
+            showsTimeRemainingEstimate: true
         )
         panel.onCancel = { ActiveModelDownload.shared.cancelInFlight() }
         panel.show()
@@ -78,7 +79,7 @@ enum FaceModelDownloadService {
 
         let isCancelled: @Sendable () -> Bool = { panel.cancelRequested }
         let reportLabel: @Sendable (String) -> Void = { text in
-            panel.update(label: text)
+            panel.updateStatus(label: text)
         }
         let reportProgress: @Sendable (Int64, Int64) -> Void = { written, expected in
             let fraction: Double

@@ -433,7 +433,7 @@ final class RenamePrefixService {
 
         // --------- SORT LOGIC ------------------
         var originalDisplayedOrder: [String]?
-        progress.update(label: "Sorting images...")
+        progress.updateStatus(label: "Sorting images...")
 
         // Partial selection always uses thumbnail-list order (ignore dialog date sort).
         if sortMode == .order || isPartialSelection {
@@ -441,7 +441,7 @@ final class RenamePrefixService {
 
             // Dates by displayed position happen BEFORE reversal for numbering
             if dateChangeMode.changesDates {
-                progress.update(label: "Setting file dates based on displayed order...")
+                progress.updateStatus(label: "Setting file dates based on displayed order...")
                 let now = Int(Date().timeIntervalSince1970)
                 let changes = RenamePrefixPlanner.minimizeDateChanges(
                     filesWithIndices: imagesToRename.enumerated().map { ($1, $0) },
@@ -460,7 +460,7 @@ final class RenamePrefixService {
         } else {
             // "date": set dates first (based on the final sequence order) so the sort uses them
             if dateChangeMode.changesDates {
-                progress.update(label: "Calculating final order for date setting...")
+                progress.updateStatus(label: "Calculating final order for date setting...")
                 let now = Int(Date().timeIntervalSince1970)
                 do {
                     var temp = try RenamePrefixPlanner.calculateTargetNames(
@@ -475,7 +475,7 @@ final class RenamePrefixService {
                     var seqIndex: [String: Int] = [:]
                     for (idx, mapping) in temp.enumerated() { seqIndex[mapping.source] = idx }
 
-                    progress.update(label: "Setting file dates for sorting...")
+                    progress.updateStatus(label: "Setting file dates for sorting...")
                     let files = imagesToRename.compactMap { path -> (String, Int)? in
                         guard fm.fileExists(atPath: path), let idx = seqIndex[path] else { return nil }
                         return (path, idx)
@@ -497,7 +497,7 @@ final class RenamePrefixService {
             }
 
             // Sort by modification date, oldest first (Python `get_sort_key` = mtime)
-            progress.update(label: "Reading file dates...")
+            progress.updateStatus(label: "Reading file dates...")
             var keyed: [(mtime: Double, index: Int, path: String)] = []
             for (idx, path) in imagesToRename.enumerated() {
                 if idx % 50 == 0 {
@@ -505,7 +505,7 @@ final class RenamePrefixService {
                 }
                 keyed.append((Self.modificationTime(path) ?? 0, idx, path))
             }
-            progress.update(label: "Sorting images...")
+            progress.updateStatus(label: "Sorting images...")
             keyed.sort { ($0.mtime, $0.index) < ($1.mtime, $1.index) }
             imagesToRename = keyed.map(\.path)
 
@@ -545,7 +545,7 @@ final class RenamePrefixService {
         // Nothing to rename: dates may still need updating
         if actualRenames.isEmpty {
             if dateChangeMode.changesDates {
-                progress.update(label: "Setting file dates...")
+                progress.updateStatus(label: "Setting file dates...")
                 let now = Int(Date().timeIntervalSince1970)
                 let changed: [String]
                 if sortMode == .order, let original = originalDisplayedOrder {
@@ -587,7 +587,7 @@ final class RenamePrefixService {
         }
 
         // Read-only files that would be moved aside in Phase 0 must be renameable
-        progress.update(label: "Checking for conflicting files...")
+        progress.updateStatus(label: "Checking for conflicting files...")
         var conflictingReadOnly: [(String, String)] = []
         let existingFiles = RenamePrefixPlanner.existingFilesMap(in: targetDirectory)
         let sourcePaths = Set(targetMappings.map { RenamePrefixPlanner.realPath($0.source) })
@@ -736,7 +736,7 @@ final class RenamePrefixService {
         }
 
         // ---- Migrate metadata cache from old paths to new paths ----
-        progress.update(label: "Migrating metadata cache...")
+        progress.updateStatus(label: "Migrating metadata cache...")
         for (old, new) in renameMap where old != new {
             appState.metadataCache.invalidate(path: old)
             if let entry = preRenameMetadata[old], fm.fileExists(atPath: new) {
@@ -779,7 +779,7 @@ final class RenamePrefixService {
                 }
                 let total = sorted.count
                 if total > 0 {
-                    progress.update(label: "Updating file dates and metadata...")
+                    progress.updateStatus(label: "Updating file dates and metadata...")
                     for (idx, mapping) in sorted.enumerated() {
                         if idx % 10 == 0 {
                             progress.update(value: totalOperations - 1 + Int(Double(idx) / Double(total) * 0.5))
