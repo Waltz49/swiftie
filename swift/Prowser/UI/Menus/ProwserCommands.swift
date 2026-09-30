@@ -759,11 +759,7 @@ private struct MoveDestinationsMenuContent: View {
                 lastDropLocation: appState.lastDropLocation
             )) {
                 Task { @MainActor in
-                    let copyOnly = appState.config.string(
-                        forKey: "destination_menu_action",
-                        default: "move"
-                    ) == "copy"
-                    appState.fileOperations.moveToLastDropLocation(copyOnly: copyOnly)
+                    appState.fileOperations.moveToLastDropLocation(copyOnly: nil)
                 }
             }
             MoveWorkFilesMenuButton(appState: appState)
@@ -815,8 +811,7 @@ private struct DestinationMenuButton: View {
                 lastDropLocation: appState.lastDropLocation
             )) {
                 Task { @MainActor in
-                    let copyOnly = appState.config.string(forKey: "destination_menu_action", default: "move") == "copy"
-                    appState.fileOperations.moveToDestination(slot: slot, copyOnly: copyOnly)
+                    appState.fileOperations.moveToDestination(slot: slot, copyOnly: nil)
                 }
             }
         }

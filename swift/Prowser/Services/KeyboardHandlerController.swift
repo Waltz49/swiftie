@@ -131,14 +131,17 @@ final class KeyboardHandlerController {
             appState.selection.resetCmdMulti()
         }
 
-        // ⌘1…9 move to destination; ⌘0 last drop; ⌥⌘1…9 copy (Python menu shortcuts).
+        // ⌘1…9 / ⌘0 use destination_menu_action; ⌥⌘ forces copy (Python Alt+Ctrl+N / Alt+Ctrl+0).
         if hasCommand, !hasShift {
-            if event.keyCode == 29, !hasOption {
-                appState.fileOperations.moveToLastDropLocation(copyOnly: false)
+            if event.keyCode == 29 {
+                appState.fileOperations.moveToLastDropLocation(copyOnly: hasOption ? true : nil)
                 return true
             }
             if let digit = controlDigitIndex(event) {
-                appState.fileOperations.moveToDestination(slot: digit + 1, copyOnly: hasOption)
+                appState.fileOperations.moveToDestination(
+                    slot: digit + 1,
+                    copyOnly: hasOption ? true : nil
+                )
                 return true
             }
         }

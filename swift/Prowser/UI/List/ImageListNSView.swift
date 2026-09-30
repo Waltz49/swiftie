@@ -665,6 +665,14 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
 private final class ImageListTableView: NSTableView, NSTableViewDataSource, NSTableViewDelegate {
     weak var host: ImageListNSView?
 
+    private var deferredListClick: (
+        index: Int,
+        path: String,
+        shiftPressed: Bool,
+        cmdPressed: Bool,
+        ctrlPressed: Bool
+    )?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         dataSource = self
@@ -832,17 +840,45 @@ private final class ImageListTableView: NSTableView, NSTableViewDataSource, NSTa
             return
         }
         let path = host.imagePaths[row]
-        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        host.listDelegate?.imageListDidClick(
-            index: row,
-            path: path,
-            shiftPressed: flags.contains(.shift),
-            cmdPressed: flags.contains(.command),
-            ctrlPressed: flags.contains(.control)
-        )
+        let shiftPressed = flags.contains(.shift)
+        let cmdPressed = flags.contains(.command)
+        let ctrlPressed = flags.contains(.control)
+        let selected = host.appState?.selection.selectedFiles ?? host.selectedPaths
+        let preserveMultiSelectForDrag =
+            !shiftPressed && !cmdPressed && !ctrlPressed
+            && selected.count > 1
+            && selected.contains(path)
+        if preserveMultiSelectForDrag {
+            deferredListClick = (row, path, shiftPressed, cmdPressed, ctrlPressed)
+        } else {
+            deferredListClick = nil
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            host.listDelegate?.imageListDidClick(
+                index: row,
+                path: path,
+                shiftPressed: shiftPressed,
+                cmdPressed: cmdPressed,
+                ctrlPressed: ctrlPressed
+            )
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if let deferred = deferredListClick {
+            host?.listDelegate?.imageListDidClick(
+                index: deferred.index,
+                path: deferred.path,
+                shiftPressed: deferred.shiftPressed,
+                cmdPressed: deferred.cmdPressed,
+                ctrlPressed: deferred.ctrlPressed
+            )
+            deferredListClick = nil
+        }
+        super.mouseUp(with: event)
     }
 
     @objc private func doubleClickRow() {
+        deferredListClick = nil
         guard let host, selectedRow >= 0, selectedRow < host.imagePaths.count else { return }
         let path = host.imagePaths[selectedRow]
         host.listDelegate?.imageListDidOpenBrowse(index: selectedRow, path: path)

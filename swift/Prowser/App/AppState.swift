@@ -133,6 +133,8 @@ final class AppState {
     var fileOpsTargetPaths: [String] = []
     /// Session-only last file-tree drop destination for ⌘0 / ⌥⌘0 (Python `_last_drop_location`).
     var lastDropLocation: String?
+    /// Paths in the active thumbnail→tree (or Finder) drag; cleared when the session ends.
+    var thumbnailDragSourcePaths: [String] = []
     /// Paths deleted in formatted-list mode; slot preserved with red-X overlay (Python `deleted_file_placeholders`).
     var deletedFilePlaceholders: Set<String> = []
     /// Section boundaries for duplicate-group thumbnail layout (Python `duplicate_sections`).
@@ -172,6 +174,12 @@ final class AppState {
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
     private var suppressDirectoryRefreshUntil: Date?
+    /// While > 0, file tree must not re-sync expansion/scroll to the active image (thumbnail drag-drop).
+    private var fileTreeHighlightSyncSuspendCount = 0
+
+    var isFileTreeHighlightSyncSuspended: Bool {
+        fileTreeHighlightSyncSuspendCount > 0
+    }
 
     let launchOptions: LaunchOptions
     private(set) var directoryLoader: DirectoryLoadCoordinator!
@@ -308,7 +316,7 @@ final class AppState {
             guard let self else { return }
             self.browseImageHistory.onCurrentImageChanged(path)
             self.reconcileUserRequestedTreeDirectoryWithActiveImage()
-            if self.userRequestedTreeDirectory != nil {
+            if self.userRequestedTreeDirectory != nil, !self.isFileTreeHighlightSyncSuspended {
                 self.syncFileTreeToActiveImage()
             }
         }
@@ -717,12 +725,25 @@ final class AppState {
         return false
     }
 
-    func beginSuppressDirectoryRefresh() {
-        suppressDirectoryRefreshUntil = Date().addingTimeInterval(0.6)
+    func beginSuppressDirectoryRefresh(minimumDuration: TimeInterval = 0.6) {
+        let until = Date().addingTimeInterval(minimumDuration)
+        if let existing = suppressDirectoryRefreshUntil, existing > until {
+            suppressDirectoryRefreshUntil = existing
+        } else {
+            suppressDirectoryRefreshUntil = until
+        }
     }
 
     func endSuppressDirectoryRefresh() {
-        suppressDirectoryRefreshUntil = Date().addingTimeInterval(0.6)
+        beginSuppressDirectoryRefresh(minimumDuration: 0.6)
+    }
+
+    func suspendFileTreeHighlightSync() {
+        fileTreeHighlightSyncSuspendCount += 1
+    }
+
+    func resumeFileTreeHighlightSync() {
+        fileTreeHighlightSyncSuspendCount = max(0, fileTreeHighlightSyncSuspendCount - 1)
     }
 
 
@@ -1072,6 +1093,7 @@ final class AppState {
 
     /// Expand/select the tree row for the active image directory without moving keyboard focus.
     func syncFileTreeToActiveImage() {
+        guard !isFileTreeHighlightSyncSuspended else { return }
         fileTreeSyncActiveImageToken += 1
     }
 

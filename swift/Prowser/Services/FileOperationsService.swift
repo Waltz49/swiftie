@@ -1,6 +1,16 @@
 import AppKit
 import Foundation
 
+/// Result of a batch move/copy with per-file conflict resolution (Python `FileMoveHandler`).
+struct FileBatchTransferOutcome {
+    var transfers: [(source: String, target: String)] = []
+    var undoEntries: [MovedFileUndoEntry] = []
+    var successCount = 0
+    var skippedCount = 0
+    var userCancelled = false
+    var failedFilenames: [String] = []
+}
+
 /// Result of inline rename commit (thumbnail or file tree).
 enum InlineRenameOutcome {
     case unchanged
@@ -315,68 +325,206 @@ final class FileOperationsService {
         }
     }
 
-    func copy(paths: [String], to directory: String) throws -> [String] {
-        guard allowPhotosLibraryTransfer(paths: paths, targetDirectory: directory, copyOnly: true) else {
-            return []
+    /// Port of `file_move_handler.resolve_target_path` loop in `file_tree_handler` / `_move_files_to_directory`.
+    func transferFiles(
+        paths: [String],
+        to targetDirectory: String,
+        copyOnly: Bool,
+        refreshWhenDone: Bool = true,
+        parentWindow: NSWindow? = nil
+    ) -> FileBatchTransferOutcome {
+        var outcome = FileBatchTransferOutcome()
+        guard let appState else { return outcome }
+
+        let files = paths.filter { path in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+            return !isDir.boolValue
         }
-        var copied: [String] = []
-        let destDir = URL(fileURLWithPath: directory)
-        for path in paths {
-            let source = URL(fileURLWithPath: path)
-            var dest = destDir.appendingPathComponent(source.lastPathComponent)
-            if FileManager.default.fileExists(atPath: dest.path) {
-                let base = source.deletingPathExtension().lastPathComponent
-                let ext = source.pathExtension
-                var counter = 1
-                repeat {
-                    let name = ext.isEmpty ? "\(base) copy \(counter)" : "\(base) copy \(counter).\(ext)"
-                    dest = destDir.appendingPathComponent(name)
-                    counter += 1
-                } while FileManager.default.fileExists(atPath: dest.path)
+        guard !files.isEmpty else { return outcome }
+
+        guard allowPhotosLibraryTransfer(paths: files, targetDirectory: targetDirectory, copyOnly: copyOnly) else {
+            return outcome
+        }
+
+        if !copyOnly {
+            let targetReal = RenamePrefixPlanner.realPath(targetDirectory)
+            var lockedNames: [String] = []
+            for path in files {
+                let sourceDir = RenamePrefixPlanner.realPath((path as NSString).deletingLastPathComponent)
+                guard sourceDir != targetReal else { continue }
+                if PrsortIO.isFileLocked(path) {
+                    lockedNames.append((path as NSString).lastPathComponent)
+                }
             }
-            try FileManager.default.copyItem(at: source, to: dest)
-            copied.append(dest.path)
+            if !lockedNames.isEmpty {
+                let preview = lockedNames.prefix(10).joined(separator: "\n")
+                let suffix = lockedNames.count > 10 ? "\n... and \(lockedNames.count - 10) more" : ""
+                showAlert(
+                    "Cannot Move Locked Files",
+                    """
+                    The following files are locked and cannot be moved:
+
+                    \(preview)\(suffix)
+
+                    Please unlock the files (⇧⌘L) before moving them, or hold Option to copy instead.
+                    """
+                )
+                return outcome
+            }
         }
-        return copied
+
+        guard FileManager.default.isWritableFile(atPath: targetDirectory) else {
+            let op = copyOnly ? "Copy" : "Move"
+            showAlert(
+                "Cannot \(op) Files",
+                """
+                Cannot \(op.lowercased()) files to destination:
+
+                \(targetDirectory)
+
+                Reason: Destination is read-only or you don't have write permission.
+
+                Please check the destination permissions or choose a different location.
+                """
+            )
+            return outcome
+        }
+
+        let suppressSeconds = max(2.0, Double(files.count) * 0.35 + 1.0)
+        appState.beginSuppressDirectoryRefresh(minimumDuration: suppressSeconds)
+        defer { appState.endSuppressDirectoryRefresh() }
+
+        let displayed = appState.fileData.displayedImages
+        let config = appState.config
+        var applyToAllState = FileMoveConflictResolver.ApplyToAllState()
+        let fm = FileManager.default
+        let targetReal = RenamePrefixPlanner.realPath(targetDirectory)
+
+        var progress: ProgressPanelController?
+        if files.count > 10 {
+            let title = copyOnly ? "Copying Files" : "Moving Files"
+            progress = ProgressPanelController(title: title, labelText: title, maximum: files.count)
+            progress?.show()
+        }
+        defer { progress?.close() }
+
+        let opLabel = copyOnly ? "Copying" : "Moving"
+        appState.config.debugLog("transferFiles starting \(files.count) file(s) copyOnly=\(copyOnly)")
+
+        for (idx, sourcePath) in files.enumerated() {
+            progress?.update(
+                value: idx,
+                label: "\(opLabel) file \(idx + 1) of \(files.count)"
+            )
+
+            let sourceDir = RenamePrefixPlanner.realPath((sourcePath as NSString).deletingLastPathComponent)
+            if sourceDir == targetReal {
+                outcome.skippedCount += 1
+                appState.status.show("file \(copyOnly ? "copy" : "move") skipped, src=dest")
+                progress?.update(value: idx + 1)
+                continue
+            }
+
+            let (resolvedPath, cancelAll) = FileMoveConflictResolver.resolveTargetPath(
+                sourcePath: sourcePath,
+                targetDirectory: targetDirectory,
+                applyToAllState: &applyToAllState,
+                config: config,
+                parentWindow: parentWindow
+            )
+
+            if cancelAll {
+                outcome.userCancelled = true
+                appState.config.debugLog(
+                    "transferFiles cancelAll at \(idx + 1)/\(files.count) \((sourcePath as NSString).lastPathComponent)"
+                )
+                break
+            }
+            guard let targetPath = resolvedPath else {
+                outcome.skippedCount += 1
+                appState.config.debugLog(
+                    "transferFiles skipped \(idx + 1)/\(files.count) \((sourcePath as NSString).lastPathComponent)"
+                )
+                progress?.update(value: idx + 1)
+                continue
+            }
+
+            let sourceURL = URL(fileURLWithPath: sourcePath)
+            do {
+                if fm.fileExists(atPath: targetPath) {
+                    try fm.removeItem(atPath: targetPath)
+                }
+                try fm.copyItem(at: sourceURL, to: URL(fileURLWithPath: targetPath))
+            } catch {
+                let name = (sourcePath as NSString).lastPathComponent
+                outcome.failedFilenames.append(name)
+                outcome.skippedCount += 1
+                progress?.update(value: idx + 1)
+                continue
+            }
+
+            if copyOnly {
+                outcome.successCount += 1
+                outcome.transfers.append((source: sourcePath, target: targetPath))
+            } else {
+                do {
+                    try fm.removeItem(at: sourceURL)
+                    outcome.successCount += 1
+                    outcome.transfers.append((source: sourcePath, target: targetPath))
+                    outcome.undoEntries.append(
+                        MovedFileUndoEntry(
+                            sourcePath: sourcePath,
+                            targetPath: targetPath,
+                            originalPosition: displayed.firstIndex(of: sourcePath)
+                        )
+                    )
+                } catch {
+                    try? fm.removeItem(atPath: targetPath)
+                    outcome.failedFilenames.append((sourcePath as NSString).lastPathComponent)
+                    outcome.skippedCount += 1
+                }
+            }
+            progress?.update(value: idx + 1)
+        }
+
+        if !outcome.undoEntries.isEmpty {
+            undoStack.pushMove(outcome.undoEntries)
+        }
+        if refreshWhenDone, outcome.successCount > 0 {
+            let removedSources = copyOnly ? [] : outcome.transfers.map(\.source)
+            refreshAfterChange(removedPaths: removedSources)
+        }
+        return outcome
+    }
+
+    func copy(paths: [String], to directory: String) throws -> [String] {
+        let outcome = transferFiles(paths: paths, to: directory, copyOnly: true, refreshWhenDone: true)
+        if outcome.failedFilenames.isEmpty {
+            return outcome.transfers.map(\.target)
+        }
+        throw NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileWriteUnknownError,
+            userInfo: [NSLocalizedDescriptionKey: "Failed to copy \(outcome.failedFilenames.count) file(s)"]
+        )
     }
 
     func move(paths: [String], to directory: String, refreshWhenDone: Bool = true) throws -> [String] {
-        guard allowPhotosLibraryTransfer(paths: paths, targetDirectory: directory, copyOnly: false) else {
-            return []
+        let outcome = transferFiles(
+            paths: paths,
+            to: directory,
+            copyOnly: false,
+            refreshWhenDone: refreshWhenDone
+        )
+        if outcome.failedFilenames.isEmpty {
+            return outcome.transfers.map(\.target)
         }
-        var blocked: [String] = []
-        for path in paths where PrsortIO.isFileLocked(path) {
-            blocked.append((path as NSString).lastPathComponent)
-        }
-        if !blocked.isEmpty {
-            showAlert("Cannot Move Locked Files", "Unlock these files before moving:\n\n" + blocked.joined(separator: "\n"))
-            return []
-        }
-
-        let displayed = appState?.fileData.displayedImages ?? []
-        var moved: [String] = []
-        var undoEntries: [MovedFileUndoEntry] = []
-        let destDir = URL(fileURLWithPath: directory)
-        for path in paths {
-            let source = URL(fileURLWithPath: path)
-            let dest = destDir.appendingPathComponent(source.lastPathComponent)
-            try FileManager.default.moveItem(at: source, to: dest)
-            moved.append(dest.path)
-            undoEntries.append(
-                MovedFileUndoEntry(
-                    sourcePath: path,
-                    targetPath: dest.path,
-                    originalPosition: displayed.firstIndex(of: path)
-                )
-            )
-        }
-        if !undoEntries.isEmpty {
-            undoStack.pushMove(undoEntries)
-        }
-        if refreshWhenDone {
-            refreshAfterChange()
-        }
-        return moved
+        throw NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileWriteUnknownError,
+            userInfo: [NSLocalizedDescriptionKey: "Failed to move \(outcome.failedFilenames.count) file(s)"]
+        )
     }
 
     func moveToDestination(slot: Int, copyOnly: Bool? = nil) {
@@ -408,21 +556,19 @@ final class FileOperationsService {
             shouldCopy = action == "copy"
         }
 
-        do {
-            if shouldCopy {
-                let copied = try copy(paths: paths, to: expanded)
-                if !copied.isEmpty {
-                    appState.status.show("Copied \(copied.count) file(s) to destination \(slot)")
-                }
-            } else {
-                let moved = try move(paths: paths, to: expanded)
-                if !moved.isEmpty {
-                    appState.status.show("Moved \(moved.count) file(s) to destination \(slot)")
+        let outcome = transferFiles(paths: paths, to: expanded, copyOnly: shouldCopy, refreshWhenDone: true)
+        reportBatchTransferOutcome(
+            outcome,
+            copyOnly: shouldCopy,
+            targetDirectory: expanded,
+            successStatus: { count in
+                if shouldCopy {
+                    "Copied \(count) file(s) to destination \(slot)"
+                } else {
+                    "Moved \(count) file(s) to destination \(slot)"
                 }
             }
-        } catch {
-            appState.status.show("Operation failed: \(error.localizedDescription)")
-        }
+        )
     }
 
     /// File-tree drop target. Port of `files/file_tree_handler.py` ``dropEvent``.
@@ -430,12 +576,19 @@ final class FileOperationsService {
     func performFileTreeDrop(filePaths: [String], targetDirectory: String, operation: NSDragOperation) -> Bool {
         guard let appState else { return false }
 
-        let files = filePaths.filter { path in
+        let mergedPaths = FileTreeOutlineView.mergedDropFilePaths(
+            pasteboardPaths: filePaths,
+            appState: appState
+        )
+        let files = mergedPaths.filter { path in
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
             return !isDir.boolValue
         }
         guard !files.isEmpty else { return false }
+
+        let firstName = files.first.map { ($0 as NSString).lastPathComponent } ?? "?"
+        appState.config.debugLog("FileTree drop batch count=\(files.count) first=\(firstName)")
 
         let copyOnly = FileDragDropOperations.isCopyDrop(operation)
         guard allowPhotosLibraryTransfer(paths: files, targetDirectory: targetDirectory, copyOnly: copyOnly) else {
@@ -472,50 +625,93 @@ final class FileOperationsService {
         appState.lastDropLocation = targetDirectory
         appState.refreshMenuState()
 
-        do {
-            if copyOnly {
-                let copied = try copy(paths: files, to: targetDirectory)
-                guard !copied.isEmpty else { return false }
-                appState.config.debugLog(
-                    "FileTree copy completed count=\(copied.count) dest=\(targetDirectory)"
-                )
-                appState.status.showFileOperation("Copied \(copied.count) file(s)")
-                refreshDirectoryAfterTreeDrop(
-                    appState: appState,
-                    sourcePaths: files,
-                    targetDirectory: targetDirectory,
-                    copyOnly: true
-                )
-            } else {
-                let displayed = appState.fileData.displayedImages
-                let activePath = appState.fileData.currentImagePath
-                let moved = try move(paths: files, to: targetDirectory, refreshWhenDone: false)
-                guard !moved.isEmpty else { return false }
-                appState.status.showFileOperation("Moved \(moved.count) file(s)")
-                DirectoryRefreshService.applyRemovedFiles(
-                    appState: appState,
-                    removed: Set(files),
-                    displayed: displayed,
-                    activePath: activePath
-                )
-                for path in files {
-                    appState.selection.selectedFiles.remove(path)
-                }
-                appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
-                refreshDirectoryAfterTreeDrop(
-                    appState: appState,
-                    sourcePaths: files,
-                    targetDirectory: targetDirectory,
-                    copyOnly: false
-                )
+        appState.suspendFileTreeHighlightSync()
+        defer { appState.resumeFileTreeHighlightSync() }
+
+        let displayed = appState.fileData.displayedImages
+        let activePath = appState.fileData.currentImagePath
+        let selectedBeforeDrop = appState.selection.selectedFiles
+        let outcome = transferFiles(
+            paths: files,
+            to: targetDirectory,
+            copyOnly: copyOnly,
+            refreshWhenDone: false
+        )
+
+        if !outcome.failedFilenames.isEmpty {
+            showTransferFailedAlert(
+                copyOnly: copyOnly,
+                failedCount: outcome.failedFilenames.count,
+                targetDirectory: targetDirectory
+            )
+        }
+
+        guard outcome.successCount > 0 else {
+            if !outcome.userCancelled,
+               outcome.failedFilenames.isEmpty,
+               outcome.skippedCount == 0 {
+                let title = copyOnly ? "Cannot Copy Files" : "Cannot Move Files"
+                let text = """
+                Cannot \(copyOnly ? "copy" : "move") files to destination:
+
+                \(targetDirectory)
+
+                No files were \(copyOnly ? "copied" : "moved"). All files may have been skipped due to overwrite conflicts.
+                """
+                StyledMessageDialog.showCritical(title: title, message: text)
+            } else if outcome.skippedCount > 0, !outcome.userCancelled {
+                appState.status.showFileOperation(copyOnly ? "No files copied" : "No files moved")
             }
-            appState.fileTreeReloadToken += 1
-            appState.eventBus.emit(.filesChangedOnDisk, payload: .string(targetDirectory))
-            return true
-        } catch {
-            appState.status.show("Operation failed: \(error.localizedDescription)")
             return false
         }
+
+        if copyOnly {
+            appState.config.debugLog(
+                "FileTree copy completed count=\(outcome.successCount) dest=\(targetDirectory)"
+            )
+            if outcome.skippedCount > 0 {
+                appState.status.showFileOperation(
+                    "Copied \(outcome.successCount) file(s), skipped \(outcome.skippedCount)"
+                )
+            } else {
+                appState.status.showFileOperation("Copied \(outcome.successCount) file(s)")
+            }
+            refreshDirectoryAfterTreeDrop(
+                appState: appState,
+                sourcePaths: mergedPaths,
+                targetDirectory: targetDirectory,
+                copyOnly: true
+            )
+        } else {
+            let movedSources = outcome.transfers.map(\.source)
+            if outcome.skippedCount > 0 {
+                appState.status.showFileOperation(
+                    "Moved \(outcome.successCount) file(s), skipped \(outcome.skippedCount)"
+                )
+            } else {
+                appState.status.showFileOperation("Moved \(outcome.successCount) file(s)")
+            }
+            DirectoryRefreshService.applyRemovedFiles(
+                appState: appState,
+                removed: Set(movedSources),
+                displayed: displayed,
+                activePath: activePath
+            )
+            let movedSet = Set(movedSources)
+            if selectedBeforeDrop.isEmpty {
+                appState.selection.selectedFiles.subtract(movedSet)
+            } else {
+                appState.selection.selectedFiles = selectedBeforeDrop.subtracting(movedSet)
+            }
+            appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
+            refreshDirectoryAfterTreeDrop(
+                appState: appState,
+                sourcePaths: mergedPaths,
+                targetDirectory: targetDirectory,
+                copyOnly: false
+            )
+        }
+        return true
     }
 
     private func refreshDirectoryAfterTreeDrop(
@@ -524,6 +720,20 @@ final class FileOperationsService {
         targetDirectory: String,
         copyOnly: Bool
     ) {
+        // Python file_tree drop: remove_thumbnails_for_files + debounced refresh only (no load_directory).
+        if appState.specificFilesActive || appState.referenceGraphActive {
+            if copyOnly {
+                let currentNorm = appState.fileData.currentDirectory.flatMap {
+                    FileDataModel.normalizePath($0) ?? $0
+                }
+                let targetNorm = FileDataModel.normalizePath(targetDirectory) ?? targetDirectory
+                if currentNorm == targetNorm {
+                    DirectoryRefreshService.refreshSpecificFilesList(appState: appState, force: false)
+                }
+            }
+            return
+        }
+
         guard let currentDirectory = appState.fileData.currentDirectory else { return }
         let currentNorm = FileDataModel.normalizePath(currentDirectory) ?? currentDirectory
         let targetNorm = FileDataModel.normalizePath(targetDirectory) ?? targetDirectory
@@ -537,7 +747,7 @@ final class FileOperationsService {
         appState.loadDirectory(currentDirectory, saveHistory: false)
     }
 
-    func moveToLastDropLocation(copyOnly: Bool = false) {
+    func moveToLastDropLocation(copyOnly: Bool? = nil) {
         guard let appState else { return }
         guard let lastDrop = appState.lastDropLocation, !lastDrop.isEmpty else {
             appState.status.show("No last drop location")
@@ -548,21 +758,25 @@ final class FileOperationsService {
             appState.status.show("No files selected")
             return
         }
-        do {
-            if copyOnly {
-                let copied = try copy(paths: paths, to: lastDrop)
-                if !copied.isEmpty {
-                    appState.status.show("Copied to last drop location")
-                }
-            } else {
-                let moved = try move(paths: paths, to: lastDrop)
-                if !moved.isEmpty {
-                    appState.status.show("Moved to last drop location")
-                }
-            }
-        } catch {
-            appState.status.show("Operation failed: \(error.localizedDescription)")
+
+        let shouldCopy: Bool
+        if let copyOnly {
+            shouldCopy = copyOnly
+        } else {
+            let action = appState.config.string(forKey: "destination_menu_action", default: "move")
+            if action == "none" { return }
+            shouldCopy = action == "copy"
         }
+
+        let outcome = transferFiles(paths: paths, to: lastDrop, copyOnly: shouldCopy, refreshWhenDone: true)
+        reportBatchTransferOutcome(
+            outcome,
+            copyOnly: shouldCopy,
+            targetDirectory: lastDrop,
+            successStatus: { _ in
+                shouldCopy ? "Copied to last drop location" : "Moved to last drop location"
+            }
+        )
     }
 
     func copyPathsToClipboard(_ paths: [String]) {
@@ -923,12 +1137,107 @@ final class FileOperationsService {
         return true
     }
 
+    private func reportBatchTransferOutcome(
+        _ outcome: FileBatchTransferOutcome,
+        copyOnly: Bool,
+        targetDirectory: String,
+        successStatus: (Int) -> String
+    ) {
+        guard let appState else { return }
+
+        if !outcome.failedFilenames.isEmpty {
+            showTransferFailedAlert(
+                copyOnly: copyOnly,
+                failedCount: outcome.failedFilenames.count,
+                targetDirectory: targetDirectory
+            )
+        }
+
+        if outcome.successCount > 0 {
+            if outcome.skippedCount > 0 {
+                let verb = copyOnly ? "Copied" : "Moved"
+                appState.status.show("\(verb) \(outcome.successCount) file(s), skipped \(outcome.skippedCount)")
+            } else {
+                appState.status.show(successStatus(outcome.successCount))
+            }
+            return
+        }
+
+        if outcome.userCancelled { return }
+
+        if outcome.failedFilenames.isEmpty, outcome.skippedCount > 0 {
+            appState.status.show(copyOnly ? "No files copied" : "No files moved")
+        } else if outcome.failedFilenames.isEmpty, outcome.skippedCount == 0 {
+            let title = copyOnly ? "Cannot Copy Files" : "Cannot Move Files"
+            let text = """
+            Cannot \(copyOnly ? "copy" : "move") files to destination:
+
+            \(targetDirectory)
+
+            No files were \(copyOnly ? "copied" : "moved"). All files may have been skipped due to overwrite conflicts.
+            """
+            StyledMessageDialog.showCritical(title: title, message: text)
+        }
+    }
+
+    private func showTransferFailedAlert(copyOnly: Bool, failedCount: Int, targetDirectory: String) {
+        let op = copyOnly ? "copy" : "move"
+        let title = copyOnly ? "Copy Failed" : "Move Failed"
+        let message: String
+        if failedCount == 1 {
+            message = """
+            Failed to \(op) file.
+
+            Destination: \(targetDirectory)
+
+            Please check file permissions and try again.
+            """
+        } else {
+            message = """
+            Failed to \(op) \(failedCount) files.
+
+            Destination: \(targetDirectory)
+
+            Please check file permissions and try again.
+            """
+        }
+        StyledMessageDialog.showCritical(title: title, message: message)
+    }
+
     private func showAlert(_ title: String, _ message: String) {
         StyledMessageDialog.showWarning(title: title, message: message)
     }
 
-    private func refreshAfterChange() {
-        guard let appState, let directory = appState.fileData.currentDirectory else { return }
+    /// After file ops, refresh the UI without leaving a specific-files level (⌘K / ⌘F / duplicates).
+    private func refreshAfterChange(removedPaths: [String] = []) {
+        guard let appState else { return }
+
+        if appState.specificFilesActive || appState.referenceGraphActive {
+            let displayed = appState.fileData.displayedImages
+            let activePath = appState.fileData.currentImagePath
+            if !removedPaths.isEmpty {
+                DirectoryRefreshService.applyRemovedFiles(
+                    appState: appState,
+                    removed: Set(removedPaths),
+                    displayed: displayed,
+                    activePath: activePath
+                )
+                let removedSet = Set(removedPaths)
+                if !appState.selection.selectedFiles.isEmpty {
+                    appState.selection.selectedFiles.subtract(removedSet)
+                }
+                appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
+            } else {
+                DirectoryRefreshService.refreshSpecificFilesList(appState: appState, force: false)
+            }
+            if let directory = appState.fileData.currentDirectory {
+                appState.eventBus.emit(.filesChangedOnDisk, payload: .string(directory))
+            }
+            appState.refreshMenuState()
+            return
+        }
+
+        guard let directory = appState.fileData.currentDirectory else { return }
         appState.loadDirectory(directory, saveHistory: false)
         appState.eventBus.emit(.filesChangedOnDisk, payload: .string(directory))
     }

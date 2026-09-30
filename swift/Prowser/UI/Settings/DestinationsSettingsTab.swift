@@ -17,8 +17,8 @@ struct DestinationsSettingsTab: View {
                     Text("Copy").tag("copy")
                     Text("None").tag("none")
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
+                .pickerStyle(.menu)
+                .frame(maxWidth: 280)
 
                 ForEach(0..<9, id: \.self) { index in
                     HStack {

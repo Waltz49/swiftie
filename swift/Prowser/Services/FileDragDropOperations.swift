@@ -39,6 +39,7 @@ enum FileDragDropOperations {
     }
 
     /// Single operation for destination feedback (cursor badge + drop). Never return `.copy | .move`.
+    /// File tree drops use ``treeDropOperation`` instead (⌥ copy, else move). Reserved for other targets.
     static func destinationOperation(
         sourceMask: NSDragOperation,
         filePaths: [String],
@@ -68,6 +69,27 @@ enum FileDragDropOperations {
             return .copy
         }
         return allowed
+    }
+
+    /// File-tree drop: move unless Option (⌥) is held; then copy. Ignores cross-volume copy default.
+    static func treeDropOperation(
+        sourceMask: NSDragOperation,
+        filePaths: [String],
+        targetDirectory: String?
+    ) -> NSDragOperation {
+        if dragModifierFlags().contains(.option) {
+            return .copy
+        }
+        guard let targetDirectory, !filePaths.isEmpty else { return [] }
+        let offered = sourceMask == [] ? NSDragOperation([.copy, .move]) : sourceMask
+        let allowed = offered.intersection([.copy, .move])
+        if allowed.contains(.move) {
+            return .move
+        }
+        if allowed.contains(.copy) {
+            return .copy
+        }
+        return []
     }
 
     /// Use the operation negotiated while dragging. Do not re-read Option at mouse-up;

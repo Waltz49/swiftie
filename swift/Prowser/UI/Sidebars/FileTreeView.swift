@@ -85,7 +85,8 @@ struct FileTreeView: NSViewRepresentable {
         context.coordinator.focusTreeIfRequested()
         context.coordinator.collapseUIIfRequested()
         context.coordinator.expandToCurrentDirectoryIfRequested()
-        if context.coordinator.consumeReloadIfRequested() {
+        if !appState.isFileTreeHighlightSyncSuspended,
+           context.coordinator.consumeReloadIfRequested() {
             if appState.fileTreeReloadFilterOnly {
                 appState.fileTreeReloadFilterOnly = false
                 context.coordinator.reloadFilterResults(preserveExpansion: true)
@@ -161,6 +162,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func syncToActiveImageIfRequested() {
             guard pinnedDirectoryAfterRename == nil else { return }
+            guard !appState.isFileTreeHighlightSyncSuspended else { return }
             guard appState.fileTreeSyncActiveImageToken != lastSyncActiveImageToken else { return }
             lastSyncActiveImageToken = appState.fileTreeSyncActiveImageToken
             lastSyncedDirectory = nil
@@ -395,6 +397,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func syncSelectionIfNeeded() {
             if pinnedDirectoryAfterRename != nil { return }
+            guard !appState.isFileTreeHighlightSyncSuspended else { return }
             switch appState.fileData.currentViewMode {
             case .slideshow, .slideshow2, .slideshow3, .browse:
                 return
@@ -1244,7 +1247,7 @@ struct FileTreeView: NSViewRepresentable {
             proposedItem item: Any?,
             proposedChildIndex _: Int
         ) -> NSDragOperation {
-            let paths = FileTreeOutlineView.filePaths(from: info)
+            let paths = FileTreeOutlineView.filePaths(from: info, appState: appState)
             guard !paths.isEmpty else { return [] }
             guard let node = item as? FileTreeNode, node.isDirectory else { return [] }
             var isDir: ObjCBool = false
@@ -1252,7 +1255,7 @@ struct FileTreeView: NSViewRepresentable {
                 return []
             }
             outlineView.setDropItem(item, dropChildIndex: NSOutlineViewDropOnItemIndex)
-            let op = FileDragDropOperations.destinationOperation(
+            let op = FileDragDropOperations.treeDropOperation(
                 sourceMask: info.draggingSourceOperationMask,
                 filePaths: paths,
                 targetDirectory: node.path
@@ -1559,7 +1562,7 @@ final class FileTreeOutlineView: NSOutlineView {
 
     /// Drives the move/copy pointer badge (green + for copy). `validateDrop` alone does not update it.
     func treeDropOperation(for sender: NSDraggingInfo) -> NSDragOperation {
-        let paths = Self.filePaths(from: sender)
+        let paths = Self.filePaths(from: sender, appState: appState)
         guard !paths.isEmpty else {
             setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
             clearTreeDropProposal()
@@ -1580,7 +1583,7 @@ final class FileTreeOutlineView: NSOutlineView {
             return []
         }
         setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
-        let op = FileDragDropOperations.destinationOperation(
+        let op = FileDragDropOperations.treeDropOperation(
             sourceMask: sender.draggingSourceOperationMask,
             filePaths: paths,
             targetDirectory: node.path
@@ -1592,11 +1595,13 @@ final class FileTreeOutlineView: NSOutlineView {
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         lastDropOperation = []
         lastDropDirectory = nil
+        coordinator?.markUserNavigatingTree(extended: true)
         return treeDropOperation(for: sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        treeDropOperation(for: sender)
+        coordinator?.markUserNavigatingTree(extended: true)
+        return treeDropOperation(for: sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -1621,7 +1626,8 @@ final class FileTreeOutlineView: NSOutlineView {
     }
 
     fileprivate func performStoredFileTreeDrop(from sender: NSDraggingInfo) -> Bool {
-        let paths = Self.filePaths(from: sender)
+        defer { appState?.thumbnailDragSourcePaths = [] }
+        let paths = Self.filePaths(from: sender, appState: appState)
         let target = lastDropDirectory ?? proposedDropDirectory
         let operation = lastDropOperation != [] ? lastDropOperation : proposedDropOperation
         lastDropOperation = []
@@ -1644,16 +1650,61 @@ final class FileTreeOutlineView: NSOutlineView {
         ) ?? false
     }
 
-    static func filePaths(from draggingInfo: NSDraggingInfo) -> [String] {
+    static func filePaths(from draggingInfo: NSDraggingInfo, appState: AppState? = nil) -> [String] {
+        var paths: [String] = []
+        let pasteboard = draggingInfo.draggingPasteboard
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if let urls = draggingInfo.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] {
-            let paths = urls.map(\.path).filter { !$0.isEmpty }
-            if !paths.isEmpty { return paths }
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] {
+            paths.append(contentsOf: urls.map(\.path).filter { !$0.isEmpty })
         }
-        if let names = draggingInfo.draggingPasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
-            return names
+        if paths.isEmpty, let items = pasteboard.pasteboardItems {
+            for item in items {
+                if let urlString = item.string(forType: .fileURL),
+                   let url = URL(string: urlString) {
+                    paths.append(url.path)
+                }
+            }
         }
-        return []
+        if paths.isEmpty,
+           let names = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+            paths = names
+        }
+        var seen = Set<String>()
+        let fromPasteboard = paths.filter { seen.insert($0).inserted }
+        guard let appState else {
+            return fromPasteboard
+        }
+        return mergedDropFilePaths(pasteboardPaths: fromPasteboard, appState: appState)
+    }
+
+    /// Full multiselect set for thumbnail→tree drops (pasteboard often exposes only one file URL).
+    static func mergedDropFilePaths(pasteboardPaths: [String], appState: AppState) -> [String] {
+        var candidates = appState.thumbnailDragSourcePaths
+        if candidates.isEmpty {
+            candidates = pasteboardPaths
+        } else if !pasteboardPaths.isEmpty {
+            let candidateSet = Set(candidates)
+            let pasteSet = Set(pasteboardPaths)
+            if !pasteSet.isSubset(of: candidateSet) {
+                candidates = pasteboardPaths
+            } else if pasteboardPaths.count > candidates.count {
+                candidates = pasteboardPaths
+            }
+        }
+
+        let selected = appState.selection.selectedFiles
+        if selected.count > 1 {
+            let candidateSet = Set(candidates)
+            if candidates.isEmpty || candidateSet.isSubset(of: selected) {
+                let ordered = appState.fileData.displayedImages.filter { selected.contains($0) }
+                if ordered.count > candidates.count {
+                    candidates = ordered
+                }
+            }
+        }
+
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0).inserted }
     }
 
     private var renameEditor: NSTextField?

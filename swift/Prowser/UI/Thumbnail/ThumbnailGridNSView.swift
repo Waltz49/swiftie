@@ -206,6 +206,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var dropInsertionIndex: Int?
     private var dropIndicatorRect: NSRect?
     private var externalDragStarted = false
+    /// Plain click on an already-selected thumb in multiselect is deferred to mouse up (Python delayed single-click) so drag keeps the batch.
+    private var deferredThumbnailClick: (
+        index: Int,
+        path: String,
+        shiftPressed: Bool,
+        cmdPressed: Bool,
+        ctrlPressed: Bool
+    )?
     /// Set when the pointer moves past the drag threshold (Python ``_dragging``); survives ``resetDragState`` until mouse up.
     private var suppressBrowseActivation = false
     private var draggingPaths: [String] = []
@@ -884,13 +892,24 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let shiftPressed = flags.contains(.shift)
         let cmdPressed = flags.contains(.command)
         let ctrlPressed = flags.contains(.control)
-        gridDelegate?.thumbnailGridDidClick(
-            index: index,
-            path: path,
-            shiftPressed: shiftPressed,
-            cmdPressed: cmdPressed,
-            ctrlPressed: ctrlPressed
-        )
+        let preserveMultiSelectForDrag =
+            !shiftPressed && !cmdPressed && !ctrlPressed
+            && (appState?.selection.selectedFiles.count ?? 0) > 1
+            && (appState?.selection.selectedFiles.contains(path) ?? false)
+        if preserveMultiSelectForDrag {
+            deferredThumbnailClick = (
+                index, path, shiftPressed, cmdPressed, ctrlPressed
+            )
+        } else {
+            deferredThumbnailClick = nil
+            gridDelegate?.thumbnailGridDidClick(
+                index: index,
+                path: path,
+                shiftPressed: shiftPressed,
+                cmdPressed: cmdPressed,
+                ctrlPressed: ctrlPressed
+            )
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -904,6 +923,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let shiftPressed = flags.contains(.shift)
         let cmdPressed = flags.contains(.command)
         let ctrlPressed = flags.contains(.control)
+        if let deferred = deferredThumbnailClick, !externalDragStarted {
+            gridDelegate?.thumbnailGridDidClick(
+                index: deferred.index,
+                path: deferred.path,
+                shiftPressed: deferred.shiftPressed,
+                cmdPressed: deferred.cmdPressed,
+                ctrlPressed: deferred.ctrlPressed
+            )
+        }
         if !suppressBrowseActivation, !shiftPressed, !cmdPressed, !ctrlPressed {
             if event.clickCount >= 2 {
                 guard let path = browseActivationPath(at: point) else {
@@ -944,6 +972,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard !paths.isEmpty else { return }
         draggingPaths = paths
         externalDragStarted = true
+        appState?.thumbnailDragSourcePaths = paths
 
         var items: [NSDraggingItem] = []
         for (offset, path) in paths.enumerated() {
@@ -980,6 +1009,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func dragPathsForPath(_ sourcePath: String) -> [String] {
         guard imagePaths.contains(sourcePath) else { return [] }
+        if let appState {
+            let selected = appState.selection.selectedFiles
+            if selected.count > 1, selected.contains(sourcePath) {
+                return imagePaths.filter { selected.contains($0) }
+            }
+        }
         if multiSelectMode,
            let sourceIndex = imagePaths.firstIndex(of: sourcePath),
            selectedIndices.contains(sourceIndex) {
@@ -1008,6 +1043,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func resetDragState() {
         dragSourcePath = nil
         dragStartPoint = nil
+        deferredThumbnailClick = nil
         externalDragStarted = false
         draggingPaths = []
         dropInsertionIndex = nil
@@ -1036,6 +1072,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         configSource?.debugLog(
             "Thumbnail drag ended operation=\(operation.rawValue) copy=\(operation == .copy) move=\(operation == .move)"
         )
+        appState?.thumbnailDragSourcePaths = []
         resetDragState()
     }
 

@@ -10,9 +10,10 @@ struct ShortcutsSidebarView: View {
         let favorites = validFavoriteSlots()
         let destinations = validDestinationSlots()
         let clickMode = moveKeysMode()
-        let copyMode = appState.config.string(forKey: "destination_menu_action", default: "move") == "copy"
+        let menuAction = appState.config.string(forKey: "destination_menu_action", default: "move")
+        let copyMode = menuAction == "copy"
         let lastDrop = validLastDropLabel()
-        let destinationClicksEnabled = clickMode != "not_links"
+        let destinationClicksEnabled = clickMode != "not_links" && menuAction != "none"
 
         let effectiveCopy = copyMode || clickMode == "copy"
 
@@ -105,10 +106,7 @@ struct ShortcutsSidebarView: View {
                         copyMode: copyMode,
                         actionEnabled: destinationClicksEnabled,
                         action: {
-                            appState.fileOperations.moveToDestination(
-                                slot: slot.number,
-                                copyOnly: copyMode
-                            )
+                            appState.fileOperations.moveToDestination(slot: slot.number, copyOnly: nil)
                         }
                     )
                 }
@@ -121,7 +119,7 @@ struct ShortcutsSidebarView: View {
                     palette: palette,
                     copyMode: copyMode,
                     actionEnabled: destinationClicksEnabled,
-                    action: { appState.fileOperations.moveToLastDropLocation(copyOnly: copyMode) }
+                    action: { appState.fileOperations.moveToLastDropLocation(copyOnly: nil) }
                 )
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
