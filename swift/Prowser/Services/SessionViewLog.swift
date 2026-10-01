@@ -1,19 +1,38 @@
 import Darwin
 import Foundation
 
-/// Combined session log under the configured temporary files directory (View log / LM Studio JSON).
-@MainActor
-enum SessionViewLog {
-    private static let lock = NSLock()
-    private static let logTag = "imagegen_plugins.lmstudio_caption"
+extension Notification.Name {
+    /// Posted on the main queue after a line is appended to the session log file (`userInfo`: `SessionViewLog.appendNotificationURLKey`, `SessionViewLog.appendNotificationTextKey`).
+    static let sessionViewLogDidAppend = Notification.Name("prowser.sessionViewLogDidAppend")
+}
 
+/// Combined session log under the profile `logs/` directory (View log / LM Studio JSON).
+enum SessionViewLog {
+    static let appendNotificationURLKey = "url"
+    static let appendNotificationTextKey = "text"
+
+    private static let logTag = "imagegen_plugins.lmstudio_caption"
+    private static let sessionLogFileName = "image_browser_session"
+
+    @MainActor
     static func logFileURL(config: AppConfig) -> URL {
-        config.temporaryFilesDirectory.appendingPathComponent("image_browser_session_\(getuid()).log")
+        config.profilePaths.logsDirectory
+            .appendingPathComponent("\(sessionLogFileName)_\(getuid()).log")
+    }
+
+    static func install(logFileURL url: URL) {
+        prepareEmptyLog(at: url)
     }
 
     /// Truncate and prepare the session log (primary GUI launch).
+    @MainActor
     static func install(config: AppConfig) {
-        let url = logFileURL(config: config)
+        install(logFileURL: logFileURL(config: config))
+    }
+
+    private static let lock = NSLock()
+
+    private static func prepareEmptyLog(at url: URL) {
         lock.lock()
         defer { lock.unlock() }
         try? FileManager.default.createDirectory(
@@ -31,26 +50,45 @@ enum SessionViewLog {
         return formatter.string(from: Date())
     }
 
-    static func appendLine(_ text: String, config: AppConfig) {
+    static func appendLine(_ text: String, logFileURL url: URL) {
         let line = text.hasSuffix("\n") ? text : text + "\n"
-        write(line, config: config)
+        write(line, to: url)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .sessionViewLogDidAppend,
+                object: nil,
+                userInfo: [
+                    appendNotificationURLKey: url,
+                    appendNotificationTextKey: line,
+                ]
+            )
+        }
     }
 
+    @MainActor
+    static func appendLine(_ text: String, config: AppConfig) {
+        appendLine(text, logFileURL: logFileURL(config: config))
+    }
+
+    @MainActor
     static func appendTimestampedBlock(header: String, body: String, config: AppConfig) {
         let block = "\(debugTimestamp()) \(header)\n\(body)\n"
-        write(block, config: config)
+        appendLine(block, logFileURL: logFileURL(config: config))
     }
 
+    @MainActor
     static func logModelInput(tag: String, payload: [String: Any], config: AppConfig) {
         guard let json = prettyJSONString(payload) else { return }
         appendTimestampedBlock(header: "\(tag) input", body: relaxJSONForLog(json), config: config)
     }
 
+    @MainActor
     static func logModelOutput(tag: String, text: String, config: AppConfig) {
         guard let json = prettyJSONString(["text": text]) else { return }
         appendTimestampedBlock(header: "\(tag) output", body: relaxJSONForLog(json), config: config)
     }
 
+    @MainActor
     static func logLMStudioCall(method: String, payload: [String: Any], config: AppConfig) {
         let sanitized = sanitizePayloadForLog(payload)
         guard let json = prettyJSONString(sanitized) else { return }
@@ -58,6 +96,7 @@ enum SessionViewLog {
         appendLine("\n[\(ts)] \(method)\n\(relaxJSONForLog(json))\n", config: config)
     }
 
+    @MainActor
     static func logLMStudioError(_ message: String, detail: String? = nil, config: AppConfig) {
         var body = message
         if let detail, !detail.isEmpty {
@@ -66,6 +105,7 @@ enum SessionViewLog {
         appendTimestampedBlock(header: "\(logTag) error", body: body, config: config)
     }
 
+    @MainActor
     static func logLMStudioSSELine(_ line: String, config: AppConfig) {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == "[DONE]" { return }
@@ -85,27 +125,35 @@ enum SessionViewLog {
         return true
     }
 
+    static func clear(logFileURL url: URL) {
+        prepareEmptyLog(at: url)
+    }
+
+    @MainActor
     static func clear(config: AppConfig) {
-        let url = logFileURL(config: config)
-        lock.lock()
-        defer { lock.unlock() }
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        chmod(url.path, 0o600)
+        clear(logFileURL: logFileURL(config: config))
     }
 
     /// Read appended bytes since `offset`; updates `offset` to the new file length.
-    static func readChunk(config: AppConfig, offset: inout UInt64) -> String {
-        let url = logFileURL(config: config)
+    static func readChunk(logFileURL url: URL, offset: inout UInt64) -> String {
         lock.lock()
         defer { lock.unlock() }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
         defer { try? handle.close() }
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
+        if offset > size {
+            offset = size
+        }
         guard offset < size else { return "" }
         try? handle.seek(toOffset: offset)
         let data = handle.readDataToEndOfFile()
         offset = size
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    @MainActor
+    static func readChunk(config: AppConfig, offset: inout UInt64) -> String {
+        readChunk(logFileURL: logFileURL(config: config), offset: &offset)
     }
 
     // MARK: - JSON helpers (port of print_call_decorator.relax_json_for_log)
@@ -218,23 +266,39 @@ enum SessionViewLog {
         return str
     }
 
-    private static func write(_ text: String, config: AppConfig) {
-        let url = logFileURL(config: config)
+    private static func write(_ text: String, to url: URL) {
         lock.lock()
         defer { lock.unlock() }
-        if !FileManager.default.fileExists(atPath: url.path) {
-            try? FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-            chmod(url.path, 0o600)
-        }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         guard let data = text.data(using: .utf8) else { return }
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
+        _ = url.withUnsafeFileSystemRepresentation { path -> Bool in
+            guard let path else { return false }
+            let fd = open(path, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR)
+            guard fd >= 0 else { return false }
+            defer { close(fd) }
+            var ok = true
+            data.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else {
+                    ok = false
+                    return
+                }
+                var remaining = raw.count
+                var pointer = base
+                while remaining > 0 {
+                    let n = Darwin.write(fd, pointer, remaining)
+                    if n <= 0 {
+                        ok = false
+                        break
+                    }
+                    remaining -= n
+                    pointer = pointer.advanced(by: n)
+                }
+            }
+            _ = fsync(fd)
+            return ok
         }
     }
 }

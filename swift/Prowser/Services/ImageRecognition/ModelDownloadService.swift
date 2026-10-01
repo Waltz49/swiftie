@@ -77,7 +77,11 @@ enum ModelDownloadService {
         }
 
         let entries = missing.compactMap { ModelManifest.entry(id: $0) }
-        guard entries.count == missing.count else { throw ModelDownloadError.missingManifestEntry }
+        guard entries.count == missing.count else {
+            let error = ModelDownloadError.missingManifestEntry
+            presentInstallFailure(error, parentWindow: parentWindow)
+            throw error
+        }
 
         if !ModelManifest.isDownloadAvailable(
             profile: profile,
@@ -87,11 +91,13 @@ enum ModelDownloadService {
             let names = entries.map { $0.artifacts.first?.fileName ?? $0.displayName }.joined(separator: ", ")
             let mirror = ImageRecognitionPaths.modelsRoot(profile: profile)
                 .appendingPathComponent("_mirror", isDirectory: true).path
-            throw ModelDownloadError.downloadNotConfigured(
+            let error = ModelDownloadError.downloadNotConfigured(
                 installPath: ImageRecognitionPaths.modelsRoot(profile: profile).path,
                 mirrorPath: mirror,
                 modelNames: names
             )
+            presentInstallFailure(error, parentWindow: parentWindow)
+            throw error
         }
 
         let totalBytes = entries.reduce(Int64(0)) { $0 + $1.approximateDownloadBytes }
@@ -147,6 +153,7 @@ enum ModelDownloadService {
             panel.close()
         }
 
+        do {
         for (index, entry) in entries.enumerated() {
             try ActiveModelDownload.shared.throwIfCancelled()
             let baseProgress = Double(index) / Double(entryCount)
@@ -197,6 +204,21 @@ enum ModelDownloadService {
             panel.update(value: Int(doneProgress * Double(progressScale)), label: entry.displayName)
         }
         NotificationCenter.default.post(name: .imageRecognitionModelsInstalled, object: nil)
+        } catch {
+            presentInstallFailure(error, parentWindow: parentWindow)
+            throw error
+        }
+    }
+
+    private static func presentInstallFailure(_ error: Error, parentWindow: NSWindow?) {
+        if case ModelDownloadError.userDeclined = error { return }
+        StyledMessageDialog.present(
+            title: "Download Search Models Failed",
+            message: error.localizedDescription,
+            style: .warning,
+            icon: .warning,
+            parentWindow: parentWindow
+        )
     }
 
     nonisolated private static func mapURLError(_ error: URLError) -> ModelDownloadError {

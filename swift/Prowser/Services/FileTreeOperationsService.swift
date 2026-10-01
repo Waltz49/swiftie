@@ -120,8 +120,9 @@ final class FileTreeOperationsService {
         Task { @MainActor in
             let removed = await appState.thumbnailCache.removeDiskThumbnails(for: images)
             if !images.isEmpty {
-                appState.thumbnailInvalidationGeneration += 1
-                appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(images))
+                DirectoryRefreshService.invalidateThumbnails(appState: appState, paths: images)
+            } else {
+                appState.backgroundImageRecognition.noteThumbnailDiskCacheInvalidated()
             }
             appState.status.show(
                 "Cleared cache for \(removed) thumbnail\(removed == 1 ? "" : "s") in \((directory as NSString).lastPathComponent)"

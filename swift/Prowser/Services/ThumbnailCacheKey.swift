@@ -3,18 +3,18 @@ import Foundation
 
 /// Port of `cache/thumbnail_cache_key.py` — must stay in sync for disk cache reuse.
 enum ThumbnailCacheKey {
+    /// Must match paths from `DirectoryScanner` (`standardizedFileURL`) for cache keys and invalidation.
     static func normalizeImagePath(_ imagePath: String) -> String {
-        if imagePath.hasPrefix("/") { return imagePath }
         if imagePath.hasPrefix("~") {
-            return (imagePath as NSString).expandingTildeInPath
+            return URL(fileURLWithPath: (imagePath as NSString).expandingTildeInPath)
+                .standardizedFileURL.path
         }
         return URL(fileURLWithPath: imagePath).standardizedFileURL.path
     }
 
     static func isPathInAppCacheDirectory(imagePath: String, appCacheDir: String) -> Bool {
-        let absPath = URL(fileURLWithPath: imagePath).standardizedFileURL.path
-        let absCache = URL(fileURLWithPath: appCacheDir).standardizedFileURL.path
-        return absPath == absCache || absPath.hasPrefix(absCache + "/")
+        let absPath = normalizeImagePath(imagePath)
+        return absPath == appCacheDir || absPath.hasPrefix(appCacheDir + "/")
     }
 
     static func buildKeyMaterial(

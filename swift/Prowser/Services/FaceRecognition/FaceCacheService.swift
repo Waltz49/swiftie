@@ -41,7 +41,10 @@ final class FaceCacheService: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: dataPath.path) else { return false }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: imagePath),
               let modified = attrs[.modificationDate] as? Date,
-              let size = attrs[.size] as? Int else { return false }
+              let size = attrs[.size] as? Int else {
+            // Payload on disk is authoritative when source file stats are temporarily unavailable.
+            return true
+        }
         let mtime = modified.timeIntervalSince1970
         if size != entry.size { return false }
         if Self.mtimeMatchesIndex(mtime, entry.mtime) { return true }

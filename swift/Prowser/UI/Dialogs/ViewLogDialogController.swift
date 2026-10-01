@@ -21,9 +21,11 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
     private var fileOffset: UInt64 = 0
     private var pollTimer: Timer?
     private var keyboardMonitor: Any?
+    private var logAppendObserver: NSObjectProtocol?
 
     static func show(appState: AppState) {
         if let existing = activeInstance, existing.panel != nil {
+            existing.resyncFromLogFile(appState: appState)
             existing.raise()
             return
         }
@@ -32,10 +34,59 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         controller.present(appState: appState)
     }
 
+    static func resyncIfOpen(appState: AppState) {
+        guard let existing = activeInstance, existing.panel != nil else { return }
+        existing.resyncFromLogFile(appState: appState)
+    }
+
     private func raise() {
         guard let panel else { return }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func resyncFromLogFile(appState: AppState) {
+        self.appState = appState
+        reloadAllFromDisk(appState: appState)
+    }
+
+    private func reloadAllFromDisk(appState: AppState) {
+        let url = appState.sessionViewLogURL
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        textView?.string = ""
+        fileOffset = 0
+        if !text.isEmpty, let textView {
+            setFullLogText(text, textView: textView)
+        }
+        syncFileOffsetToDiskEnd(appState: appState)
+        refreshLogTextLayout(stickToBottom: true)
+    }
+
+    private func syncFileOffsetToDiskEnd(appState: AppState) {
+        let url = appState.sessionViewLogURL
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
+        fileOffset = size
+    }
+
+    private func installLogAppendObserver() {
+        logAppendObserver = NotificationCenter.default.addObserver(
+            forName: .sessionViewLogDidAppend,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                self?.handleLogAppendNotification(note)
+            }
+        }
+    }
+
+    private func handleLogAppendNotification(_ note: Notification) {
+        guard let appState,
+              let url = note.userInfo?[SessionViewLog.appendNotificationURLKey] as? URL,
+              textView != nil else { return }
+        guard url.standardizedFileURL.path == appState.sessionViewLogURL.standardizedFileURL.path else { return }
+        // Append via file offset only — avoid duplicating lines already shown by the poll timer.
+        appendFromFile(stickToBottom: isAtBottom())
     }
 
     private func present(appState: AppState) {
@@ -90,7 +141,9 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         content.orientation = .vertical
         content.spacing = 10
         content.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        content.autoresizingMask = [.width, .height]
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 520),
@@ -99,6 +152,7 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
             defer: false
         )
         panel.title = "View Log"
+        panel.subtitle = ProwserTempFiles.displayPath(appState.sessionViewLogURL.path)
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
@@ -123,12 +177,20 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         )
 
         fileOffset = 0
-        appendFromFile(stickToBottom: true)
+        installLogAppendObserver()
+        // Load after the panel has a real content rect (stack view needs layout pass).
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.reloadAllFromDisk(appState: appState)
+        }
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.pollLog()
             }
+        }
+        if let pollTimer {
+            RunLoop.main.add(pollTimer, forMode: .common)
         }
 
         panel.makeKeyAndOrderFront(nil)
@@ -142,9 +204,10 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
 
     private func appendFromFile(stickToBottom: Bool) {
         guard let appState, let textView else { return }
-        let chunk = SessionViewLog.readChunk(config: appState.config, offset: &fileOffset)
+        let chunk = SessionViewLog.readChunk(logFileURL: appState.sessionViewLogURL, offset: &fileOffset)
         guard !chunk.isEmpty else { return }
         appendText(chunk, stickToBottom: stickToBottom, textView: textView)
+        refreshLogTextLayout(stickToBottom: stickToBottom)
     }
 
     private static var logTextAttributes: [NSAttributedString.Key: Any] {
@@ -154,14 +217,40 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         ]
     }
 
-    private func appendText(_ text: String, stickToBottom: Bool, textView: NSTextView) {
-        guard !text.isEmpty else { return }
-        let range = NSRange(location: textView.string.count, length: 0)
-        textView.textStorage?.append(NSAttributedString(string: text, attributes: Self.logTextAttributes))
+    private func setFullLogText(_ text: String, textView: NSTextView) {
+        let attrs = Self.logTextAttributes
+        textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attrs))
+        textView.font = Self.logFont
+        textView.textColor = Self.logText
+        textView.backgroundColor = Self.logBackground
+    }
+
+    private func refreshLogTextLayout(stickToBottom: Bool) {
+        guard let textView, let scrollView = textView.enclosingScrollView else { return }
+        guard let container = textView.textContainer, let layoutManager = textView.layoutManager else { return }
+        layoutManager.ensureLayout(for: container)
+        let used = layoutManager.usedRect(for: container)
+        var frame = textView.frame
+        frame.size.width = max(scrollView.contentSize.width, used.width)
+        frame.size.height = max(used.height, scrollView.contentSize.height)
+        textView.frame = frame
         if stickToBottom {
             textView.scrollToEndOfDocument(nil)
+        }
+    }
+
+    private func appendText(_ text: String, stickToBottom: Bool, textView: NSTextView) {
+        guard !text.isEmpty else { return }
+        let attrs = Self.logTextAttributes
+        if let storage = textView.textStorage {
+            storage.append(NSAttributedString(string: text, attributes: attrs))
         } else {
-            textView.setSelectedRange(range)
+            textView.string += text
+            textView.font = Self.logFont
+            textView.textColor = Self.logText
+        }
+        if stickToBottom {
+            textView.scrollToEndOfDocument(nil)
         }
     }
 
@@ -200,14 +289,14 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
 
     @objc private func clearLog() {
         guard let appState else { return }
-        SessionViewLog.clear(config: appState.config)
+        SessionViewLog.clear(logFileURL: appState.sessionViewLogURL)
         textView?.string = ""
         fileOffset = 0
     }
 
     @objc private func saveLog() {
         guard let appState else { return }
-        let source = SessionViewLog.logFileURL(config: appState.config)
+        let source = appState.sessionViewLogURL
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
         let stamp = formatter.string(from: Date())
@@ -242,6 +331,10 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         pollTimer?.invalidate()
         pollTimer = nil
+        if let logAppendObserver {
+            NotificationCenter.default.removeObserver(logAppendObserver)
+            self.logAppendObserver = nil
+        }
         if let monitor = keyboardMonitor {
             NSEvent.removeMonitor(monitor)
             keyboardMonitor = nil

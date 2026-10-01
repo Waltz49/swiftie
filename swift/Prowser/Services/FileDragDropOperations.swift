@@ -80,7 +80,7 @@ enum FileDragDropOperations {
         if dragModifierFlags().contains(.option) {
             return .copy
         }
-        guard let targetDirectory, !filePaths.isEmpty else { return [] }
+        guard targetDirectory != nil, !filePaths.isEmpty else { return [] }
         let offered = sourceMask == [] ? NSDragOperation([.copy, .move]) : sourceMask
         let allowed = offered.intersection([.copy, .move])
         if allowed.contains(.move) {

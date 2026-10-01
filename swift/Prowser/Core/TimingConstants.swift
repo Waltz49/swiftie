@@ -19,8 +19,15 @@ enum TimingConstants {
     static let thumbnailBackgroundLoadChunkDelayMs = 40
     /// Qt default `SH_ToolTip_WakeUpDelay` used by `IconGraphicTooltipFilter`.
     static let graphicButtonTooltipDelayMs = 700
-    /// Idle before background CLIP/CNN indexing (`BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS`).
+    /// Idle before background CLIP/CNN indexing (`BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS` is 5 in Python).
+    /// Temporarily 10s for easier idle-background testing.
     static let backgroundClipIdleSeconds: TimeInterval = 5
-    /// Max images indexed per idle batch in background extraction.
-    static let backgroundClipBatchSize = 24
+    /// Max images per idle batch shortly after the user stops interacting.
+    static let backgroundClipBatchSize = 54
+    /// After this much continuous idle, use `backgroundClipExtendedIdleBatchSize` instead.
+    static let backgroundClipExtendedIdleSeconds: TimeInterval = 30
+    /// Larger idle batch when the user has been inactive for `backgroundClipExtendedIdleSeconds`.
+    static let backgroundClipExtendedIdleBatchSize = 150
+    /// Idle gather scans each listed folder plus immediate subfolders (e.g. `/Volumes/MiscFS` → `bg/`).
+    static let backgroundIdleScanSubfolderDepth = 1
 }

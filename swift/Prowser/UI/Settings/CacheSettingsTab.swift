@@ -8,7 +8,9 @@ struct CacheSettingsTab: View {
     @State private var sourceDirectories = ""
     @State private var backgroundEnabled = false
     @State private var gatherThumbnails = true
+    @State private var extractFaces = false
     @State private var indexingAvailable = false
+    @State private var faceIndexingAvailable = false
 
     var body: some View {
         ScrollView {
@@ -45,27 +47,43 @@ struct CacheSettingsTab: View {
                 SettingsSection(title: "Background Processing") {
                     SettingsPreferencePanel {
                         SettingsPreferenceToggleRow(
-                            title: "Gather image metadata for searching, while idle",
+                            title: "Gather thumbnails while idle",
+                            subtitle: "While idle, cache thumbnails for favorites, recent folders, and the current directory.",
+                            isOn: $gatherThumbnails
+                        )
+                        .help("Cache thumbnails for uncached images in favorites, recent folders, and the current directory.")
+                        .onChange(of: gatherThumbnails) { _, on in
+                            appState.backgroundImageRecognition.setGatherThumbnails(on)
+                        }
+                        SettingsPreferenceToggleRow(
+                            title: "Gather CLIP and CNN image data while idle",
                             subtitle: "While idle, build CLIP and CNN feature caches for favorites, recent folders, and the current directory.",
                             isOn: $backgroundEnabled
                         )
                         .disabled(!indexingAvailable)
                         .help(
                             indexingAvailable
-                                ? "While idle, build CLIP and CNN feature caches for favorites, recent folders, and the current directory."
-                                : "Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection."
+                                ? "Pre-compute CLIP and CNN features for similarity and text search. Runs one idle task at a time with thumbnails and face data."
+                                : "Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle CLIP/CNN collection."
                         )
                         .onChange(of: backgroundEnabled) { _, on in
                             appState.backgroundImageRecognition.setEnabled(on)
                         }
-                        SettingsPreferenceToggleRow(
-                            title: "Gather thumbnails while idle",
-                            subtitle: "While idle, cache thumbnails for favorites, recent folders, and the current directory.",
-                            isOn: $gatherThumbnails
-                        )
-                        .help("Gather thumbnails while idle; can be used with or without idle search-data collection.")
-                        .onChange(of: gatherThumbnails) { _, on in
-                            appState.backgroundImageRecognition.setGatherThumbnails(on)
+                        if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                            SettingsPreferenceToggleRow(
+                                title: "Gather face data while idle",
+                                subtitle: "While idle, extract and cache face encodings for favorites, recent folders, and the current directory.",
+                                isOn: $extractFaces
+                            )
+                            .disabled(!faceIndexingAvailable)
+                            .help(
+                                faceIndexingAvailable
+                                    ? "Pre-compute face encodings for known-person search. Runs one idle task at a time with thumbnails and CLIP/CNN."
+                                    : "Install face recognition models (Settings → Face Recognition) to enable idle face collection."
+                            )
+                            .onChange(of: extractFaces) { _, on in
+                                appState.backgroundImageRecognition.setExtractFaces(on)
+                            }
                         }
                     }
                     Text(footerNote)
@@ -108,18 +126,19 @@ struct CacheSettingsTab: View {
         reloadIndexingAvailability()
         backgroundEnabled = appState.config.bool(forKey: "background_clip_enabled", default: false)
         gatherThumbnails = appState.config.bool(forKey: "background_clip_gather_thumbnails", default: true)
+        extractFaces = appState.config.bool(forKey: "background_clip_extract_faces", default: false)
     }
 
     private func reloadIndexingAvailability() {
         indexingAvailable = BackgroundImageRecognitionController.indexingAvailable(appState: appState)
+        faceIndexingAvailable = FaceRecognitionCapabilities.faceFeaturesAvailable(
+            profile: appState.config.profilePaths
+        )
         appState.backgroundImageRecognition.applyEnabledFromSettings()
     }
 
     private var footerNote: String {
-        if indexingAvailable {
-            return "Runs while idle; may use battery. Does not extract faces."
-        }
-        return "Install search models (⌘K / ⌘F or Settings → Models for Search) to enable idle search-data collection."
+        "Enabled idle tasks run one at a time (thumbnails, CLIP, CNN, or faces). May use battery."
     }
 
     private var totalsLabel: String {

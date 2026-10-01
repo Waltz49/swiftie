@@ -56,6 +56,8 @@ enum ClipTextSearchService {
             )
         } catch ModelDownloadError.userDeclined {
             return
+        } catch is ModelDownloadError {
+            return
         } catch {
             StyledMessageDialog.showWarning(title: "Search Failed", message: error.localizedDescription)
             return

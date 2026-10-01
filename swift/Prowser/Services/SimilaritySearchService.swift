@@ -208,6 +208,8 @@ enum SimilaritySearchService {
             closeProgressPanel()
         } catch ModelDownloadError.userDeclined {
             closeProgressPanel()
+        } catch is ModelDownloadError {
+            closeProgressPanel()
         } catch {
             closeProgressPanel()
             StyledMessageDialog.showWarning(title: "Search Failed", message: error.localizedDescription)

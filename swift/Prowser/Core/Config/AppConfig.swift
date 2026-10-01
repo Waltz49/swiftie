@@ -13,12 +13,26 @@ final class AppConfig {
 
     /// Session-only debug flag. Off at launch unless `--debug`; never written to settings.json.
     private var sessionDebugEnabled = false
+    /// Set once at launch from ``AppState`` so Settings/debug writes match the View log file.
+    private var boundSessionViewLogURL: URL?
 
     /// True while the settings window is open (edits stay in memory until OK).
     var isSettingsSessionActive: Bool { settingsDraft != nil }
 
     func applyLaunchDebugFlag(_ enabled: Bool) {
         sessionDebugEnabled = enabled
+    }
+
+    func bindSessionViewLogURL(_ url: URL) {
+        boundSessionViewLogURL = url
+    }
+
+    private func appendDebugModeEnabledSessionLine() {
+        let url = sessionViewLogFileURL
+        SessionViewLog.appendLine(
+            "[\(SessionViewLog.debugTimestamp())] Debug mode enabled\n",
+            logFileURL: url
+        )
     }
 
     func uiThemeAtSettingsOpen() -> String? {
@@ -255,7 +269,11 @@ final class AppConfig {
 
     func updateSetting(_ key: String, value: Any?) {
         if key == "debug_mode" {
+            let wasEnabled = sessionDebugEnabled
             sessionDebugEnabled = value as? Bool ?? false
+            if sessionDebugEnabled, !wasEnabled {
+                appendDebugModeEnabledSessionLine()
+            }
             return
         }
         mutateSettings { storage in
@@ -269,7 +287,11 @@ final class AppConfig {
 
     func setValue(_ value: Any, forKey key: String) {
         if key == "debug_mode" {
+            let wasEnabled = sessionDebugEnabled
             sessionDebugEnabled = value as? Bool ?? false
+            if sessionDebugEnabled, !wasEnabled {
+                appendDebugModeEnabledSessionLine()
+            }
             return
         }
         mutateSettings { storage in
@@ -329,8 +351,14 @@ final class AppConfig {
     func debugLog(_ message: String) {
         guard bool(forKey: "debug_mode") else { return }
         let line = "\(SessionViewLog.debugTimestamp()) \(message)"
-        SessionViewLog.appendLine(line, config: self)
+        SessionViewLog.appendLine(line, logFileURL: sessionViewLogFileURL)
         NSLog("%@", message)
+    }
+
+    /// Path for Tools → Debug → View log (⌃-L).
+    var sessionViewLogFileURL: URL {
+        if let boundSessionViewLogURL { return boundSessionViewLogURL }
+        return SessionViewLog.logFileURL(config: self)
     }
 
     func int(forKey key: String, default defaultValue: Int = 0) -> Int {

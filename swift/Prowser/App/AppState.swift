@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppState {
     let config: AppConfig
+    /// Fixed for this process; View log and session debug lines always use this path.
+    let sessionViewLogURL: URL
     let eventBus: AppEventBus
     let modelEventBridge: ModelEventBridge
     let fileData: FileDataModel
@@ -203,7 +205,15 @@ final class AppState {
 
         config.loadSettings()
         config.applyLaunchDebugFlag(launchOptions.debug)
-        SessionViewLog.install(config: config)
+        sessionViewLogURL = SessionViewLog.logFileURL(config: config)
+        config.bindSessionViewLogURL(sessionViewLogURL)
+        SessionViewLog.install(logFileURL: sessionViewLogURL)
+        if launchOptions.debug {
+            SessionViewLog.appendLine(
+                "[\(SessionViewLog.debugTimestamp())] Debug mode enabled (--debug)\n",
+                logFileURL: sessionViewLogURL
+            )
+        }
         migrateSwiftSidebarDefaults(config: config)
         discardPersistedLastDropLocation(config: config)
         leftSidebarSplit = SidebarPaneSplitModel(side: .left, config: config)
@@ -583,6 +593,7 @@ final class AppState {
     /// After Settings clears or scrubs thumbnail disk cache (Python `cache_cleared` / `clear_cache`).
     func refreshThumbnailsAfterDiskCacheMutation() {
         let paths = fileData.displayedImages
+        backgroundImageRecognition.noteIdleScanScopeChanged()
         Task {
             await thumbnailCache.resetAfterDiskCacheMutation()
             await MainActor.run {
@@ -751,8 +762,21 @@ final class AppState {
     func toggleDebugMode() {
         let enabled = !config.bool(forKey: "debug_mode")
         config.applyLaunchDebugFlag(enabled)
+        if enabled {
+            SessionViewLog.appendLine(
+                "[\(SessionViewLog.debugTimestamp())] Debug mode enabled\n",
+                logFileURL: sessionViewLogURL
+            )
+        }
+        ViewLogDialogController.resyncIfOpen(appState: self)
         KeyboardInputTracer.installIfNeeded(config: config)
         status.show(enabled ? "Debug mode enabled" : "Debug mode disabled")
+        if enabled {
+            status.show(
+                "Session log: \(ProwserTempFiles.displayPath(sessionViewLogURL.path))",
+                duration: 4
+            )
+        }
     }
 
     func toggleBrowseZoomSharpen() {
@@ -817,6 +841,10 @@ final class AppState {
 
     func openLiveLog() {
         ViewLogDialogController.show(appState: self)
+        status.show(
+            "Session log file: \(ProwserTempFiles.displayPath(sessionViewLogURL.path))",
+            duration: 5
+        )
     }
 
     func removeFacialRecognitionModels() {

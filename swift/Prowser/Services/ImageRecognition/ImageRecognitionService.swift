@@ -149,33 +149,31 @@ final class ImageRecognitionService {
         return result
     }
 
-    func pathsNeedingCNN(paths: [String], config: AppConfig) -> [String] {
-        guard let cacheManager else { return paths }
-        var need: [String] = []
-        for path in paths {
-            guard let attrs = fileAttributes(path: path) else { continue }
-            if cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size) == nil {
-                need.append(path)
-            }
-        }
-        return need
+    func pathNeedsCNN(path: String, config: AppConfig) -> Bool {
+        guard let cacheManager else { return true }
+        guard let attrs = fileAttributes(path: path) else { return false }
+        return cacheManager.getCNN(path: path, mtime: attrs.mtime, size: attrs.size) == nil
     }
 
-    func pathsNeedingCLIP(paths: [String], config: AppConfig) -> [String] {
-        guard let cacheManager else { return paths }
+    func pathNeedsCLIP(path: String, config: AppConfig) -> Bool {
+        guard let cacheManager else { return true }
         let expectedDim = ModelManifest.clipFeatureDimension(
             for: config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
         )
-        var need: [String] = []
-        for path in paths {
-            guard let attrs = fileAttributes(path: path) else { continue }
-            if let cached = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size),
-               cached.count == expectedDim {
-                continue
-            }
-            need.append(path)
+        guard let attrs = fileAttributes(path: path) else { return false }
+        if let cached = cacheManager.getCLIP(path: path, mtime: attrs.mtime, size: attrs.size),
+           cached.count == expectedDim {
+            return false
         }
-        return need
+        return true
+    }
+
+    func pathsNeedingCNN(paths: [String], config: AppConfig) -> [String] {
+        paths.filter { pathNeedsCNN(path: $0, config: config) }
+    }
+
+    func pathsNeedingCLIP(paths: [String], config: AppConfig) -> [String] {
+        paths.filter { pathNeedsCLIP(path: $0, config: config) }
     }
 
     func cnnFeatures(

@@ -152,6 +152,7 @@ enum DirectoryRefreshService {
                 } else if let first = newList.first {
                     appState.fileData.setCurrentImagePath(first)
                 }
+                noteIdleBackgroundScanScopeChanged(appState: appState)
             } else {
                 removeDisplayedFiles(appState: appState, removed: removed, displayed: displayed)
             }
@@ -265,11 +266,17 @@ enum DirectoryRefreshService {
         return original.first { !removed.contains($0) }
     }
 
+    /// Invalidate idle background scan state when displayed paths or file content change.
+    private static func noteIdleBackgroundScanScopeChanged(appState: AppState) {
+        appState.backgroundImageRecognition.noteIdleScanScopeChanged()
+    }
+
     static func invalidateThumbnails(appState: AppState, paths: [String]) {
         guard !paths.isEmpty else { return }
         for path in paths {
             appState.metadataCache.invalidate(path: path)
         }
+        appState.backgroundImageRecognition.noteThumbnailDiskCacheInvalidated()
         let cache = appState.thumbnailCache
         Task {
             for path in paths {

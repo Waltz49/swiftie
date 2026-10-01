@@ -12,6 +12,7 @@ actor ThumbnailCache {
 
     private let thumbnailDirectory: URL
     private let appCacheDirectory: URL
+    private let appCacheDirectoryStandardizedPath: String
     private var ignoreExifRotation: Bool
     private var memoryCache: [String: MemoryEntry] = [:]
     private var memoryKeysByPath: [String: Set<String>] = [:]
@@ -41,6 +42,7 @@ actor ThumbnailCache {
     init(paths: ProfilePaths, ignoreExifRotation: Bool) {
         thumbnailDirectory = paths.thumbnailCacheDirectory
         appCacheDirectory = paths.imageCacheDirectory
+        appCacheDirectoryStandardizedPath = ThumbnailCacheKey.normalizeImagePath(appCacheDirectory.path)
         self.ignoreExifRotation = ignoreExifRotation
     }
 
@@ -100,7 +102,7 @@ actor ThumbnailCache {
     func cacheKey(for imagePath: String) -> String {
         ThumbnailCacheKey.computeCacheKey(
             imagePath: imagePath,
-            appCacheDir: appCacheDirectory.path,
+            appCacheDir: appCacheDirectoryStandardizedPath,
             ignoreExifRotation: ignoreExifRotation,
             mtime: resolvedMtime(for: imagePath)
         )
@@ -143,6 +145,66 @@ actor ThumbnailCache {
         let originalHeight: Int
     }
 
+    /// Python `is_thumbnail_cached_on_disk` — exact size or any larger variant on disk for this cache key.
+    func isThumbnailSatisfiedOnDisk(for imagePath: String, size: Int) -> Bool {
+        isThumbnailSatisfiedOnDisk(for: imagePath, size: size, diskIndex: nil)
+    }
+
+    func isThumbnailSatisfiedOnDisk(
+        for imagePath: String,
+        size: Int,
+        diskIndex: DiskThumbnailIndex?
+    ) -> Bool {
+        let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
+        if let sizes = diskSizesByPath[normalized], sizes.contains(where: { $0 >= size }) {
+            let key = cacheKey(for: imagePath)
+            for cachedSize in sizes where cachedSize >= size {
+                let url = thumbnailDirectory.appendingPathComponent(
+                    ThumbnailCacheKey.diskFilename(cacheKey: key, size: cachedSize)
+                )
+                if FileManager.default.fileExists(atPath: url.path) {
+                    return true
+                }
+            }
+            diskSizesByPath.removeValue(forKey: normalized)
+        }
+        let key = cacheKey(for: imagePath)
+        if let diskIndex, let sizes = diskIndex.sizesByKey[key], sizes.contains(where: { $0 >= size }) {
+            for cachedSize in sizes where cachedSize >= size {
+                registerDiskSize(imagePath: imagePath, size: cachedSize)
+            }
+            return true
+        }
+        let exactURL = thumbnailDirectory.appendingPathComponent(
+            ThumbnailCacheKey.diskFilename(cacheKey: key, size: size)
+        )
+        if FileManager.default.fileExists(atPath: exactURL.path) {
+            registerDiskSize(imagePath: imagePath, size: size)
+            return true
+        }
+        if diskIndex == nil, let sizes = diskThumbnailIndex().sizesByKey[key], sizes.contains(where: { $0 >= size }) {
+            for cachedSize in sizes where cachedSize >= size {
+                registerDiskSize(imagePath: imagePath, size: cachedSize)
+            }
+            return true
+        }
+        return false
+    }
+
+    /// Idle background gather: persist at `size` when missing; returns true only when disk cache newly satisfied.
+    func warmIdleBackgroundThumbnail(for imagePath: String, size: Int) async -> Bool {
+        if isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
+            return false
+        }
+        _ = await generateThumbnailResult(
+            for: imagePath,
+            size: size,
+            priority: .default,
+            queueOrder: ThumbnailQueueOrdering.background
+        )
+        return isThumbnailSatisfiedOnDisk(for: imagePath, size: size)
+    }
+
     /// Returns `CGImage` so callers on `@MainActor` can build `NSImage` without crossing a non-Sendable boundary.
     func generateThumbnail(
         for imagePath: String,
@@ -163,7 +225,7 @@ actor ThumbnailCache {
         if let cached = cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size) {
             return cached
         }
-        if let scaled = scaledDownFromLarger(imagePath: imagePath, size: size) {
+        if let scaled = await scaledDownFromLarger(imagePath: imagePath, size: size) {
             return scaled
         }
 
@@ -209,7 +271,7 @@ actor ThumbnailCache {
         }
 
         if enqueuedGeneration != decodeQueueGeneration {
-            if let generated, priority.rawValue >= ThumbnailLoadPriority.nearVisible.rawValue {
+            if let generated {
                 return await storeGeneratedThumbnail(generated, imagePath: imagePath, size: size, memoryKey: memoryKey)
             }
             return nil
@@ -326,7 +388,7 @@ actor ThumbnailCache {
         return image
     }
 
-    private func scaledDownFromLarger(imagePath: String, size: Int) -> GeneratedThumbnail? {
+    private func scaledDownFromLarger(imagePath: String, size: Int) async -> GeneratedThumbnail? {
         let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
         if let keys = memoryKeysByPath[normalized] {
             var bestKey: String?
@@ -343,6 +405,9 @@ actor ThumbnailCache {
                let cgImage = scaled.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                 let memoryKey = memoryKey(for: imagePath, size: size)
                 storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
+                if !isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
+                    try? await storeThumbnailOffDiskIO(scaled, for: imagePath, size: size, memoryKey: memoryKey)
+                }
                 return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
             }
         }
@@ -384,9 +449,8 @@ actor ThumbnailCache {
         }
         let memoryKey = memoryKey(for: imagePath, size: size)
         storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
-        if bestDiskSize != size {
-            let persistImage = scaled
-            Task { try? await self.storeThumbnailOffDiskIO(persistImage, for: imagePath, size: size, memoryKey: memoryKey) }
+        if bestDiskSize != size || !isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
+            try? await storeThumbnailOffDiskIO(scaled, for: imagePath, size: size, memoryKey: memoryKey)
         }
         return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
     }
@@ -429,7 +493,10 @@ actor ThumbnailCache {
 
     private func resolvedMtime(for imagePath: String) -> Int? {
         let pathStr = ThumbnailCacheKey.normalizeImagePath(imagePath)
-        if ThumbnailCacheKey.isPathInAppCacheDirectory(imagePath: pathStr, appCacheDir: appCacheDirectory.path) {
+        if ThumbnailCacheKey.isPathInAppCacheDirectory(
+            imagePath: pathStr,
+            appCacheDir: appCacheDirectoryStandardizedPath
+        ) {
             return nil
         }
         let now = Date()
