@@ -28,7 +28,8 @@ enum DirectoryScanner {
             if !matchesGlob(fileURL.lastPathComponent, pattern: filterPattern) { continue }
             results.append(fileURL.standardizedFileURL.path)
         }
-        return results.sorted()
+        // Callers apply display sort (`DirectoryLoadBackgroundWork`, `DisplayOrderService`, etc.).
+        return results
     }
 
     static func scanDirectoryRecursive(

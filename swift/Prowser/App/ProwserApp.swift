@@ -192,7 +192,8 @@ final class DirectoryLoadCoordinator {
             }.value
 
             guard !Task.isCancelled else { return }
-            self?.finishDirectoryLoad(
+            guard let self else { return }
+            self.finishDirectoryLoad(
                 generation: generation,
                 path: normalized,
                 images: images,
@@ -248,13 +249,19 @@ final class DirectoryLoadCoordinator {
         }
         appState.noteInitialThumbnailDirectoryLoadCompleted()
 
-        appState.config.updateSetting("last_directory", value: path)
-        appState.config.recordRecentDirectory(path)
         appState.eventBus.emit(.directoryLoaded, payload: .string(path))
-        appState.watchCurrentDirectory()
-        appState.persistRestoreState()
-        appState.scheduleDeferredMenuRefresh()
-        onComplete?()
+
+        let deferredPath = path
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, generation == self.activeLoadGeneration else { return }
+            self.appState.config.updateSetting("last_directory", value: deferredPath)
+            self.appState.config.recordRecentDirectory(deferredPath)
+            self.appState.watchCurrentDirectory()
+            self.appState.persistRestoreState()
+            self.appState.scheduleDeferredMenuRefresh()
+            onComplete?()
+        }
     }
 
     func goBack() {

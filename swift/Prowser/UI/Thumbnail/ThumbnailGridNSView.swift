@@ -592,6 +592,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func invalidateThumbnailLoadingSession() {
         backgroundLoadSession += 1
         backgroundLoadingSuspended = false
+        loadingPaths.removeAll()
         cancelPendingBackgroundBatches()
         visibleLoadDebounceWorkItem?.cancel()
         visibleLoadDebounceWorkItem = nil
@@ -602,6 +603,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func suspendBackgroundThumbnailLoading() {
         backgroundLoadingSuspended = true
         backgroundLoadSession += 1
+        loadingPaths.removeAll()
         cancelPendingBackgroundBatches()
         if let appState {
             let cache = appState.thumbnailCache
@@ -1475,7 +1477,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let visibleSet = Set(visibleIndices)
         let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
         let excluded = visibleSet.union(nearVisible)
-        scheduleBackgroundThumbnailLoading(excluded: excluded, session: backgroundLoadSession)
+        scheduleBackgroundThumbnailLoading(excluded: excluded)
     }
 
     /// Pixel size passed to ``ThumbnailCache`` (Python ``current_thumbnail_size`` / disk cache key suffix).
@@ -1655,9 +1657,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
         if isBackground, backgroundLoadingSuspended { return }
         if thumbnails[path] != nil { return }
-        if isBackground {
-            if loadingPaths.contains(path) { return }
-        }
+        if loadingPaths.contains(path) { return }
         loadingPaths.insert(path)
         let pixelSize = thumbnailGenerationPixelSize()
         gridDelegate?.thumbnailGridNeedsThumbnail(
@@ -1670,7 +1670,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             Task { @MainActor in
                 guard let self else { return }
                 self.loadingPaths.remove(path)
-                guard let image else { return }
+                guard let image else {
+                    if priority == .visible || priority == .nearVisible,
+                       self.thumbnailLoadingActive,
+                       self.appState?.fileData.currentViewMode == .thumbnail,
+                       self.imagePaths.contains(path) {
+                        self.scheduleLoadVisibleThumbnails(debounced: true)
+                    }
+                    return
+                }
                 self.thumbnails[path] = image
                 if let paintIndex = self.imagePaths.firstIndex(of: path) {
                     self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
@@ -1681,7 +1689,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
     }
 
-    private func scheduleBackgroundThumbnailLoading(excluded: Set<Int>, session: UInt64) {
+    private func scheduleBackgroundThumbnailLoading(excluded: Set<Int>) {
         guard thumbnailLoadingActive else { return }
         guard !backgroundLoadingSuspended else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
@@ -1694,10 +1702,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let work = DispatchWorkItem { [weak self] in
             guard let self, let appState = self.appState else { return }
             Task { @MainActor in
-                await appState.thumbnailCache.noteBackgroundLoadSession(session)
+                let claimedSession = self.backgroundLoadSession
+                await appState.thumbnailCache.noteBackgroundLoadSession(claimedSession)
                 self.queueBackgroundThumbnailBatch(
                     indices: backgroundIndices,
-                    session: session,
+                    claimedSession: claimedSession,
                     submitOffset: 0
                 )
             }
@@ -1709,8 +1718,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
-    private func queueBackgroundThumbnailBatch(indices: [Int], session: UInt64, submitOffset: Int = 0) {
-        guard session == backgroundLoadSession else { return }
+    private func queueBackgroundThumbnailBatch(
+        indices: [Int],
+        claimedSession: UInt64,
+        submitOffset: Int = 0
+    ) {
+        guard claimedSession == backgroundLoadSession else {
+            if thumbnailLoadingActive, !backgroundLoadingSuspended {
+                startBackgroundThumbnailLoadingIfNeeded()
+            }
+            return
+        }
         guard thumbnailLoadingActive else { return }
         guard !backgroundLoadingSuspended else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
@@ -1721,7 +1739,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             let remaining = Array(indices.dropFirst(batchSize))
             guard !remaining.isEmpty, !backgroundLoadingSuspended else { return }
             let followUp = DispatchWorkItem { [weak self] in
-                self?.queueBackgroundThumbnailBatch(indices: remaining, session: session)
+                self?.queueBackgroundThumbnailBatch(
+                    indices: remaining,
+                    claimedSession: claimedSession,
+                    submitOffset: 0
+                )
             }
             backgroundLoadFollowUpWorkItem = followUp
             DispatchQueue.main.asyncAfter(
@@ -1735,13 +1757,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         requestThumbnailLoad(
             for: imagePaths[index],
             priority: .background,
-            backgroundLoadSession: session,
+            backgroundLoadSession: claimedSession,
             isBackground: true
         )
 
         let nextOffset = submitOffset + 1
         let stagger = DispatchWorkItem { [weak self] in
-            self?.queueBackgroundThumbnailBatch(indices: indices, session: session, submitOffset: nextOffset)
+            self?.queueBackgroundThumbnailBatch(
+                indices: indices,
+                claimedSession: claimedSession,
+                submitOffset: nextOffset
+            )
         }
         backgroundLoadWorkItem = stagger
         DispatchQueue.main.asyncAfter(
@@ -1785,8 +1811,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let visiblePaths = orderedVisible.map { imagePaths[$0] }
         let nearPaths = orderedNear.map { imagePaths[$0] }
         let scheduleBackgroundAfterLoad = scheduleBackground
+        let excluded = visibleSet.union(nearVisible)
         visibleThumbnailLoadGeneration += 1
         let loadGeneration = visibleThumbnailLoadGeneration
+
+        // Reprioritize before starting loads. Starting loads first (then reprioritizing) cancels
+        // in-flight decodes without retry — common after disk cache clear / tree "Clear cache".
         Task { @MainActor in
             guard loadGeneration == self.visibleThumbnailLoadGeneration else { return }
             await appState.thumbnailCache.reprioritizeForViewport(
@@ -1794,6 +1824,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 orderedNearPaths: nearPaths
             )
             guard loadGeneration == self.visibleThumbnailLoadGeneration else { return }
+
             for (order, path) in visiblePaths.enumerated() {
                 self.requestThumbnailLoad(
                     for: path,
@@ -1808,9 +1839,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     queueOrder: order
                 )
             }
-            guard scheduleBackgroundAfterLoad, !self.backgroundLoadingSuspended else { return }
-            let excluded = visibleSet.union(nearVisible)
-            self.scheduleBackgroundThumbnailLoading(excluded: excluded, session: self.backgroundLoadSession)
+
+            if scheduleBackgroundAfterLoad, !self.backgroundLoadingSuspended {
+                self.scheduleBackgroundThumbnailLoading(excluded: excluded)
+            }
         }
     }
 
