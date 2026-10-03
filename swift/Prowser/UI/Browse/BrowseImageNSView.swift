@@ -54,6 +54,8 @@ final class BrowseImageNSView: NSView {
     }
 
     private var pendingPreservedView: PreservedViewState?
+    private var cursorHideTrackingArea: NSTrackingArea?
+    private var isRefreshingCursorHideTracking = false
 
     override var isFlipped: Bool { true }
 
@@ -70,6 +72,57 @@ final class BrowseImageNSView: NSView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        appState?.syncBrowseCursorAutoHide()
+        updateTrackingAreas()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        let rect = bounds
+        if let cursorHideTrackingArea, cursorHideTrackingArea.rect == rect {
+            return
+        }
+        isRefreshingCursorHideTracking = true
+        if let cursorHideTrackingArea {
+            removeTrackingArea(cursorHideTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: rect,
+            options: [
+                .mouseEnteredAndExited,
+                .mouseMoved,
+                .activeInKeyWindow,
+                .inVisibleRect,
+                .assumeInside,
+            ],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        cursorHideTrackingArea = area
+        isRefreshingCursorHideTracking = false
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        appState?.browseCursorAutoHide.noteEnteredHideZone()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if isRefreshingCursorHideTracking { return }
+        appState?.browseCursorAutoHide.noteExitedHideZone()
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        if appState?.browseCursorAutoHide.pointerHiddenOnCanvas == true {
+            addCursorRect(bounds, cursor: BrowseCursorAutoHideController.canvasBlankCursor)
+        }
     }
 
     func resetView() {
@@ -148,6 +201,7 @@ final class BrowseImageNSView: NSView {
             applyCurrentDisplayMode()
         }
         needsDisplay = true
+        appState?.browseCursorAutoHide.reassertAfterCanvasContentChange()
     }
 
     private func capturePreserveSnapshot(forNewPath path: String?) {
@@ -531,6 +585,7 @@ final class BrowseImageNSView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        appState?.browseCursorAutoHide.noteMouseActivity()
         if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
             let delta = event.deltaY
             let factor = delta > 0 ? scaleFactor * 1.1 : scaleFactor / 1.1
@@ -546,6 +601,7 @@ final class BrowseImageNSView: NSView {
     }
 
     override func magnify(with event: NSEvent) {
+        appState?.browseCursorAutoHide.noteMouseActivity()
         if event.phase == .began {
             magnifyAnchor = zoomAnchorPoint(for: event)
         }
@@ -557,6 +613,7 @@ final class BrowseImageNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        appState?.browseCursorAutoHide.noteMouseActivity()
         guard sourceImage != nil else { return }
         dragStart = convert(event.locationInWindow, from: nil)
         scrollAtDragStart = scrollOffset
@@ -567,6 +624,7 @@ final class BrowseImageNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        appState?.browseCursorAutoHide.noteMouseActivity()
         guard let dragStart else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard canPan() else { return }

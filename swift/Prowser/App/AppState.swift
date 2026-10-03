@@ -30,6 +30,7 @@ final class AppState {
     let copyFeedback = CopyFeedbackService()
     let keyboardHandler = KeyboardHandlerController()
     private let statusBarPeekMonitor = StatusBarPeekMonitor()
+    let browseCursorAutoHide = BrowseCursorAutoHideController()
     private let aboutDialog = AboutDialogController()
     private let settingsDialog = SettingsDialogController()
     private let auxiliaryDialogs = AuxiliaryDialogController()
@@ -336,6 +337,7 @@ final class AppState {
             self.persistRestoreState()
             self.menuRefresh.refreshAll()
             self.onViewModeChangedForSidebarLayout()
+            self.syncBrowseCursorAutoHide()
         }
 
         startNamedPipeListener()

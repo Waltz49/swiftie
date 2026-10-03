@@ -3,6 +3,21 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension AppState {
+    func syncBrowseCursorAutoHide() {
+        let mode = fileData.currentViewMode
+        guard BrowseCursorAutoHideController.activeViewModes.contains(mode) else {
+            browseCursorAutoHide.stop()
+            return
+        }
+        guard mode == .browse, let host = browseImageHost else {
+            browseCursorAutoHide.stop()
+            return
+        }
+        browseCursorAutoHide.sync(hideZone: host) { [weak self] in
+            self?.fileData.currentViewMode == .browse
+        }
+    }
+
     func updateStatusBarPeek(nearBottom: Bool) {
         guard !fileData.currentViewMode.hidesSlideshowChrome else {
             if statusBarPeekActive {

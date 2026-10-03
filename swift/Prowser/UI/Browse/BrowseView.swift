@@ -22,11 +22,16 @@ struct BrowseView: NSViewRepresentable {
         }
         context.coordinator.view = view
         appState.browseImageHost = view
+        appState.syncBrowseCursorAutoHide()
         context.coordinator.startObserving()
         return view
     }
 
     func updateNSView(_ nsView: BrowseImageNSView, context: Context) {
+        if appState.browseImageHost !== nsView {
+            appState.browseImageHost = nsView
+            appState.syncBrowseCursorAutoHide()
+        }
         nsView.applyTheme(appState.theme.colors)
         nsView.setImage(
             path: appState.fileData.currentImagePath,

@@ -30,4 +30,6 @@ enum TimingConstants {
     static let backgroundClipExtendedIdleBatchSize = 150
     /// Idle gather scans each listed folder plus immediate subfolders (e.g. `/Volumes/MiscFS` → `bg/`).
     static let backgroundIdleScanSubfolderDepth = 1
+    /// Browse/slideshow shell: hide pointer after idle (Python `CursorManager` default 2000 ms).
+    static let browseCursorHideDelaySeconds: TimeInterval = 2.0
 }
