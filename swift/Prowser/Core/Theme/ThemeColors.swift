@@ -166,6 +166,7 @@ struct ThemeColors: Equatable {
         let tooltipFallback = themeID == "light"
             ? (bg: "#fffff0", fg: "#1a1a1a", border: "#a0a0a0")
             : (bg: "#000000", fg: "#ddeeff", border: "#b2b2b8")
+        let thumbnailGridBackground = resolvedColor("thumbnail_grid_background_color_hex", "#000000")
 
         return ThemeColors(
             themeID: themeID,
@@ -195,10 +196,10 @@ struct ThemeColors: Equatable {
             buttonBgHover: resolvedColor("button_bg_hover_hex", "#263447"),
             buttonTextHover: resolvedColor("button_text_hover_hex", "#bbecff"),
             buttonBorderHover: resolvedColor("button_border_hover_hex", "#41a6c6"),
-            thumbnailGridBackground: resolvedColor("thumbnail_grid_background_color_hex", "#000000"),
+            thumbnailGridBackground: thumbnailGridBackground,
             thumbnailText: resolvedColor("thumbnail_text_color_hex", "#b6b6b6"),
             defaultImageBorder: resolvedColor("default_image_color_hex", "#606060"),
-            defaultImageBackground: resolvedColor("default_image_background_color_hex", "#000000"),
+            defaultImageBackground: thumbnailGridBackground,
             defaultImageBorderWidth: intValue("default_image_border_width_index", fallback: 1, min: 0, max: 10),
             currentImageBorder: resolvedColor("current_image_border_color_hex", "#87ceeb"),
             currentImageBackground: resolvedColor("current_image_background_color_hex", "#0080b2"),

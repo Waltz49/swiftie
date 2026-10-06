@@ -183,7 +183,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [x] Undo delete (⌘Z — `TrashRestore`)
 - [~] Undo move (⌘Z after move — `FileUndoStack`)
 - [~] Select All (⌘A) / Deselect All
-- [~] Copy Path (⌘⇧C in Swift; Python ⌘C copies path — verify shortcut parity)
+- [x] Copy Path (⌘C) / Copy Image (⌃C)
 - [~] Copy Image (⌘C in Swift; Python ⌃C copies image)
 - [x] Copy user comment
 - [~] Lock / Unlock files (⌘L / ⇧⌘L — in Edit menu; Python also in Tools)

@@ -85,7 +85,7 @@ final class ListPromptTooltip {
         guard !text.isEmpty else { return }
         guard hostEffectiveVisible(anchorView), hostUnderCursor(anchorView) else { return }
         label.stringValue = text
-        label.textColor = NSColor(colors.text)
+        label.textColor = NSColor(colors.dialogText)
         if let chrome = panel.contentView {
             chrome.wantsLayer = true
             chrome.layer?.backgroundColor = NSColor(colors.dialogBackground).cgColor

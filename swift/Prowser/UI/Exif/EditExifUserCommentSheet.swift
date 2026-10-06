@@ -395,7 +395,9 @@ struct EditExifUserCommentSheet: View {
 
     private func resetToOriginal() {
         cancelCaptionIfNeeded()
-        appState.editUserCommentText = appState.editUserCommentOriginalText
+        appState.editUserCommentText = ImageGenExifCommentFormatting.formatUserCommentTextForDisplay(
+            appState.editUserCommentOriginalText
+        )
     }
 
     // MARK: - AI Caption

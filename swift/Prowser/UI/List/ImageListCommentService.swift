@@ -28,7 +28,7 @@ struct ImageListCommentInfo: Equatable, Sendable {
         case .exifComment:
             return fullComment
         case .prowserFormatted:
-            return ExifService.truncateUserCommentBeforePrompt(fullComment)
+            return ImageGenExifCommentFormatting.extractedPromptText(from: fullComment)
         }
     }
 }

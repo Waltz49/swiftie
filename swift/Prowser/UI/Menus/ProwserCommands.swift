@@ -213,23 +213,23 @@ struct ProwserCommands: Commands {
                 .keyboardShortcut("i", modifiers: .command)
 
                 Menu("Sort By") {
-                    SortMenuButton(appState: appState, title: "Date (Newest First)", mode: .date, reversed: false, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "Date (Oldest First)", mode: .date, reversed: true, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "EXIF Date (Newest First)", mode: .exifDate, reversed: false, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "EXIF Date (Oldest First)", mode: .exifDate, reversed: true, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "EXIF Year (Newest First)", mode: .exifYear, reversed: false, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "EXIF Year (Oldest First)", mode: .exifYear, reversed: true, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "Name (A-Z)", mode: .name, reversed: false, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "Name (Z-A)", mode: .name, reversed: true, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "Size (Largest First)", mode: .size, reversed: false, apply: applySortMode)
-                    SortMenuButton(appState: appState, title: "Size (Smallest First)", mode: .size, reversed: true, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Date (Newest First)", mode: .date, reversed: false, apply: applySortMode, shortcutKey: "d")
+                    SortMenuButton(appState: appState, title: "Date (Oldest First)", mode: .date, reversed: true, apply: applySortMode, shortcutKey: "d", shortcutModifiers: .shift)
+                    SortMenuButton(appState: appState, title: "EXIF Date (Newest First)", mode: .exifDate, reversed: false, apply: applySortMode, shortcutKey: "x")
+                    SortMenuButton(appState: appState, title: "EXIF Date (Oldest First)", mode: .exifDate, reversed: true, apply: applySortMode, shortcutKey: "x", shortcutModifiers: .shift)
+                    SortMenuButton(appState: appState, title: "EXIF Year (Newest First)", mode: .exifYear, reversed: false, apply: applySortMode, shortcutKey: "y")
+                    SortMenuButton(appState: appState, title: "EXIF Year (Oldest First)", mode: .exifYear, reversed: true, apply: applySortMode, shortcutKey: "y", shortcutModifiers: .shift)
+                    SortMenuButton(appState: appState, title: "Name (A-Z)", mode: .name, reversed: false, apply: applySortMode, shortcutKey: "n")
+                    SortMenuButton(appState: appState, title: "Name (Z-A)", mode: .name, reversed: true, apply: applySortMode, shortcutKey: "n", shortcutModifiers: .shift)
+                    SortMenuButton(appState: appState, title: "Size (Largest First)", mode: .size, reversed: false, apply: applySortMode, shortcutKey: "z")
+                    SortMenuButton(appState: appState, title: "Size (Smallest First)", mode: .size, reversed: true, apply: applySortMode, shortcutKey: "z", shortcutModifiers: .shift)
                     Divider()
                     Button("Reverse Sort Order") {
                         Task { @MainActor in appState.reverseSortOrder() }
                     }
                     .keyboardShortcut("t", modifiers: .command)
                     RandomSortMenuButton(appState: appState)
-                    SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode)
+                    SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode, shortcutKey: "c")
                 }
 
                 ActualSizeToggleButton(appState: appState)
@@ -824,11 +824,18 @@ private struct SortMenuButton: View {
     let mode: SortMode
     let reversed: Bool
     let apply: @MainActor (SortMode, Bool) -> Void
+    var shortcutKey: KeyEquivalent?
+    var shortcutModifiers: EventModifiers = []
 
     var body: some View {
         let checked = MenuStateHelpers.sortMenuItemChecked(mode: mode, reversed: reversed, config: appState.config)
-        Button(checked ? "✓ \(title)" : title) {
+        let button = Button(checked ? "✓ \(title)" : title) {
             Task { @MainActor in apply(mode, reversed) }
+        }
+        if let shortcutKey {
+            button.keyboardShortcut(shortcutKey, modifiers: shortcutModifiers)
+        } else {
+            button
         }
     }
 }

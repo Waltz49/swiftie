@@ -241,7 +241,6 @@ struct ThemeSettingsTab: View {
                 onColorChange: { setOverride(editID, "default_image_color_hex", $0) },
                 onWidthChange: { setOverride(editID, "default_image_border_width_index", $0) }
             )
-            ThemeColorSwatchRow(label: "Image background:", hex: stringValue(merged, "default_image_background_color_hex"), onColorChange: { setOverride(editID, "default_image_background_color_hex", $0) })
             ThemeColorSwatchRow(
                 label: "Active image border:",
                 hex: stringValue(merged, "current_image_border_color_hex"),
@@ -382,9 +381,20 @@ struct ThemeSettingsTab: View {
 
     private func setOverride(_ themeID: String, _ key: String, _ value: Any) {
         appState.theme.setColorOverride(themeID: themeID, key: key, value: value, persist: false)
+        if key == "thumbnail_grid_background_color_hex", let hex = value as? String {
+            appState.theme.setColorOverride(
+                themeID: themeID,
+                key: "default_image_background_color_hex",
+                value: hex,
+                persist: false
+            )
+        }
         if themeID == cachedEditPresetID {
             var merged = cachedMerged
             merged[key] = value
+            if key == "thumbnail_grid_background_color_hex", let hex = value as? String {
+                merged["default_image_background_color_hex"] = hex
+            }
             cachedMerged = merged
         } else {
             refreshThemeColorCache()

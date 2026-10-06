@@ -13,7 +13,7 @@ struct ThumbnailEmptyStateStyle {
     static func from(theme: ThemeColors) -> ThumbnailEmptyStateStyle {
         ThumbnailEmptyStateStyle(
             background: theme.thumbnailGridBackground.nsColor,
-            text: theme.text.nsColor,
+            text: theme.thumbnailText.nsColor,
             buttonBackground: theme.thumbnailEmptyFilterButtonBackground.nsColor,
             buttonBackgroundHover: theme.thumbnailEmptyFilterButtonBackgroundHover.nsColor,
             buttonBorder: theme.thumbnailEmptyFilterButtonBorder.nsColor,

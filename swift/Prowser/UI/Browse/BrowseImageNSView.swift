@@ -832,7 +832,7 @@ final class BrowseImageNSView: NSView {
         paragraph.alignment = .center
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 14),
-            .foregroundColor: NSColor(themeColors.text),
+            .foregroundColor: themeColors.thumbnailText.nsColor,
             .paragraphStyle: paragraph,
         ]
         let rect = bounds.insetBy(dx: 28, dy: 28)

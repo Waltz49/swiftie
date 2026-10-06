@@ -129,7 +129,12 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
     var sortMode: SortMode = .date
     var sortReversed = false
 
-    var themeColors = ThemeColors.dark
+    var themeColors = ThemeColors.dark {
+        didSet {
+            guard oldValue != themeColors else { return }
+            directoryBannerView.textColor = themeColors.thumbnailText.nsColor
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -323,6 +328,7 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.documentView = tableView
         directoryBannerView.translatesAutoresizingMaskIntoConstraints = false
+        directoryBannerView.textColor = themeColors.thumbnailText.nsColor
         addSubview(scrollView)
         addSubview(directoryBannerView)
         addSubview(headerView)
@@ -582,7 +588,7 @@ final class ImageListNSView: NSView, ImageListHeaderDelegate {
         if isMultiSelected && multiSelectMode {
             return NSColor(themeColors.multiselectBorder)
         }
-        return NSColor(themeColors.text)
+        return NSColor(themeColors.thumbnailText)
     }
 
     // MARK: - ImageListHeaderDelegate

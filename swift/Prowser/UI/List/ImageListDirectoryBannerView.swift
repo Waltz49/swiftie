@@ -13,12 +13,19 @@ final class ImageListDirectoryBannerView: NSView {
         }
     }
 
+    var textColor: NSColor = ThemeColors.dark.thumbnailText.nsColor {
+        didSet {
+            guard oldValue != textColor else { return }
+            needsDisplay = true
+        }
+    }
+
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let content else { return }
         let font = NSFont.systemFont(ofSize: Self.fontSize)
-        let color = NSColor(calibratedRed: 0.78, green: 0.78, blue: 0.98, alpha: 1)
+        let color = textColor
         let margin: CGFloat = 8
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,

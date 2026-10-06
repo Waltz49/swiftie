@@ -1359,14 +1359,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let rect = separator.rect
         if let label = separator.label, !label.isEmpty {
             let font = NSFont.boldSystemFont(ofSize: 13)
+            let thumbText = themeColors.thumbnailText.nsColor
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
-                .foregroundColor: NSColor.labelColor,
+                .foregroundColor: thumbText,
             ]
             let textRect = NSRect(x: rect.minX + 12, y: rect.minY + 6, width: rect.width - 24, height: rect.height - 8)
             (label as NSString).draw(in: textRect, withAttributes: attrs)
         }
-        NSColor.labelColor.withAlphaComponent(0.35).setStroke()
+        themeColors.thumbnailText.nsColor.withAlphaComponent(0.35).setStroke()
         let path = NSBezierPath()
         let lineY = rect.midY
         path.move(to: NSPoint(x: rect.minX + 10, y: lineY))
@@ -1863,7 +1864,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         } else if isSelected {
             fillColor = themeColors.multiselectBackground.nsColor
         } else {
-            fillColor = themeColors.defaultImageBackground.nsColor
+            fillColor = themeColors.thumbnailGridBackground.nsColor
         }
         fillRoundedThumbnailRect(rect, fill: fillColor, stroke: nil, lineWidth: 0)
     }
@@ -1976,7 +1977,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         paragraph.lineBreakMode = .byClipping
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: themeColors.thumbnailText.nsColor,
             .paragraphStyle: paragraph,
         ]
         var y = pillRect.minY + 2
@@ -2030,7 +2031,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let ext = (path as NSString).pathExtension.uppercased()
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.boldSystemFont(ofSize: 12),
-            .foregroundColor: NSColor.tertiaryLabelColor,
+            .foregroundColor: themeColors.thumbnailText.nsColor,
         ]
         (ext as NSString).draw(
             in: rect,
@@ -2078,7 +2079,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         editor.isBezeled = false
         editor.drawsBackground = true
         editor.backgroundColor = overlayBoxColor
-        editor.textColor = .labelColor
+        editor.textColor = themeColors.thumbnailText.nsColor
         editor.font = NSFont(name: "Arial", size: 13) ?? NSFont.systemFont(ofSize: 13)
         editor.focusRingType = .none
         editor.wantsLayer = true

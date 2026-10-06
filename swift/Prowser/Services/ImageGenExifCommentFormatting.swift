@@ -1,0 +1,365 @@
+import Foundation
+
+/// EXIF UserComment layout for MFLUX JSON and Prowser image-gen metadata.
+/// Port of `imagegen_plugins/image_gen_naming.py` (display paths only; no generation).
+enum ImageGenExifCommentFormatting {
+    private static let loraContinuationPrefix = String(repeating: "\u{00a0}", count: 6)
+
+    private static let hfModelDisplayNames: [String: String] = [
+        "black-forest-labs/FLUX.1-schnell": "FLUX.1 Schnell",
+        "black-forest-labs/FLUX.1-dev": "FLUX.1 Dev",
+        "black-forest-labs/FLUX.1-Fill-dev": "FLUX.1 Fill",
+        "black-forest-labs/FLUX.2-klein-4B": "FLUX.2 Klein 4B",
+        "black-forest-labs/FLUX.2-klein-9B": "FLUX.2 Klein 9B",
+        "black-forest-labs/FLUX.2-klein-9b-kv": "FLUX.2 Klein 9B KV",
+        "SceneWorks/flux2-klein-9b-kv-mlx": "FLUX.2 Klein 9B KV MLX",
+        "SG161222/Realistic_Vision_V4.0_noVAE": "Realistic Vision V4.0",
+        "stablediffusionapi/anythingfurry": "Anything Furry",
+        "stabilityai/stable-diffusion-xl-base-1.0": "SDXL 1.0 Base",
+        "Disty0/Z-Image-Turbo-SDNQ-int8": "Z-Image Turbo",
+        "filipstrand/Z-Image-Turbo-mflux-4bit": "Z-Image Turbo 4-bit",
+    ]
+
+    private static let promptSectionSkipHeadings: Set<String> = [
+        "prompt", "prompt:", "description", "description:",
+    ]
+
+    // MARK: - Parse
+
+    /// Port of `parse_mflux_metadata_json`.
+    static func parseMfluxMetadataJSON(_ text: String) -> [String: Any]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first, first == "{" || first == "[" else { return nil }
+        guard let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if json["mflux_version"] != nil { return json }
+        if json["prompt"] != nil,
+           json.keys.contains(where: { ["seed", "steps", "model", "quantize"].contains($0) }) {
+            return json
+        }
+        return nil
+    }
+
+    // MARK: - Display
+
+    /// Port of `format_user_comment_text_for_display`.
+    static func formatUserCommentTextForDisplay(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return text }
+        if let meta = parseMfluxMetadataJSON(trimmed) {
+            return normalizeExifLoraDisplayLines(formatExifCommentFromMfluxMetadata(meta))
+        }
+        return normalizeExifLoraDisplayLines(trimmed)
+    }
+
+    /// Prompt text from MFLUX JSON or formatted/plain comment (port of import / clipboard rules).
+    static func extractedPromptText(from text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        if let meta = parseMfluxMetadataJSON(trimmed),
+           let prompt = stringValue(meta["prompt"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !prompt.isEmpty {
+            return prompt
+        }
+        return truncateBeforePromptSection(trimmed)
+    }
+
+    // MARK: - MFLUX → EXIF body
+
+    /// Port of `format_exif_comment_from_mflux_metadata` (values / pipeline omitted in Swift browser).
+    static func formatExifCommentFromMfluxMetadata(_ meta: [String: Any], modelName: String = "") -> String {
+        var resolvedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if resolvedModel.isEmpty {
+            let rawModel = stringValue(meta["model_config"]) ?? stringValue(meta["model"]) ?? ""
+            resolvedModel = menuLabelForHFModelId(rawModel)
+        }
+        let promptText = stringValue(meta["prompt"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let steps = intValue(meta["steps"])
+        let quant = intValue(meta["quantize"])
+        let guidance = doubleValue(meta["guidance"])
+        let seed = intValue(meta["seed"])
+        var elapsed = parseElapsedSeconds(meta["generation_time_seconds"])
+        if elapsed == nil {
+            elapsed = parseElapsedSeconds(meta["generation_time"])
+        }
+        let lora = loraNameForExifFromPathsAndScales(
+            paths: meta["lora_paths"],
+            scales: meta["lora_scales"]
+        )
+        return formatImageExifPrompt(
+            modelName: resolvedModel,
+            promptText: promptText,
+            elapsedSeconds: elapsed,
+            seed: seed,
+            steps: steps,
+            quantization: quant,
+            lora: lora,
+            guidance: guidance
+        )
+    }
+
+    /// Port of `format_image_exif_prompt`.
+    static func formatImageExifPrompt(
+        modelName: String,
+        promptText: String,
+        elapsedSeconds: Double? = nil,
+        seed: Int? = nil,
+        steps: Int? = nil,
+        quantization: Int? = nil,
+        lora: String? = nil,
+        guidance: Double? = nil
+    ) -> String {
+        let prompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var paramLines: [String] = []
+        if let seed {
+            paramLines.append("Seed: \(seed)")
+        }
+        if let steps {
+            paramLines.append("Steps: \(steps)")
+        }
+        if let quantization {
+            paramLines.append("Quantization: \(quantization)")
+        }
+        paramLines.append(contentsOf: loraParamLinesForExif(lora))
+        if let guidance {
+            paramLines.append("Guidance: \(formatGuidance(guidance))")
+        }
+
+        let name = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty {
+            var modelBlock = "Image Model:\n\(name)"
+            if !paramLines.isEmpty {
+                modelBlock += "\n" + paramLines.joined(separator: "\n")
+            }
+            if let elapsedSeconds {
+                modelBlock += "\nElapsed: \(formatElapsedHMS(elapsedSeconds))"
+            }
+            return "\(modelBlock)\n\nPrompt:\n\(prompt)"
+        }
+
+        if !paramLines.isEmpty {
+            let header = paramLines.joined(separator: "\n")
+            if !prompt.isEmpty {
+                return "\(header)\n\nPrompt:\n\(prompt)"
+            }
+            return header
+        }
+        return "Prompt:\n\(prompt)"
+    }
+
+    // MARK: - Elapsed
+
+    /// Port of `format_elapsed_hms`.
+    static func formatElapsedHMS(_ seconds: Double) -> String {
+        let total = Int(round(max(0, seconds)))
+        let h = total / 3600
+        let rem = total % 3600
+        let m = rem / 60
+        let s = rem % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        if m > 0 {
+            return String(format: "%d:%02d", m, s)
+        }
+        return String(s)
+    }
+
+    // MARK: - Model / LoRA labels
+
+    static func menuLabelForHFModelId(_ modelId: String) -> String {
+        let id = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, id.lowercased() != "none" else { return "" }
+        if let label = hfModelDisplayNames[id] {
+            return label
+        }
+        if let slash = id.lastIndex(of: "/") {
+            return String(id[id.index(after: slash)...])
+        }
+        return id
+    }
+
+    static func loraNameForExifFromPathsAndScales(paths: Any?, scales: Any?) -> String? {
+        guard let pathList = paths as? [Any], !pathList.isEmpty else { return nil }
+        let scaleList = scales as? [Any] ?? []
+        var labels: [String] = []
+        for (index, item) in pathList.enumerated() {
+            let path = String(describing: item).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else { continue }
+            let fileName = (path as NSString).lastPathComponent
+            let stem = (fileName as NSString).deletingPathExtension
+            let name = stem.isEmpty ? fileName : stem
+            guard !name.isEmpty else { continue }
+            var scale = 1.0
+            if index < scaleList.count {
+                scale = doubleValue(scaleList[index]) ?? 1.0
+            }
+            labels.append("\(name) [\(formatExifLoraWeight(scale))]")
+        }
+        guard !labels.isEmpty else { return nil }
+        if labels.count == 1 {
+            return labels[0]
+        }
+        return labels.joined(separator: " + ")
+    }
+
+    static func formatExifLoraWeight(_ scale: Double) -> String {
+        let formatted = String(format: "%g", scale)
+        return formatted
+    }
+
+    // MARK: - Private helpers
+
+    private static func truncateBeforePromptSection(_ text: String) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for (index, line) in lines.enumerated() {
+            if promptSectionSkipHeadings.contains(line.trimmingCharacters(in: .whitespaces).lowercased()) {
+                return lines.dropFirst(index + 1).joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return text
+    }
+
+    private static func parseElapsedSeconds(_ raw: Any?) -> Double? {
+        guard let raw else { return nil }
+        let value: Double?
+        if let d = raw as? Double {
+            value = d
+        } else if let n = raw as? NSNumber {
+            value = n.doubleValue
+        } else if let s = raw as? String, let d = Double(s) {
+            value = d
+        } else {
+            return nil
+        }
+        guard let value, value >= 0 else { return nil }
+        return value
+    }
+
+    private static func intValue(_ raw: Any?) -> Int? {
+        guard let raw else { return nil }
+        if let i = raw as? Int { return i }
+        if let n = raw as? NSNumber { return n.intValue }
+        if let s = raw as? String, let i = Int(s) { return i }
+        if let d = raw as? Double { return Int(d) }
+        return nil
+    }
+
+    private static func doubleValue(_ raw: Any?) -> Double? {
+        guard let raw else { return nil }
+        if let d = raw as? Double { return d }
+        if let n = raw as? NSNumber { return n.doubleValue }
+        if let s = raw as? String, let d = Double(s) { return d }
+        if let i = raw as? Int { return Double(i) }
+        return nil
+    }
+
+    private static func stringValue(_ raw: Any?) -> String? {
+        guard let raw else { return nil }
+        if raw is NSNull { return nil }
+        let s = String(describing: raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty || s.lowercased() == "none" { return nil }
+        return s
+    }
+
+    private static func formatGuidance(_ value: Double) -> String {
+        if value == Double(Int(value)) {
+            return String(Int(value))
+        }
+        return String(format: "%g", value)
+    }
+
+    private static func loraNamesFromExifValue(_ lora: String) -> [String] {
+        let text = lora.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+        let parts = text.components(separatedBy: " + ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? [text] : parts
+    }
+
+    private static func formatLoraLinesForExif(names: [String], linePrefix: String = "") -> [String] {
+        var lines: [String] = []
+        for (index, name) in names.enumerated() {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if index == 0 {
+                lines.append("\(linePrefix)LoRA: \(trimmed)")
+            } else {
+                lines.append("\(linePrefix)\(loraContinuationPrefix)\(trimmed)")
+            }
+        }
+        return lines
+    }
+
+    private static func loraParamLinesForExif(_ lora: String?) -> [String] {
+        guard let lora, !lora.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        return formatLoraLinesForExif(names: loraNamesFromExifValue(lora))
+    }
+
+    /// Port of `_normalize_exif_lora_display_lines`.
+    private static func normalizeExifLoraDisplayLines(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return text }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var out: [String] = []
+        var pendingNames: [String] = []
+        var pendingPrefix = ""
+
+        func flushPending() {
+            guard !pendingNames.isEmpty else { return }
+            out.append(contentsOf: formatLoraLinesForExif(names: pendingNames, linePrefix: pendingPrefix))
+            pendingNames = []
+            pendingPrefix = ""
+        }
+
+        let loraLinePattern = try? NSRegularExpression(
+            pattern: "^\\s*LoRA\\s*:\\s*(.+?)\\s*$",
+            options: [.caseInsensitive]
+        )
+        let loraContPattern = try? NSRegularExpression(
+            pattern: "^\(loraContinuationPrefix)(.+?)\\s*$",
+            options: []
+        )
+
+        for line in lines {
+            let stripped = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let loraLinePattern,
+               let match = loraLinePattern.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
+               let valueRange = Range(match.range(at: 1), in: stripped) {
+                let prefix = stripped.isEmpty ? "" : String(line.prefix(line.count - stripped.count))
+                let value = String(stripped[valueRange])
+                let names = loraNamesFromExifValue(value)
+                if names.count > 1 {
+                    flushPending()
+                    out.append(contentsOf: formatLoraLinesForExif(names: names, linePrefix: prefix))
+                    continue
+                }
+                if !pendingNames.isEmpty, prefix != pendingPrefix {
+                    flushPending()
+                }
+                if pendingNames.isEmpty {
+                    pendingPrefix = prefix
+                }
+                pendingNames.append(names.first ?? value.trimmingCharacters(in: .whitespacesAndNewlines))
+                continue
+            }
+            if let loraContPattern,
+               let match = loraContPattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               let nameRange = Range(match.range(at: 1), in: line) {
+                let name = String(line[nameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    pendingNames.append(name)
+                }
+                continue
+            }
+            flushPending()
+            out.append(line)
+        }
+        flushPending()
+        return out.joined(separator: "\n")
+    }
+}

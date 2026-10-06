@@ -1031,6 +1031,12 @@ final class KeyboardHandlerController {
         case "d":
             applySort(.date, reversed: false, appState: appState)
             return true
+        case "x":
+            applySort(.exifDate, reversed: false, appState: appState)
+            return true
+        case "y":
+            applySort(.exifYear, reversed: false, appState: appState)
+            return true
         case "z":
             applySort(.size, reversed: false, appState: appState)
             return true
@@ -1076,6 +1082,12 @@ final class KeyboardHandlerController {
             return true
         case "d":
             applySort(.date, reversed: true, appState: appState)
+            return true
+        case "x":
+            applySort(.exifDate, reversed: true, appState: appState)
+            return true
+        case "y":
+            applySort(.exifYear, reversed: true, appState: appState)
             return true
         case "z":
             applySort(.size, reversed: true, appState: appState)

@@ -154,7 +154,7 @@ enum ExifService {
     static func isProwserFormattedUserComment(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        if parseMfluxMetadataJSON(trimmed) != nil { return true }
+        if ImageGenExifCommentFormatting.parseMfluxMetadataJSON(trimmed) != nil { return true }
         guard hasPromptSection(trimmed), hasImageModelSection(trimmed) else { return false }
         return true
     }
@@ -179,21 +179,6 @@ enum ExifService {
         return false
     }
 
-    private static func parseMfluxMetadataJSON(_ text: String) -> [String: Any]? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first, first == "{" || first == "[" else { return nil }
-        guard let data = trimmed.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        if json["mflux_version"] != nil { return json }
-        if json["prompt"] != nil,
-           json.keys.contains(where: { ["seed", "steps", "model", "quantize"].contains($0) }) {
-            return json
-        }
-        return nil
-    }
-
     /// Python/piexif-backed user description (matches information sidebar in Qt app).
     @MainActor
     static func userDescription(path: String) async -> String? {
@@ -211,7 +196,8 @@ enum ExifService {
 
     /// Port of `imagegen_plugins/image_gen_menu.py` `initial_prompt_from_usercomment`.
     static func initialPromptFromUserComment(_ text: String) -> String? {
-        let prompt = truncateUserCommentBeforePrompt(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = ImageGenExifCommentFormatting.extractedPromptText(from: text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return prompt.isEmpty ? nil : prompt
     }
 
@@ -231,7 +217,8 @@ enum ExifService {
     static func userCommentTextForClipboard(_ text: String, copyFull: Bool = false) -> String {
         guard !text.isEmpty else { return text }
         if copyFull { return text }
-        return truncateUserCommentBeforePrompt(text).replacingOccurrences(of: ";", with: ".")
+        return ImageGenExifCommentFormatting.extractedPromptText(from: text)
+            .replacingOccurrences(of: ";", with: ".")
     }
 
     /// Port of `exif/exif_utils.py` `truncate_usercomment_before_prompt`.
@@ -252,7 +239,7 @@ enum ExifService {
               !comment.isEmpty else {
             return nil
         }
-        let prompt = truncateUserCommentBeforePrompt(comment)
+        let prompt = ImageGenExifCommentFormatting.extractedPromptText(from: comment)
         return prompt.isEmpty ? nil : prompt
     }
 

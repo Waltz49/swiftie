@@ -63,6 +63,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         _ = appState.showThumbnailDirectoryLoadingCanvas
         _ = appState.config.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
         _ = appState.config.bool(forKey: "manual_thumbnail_size", default: false)
+        _ = appState.theme.colors
         context.coordinator.syncFromAppStateIfNeeded()
     }
 
@@ -78,7 +79,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var lastSyncedDirectory: String?
         private var lastGridSyncFingerprint: GridSyncFingerprint?
         private var lastSelectionFingerprint: SelectionFingerprint?
-        private var lastSyncedThemeID: String?
+        private var lastSyncedThemeColors: ThemeColors?
 
         /// Fields that drive grid layout, paths, theme, and highlight — not selection chrome alone.
         private struct GridSyncFingerprint: Equatable {
@@ -243,6 +244,7 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         private func syncFromAppState(force: Bool) {
             guard let gridView else { return }
+            syncThemeVisualsIfNeeded(to: gridView, force: force)
             let paths = appState.showThumbnailDirectoryLoadingCanvas ? [] : appState.fileData.displayedImages
             let index = resolvedHighlightIndex(in: paths)
             let fingerprint = GridSyncFingerprint(
@@ -281,14 +283,6 @@ struct ThumbnailGridView: NSViewRepresentable {
             lastGridSyncFingerprint = fingerprint
             if pathsChanged {
                 lastSelectionFingerprint = nil
-            }
-
-            if force || fingerprint.themeID != lastSyncedThemeID {
-                if let scrollView {
-                    ThumbnailScrollAreaChrome.apply(to: scrollView, colors: appState.theme.colors)
-                }
-                gridView.applyTheme(appState.theme.colors)
-                lastSyncedThemeID = fingerprint.themeID
             }
 
             let directory = appState.fileData.currentDirectory
@@ -360,6 +354,16 @@ struct ThumbnailGridView: NSViewRepresentable {
             guard let gridView else { return }
             gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
             gridView.needsDisplay = true
+        }
+
+        private func syncThemeVisualsIfNeeded(to gridView: ThumbnailGridNSView, force: Bool) {
+            let colors = appState.theme.colors
+            guard force || colors != lastSyncedThemeColors else { return }
+            if let scrollView {
+                ThumbnailScrollAreaChrome.apply(to: scrollView, colors: colors)
+            }
+            gridView.applyTheme(colors)
+            lastSyncedThemeColors = colors
         }
 
         private func syncSelectionVisualsIfNeeded(to gridView: ThumbnailGridNSView? = nil) {

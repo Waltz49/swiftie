@@ -54,10 +54,12 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Shift+N | Sort by name (Z–A) |
 | Z | Sort by size (largest first) |
 | Shift+Z | Sort by size (smallest first) |
+| X | Sort by EXIF month (newest first) |
+| Shift+X | Sort by EXIF month (oldest first) |
+| Y | Sort by EXIF year (newest first) |
+| Shift+Y | Sort by EXIF year (oldest first) |
 | C | Custom sort |
 | Cmd+T | Reverse sort order |
-
-EXIF date/year sorts are available from the **View → Sort By** menu (no letter keys in the Swift port yet).
 
 ### Thumbnail Size
 | Key | Action |

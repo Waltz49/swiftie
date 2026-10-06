@@ -45,7 +45,7 @@ enum InformationOverlayBuilder {
            !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            !description.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("b'"),
            !description.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("b\"") {
-            speakablePlainText = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            speakablePlainText = ImageGenExifCommentFormatting.formatUserCommentTextForDisplay(description)
         }
 
         let remaining = remainingFieldPairs(from: record)

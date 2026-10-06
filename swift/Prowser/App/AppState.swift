@@ -1266,9 +1266,9 @@ final class AppState {
         editUserCommentPath = path
         editUserCommentError = nil
         Task {
-            let text = await ExifService.userDescription(path: path) ?? ""
-            editUserCommentText = text
-            editUserCommentOriginalText = text
+            let raw = await ExifService.userDescription(path: path) ?? ""
+            editUserCommentOriginalText = raw
+            editUserCommentText = ImageGenExifCommentFormatting.formatUserCommentTextForDisplay(raw)
             let alreadyOpen = showEditUserCommentSheet
             showEditUserCommentSheet = true
             if alreadyOpen {

@@ -44,6 +44,8 @@ struct KeyboardShortcutsHelpView: View {
                     shortcutSection("Sort", rows: [
                         ("N / ⇧N", "Sort by name (A-Z / Z-A)"),
                         ("D / ⇧D", "Sort by date (newest / oldest)"),
+                        ("X / ⇧X", "Sort by EXIF month (newest / oldest)"),
+                        ("Y / ⇧Y", "Sort by EXIF year (newest / oldest)"),
                         ("Z / ⇧Z", "Sort by size (largest / smallest)"),
                         ("R", "Random sort"),
                         ("C", "Custom sort (.prsort)"),

@@ -131,14 +131,14 @@ final class BrowseCursorAutoHideController {
         let center = NotificationCenter.default
         observers.append(
             center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] notification in
-                Task { @MainActor [weak self] in
+                MainActor.assumeIsolated {
                     self?.handleHostWindowResignedKey(notification)
                 }
             }
         )
         observers.append(
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] notification in
-                Task { @MainActor [weak self] in
+                MainActor.assumeIsolated {
                     self?.handleHostWindowBecameKey(notification)
                 }
             }
@@ -206,7 +206,7 @@ final class BrowseCursorAutoHideController {
     }
 
     private func pointerIsOverHideZone(atWindowPoint windowPoint: NSPoint) -> Bool {
-        guard let hideZone, let window = hideZone.window else { return false }
+        guard let hideZone, hideZone.window != nil else { return false }
         guard hideZone.bounds.width > 1, hideZone.bounds.height > 1 else { return false }
         let point = hideZone.convert(windowPoint, from: nil)
         return hideZone.bounds.contains(point)
