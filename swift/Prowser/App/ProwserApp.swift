@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+// defaults write $(osascript -e 'id of app "/Applications/swift-prowser.app"') NSAppSleepDisabled -bool YES
+
 @main
 struct ProwserApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate

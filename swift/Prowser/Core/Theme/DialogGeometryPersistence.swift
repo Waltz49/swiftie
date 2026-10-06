@@ -15,6 +15,7 @@ enum DialogGeometryKey {
     static let referenceGraph = "reference_graph_dialog_geometry"
     static let exifBatchConfirmation = "exif_batch_confirmation_dialog_geometry"
     static let keyboardHelp = "keyboard_help_dialog_geometry"
+    static let hiddenGemsHelp = "hidden_gems_help_dialog_geometry"
     static let about = "about_dialog_geometry"
     static let settings = "settings_dialog_geometry"
     static let settingsSizeFallback = "settings_dialog_size"

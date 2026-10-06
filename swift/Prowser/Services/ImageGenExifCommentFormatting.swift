@@ -26,18 +26,64 @@ enum ImageGenExifCommentFormatting {
 
     // MARK: - Parse
 
+    private static let mfluxMetadataKeyHints: Set<String> = [
+        "mflux_version", "model", "model_config", "seed", "steps", "quantize",
+        "generation_time_seconds", "generation_time", "prompt",
+    ]
+
+    /// Strip BOM / EXIF charset prefix and isolate a JSON object when ImageIO returns a raw blob.
+    static func normalizedUserCommentTextForParsing(_ text: String) -> String {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("\u{FEFF}") {
+            trimmed = String(trimmed.dropFirst())
+        }
+        if let data = trimmed.data(using: .utf8), !trimmed.isEmpty {
+            let decoded = ExifService.decodeUserComment(data).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !decoded.isEmpty, decoded != trimmed {
+                trimmed = decoded
+            }
+        }
+        if trimmed.first != "{", trimmed.first != "[" {
+            if let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}"), start < end {
+                trimmed = String(trimmed[start...end])
+            }
+        }
+        return trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Port of `parse_mflux_metadata_json`.
     static func parseMfluxMetadataJSON(_ text: String) -> [String: Any]? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first, first == "{" || first == "[" else { return nil }
-        guard let data = trimmed.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+        let trimmed = normalizedUserCommentTextForParsing(text)
+        guard !trimmed.isEmpty else { return nil }
+        guard let payload = jsonObjectPayload(from: trimmed) else { return nil }
+        guard let dict = payload as? [String: Any] else { return nil }
+        if dict["mflux_version"] != nil { return dict }
+        if dict["prompt"] != nil,
+           dict.keys.contains(where: { ["seed", "steps", "model", "quantize"].contains($0) }) {
+            return dict
         }
-        if json["mflux_version"] != nil { return json }
-        if json["prompt"] != nil,
-           json.keys.contains(where: { ["seed", "steps", "model", "quantize"].contains($0) }) {
+        if dict.keys.contains(where: { mfluxMetadataKeyHints.contains($0) }) {
+            return dict
+        }
+        return nil
+    }
+
+    private static func jsonObjectPayload(from trimmed: String) -> Any? {
+        guard let data = trimmed.data(using: .utf8) else { return nil }
+        if let json = try? JSONSerialization.jsonObject(with: data) {
+            if let nested = json as? String,
+               let nestedData = nested.data(using: .utf8),
+               let inner = try? JSONSerialization.jsonObject(with: nestedData) {
+                return inner
+            }
             return json
+        }
+        if let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}") , start < end {
+            let slice = String(trimmed[start...end])
+            if let sliceData = slice.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: sliceData) {
+                return json
+            }
         }
         return nil
     }
@@ -46,7 +92,7 @@ enum ImageGenExifCommentFormatting {
 
     /// Port of `format_user_comment_text_for_display`.
     static func formatUserCommentTextForDisplay(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = normalizedUserCommentTextForParsing(text)
         guard !trimmed.isEmpty else { return text }
         if let meta = parseMfluxMetadataJSON(trimmed) {
             return normalizeExifLoraDisplayLines(formatExifCommentFromMfluxMetadata(meta))

@@ -970,6 +970,13 @@ struct ProwserHelpCommands: Commands {
                 }
                 .keyboardShortcut("/", modifiers: [])
 
+                Button("Hidden Gems…") {
+                    Task { @MainActor in
+                        appState.showHiddenGemsHelp = true
+                        appState.syncAuxiliaryDialogs()
+                    }
+                }
+
                 Button("Image Search (Native)…") {
                     Task { @MainActor in
                         appState.showImageRecognitionCaveats = true

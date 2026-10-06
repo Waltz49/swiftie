@@ -9,7 +9,7 @@ Planning reference only. Python reference: `~/dev/testchat/image_browser`. Each 
 | **Preferences…** under the application menu (⌘,) | **Settings…** under **File** (⌘,); both use window title **Prowser Preferences** |
 | **Move to** / **Copy to** as its own menu-bar menu (title follows move vs copy setting) | Separate **Move to** or **Copy to** top-level menu (same title rules) |
 | **Help → Image Search (Native)…** | No equivalent help entry |
-| No **PF Keys…** or **Hidden Gems…** help | **Help → PF Keys…** and **Help → Hidden Gems…** |
+| No **PF Keys…** help | **Help → PF Keys…** |
 | **F6** toggles sharpen when zoomed in browse (persisted) | No **F6** sharpen toggle |
 | **⌥T**, **⌥P**, **⌥O**, **⌥I** show one sidebar pane and hide siblings on that side | No matching shortcuts |
 | Search menu: **Identify Faces in Current Image…** (⇧⌘P) | Search menu: **Extract Faces** (⇧⌘P); thumbnail menu uses **Extract Faces** |

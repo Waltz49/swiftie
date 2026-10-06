@@ -60,6 +60,7 @@ final class AppState {
     /// Set when opening Settings → Face Recognition for ⇧⌘P Extract Faces (Python `auto_extract_faces`).
     var pendingAutoExamineFaces = false
     var showKeyboardHelp = false
+    var showHiddenGemsHelp = false
     var showImageRecognitionCaveats = false
     var showSimilaritySearchSheet = false
     var showClipSearchSheet = false
@@ -95,6 +96,7 @@ final class AppState {
             || showFindReferencesSheet
             || showReferenceGraphSheet
             || showKeyboardHelp
+            || showHiddenGemsHelp
             || showImageRecognitionCaveats
             || showSimilaritySearchSheet
             || showClipSearchSheet
@@ -1355,6 +1357,7 @@ final class AppState {
     enum DialogID {
         static let editExifUserComment = "editExifUserComment"
         static let keyboardHelp = "keyboardHelp"
+        static let hiddenGemsHelp = "hiddenGemsHelp"
         static let convertFormat = "convertFormat"
         static let resizeImages = "resizeImages"
         static let renamePrefix = "renamePrefix"
@@ -1390,6 +1393,16 @@ final class AppState {
             onClose: { [weak self] in self?.showKeyboardHelp = false }
         ) {
             KeyboardShortcutsHelpView()
+        }
+        syncDialog(
+            id: DialogID.hiddenGemsHelp,
+            show: showHiddenGemsHelp,
+            title: "Hidden Gems",
+            defaultSize: NSSize(width: 520, height: 560),
+            minSize: NSSize(width: 480, height: 400),
+            onClose: { [weak self] in self?.showHiddenGemsHelp = false }
+        ) {
+            HiddenGemsHelpView()
         }
         syncDialog(
             id: DialogID.convertFormat,

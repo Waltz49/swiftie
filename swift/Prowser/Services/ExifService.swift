@@ -589,6 +589,14 @@ enum ExifService {
             }
             decoded = trimNulls(decoded)
             if decoded.hasPrefix("b'") || decoded.hasPrefix("b\"") { return nil }
+            if let data = decoded.data(using: .utf8),
+               decoded.first != "{",
+               !decoded.hasPrefix("[") {
+                let fromBytes = trimNulls(decodeUserComment(data))
+                if !fromBytes.isEmpty, fromBytes != decoded {
+                    decoded = fromBytes
+                }
+            }
             return decoded.isEmpty ? nil : decoded
         }
         return nil
@@ -620,13 +628,13 @@ enum ExifService {
     }
 
     private static func userDescription(exif: [CFString: Any], tiff: [CFString: Any]) -> String? {
-        // Match Python `get_user_description_from_exif_dict` / information sidebar order.
-        if let raw = tiff[kCGImagePropertyTIFFImageDescription],
-           let desc = decodeDescriptionValue(raw) {
-            return desc
-        }
+        // Prefer MFLUX JSON in UserComment over TIFF ImageDescription (matches lightweight EXIF reads).
         if let raw = exif[kCGImagePropertyExifUserComment],
            let desc = decodeUserCommentValue(raw) {
+            return desc
+        }
+        if let raw = tiff[kCGImagePropertyTIFFImageDescription],
+           let desc = decodeDescriptionValue(raw) {
             return desc
         }
         let xpCommentKey = "{XPComment}" as CFString

@@ -10,6 +10,7 @@ struct AuxiliaryDialogBridge: View {
             .accessibilityHidden(true)
             .onAppear { appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showKeyboardHelp) { _, _ in appState.syncAuxiliaryDialogs() }
+            .onChange(of: appState.showHiddenGemsHelp) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showConvertFormatSheet) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.showResizeSheet) { _, _ in appState.syncAuxiliaryDialogs() }
             .onChange(of: appState.renamePrefixDialog?.id) { _, _ in appState.syncAuxiliaryDialogs() }
