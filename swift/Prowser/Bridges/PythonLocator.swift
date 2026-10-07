@@ -13,8 +13,21 @@ enum PythonLocator {
         let repoRoot = locateRepoRoot(config: config)
         guard let repoRoot else { return nil }
 
+        let effectiveProfile = resolvedProfilePath(explicit: profilePath, config: config)
+
         if let executable = locatePythonExecutable(repoRoot: repoRoot, config: config) {
-            return Environment(executable: executable, repoRoot: repoRoot, profilePath: profilePath)
+            return Environment(executable: executable, repoRoot: repoRoot, profilePath: effectiveProfile)
+        }
+        return nil
+    }
+
+    /// Python defaults to `~/.prowser` when `PROWSER_PROFILE` is unset; match Swift's active profile.
+    static func resolvedProfilePath(explicit: String?, config: AppConfig?) -> String? {
+        if let explicit, !explicit.isEmpty {
+            return (explicit as NSString).expandingTildeInPath
+        }
+        if let config {
+            return config.prowserHome.path
         }
         return nil
     }

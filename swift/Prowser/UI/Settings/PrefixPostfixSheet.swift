@@ -132,8 +132,14 @@ struct PrefixPostfixSheet: View {
 private struct PrefixPostfixTextEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
-    @State var text: String
+    @State private var text: String
     let onSave: (String) -> Void
+
+    init(title: String, text: String, onSave: @escaping (String) -> Void) {
+        self.title = title
+        _text = State(initialValue: text)
+        self.onSave = onSave
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

@@ -20,6 +20,19 @@ enum PrefixPostfixStore {
 
     static func load(dataDirectory: URL) -> [PrefixPostfixEntry] {
         let url = fileURL(dataDirectory: dataDirectory)
+        if FileManager.default.fileExists(atPath: url.path) {
+            return parseEntries(from: url)
+        }
+        // Legacy: Python imagegen used ~/.prowser before Swift always passed PROWSER_PROFILE.
+        let legacy = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".prowser/data/\(fileName)")
+        if legacy.path != url.path, FileManager.default.fileExists(atPath: legacy.path) {
+            return parseEntries(from: legacy)
+        }
+        return []
+    }
+
+    private static func parseEntries(from url: URL) -> [PrefixPostfixEntry] {
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let entries = json["entries"] as? [[String: Any]] else {
@@ -65,13 +78,14 @@ enum PrefixPostfixStore {
     }
 
     /// Port of ``apply_prefix_postfix_rules`` (list order preserved).
+    @MainActor
     static func applyRules(
         _ text: String,
         forImages: Bool,
-        settings: [String: Any],
-        dataDirectory: URL
+        config: AppConfig
     ) -> String {
-        guard settings["imagegen_add_chat_prefix_postfix"] as? Bool ?? true else { return text }
+        guard config.bool(forKey: "imagegen_add_chat_prefix_postfix", default: true) else { return text }
+        let dataDirectory = config.dataDirectory
         let entries = load(dataDirectory: dataDirectory)
         var prefixes: [String] = []
         var postfixes: [String] = []
