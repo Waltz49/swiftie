@@ -23,6 +23,13 @@ struct InformationPaneContentView: View {
                 InformationPaneScrollViewAttachment()
                     .frame(width: 0, height: 0)
 
+                if let heading = content.activeJobHeading, !heading.isEmpty {
+                    Text(heading)
+                        .font(.system(size: sectionHeaderFontSize, weight: .semibold))
+                        .foregroundStyle(colors.sidebarHeaderText)
+                        .padding(.bottom, 8)
+                }
+
                 filenameBlock(content.filenameSection)
 
                 descriptionBlock(content.descriptionSection)

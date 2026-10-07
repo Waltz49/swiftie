@@ -171,6 +171,10 @@ struct SettingsWindowView: View {
             ModelsSearchSettingsTab()
         case .faceRecognition:
             FaceRecognitionSettingsTab()
+        case .imageGeneration:
+            ImageGenerationSettingsTab()
+        case .lora:
+            LoRASettingsTab()
         }
     }
 }

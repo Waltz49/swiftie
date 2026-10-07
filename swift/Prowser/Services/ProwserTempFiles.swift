@@ -30,6 +30,14 @@ enum ProwserTempFiles {
         return path
     }
 
+    static func imageGenProgressDirectory(prowserHome: URL? = nil) -> String {
+        let home = prowserHome ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(ProfilePaths.defaultProfileDirectoryName, isDirectory: true)
+        let dir = home.appendingPathComponent("tmp/imagegen-progress", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.path
+    }
+
     private static let legacyProgressPrefix = ".imagegen-progress-"
 
     /// Port of ``prowser_temp_files.cleanup_cancelled_generation_output_artifacts``.

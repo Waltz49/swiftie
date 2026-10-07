@@ -1,6 +1,7 @@
 import Foundation
 
 struct InformationPaneContent: Equatable {
+    var activeJobHeading: String?
     var filenameSection: InformationFilenameSection
     var descriptionSection: InformationDescriptionSection
 }

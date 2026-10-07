@@ -1,20 +1,34 @@
-# Swift image browser
+# Swift image browser and optional image generation (WithGen)
 
-The Swift app is a **standalone macOS image browser**. It does not start Python, and it does not use Python ML workers.
+The Swift app is a **standalone macOS image browser**. Browsing, thumbnails, EXIF, native Core ML search, and face recognition run in Swift without requiring the PySide6 UI.
 
-Browsing, thumbnails, list/browse/slideshow views, file operations, EXIF (ImageIO), duplicates, **native Core ML image search (⌘K / ⌘F)**, and the rest of the native UI run entirely in Swift.
+## Optional image generation (MFLUX CLI)
 
-Python-only features from the original PySide6 app are **not** ported:
+When **not** launched with `--min` / `PROWSER_MIN_BUNDLE`, the app can expose **Image** menu items, the unified generation dialog, and **Job Control** UI. Generation does **not** use `model_tasks_worker.py` or Qt.
 
-- Image generation, LoRAs, job queue
-- Chat
-- **Search for Known Person** (⌘P) and **Search for Person in Current Image** (⌃⌘P) use **native dlib** in Swift (shared `known_faces.json` + `face_cache/` when profile roots match). The Python app implements the same features with `face_recognition` and older menu labels (**Search by Person…**, **Quick Person Search**).
+| Component | Role |
+|-----------|------|
+| **Python** `imagegen_plugins/registry_bridge.py` | Headless subprocess: plugin list, `build_payload`, availability metadata |
+| **Swift** `MfluxGenerationTasks` | Spawns `mflux-generate-*` from the configured venv `bin` |
+| **Swift** `ImageGenMfluxPrep` | Mask/pad/expand prep before CLI (ports of PIL helpers) |
+
+Configure in **Preferences → Image Generation**:
+
+- **Python repo root** — checkout containing `imagegen_plugins` (or `PROWSER_PYTHON_ROOT`)
+- **Python executable** — optional override for the registry subprocess
+- **MFLUX venv path** — venv root or `bin` directory with `mflux-generate`, `mflux-generate-fill`, etc.
+
+If the registry bridge or MFLUX binaries are missing, the **Image** menu stays disabled.
+
+## Not ported / stubbed
+
+- **LoRA** catalog UI and settings editor — stub (“Not implemented yet”); CLI LoRA args are omitted
+- **Flux-prompt AI** queue steps — skipped when the foreground AI bridge is unavailable
+- **Chat** and Python CLIP/chat workers
 - Whisper / LM Studio captioning
 
-The Swift browser stores its profile under `~/.swift-prowser` (settings, thumbnail cache, image recognition cache, `.prsort`). That is separate from the Python app’s `~/.prowser`.
-
-See **Help → Image Search (Native)…** for caveats vs the Python app.
+Profile data defaults to `~/.swift-prowser` (separate from Python `~/.prowser` unless you point both at the same profile path).
 
 ## One-line summary
 
-**Swift is the whole app.** No Python helper processes are required or started.
+**Swift is the whole app.** Image generation is optional and uses a thin Python registry plus local MFLUX CLIs—not the full Python image browser process.

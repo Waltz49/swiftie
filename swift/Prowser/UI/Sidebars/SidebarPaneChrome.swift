@@ -16,9 +16,9 @@ struct SidebarPaneTitlebar: View {
     var onTitlebarDragEnded: (() -> Void)? = nil
     var status: String? = nil
     var omitLeftBorder: Bool = false
+    var showsFlyoutButton: Bool = false
+    var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
-    /// File tree keyboard focus: `current_image_background_color_hex` (active image background).
-    var titlebarFocusHighlighted: Bool = false
 
     @State private var dragStartY: CGFloat?
     @State private var suppressTitleClick = false
@@ -46,6 +46,16 @@ struct SidebarPaneTitlebar: View {
                     .foregroundStyle(colors.sidebarHeaderText)
             }
 
+            if showsFlyoutButton, let onFlyout {
+                SidebarTitlebarChipButton(
+                    tooltip: "Open floating job control panel",
+                    image: { colors, hover in
+                        TitlebarIcons.flyoutIcon(paneMode: true, colors: colors, hover: hover)
+                    },
+                    action: onFlyout
+                )
+            }
+
             SidebarTitlebarChipButton(
                 tooltip: isExpanded ? "Hide pane" : "Show pane",
                 image: { colors, hover in
@@ -71,11 +81,7 @@ struct SidebarPaneTitlebar: View {
             }
             onTitleClick?()
         }
-        .background(
-            titlebarFocusHighlighted
-                ? colors.currentImageBackground
-                : colors.sidebarHeaderBackground
-        )
+        .background(colors.sidebarHeaderBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(colors.sidebarHeaderBorder)
@@ -118,7 +124,7 @@ struct SidebarPaneTitlebar: View {
     }
 }
 
-/// Titlebar + content for a sidebar pane in the stack (collapsed panes may keep content mounted).
+/// Titlebar + content for an open sidebar pane (closed panes are omitted from the stack).
 struct SidebarPaneSection<Content: View>: View {
     @Environment(AppState.self) private var appState
 
@@ -134,8 +140,9 @@ struct SidebarPaneSection<Content: View>: View {
     var onTitlebarDragEnded: (() -> Void)? = nil
     var status: String? = nil
     var omitLeftBorder: Bool = false
+    var showsFlyoutButton: Bool = false
+    var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
-    var titlebarFocusHighlighted: Bool = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -153,29 +160,29 @@ struct SidebarPaneSection<Content: View>: View {
                 onTitlebarDragEnded: onTitlebarDragEnded,
                 status: status,
                 omitLeftBorder: omitLeftBorder,
-                contextMenuKind: contextMenuKind,
-                titlebarFocusHighlighted: titlebarFocusHighlighted
+                showsFlyoutButton: showsFlyoutButton,
+                onFlyout: onFlyout,
+                contextMenuKind: contextMenuKind
             )
 
-            content()
-                .frame(maxWidth: .infinity, maxHeight: isExpanded ? .infinity : 0, alignment: .top)
-                .opacity(isExpanded ? 1 : 0)
-                .allowsHitTesting(isExpanded)
-                .accessibilityHidden(!isExpanded)
-                .clipped()
-                .background(appState.theme.colors.sidebarBackground)
-                .overlay(alignment: .leading) {
-                    if !omitLeftBorder {
+            if isExpanded {
+                content()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
+                    .background(appState.theme.colors.sidebarBackground)
+                    .overlay(alignment: .leading) {
+                        if !omitLeftBorder {
+                            Rectangle()
+                                .fill(appState.theme.colors.sidebarHeaderBorder)
+                                .frame(width: 1)
+                        }
+                    }
+                    .overlay(alignment: .trailing) {
                         Rectangle()
                             .fill(appState.theme.colors.sidebarHeaderBorder)
                             .frame(width: 1)
                     }
-                }
-                .overlay(alignment: .trailing) {
-                    Rectangle()
-                        .fill(appState.theme.colors.sidebarHeaderBorder)
-                        .frame(width: 1)
-                }
+            }
         }
         .frame(
             maxWidth: .infinity,
@@ -216,11 +223,18 @@ struct SidebarPaneBody<Content: View>: View {
             FileTreeToolbarView()
         case .information:
             InformationActionBarView()
+        case .jobs:
+            JobsToolbarView()
         }
     }
 
     private func usesInternalContextMenu(_ kind: SidebarPaneContextMenuKind) -> Bool {
-        kind == .fileTree
+        switch kind {
+        case .fileTree, .jobs:
+            return true
+        default:
+            return false
+        }
     }
 
     private func toolbarVisible(for kind: SidebarPaneContextMenuKind) -> Bool {
@@ -229,6 +243,8 @@ struct SidebarPaneBody<Content: View>: View {
             return appState.fileTreeToolbarVisible
         case .information:
             return appState.informationMenuBarVisible
+        case .jobs:
+            return appState.jobsToolbarVisible
         }
     }
 }

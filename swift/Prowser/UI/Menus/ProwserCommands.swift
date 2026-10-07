@@ -951,6 +951,65 @@ private struct ThemeMenuContent: View {
     }
 }
 
+/// Image generation menu (separate type — `ProwserCommands` is at the ten-entry `CommandsBuilder` limit).
+struct ProwserImageCommands: Commands {
+    @Bindable var appState: AppState
+
+    private var imageGenCommandsEnabled: Bool {
+        MainActor.assumeIsolated {
+            _ = appState.menuCommandsRevision
+            return BundleCapabilities.imageGenUIEnabled && appState.imageGen.isEnabled
+        }
+    }
+
+    var body: some Commands {
+        CommandMenu("Image") {
+            Button("Create an image from text…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "create") }
+            }
+            .disabled(!imageGenCommandsEnabled)
+
+            Button("Fast Open Image Generation") {
+                Task { @MainActor in appState.openFastImageGenDialog() }
+            }
+            .keyboardShortcut("/", modifiers: [.shift, .option])
+            .disabled(!imageGenCommandsEnabled)
+
+            Divider()
+
+            Button("Edit this image with AI…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "edit") }
+            }
+            .disabled(!imageGenCommandsEnabled)
+
+            Button("Expand this image…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "expand") }
+            }
+            .disabled(!imageGenCommandsEnabled)
+
+            Button("Infill / paint this image…") {
+                Task { @MainActor in appState.openImageGenDialog(function: "infill") }
+            }
+            .disabled(!imageGenCommandsEnabled)
+
+            Divider()
+
+            Button("Cancel Generation") {
+                Task { @MainActor in appState.confirmCancelGeneration() }
+            }
+            .disabled(!imageGenCommandsEnabled)
+
+            Divider()
+
+            Button("Toggle Job Queue") {
+                Task { @MainActor in appState.toggleJobsPanel() }
+            }
+            .keyboardShortcut("j", modifiers: .command)
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+        }
+    }
+}
+
 /// Separate `Commands` type — SwiftUI `CommandsBuilder` supports at most ten top-level entries.
 struct ProwserHelpCommands: Commands {
     @Bindable var appState: AppState

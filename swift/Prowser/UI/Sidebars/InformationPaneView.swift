@@ -68,6 +68,9 @@ struct InformationPaneView: View {
         .onChange(of: appState.theme.colors) { _, _ in
             rebuildContent()
         }
+        .onChange(of: appState.imageGenUIRevision) { _, _ in
+            rebuildContent()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
             switch action {
@@ -133,9 +136,13 @@ struct InformationPaneView: View {
             content = nil
             return
         }
+        let activeJobHeading = appState.fileData.currentImagePath.flatMap {
+            appState.imageGen.activeJobRelationHeading(for: $0)
+        }
         content = InformationPaneLayoutBuilder.buildContent(
             data: overlayData,
             sectionState: sectionState,
+            activeJobHeading: activeJobHeading,
             contentWidth: max(160, Int(appState.rightSidebarWidth) - 36)
         )
         scrollCoordinator.restoreOffset()

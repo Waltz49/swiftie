@@ -16,9 +16,28 @@ struct ProwserApp: App {
         .commands {
             if let appState = appDelegate.appState, appDelegate.isPrimary {
                 ProwserCommands(appState: appState)
+                ProwserImageCommands(appState: appState)
                 ProwserHelpCommands(appState: appState)
             }
         }
+
+        Window("Job Control", id: "jobs-panel") {
+            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
+                FloatingJobQueuePanelView()
+                    .environment(appState)
+                    .frame(minWidth: 280, minHeight: 220)
+            }
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 320, height: 420)
+
+        Window("Image Generation", id: "imagegen-unified") {
+            OptionalAppStateWindow(appState: appDelegate.appState) { appState in
+                ImageGenUnifiedDialog()
+                    .environment(appState)
+            }
+        }
+        .defaultSize(width: 720, height: 560)
     }
 }
 
@@ -30,6 +49,7 @@ struct ChromeSavedLayout: Equatable {
     var chatVisible: Bool
     var shortcutsVisible: Bool
     var informationVisible: Bool
+    var jobsVisible: Bool
     var leftSidebarVisible: Bool
     var rightSidebarVisible: Bool
     var leftSidebarWidth: CGFloat

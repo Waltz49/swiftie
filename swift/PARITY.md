@@ -240,6 +240,8 @@ Top-level **Move to** / **Copy to** menu (title follows `destination_menu_action
 
 ## Menus — Image (generation)
 
+WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and MFLUX CLI probe (`MfluxToolchain`). Generation runs via `mflux-generate-*`, not Python `model_tasks_worker`.
+
 - [x] Create an image from text… (`ImageGenUnifiedDialog` — intro, scroll fields, collapsible AI + custom size with pipeline dim limits)
 - [~] Fast create / preset submenu entries (`image_gen_menu.py` — ⇧⌥/ fast-open; per-function submenu partial)
 - [~] Edit / Expand / Infill dialogs (unified shell: icon switcher, source nav, footer Cancel/Close/Replace/Generate)
@@ -249,7 +251,7 @@ Top-level **Move to** / **Copy to** menu (title follows `destination_menu_action
 - [~] Job queue in right sidebar pane (AppKit cards + drag reorder)
 - [~] Progressive preview path display (tap opens browse)
 - [~] Job shortcuts: J pane, ⌘J panel, ⌃J size cycle, ⌥[/]\\, ⌥/, ⇧⌥/, ⌘⌥/
-- [x] LoRA stack picker UI (`--min` hidden; field layout via registry bridge)
+- [~] LoRA stack picker UI — stub “Not implemented yet” on WithGen (CLI omits LoRA; full picker on Python)
 
 ## Menus — Tools
 

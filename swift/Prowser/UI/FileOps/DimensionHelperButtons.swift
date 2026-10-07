@@ -30,4 +30,14 @@ enum ImageGenDimHelperTooltips {
         + "max size from Settings Dialog."
     static let square = "Square:\nMake width and height equal."
     static let reverse = "Reverse:\nSwap width and height."
+    static let aspect =
+        "Keep width and height proportional\nwhen either dimension is changed."
+    static let doubleArea =
+        "Double the pixel area (width × height),\n"
+        + "keeping aspect ratio.\n"
+        + "Limited by min/max size and Settings."
+    static let halfArea =
+        "Halve the pixel area (width × height),\n"
+        + "keeping aspect ratio.\n"
+        + "Limited by min/max size and Settings."
 }

@@ -75,6 +75,10 @@ extension AppState {
     func loadSidebarToolbarSettings() {
         fileTreeToolbarVisible = config.bool(forKey: "file_tree_show_toolbar", default: true)
         informationMenuBarVisible = config.bool(forKey: "information_show_menu_bar", default: true)
+        jobsToolbarVisible = config.bool(forKey: "jobs_show_toolbar", default: true)
+        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
+        jobsPanelAlwaysOnTop = imagegen["job_queue_always_on_top"] as? Bool ?? false
+        imageGen.reloadToolbarSettings(from: imagegen)
     }
 
     func reloadSidebarWidthsFromConfig() {
@@ -335,6 +339,7 @@ extension AppState {
             chatVisible: config.bool(forKey: "chat_visible", default: false),
             shortcutsVisible: config.bool(forKey: "shortcuts_sidebar_visible", default: true),
             informationVisible: config.bool(forKey: "information_sidebar_visible", default: true),
+            jobsVisible: config.bool(forKey: "jobs_visible", default: true),
             leftSidebarVisible: config.bool(forKey: "left_sidebar_visible", default: true),
             rightSidebarVisible: config.bool(forKey: "right_sidebar_visible", default: true),
             leftSidebarWidth: leftSidebarWidth,
@@ -359,6 +364,7 @@ extension AppState {
         config.updateSetting("chat_visible", value: layout.chatVisible)
         config.updateSetting("shortcuts_sidebar_visible", value: layout.shortcutsVisible)
         config.updateSetting("information_sidebar_visible", value: layout.informationVisible)
+        config.updateSetting("jobs_visible", value: layout.jobsVisible)
         config.updateSetting("left_sidebar_visible", value: layout.leftSidebarVisible)
         config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
         persistSidebarWidth(side: .left, width: leftSidebarWidth)
@@ -372,6 +378,9 @@ extension AppState {
         config.updateSetting("chat_visible", value: true)
         config.updateSetting("shortcuts_sidebar_visible", value: true)
         config.updateSetting("information_sidebar_visible", value: true)
+        if BundleCapabilities.imageGenUIEnabled {
+            config.updateSetting("jobs_visible", value: true)
+        }
         config.updateSetting("left_sidebar_visible", value: true)
         config.updateSetting("right_sidebar_visible", value: true)
     }
@@ -394,6 +403,9 @@ extension AppState {
         config.updateSetting("chat_visible", value: layout.chatVisible)
         config.updateSetting("shortcuts_sidebar_visible", value: layout.shortcutsVisible)
         config.updateSetting("information_sidebar_visible", value: layout.informationVisible)
+        if BundleCapabilities.imageGenUIEnabled {
+            config.updateSetting("jobs_visible", value: layout.jobsVisible)
+        }
         config.updateSetting("right_sidebar_visible", value: layout.rightSidebarVisible)
     }
 

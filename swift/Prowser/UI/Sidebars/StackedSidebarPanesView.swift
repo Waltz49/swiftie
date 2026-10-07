@@ -10,6 +10,8 @@ struct SidebarPaneDescriptor {
     var omitLeftBorder: Bool = false
     var allowsTitlebarDrag: Bool = false
     var allowsDoubleClickFit: Bool = true
+    var isJobsPane: Bool = false
+    var showsFlyoutButton: Bool = false
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
     /// Measured at double-click time (Python `_needed_pane_height`), not during body evaluation.
     var preferredFitContentHeight: () -> CGFloat = { 120 }
@@ -58,6 +60,12 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             .onChange(of: appState.sidebarLayoutRevision) { _, _ in
                 relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
             }
+            .onChange(of: appState.jobsDisplayMode) { _, _ in
+                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
+            }
+            .onChange(of: appState.jobsQueueSizeMode) { _, _ in
+                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(appState.theme.colors.sidebarBackground)
@@ -69,6 +77,17 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                     .frame(width: CGFloat(max(1, appState.theme.colors.viewBorderWidthPx)))
             }
         }
+    }
+
+    private var layoutSignature: String {
+        descriptors.map { descriptor in
+            let expanded = model.paneExpanded(
+                configKey: descriptor.expandedConfigKey,
+                default: descriptor.defaultExpanded
+            )
+            return "\(descriptor.index):\(descriptor.isDisplayed):\(expanded)"
+        }.joined(separator: "|")
+        + "|jobs:\(appState.jobsDisplayMode.rawValue)|mode:\(appState.jobsQueueSizeMode.rawValue)"
     }
 
     @ViewBuilder
@@ -100,8 +119,9 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                 : nil,
             status: descriptor.status,
             omitLeftBorder: model.side == .right ? true : descriptor.omitLeftBorder,
-            contextMenuKind: descriptor.contextMenuKind,
-            titlebarFocusHighlighted: descriptor.contextMenuKind == .fileTree && appState.fileTreeKeyboardFocused
+            showsFlyoutButton: descriptor.showsFlyoutButton,
+            onFlyout: descriptor.showsFlyoutButton ? { appState.showJobsPanel() } : nil,
+            contextMenuKind: descriptor.contextMenuKind
         ) {
             SidebarPaneBody(kind: descriptor.contextMenuKind) {
                 paneContent(for: descriptor.index)
@@ -163,6 +183,14 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         let allocHeight = max(totalHeight - splitterTotal, CGFloat(displayedCount) * SidebarPaneLayout.headerHeight)
         let updated = model.layoutSizes(totalHeight: allocHeight, appState: appState)
         model.applySizes(updated, appState: appState, persist: false)
+        refitJobsPane(appState: appState)
+    }
+
+    /// `scaledSizes` drift goes to the last pane; re-pin jobs to content. In ALL+multi-job
+    /// mode `resizeJobsPaneToMode` is grow-only, so the user's height is otherwise kept.
+    private func refitJobsPane(appState: AppState) {
+        guard model.side == .right, appState.jobsDisplayMode == .pane else { return }
+        model.resizeJobsPaneToMode(appState: appState)
     }
 
     private func togglePane(_ descriptor: SidebarPaneDescriptor) {
@@ -179,6 +207,10 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
     }
 
     private func handleDoubleClick(_ descriptor: SidebarPaneDescriptor) {
+        if descriptor.isJobsPane {
+            model.cycleJobsPaneSize(appState: appState)
+            return
+        }
         model.togglePaneFit(
             paneIndex: descriptor.index,
             appState: appState,

@@ -40,6 +40,26 @@ final class AppState {
     let rightSidebarSplit: SidebarPaneSplitModel
     let directoryHistory = DirectoryHistory()
     let browseImageHistory = BrowseImageHistoryController()
+    let workers: ImageGenServices
+    let imageGen: ImageGenController
+    var jobsDisplayMode: JobsDisplayMode = .pane
+    var jobsQueueSizeMode: JobsQueueSizeMode = .all
+    var showFloatingJobsPanel = false
+    var showImageGenCreateSheet = false
+    var showImageGenUnifiedDialog = false
+    var imageGenDialogReloadToken = 0
+    var imageGenUIRevision = 0
+    var imageGenDialogRequest = ImageGenDialogRequest.empty
+    var jobsToolbarVisible = true
+    var jobsPanelAlwaysOnTop = false
+    var measuredJobsCardStackHeight: CGFloat = 0
+    var measuredActiveJobStripHeight: CGFloat = 0
+    var isAdjustingJobsPaneGeometry = false
+    var progressiveRefreshTask: Task<Void, Never>?
+    var pendingProgressivePath: String?
+    var pendingProgressiveForceEnterBrowse = false
+    var prowserGeneratedImageOpenTask: Task<Void, Never>?
+    private let generationTimingDialog = GenerationTimingDialogController()
     var fileTreeFocusToken = 0
     /// Tree pane keyboard focus (Python `combined_sidebar._update_tree_header_focus`).
     var fileTreeKeyboardFocused = false
@@ -101,6 +121,7 @@ final class AppState {
             || showSimilaritySearchSheet
             || showClipSearchSheet
             || showPersonSearchSheet
+            || showImageGenCreateSheet
             || isAboutDialogVisible
             || showMoveWorkFilesSheet
     }
@@ -239,6 +260,14 @@ final class AppState {
             ignoreExifRotation: config.ignoreExifRotation
         )
         metadataCache = MetadataCacheService(paths: profilePaths)
+        workers = ImageGenServices(profilePath: launchOptions.profilePath, config: config)
+        imageGen = ImageGenController(
+            config: config,
+            modelTasks: workers.modelTasks,
+            foregroundTasks: workers.foregroundModelTasks,
+            registry: workers.imageGenRegistry
+        )
+        ExifBridgeSupport.registry = workers.imageGenRegistry
         renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
@@ -277,6 +306,20 @@ final class AppState {
         keyboardHandler.bind(self)
         statusBarPeekMonitor.bind(self)
         browseImageHistory.bind(self)
+        imageGen.scheduleStartupQueueRelease()
+        imageGen.onImageGenerated = { [weak self] path in
+            guard let self else { return }
+            let folder = (path as NSString).deletingLastPathComponent
+            let name = (path as NSString).lastPathComponent
+            status.show("Saved \(name) to \(folder)")
+            showProwserGeneratedImage(at: path)
+        }
+        imageGen.onProgressivePreview = { [weak self] path, forceEnterBrowse in
+            self?.scheduleProgressiveBrowseRefresh(path, forceEnterBrowse: forceEnterBrowse)
+        }
+        imageGen.onQueueChanged = { [weak self] in
+            self?.bumpImageGenUI()
+        }
         KeyboardInputTracer.installIfNeeded(config: config)
 
         directoryHistory.referenceGraphStateProvider = { [weak self] in
@@ -1581,11 +1624,9 @@ final class AppState {
         }
     }
 
-    func confirmQuitIfRunning() -> Bool {
-        true
-    }
-
     func prepareForApplicationExit() {
+        imageGen.cleanup()
+        workers.shutdown()
         auxiliaryDialogs.closeAll()
     }
 

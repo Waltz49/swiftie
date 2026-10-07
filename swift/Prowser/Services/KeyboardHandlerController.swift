@@ -27,6 +27,9 @@ final class KeyboardHandlerController {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             self.appState?.recordSearchInvocationTreeContextFromKeyEvent(event)
+            if self.tryHandleJobsPanelToggleShortcut(event) {
+                return nil
+            }
             if self.tryHandleFileTreeKeyboard(event) {
                 return nil
             }
@@ -36,6 +39,19 @@ final class KeyboardHandlerController {
             let handled = self.handleKeyDown(event)
             return handled ? nil : event
         }
+    }
+
+    /// ⌘J — show/hide floating job control panel (main window, panel, and text fields).
+    private func tryHandleJobsPanelToggleShortcut(_ event: NSEvent) -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled, let appState else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command),
+              !flags.contains(.shift),
+              !flags.contains(.option),
+              !flags.contains(.control) else { return false }
+        guard event.charactersIgnoringModifiers?.lowercased() == "j" else { return false }
+        appState.toggleJobsPanel()
+        return true
     }
 
     /// Tree forwards unhandled keys here (Python `keyboard_handler_manager.handle_key_event` from the tree view).
@@ -185,6 +201,50 @@ final class KeyboardHandlerController {
            let digit = controlDigitIndex(event) {
             appState.fileOperations.openFavoriteDirectory(slot: digit + 1)
             return true
+        }
+
+        if hasCommand, hasOption, !hasShift, !hasControl {
+            if event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
+                if BundleCapabilities.imageGenUIEnabled {
+                    appState.editActiveQueueJob()
+                    return true
+                }
+            }
+        }
+
+        if hasControl, !hasCommand, !hasShift, !hasOption,
+           event.charactersIgnoringModifiers?.lowercased() == "j" {
+            appState.cycleActiveJobsSurfaceSize()
+            return true
+        }
+
+        if hasOption, !hasCommand, !hasShift, !hasControl {
+            switch event.charactersIgnoringModifiers {
+            case "[", "{":
+                appState.setJobsQueueSizeMode(.strip)
+                return true
+            case "]", "}":
+                appState.setJobsQueueSizeMode(.one, requireActive: true)
+                return true
+            case "\\", "|":
+                appState.setJobsQueueSizeMode(.all, requireActive: true)
+                return true
+            case "/", "÷":
+                if BundleCapabilities.imageGenUIEnabled {
+                    appState.openImageGenDialog(function: "create")
+                    return true
+                }
+            default:
+                break
+            }
+        }
+
+        if hasShift, hasOption, !hasCommand, !hasControl,
+           event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
+            if BundleCapabilities.imageGenUIEnabled {
+                appState.openFastImageGenDialog()
+                return true
+            }
         }
 
         // ^H — open home directory (Python Tools menu Meta+H).

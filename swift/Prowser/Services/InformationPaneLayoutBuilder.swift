@@ -28,6 +28,7 @@ enum InformationPaneLayoutBuilder {
     static func buildContent(
         data: InformationOverlayData,
         sectionState: InformationSectionState,
+        activeJobHeading: String? = nil,
         contentWidth: Int
     ) -> InformationPaneContent {
         let hasExifFields = data.fieldValuePairs.contains { !basicInfoFields.contains($0.0) }
@@ -54,6 +55,7 @@ enum InformationPaneLayoutBuilder {
         }
 
         return InformationPaneContent(
+            activeJobHeading: activeJobHeading,
             filenameSection: filenameSection,
             descriptionSection: descriptionSection
         )
