@@ -2,6 +2,29 @@ import XCTest
 @testable import Prowser
 
 final class ThumbnailUniformGridLayoutTests: XCTestCase {
+    func testPartialPageCentersInViewport() {
+        let paths = (0..<4).map { "/tmp/grid/file_\($0).jpg" }
+        let viewportWidth: CGFloat = 1000
+        let viewportHeight: CGFloat = 800
+        let layout = ThumbnailStandardGridLayout.compute(
+            paths: paths,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            thumbnailSize: 280,
+            showFilename: false,
+            showImageSize: false,
+            showExtensions: true,
+            basenamesNeedingExtensions: []
+        )
+        guard let frame0 = layout.itemFrames[0] else {
+            XCTFail("Missing frame")
+            return
+        }
+        XCTAssertGreaterThan(frame0.minX, ThumbnailLayout.baseMargin)
+        let topMargin = ThumbnailLayout.canvasInset + ThumbnailGridLayoutService.canvasTopMargin
+        XCTAssertGreaterThan(frame0.minY, topMargin + 40)
+    }
+
     func testUniformGridOmitsOverlayWork() {
         let paths = (0..<120).map { "/tmp/grid/file_\($0).jpg" }
         let layout = ThumbnailStandardGridLayout.compute(

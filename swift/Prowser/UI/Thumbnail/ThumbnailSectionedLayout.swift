@@ -49,6 +49,7 @@ enum ThumbnailSectionedLayout {
         var rowLayout: RowLayout
         var rowVerticalBounds: [(minY: CGFloat, maxY: CGFloat)] = []
         var usesUniformRowHeights: Bool = false
+        var gridXOffset: CGFloat = ThumbnailLayout.baseMargin
     }
 
     /// Largest overlay band in duplicate section mode (for thumbnail size calculation).
@@ -173,6 +174,7 @@ enum ThumbnailSectionedLayout {
         paths: [String],
         sections: [DuplicateGroupPresentation.DuplicateSection],
         viewportWidth: CGFloat,
+        viewportHeight: CGFloat = 0,
         thumbnailSize: CGFloat,
         showFilename: Bool,
         showImageSize: Bool,
@@ -186,6 +188,8 @@ enum ThumbnailSectionedLayout {
             separatorLabels: sections.map { _ in nil as String? },
             duplicateSeparatorLine: true,
             viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            centerVerticallyInViewport: true,
             thumbnailSize: thumbnailSize,
             showFilename: showFilename,
             showImageSize: showImageSize,
@@ -209,6 +213,7 @@ enum ThumbnailSectionedLayout {
         paths: [String],
         sections: [ExifSectionPresentation.Section],
         viewportWidth: CGFloat,
+        viewportHeight: CGFloat = 0,
         thumbnailSize: CGFloat,
         showFilename: Bool,
         showImageSize: Bool,
@@ -222,6 +227,8 @@ enum ThumbnailSectionedLayout {
             separatorLabels: sections.map(\.sectionKey),
             duplicateSeparatorLine: false,
             viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            centerVerticallyInViewport: false,
             thumbnailSize: thumbnailSize,
             showFilename: showFilename,
             showImageSize: showImageSize,
@@ -247,6 +254,8 @@ enum ThumbnailSectionedLayout {
         separatorLabels: [String?],
         duplicateSeparatorLine: Bool,
         viewportWidth: CGFloat,
+        viewportHeight: CGFloat,
+        centerVerticallyInViewport: Bool,
         thumbnailSize: CGFloat,
         showFilename: Bool,
         showImageSize: Bool,
@@ -415,6 +424,26 @@ enum ThumbnailSectionedLayout {
         for separator in separators {
             contentBottom = max(contentBottom, separator.rect.maxY)
         }
+        if centerVerticallyInViewport, viewportHeight > 0 {
+            let deltaY = ThumbnailLayout.centeredGridVerticalOffset(
+                contentBottomY: contentBottom,
+                topMargin: topMargin,
+                viewportHeight: viewportHeight
+            )
+            if deltaY != 0 {
+                var rowVerticalBounds: [(minY: CGFloat, maxY: CGFloat)] = []
+                ThumbnailLayout.shiftLayoutFrames(
+                    itemFrames: &itemFrames,
+                    rowVerticalBounds: &rowVerticalBounds,
+                    deltaX: 0,
+                    deltaY: deltaY
+                )
+                for index in separators.indices {
+                    separators[index].rect.origin.y += deltaY
+                }
+            }
+        }
+
         let contentHeight = contentBottom
             + ThumbnailLayout.canvasInset
             + ThumbnailGridLayoutService.canvasBottomMargin
@@ -425,7 +454,8 @@ enum ThumbnailSectionedLayout {
             contentSize: NSSize(width: viewportWidth, height: contentHeight),
             overlayHeights: overlayHeights,
             wrappedLines: wrappedLines,
-            rowLayout: RowLayout(indexToRow: indexToRow, rowToIndices: rowToIndices)
+            rowLayout: RowLayout(indexToRow: indexToRow, rowToIndices: rowToIndices),
+            gridXOffset: xOffset
         )
     }
 

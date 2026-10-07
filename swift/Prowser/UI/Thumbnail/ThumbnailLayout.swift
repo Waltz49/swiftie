@@ -75,13 +75,59 @@ enum ThumbnailLayout {
         return stem
     }
 
+    /// Python `_update_thumbnail_rectangles` horizontal `x_offset` for a fixed-column grid.
+    static func centeredGridXOffset(
+        viewportWidth: CGFloat,
+        columnCount: Int,
+        columnStride: CGFloat,
+        minMargin: CGFloat = baseMargin
+    ) -> CGFloat {
+        guard columnCount > 0 else { return minMargin }
+        let totalGridWidth = CGFloat(columnCount) * columnStride - thumbnailSpacing
+        return max(minMargin, (viewportWidth - totalGridWidth) / 2)
+    }
+
+    /// Python vertical centering when grid content is shorter than the viewport (non-EXIF modes).
+    static func centeredGridVerticalOffset(
+        contentBottomY: CGFloat,
+        topMargin: CGFloat,
+        viewportHeight: CGFloat
+    ) -> CGFloat {
+        let bottomMargin = canvasInset + ThumbnailGridLayoutService.canvasBottomMargin
+        let totalGridHeight = contentBottomY - topMargin
+        let available = viewportHeight - topMargin - bottomMargin
+        guard available > 0, totalGridHeight < available else { return 0 }
+        return (available - totalGridHeight) / 2
+    }
+
+    static func shiftLayoutFrames(
+        itemFrames: inout [Int: NSRect],
+        rowVerticalBounds: inout [(minY: CGFloat, maxY: CGFloat)],
+        deltaX: CGFloat,
+        deltaY: CGFloat
+    ) {
+        guard deltaX != 0 || deltaY != 0 else { return }
+        for index in itemFrames.keys {
+            guard var frame = itemFrames[index] else { continue }
+            frame.origin.x += deltaX
+            frame.origin.y += deltaY
+            itemFrames[index] = frame
+        }
+        if deltaY != 0 {
+            rowVerticalBounds = rowVerticalBounds.map { span in
+                (minY: span.minY + deltaY, maxY: span.maxY + deltaY)
+            }
+        }
+    }
+
     static func metrics(
         for viewportWidth: CGFloat,
         itemCount: Int,
         showFilename: Bool,
         showImageSize: Bool = false,
         cellSize: CGFloat = defaultCellSize,
-        scrollbarWidth: CGFloat = 0
+        scrollbarWidth: CGFloat = 0,
+        xOffsetOverride: CGFloat? = nil
     ) -> GridMetrics {
         // Auto layout never passes cellSize below 150; manual sizing may go down to `minCellSize` (Python `set_thumbnail_size`).
         let targetCell = min(max(cellSize, minCellSize), maxCellSize)
@@ -95,7 +141,7 @@ enum ThumbnailLayout {
         let cellHeight = imageHeight + label
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
 
-        let xOffset = baseMargin
+        let xOffset = xOffsetOverride ?? baseMargin
 
         let contentHeight = canvasInset * 2
             + CGFloat(rows) * cellHeight

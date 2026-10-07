@@ -13,11 +13,13 @@ enum ThumbnailStandardGridLayout {
         /// Row index → vertical span in document coordinates (for viewport intersection).
         var rowVerticalBounds: [(minY: CGFloat, maxY: CGFloat)]
         var usesUniformRowHeights: Bool
+        var gridXOffset: CGFloat
     }
 
     static func compute(
         paths: [String],
         viewportWidth: CGFloat,
+        viewportHeight: CGFloat = 0,
         thumbnailSize: CGFloat,
         showFilename: Bool,
         showImageSize: Bool,
@@ -35,7 +37,8 @@ enum ThumbnailStandardGridLayout {
                 contentSize: NSSize(width: viewportWidth, height: 300),
                 rowLayout: .init(indexToRow: [:], rowToIndices: [:]),
                 rowVerticalBounds: [],
-                usesUniformRowHeights: true
+                usesUniformRowHeights: true,
+                gridXOffset: ThumbnailLayout.baseMargin
             )
         }
 
@@ -43,6 +46,7 @@ enum ThumbnailStandardGridLayout {
             return computeUniformGrid(
                 paths: paths,
                 viewportWidth: viewportWidth,
+                viewportHeight: viewportHeight,
                 thumbnailSize: thumbnailSize,
                 scrollbarWidth: scrollbarWidth
             )
@@ -128,6 +132,21 @@ enum ThumbnailStandardGridLayout {
         let contentHeight = yOffset
             + ThumbnailLayout.canvasInset
             + ThumbnailGridLayoutService.canvasBottomMargin
+        let gridXOffset = ThumbnailLayout.centeredGridXOffset(
+            viewportWidth: viewportWidth,
+            columnCount: columns,
+            columnStride: columnStride
+        )
+        let contentBottomY = yOffset
+        applyViewportCentering(
+            itemFrames: &itemFrames,
+            rowVerticalBounds: &rowVerticalBounds,
+            metricsXOffset: metrics.xOffset,
+            gridXOffset: gridXOffset,
+            contentBottomY: contentBottomY,
+            topMargin: topMargin,
+            viewportHeight: viewportHeight
+        )
         return Result(
             itemFrames: itemFrames,
             overlayHeights: overlayHeights,
@@ -139,7 +158,8 @@ enum ThumbnailStandardGridLayout {
                 rowToIndices: rowToIndices
             ),
             rowVerticalBounds: rowVerticalBounds,
-            usesUniformRowHeights: false
+            usesUniformRowHeights: false,
+            gridXOffset: gridXOffset
         )
     }
 
@@ -147,6 +167,7 @@ enum ThumbnailStandardGridLayout {
     private static func computeUniformGrid(
         paths: [String],
         viewportWidth: CGFloat,
+        viewportHeight: CGFloat,
         thumbnailSize: CGFloat,
         scrollbarWidth: CGFloat
     ) -> Result {
@@ -194,6 +215,24 @@ enum ThumbnailStandardGridLayout {
         }
         contentHeight += ThumbnailLayout.canvasInset + ThumbnailGridLayoutService.canvasBottomMargin
 
+        let gridXOffset = ThumbnailLayout.centeredGridXOffset(
+            viewportWidth: viewportWidth,
+            columnCount: columns,
+            columnStride: columnStride
+        )
+        let contentBottomY = rowCount > 0
+            ? topMargin + CGFloat(rowCount) * cellHeight + CGFloat(max(0, rowCount - 1)) * spacing
+            : topMargin
+        applyViewportCentering(
+            itemFrames: &itemFrames,
+            rowVerticalBounds: &rowVerticalBounds,
+            metricsXOffset: metrics.xOffset,
+            gridXOffset: gridXOffset,
+            contentBottomY: contentBottomY,
+            topMargin: topMargin,
+            viewportHeight: viewportHeight
+        )
+
         return Result(
             itemFrames: itemFrames,
             overlayHeights: [:],
@@ -205,7 +244,33 @@ enum ThumbnailStandardGridLayout {
                 rowToIndices: rowToIndices
             ),
             rowVerticalBounds: rowVerticalBounds,
-            usesUniformRowHeights: true
+            usesUniformRowHeights: true,
+            gridXOffset: gridXOffset
+        )
+    }
+
+    private static func applyViewportCentering(
+        itemFrames: inout [Int: NSRect],
+        rowVerticalBounds: inout [(minY: CGFloat, maxY: CGFloat)],
+        metricsXOffset: CGFloat,
+        gridXOffset: CGFloat,
+        contentBottomY: CGFloat,
+        topMargin: CGFloat,
+        viewportHeight: CGFloat
+    ) {
+        let deltaX = gridXOffset - metricsXOffset
+        let deltaY = viewportHeight > 0
+            ? ThumbnailLayout.centeredGridVerticalOffset(
+                contentBottomY: contentBottomY,
+                topMargin: topMargin,
+                viewportHeight: viewportHeight
+            )
+            : 0
+        ThumbnailLayout.shiftLayoutFrames(
+            itemFrames: &itemFrames,
+            rowVerticalBounds: &rowVerticalBounds,
+            deltaX: deltaX,
+            deltaY: deltaY
         )
     }
 }

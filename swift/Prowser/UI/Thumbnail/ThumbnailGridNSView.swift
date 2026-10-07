@@ -432,6 +432,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 paths: imagePaths,
                 sections: duplicateSections,
                 viewportWidth: viewportWidth,
+                viewportHeight: viewport.height,
                 thumbnailSize: cellSize,
                 showFilename: showFilenames,
                 showImageSize: showImageSize,
@@ -444,6 +445,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 paths: imagePaths,
                 sections: exifDateSections,
                 viewportWidth: viewportWidth,
+                viewportHeight: viewport.height,
                 thumbnailSize: cellSize,
                 showFilename: showFilenames,
                 showImageSize: showImageSize,
@@ -455,6 +457,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             let standard = ThumbnailStandardGridLayout.compute(
                 paths: imagePaths,
                 viewportWidth: viewportWidth,
+                viewportHeight: viewport.height,
                 thumbnailSize: cellSize,
                 showFilename: showFilenames,
                 showImageSize: showImageSize,
@@ -471,7 +474,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 wrappedLines: standard.wrappedLines,
                 rowLayout: standard.rowLayout,
                 rowVerticalBounds: standard.rowVerticalBounds,
-                usesUniformRowHeights: standard.usesUniformRowHeights
+                usesUniformRowHeights: standard.usesUniformRowHeights,
+                gridXOffset: standard.gridXOffset
             )
         }
         canvasLayoutResult = layout
@@ -481,7 +485,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             showFilename: showFilenames,
             showImageSize: showImageSize,
             cellSize: cellSize,
-            scrollbarWidth: verticalScrollbarReservedWidth()
+            scrollbarWidth: verticalScrollbarReservedWidth(),
+            xOffsetOverride: layout.gridXOffset
         )
         let docHeight = max(layout.contentSize.height, viewport.height)
         applyDocumentSize(
