@@ -40,6 +40,45 @@ enum ProwserTempFiles {
 
     private static let legacyProgressPrefix = ".imagegen-progress-"
 
+    /// Remove ``{profile}/tmp/imagegen-progress`` on shutdown (debug off), matching profile tmp cleanup.
+    static func cleanupImageGenProgressDirectoryOnShutdown(debugMode: Bool) {
+        guard !debugMode else { return }
+        let dir = imageGenProgressDirectory()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else { return }
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+
+    /// Port of ``prowser_temp_files.cleanup_stale_imagegen_worker_temps`` (orphaned files in profile tmp).
+    static func cleanupStaleImageGenWorkerTemps(debugMode: Bool) {
+        guard !debugMode else { return }
+        let tmpDir = (imageGenProgressDirectory() as NSString).deletingLastPathComponent
+        let prefixes = [
+            "imagegen-mflux-",
+            "imagegen-progress-",
+            "imagegen-expand-base-",
+            "imagegen-mflux-infill-",
+            "imagegen-mflux-infill-mask-",
+            "imagegen-mflux-fill-",
+            "imagegen-mflux-mask-",
+        ]
+        let dirPrefixes = ["imagegen-mflux-stepwise-"]
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmpDir) else { return }
+        for name in names {
+            let full = (tmpDir as NSString).appendingPathComponent(name)
+            if dirPrefixes.contains(where: { name.hasPrefix($0) }) {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue {
+                    try? FileManager.default.removeItem(atPath: full)
+                }
+                continue
+            }
+            if prefixes.contains(where: { name.hasPrefix($0) }) {
+                try? FileManager.default.removeItem(atPath: full)
+            }
+        }
+    }
+
     /// Port of ``prowser_temp_files.cleanup_cancelled_generation_output_artifacts``.
     static func cleanupCancelledGenerationOutputArtifacts(outputPath: String) {
         guard !outputPath.isEmpty else { return }

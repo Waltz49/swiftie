@@ -107,6 +107,21 @@ struct QueueJobStatusView {
         )
     }
 
+    /// Python ``queue_status_view_with_error_banner``.
+    static func queueStatusViewWithErrorBanner(
+        _ view: QueueJobStatusView?,
+        errorMessage: String
+    ) -> QueueJobStatusView {
+        let base = view ?? QueueJobStatusView()
+        var text = errorMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { text = "Job failed." }
+        if text.count > 400 {
+            text = String(text.prefix(397)) + "..."
+        }
+        let banner = QueueStatusRowKind.banner("Error: \(text)")
+        return QueueJobStatusView(rows: [banner] + base.rows, running: false)
+    }
+
     /// Degraded fallback when the registry bridge is unavailable.
     static func degradedFallback(prompt: String, copiesTotal: Int) -> QueueJobStatusView {
         var rows: [QueueStatusRowKind] = [.title("Generate from text", running: false)]

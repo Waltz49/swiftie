@@ -98,7 +98,7 @@ struct ImageGenPromptSection: View {
     }
 
     private func importPrompt() {
-        if function == "create", !isBrowseOrThumbnail {
+        if !isBrowseOrThumbnail {
             ImageGenExifImport.showWarning(
                 title: "Import Text",
                 message: "Select an image in browse view, or select a single thumbnail, before importing."
@@ -126,7 +126,7 @@ struct ImageGenPromptSection: View {
     }
 
     private func importRest() {
-        if function == "create", !isBrowseOrThumbnail {
+        if !isBrowseOrThumbnail {
             ImageGenExifImport.showWarning(
                 title: "Import Rest",
                 message: "Select an image in browse view, or select a single thumbnail, before importing."

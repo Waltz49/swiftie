@@ -124,6 +124,21 @@ enum JobStepQueue {
         return steps.count
     }
 
+    static func parseHeldFromDoc(_ doc: [String: Any]?) -> Bool {
+        guard let doc else { return false }
+        return doc["held"] as? Bool ?? false
+    }
+
+    static func applyHeldToDoc(_ doc: [String: Any], held: Bool) -> [String: Any] {
+        var out = doc
+        if held {
+            out["held"] = true
+        } else {
+            out.removeValue(forKey: "held")
+        }
+        return out
+    }
+
     static func buildPendingJobDoc(
         jobID: String,
         pluginID: String,
@@ -133,7 +148,8 @@ enum JobStepQueue {
         thumbnailPaths: [String],
         stepsDone: Int = 0,
         continuousMode: Bool = false,
-        continuousTemplate: [String: Any]? = nil
+        continuousTemplate: [String: Any]? = nil,
+        held: Bool = false
     ) -> [String: Any] {
         var doc: [String: Any] = [
             "version": stepVersion,
@@ -153,7 +169,7 @@ enum JobStepQueue {
         if let continuousTemplate {
             doc[continuousTemplateKey] = continuousTemplate
         }
-        return doc
+        return applyHeldToDoc(doc, held: held)
     }
 
     static func buildRunningJobDoc(

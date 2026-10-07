@@ -10,7 +10,10 @@ enum WindowFullscreen {
     private static var deferredExitPersist: DispatchWorkItem?
 
     static func mainWindow() -> NSWindow? {
-        NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible }
+        if let tagged = BrowserWindowIdentity.resolveMainBrowserWindow() {
+            return tagged
+        }
+        return NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible }
     }
 
     static var isInMacOSSpace: Bool {
@@ -138,6 +141,6 @@ enum WindowFullscreen {
     }
 
     private static func isMainBrowserWindow(_ window: NSWindow) -> Bool {
-        BrowserWindowIdentity.isMainBrowserWindow(window)
+        BrowserWindowIdentity.isTaggedMainBrowserWindow(window)
     }
 }

@@ -68,15 +68,14 @@ enum SidebarPaneContextMenus {
             enabled: controller.canSkipActiveSeriesCopy,
             action: #selector(PaneMenuActions.jobsSkipCopy(_:))
         )
-        if floating {
-            menu.addItem(.separator())
-            addCheckable(
-                menu,
-                title: "Always on Top",
-                checked: appState.jobsPanelAlwaysOnTop,
-                action: #selector(PaneMenuActions.jobsAlwaysOnTop(_:))
-            )
-        }
+        menu.addItem(.separator())
+        addCheckable(
+            menu,
+            title: "Always on Top",
+            checked: appState.jobsPanelAlwaysOnTop,
+            enabled: floating,
+            action: #selector(PaneMenuActions.jobsAlwaysOnTop(_:))
+        )
         menu.addItem(.separator())
         addCheckable(
             menu,

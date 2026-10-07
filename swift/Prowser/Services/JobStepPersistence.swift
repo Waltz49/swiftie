@@ -119,6 +119,10 @@ struct ImageGenQueuedJob: Identifiable {
     var steps: [[String: Any]]
     var pluginUnavailable: Bool
     var statusView: QueueJobStatusView?
+    var jobNumber: Int?
+    var held: Bool
+    var inError: Bool
+    var errorMessage: String
 
     var id: String { jobID }
     var statusLabel: String { QueueRowSnapshot.plainText(from: statusHTML) }
@@ -135,7 +139,11 @@ struct ImageGenQueuedJob: Identifiable {
         referencesInvalid: Bool = false,
         steps: [[String: Any]] = [],
         pluginUnavailable: Bool = false,
-        statusView: QueueJobStatusView? = nil
+        statusView: QueueJobStatusView? = nil,
+        jobNumber: Int? = nil,
+        held: Bool = false,
+        inError: Bool = false,
+        errorMessage: String = ""
     ) {
         self.jobID = jobID
         self.pluginID = pluginID
@@ -149,6 +157,10 @@ struct ImageGenQueuedJob: Identifiable {
         self.steps = steps
         self.pluginUnavailable = pluginUnavailable
         self.statusView = statusView
+        self.jobNumber = jobNumber
+        self.held = held
+        self.inError = inError
+        self.errorMessage = errorMessage
     }
 
     init(document: [String: Any]) {
@@ -179,6 +191,16 @@ struct ImageGenQueuedJob: Identifiable {
         }
 
         statusHTML = document["status_html"] as? String ?? "Queued"
+        jobNumber = ImageGenJobNumber.parse(from: document)
+        held = document["held"] as? Bool ?? false
+        inError = document["in_error"] as? Bool ?? false
+        errorMessage = document["error_message"] as? String ?? ""
+        if inError == false, statusHTML == "Failed" {
+            inError = true
+            if errorMessage.isEmpty {
+                errorMessage = "Job failed."
+            }
+        }
         referencesInvalid = document["references_invalid"] as? Bool ?? false
         fullPrompt = JobStepQueue.resolvedFullPrompt(
             stored: {
@@ -221,7 +243,13 @@ struct ImageGenQueuedJob: Identifiable {
                 "thumbnail_paths": thumbnailPaths,
             ],
             "steps_done": 0,
+            "held": held,
+            "in_error": inError,
+            "error_message": errorMessage,
         ]
+        if let jobNumber {
+            doc["job_number"] = jobNumber
+        }
         if !steps.isEmpty {
             doc["steps"] = steps
         }

@@ -82,6 +82,21 @@ enum DialogGeometryPersistence {
         )
     }
 
+    /// Python ``apply_macos_frameless_floating_dialog`` — custom header flush to the window top.
+    static func applyFloatingPanelChrome(to window: NSWindow) {
+        var mask = window.styleMask
+        mask.insert(.fullSizeContentView)
+        window.styleMask = mask
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = true
+        window.toolbar = nil
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+    }
+
     static func apply(
         to window: NSWindow,
         config: AppConfig,
@@ -89,13 +104,20 @@ enum DialogGeometryPersistence {
         defaultSize: NSSize,
         minSize: NSSize,
         nestedInImageGen: Bool = false,
-        sizeFallbackKey: String? = nil
+        sizeFallbackKey: String? = nil,
+        floatingPanelChrome: Bool = false
     ) {
         var mask = window.styleMask
         mask.insert(.resizable)
         mask.insert(.miniaturizable)
+        if floatingPanelChrome {
+            mask.insert(.fullSizeContentView)
+        }
         window.styleMask = mask
         window.minSize = minSize
+        if floatingPanelChrome {
+            applyFloatingPanelChrome(to: window)
+        }
 
         if let stored = loadFrame(
             config: config,
@@ -232,6 +254,7 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
     var windowIdentifier: String?
     var windowTitle: String?
     var alwaysOnTop: Bool?
+    var hidesStandardWindowButtons = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appState: appState)
@@ -285,6 +308,9 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
             if let alwaysOnTop = settings.alwaysOnTop {
                 window.level = alwaysOnTop ? .floating : .normal
             }
+            if settings.hidesStandardWindowButtons {
+                DialogGeometryPersistence.applyFloatingPanelChrome(to: window)
+            }
 
             if configuredWindows[id] == nil {
                 DialogGeometryPersistence.apply(
@@ -294,7 +320,8 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
                     defaultSize: NSSize(width: settings.defaultWidth, height: settings.defaultHeight),
                     minSize: NSSize(width: settings.minWidth, height: settings.minHeight),
                     nestedInImageGen: settings.nestedInImageGen,
-                    sizeFallbackKey: settings.sizeFallbackKey
+                    sizeFallbackKey: settings.sizeFallbackKey,
+                    floatingPanelChrome: settings.hidesStandardWindowButtons
                 )
                 installObservers(for: window, settings: settings)
             }
@@ -391,7 +418,8 @@ extension View {
         sizeFallbackKey: String? = nil,
         windowIdentifier: String? = nil,
         windowTitle: String? = nil,
-        alwaysOnTop: Bool? = nil
+        alwaysOnTop: Bool? = nil,
+        hidesStandardWindowButtons: Bool = false
     ) -> some View {
         background(
             DialogWindowGeometryConfigurator(
@@ -404,7 +432,8 @@ extension View {
                 sizeFallbackKey: sizeFallbackKey,
                 windowIdentifier: windowIdentifier,
                 windowTitle: windowTitle,
-                alwaysOnTop: alwaysOnTop
+                alwaysOnTop: alwaysOnTop,
+                hidesStandardWindowButtons: hidesStandardWindowButtons
             )
         )
     }

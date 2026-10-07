@@ -12,6 +12,9 @@ struct QueueRowSnapshot: Identifiable {
     var pluginUnavailable: Bool
     var statusLabel: String
     var copiesTotal: Int
+    var jobNumber: Int?
+    var held: Bool
+    var inError: Bool
 
     var id: String { jobID }
 
@@ -25,7 +28,10 @@ struct QueueRowSnapshot: Identifiable {
         referencesInvalid: Bool = false,
         pluginUnavailable: Bool = false,
         statusLabel: String = "",
-        copiesTotal: Int = 1
+        copiesTotal: Int = 1,
+        jobNumber: Int? = nil,
+        held: Bool = false,
+        inError: Bool = false
     ) {
         self.jobID = jobID
         self.isActive = isActive
@@ -37,6 +43,9 @@ struct QueueRowSnapshot: Identifiable {
         self.pluginUnavailable = pluginUnavailable
         self.statusLabel = statusLabel.isEmpty ? Self.plainText(from: statusHTML) : statusLabel
         self.copiesTotal = copiesTotal
+        self.jobNumber = jobNumber
+        self.held = held
+        self.inError = inError
     }
 
     static func plainText(from html: String) -> String {

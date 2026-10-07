@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard isPrimary else { return false }
+        BrowserWindowIdentity.requestShowMainBrowserWindow()
         if !flag, let lastDir = appState.config.lastDirectory,
            FileManager.default.fileExists(atPath: lastDir) {
             appState.loadDirectory(lastDir)
@@ -215,17 +216,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func closeDuplicateMainWindows() {
         guard isPrimary else { return }
-        let mainWindows = NSApp.windows.filter(isMainBrowserWindow)
-        guard mainWindows.count > 1 else { return }
-        let keeper = NSApp.keyWindow.flatMap { isMainBrowserWindow($0) ? $0 : nil }
-            ?? mainWindows.first
-        for window in mainWindows where window !== keeper {
+        let candidates = NSApp.windows.filter { window in
+            BrowserWindowIdentity.isTaggedMainBrowserWindow(window)
+        }
+        guard candidates.count > 1 else { return }
+        let keeper = candidates.first { $0.identifier?.rawValue == BrowserWindowIdentity.main }
+            ?? candidates.first(where: \.isVisible)
+            ?? candidates.first
+        guard let keeper else { return }
+        for window in candidates where window !== keeper {
             window.close()
         }
-    }
-
-    private func isMainBrowserWindow(_ window: NSWindow) -> Bool {
-        BrowserWindowIdentity.isMainBrowserWindow(window)
     }
 
     private func installMenuBarDeduplication() {
@@ -331,6 +332,7 @@ struct OptionalAppStateWindow<Content: View>: View {
     var body: some View {
         if let appState {
             content(appState)
+                .background(MainWindowPresentationBridge())
         } else {
             SecondaryLaunchView()
         }

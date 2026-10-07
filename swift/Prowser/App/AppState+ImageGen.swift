@@ -374,6 +374,7 @@ extension AppState {
         stripHost.view.frame = NSRect(x: 0, y: 0, width: 360, height: 80)
         Task { await imageGen.refreshActiveStripView() }
 
+        let parentWindow = BrowserWindowIdentity.resolveMainBrowserWindow()
         let choice = StyledMessageDialog.present(
             title: "AI task running",
             message: "Image generation or an AI caption is in progress.\nQuit anyway?",
@@ -385,7 +386,8 @@ extension AppState {
             ],
             defaultButtonIndex: 0,
             escapeButtonIndex: 0,
-            accessoryView: stripHost.view
+            accessoryView: stripHost.view,
+            parentWindow: parentWindow
         )
         switch choice {
         case 1:

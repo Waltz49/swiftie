@@ -19,13 +19,15 @@ enum ImageGenExifImport {
         sourcePath: String?,
         appState: AppState
     ) -> String? {
+        if isBrowseOrThumbnail(appState) {
+            guard let path = activeImagePath(appState) else { return nil }
+            return exifImportablePath(path)
+        }
         if function == "edit" || function == "expand" || function == "infill" {
             guard let sourcePath, FileManager.default.isReadableFile(atPath: sourcePath) else { return nil }
             return exifImportablePath(sourcePath)
         }
-        guard isBrowseOrThumbnail(appState) else { return nil }
-        guard let path = activeImagePath(appState) else { return nil }
-        return exifImportablePath(path)
+        return nil
     }
 
     @MainActor

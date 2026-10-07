@@ -1384,8 +1384,7 @@ final class AppState {
     func closeMainWindow() {
         WindowFullscreen.noteMainWindowClosing()
         quitConfirmedViaClose = true
-        let mainWindows = NSApp.windows.filter(Self.isPrimaryBrowserWindow)
-        if let window = mainWindows.first(where: { $0 === NSApp.keyWindow }) ?? mainWindows.first {
+        if let window = BrowserWindowIdentity.resolveMainBrowserWindow() {
             window.performClose(nil)
         }
         // Extra SwiftUI scenes (Settings) can keep the process alive after the
@@ -1393,8 +1392,8 @@ final class AppState {
         NSApp.terminate(nil)
     }
 
-    private static func isPrimaryBrowserWindow(_ window: NSWindow) -> Bool {
-        BrowserWindowIdentity.isMainBrowserWindow(window)
+    func showMainBrowserWindow() {
+        BrowserWindowIdentity.requestShowMainBrowserWindow()
     }
 
     enum DialogID {
@@ -1625,6 +1624,9 @@ final class AppState {
     }
 
     func prepareForApplicationExit() {
+        let debugMode = config.bool(forKey: "debug_mode", default: false)
+        ProwserTempFiles.cleanupStaleImageGenWorkerTemps(debugMode: debugMode)
+        ProwserTempFiles.cleanupImageGenProgressDirectoryOnShutdown(debugMode: debugMode)
         imageGen.cleanup()
         workers.shutdown()
         auxiliaryDialogs.closeAll()

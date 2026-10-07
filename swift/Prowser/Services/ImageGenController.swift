@@ -48,6 +48,7 @@ final class ImageGenController {
     private var activeJobCardThumbnailPathsCache: [String] = []
     private var activePluginID = ""
     private var activeFunction = "create"
+    private var activeJobNumber: Int?
     private var pendingValues: [String: Any] = [:]
     /// Settings frozen for the in-flight copy so EXIF survives a mid-run Update
     /// (Python ``_copy_cycle_values`` / ``_copy_cycle_plugin``).
@@ -332,6 +333,7 @@ final class ImageGenController {
                 copiesTotal: normalizedCopies
             )
         }
+        job.jobNumber = ImageGenJobNumber.allocate(config: config)
         queue.jobs.append(job)
         persistQueue()
         bumpQueueRevision()
@@ -356,24 +358,27 @@ final class ImageGenController {
     // MARK: - Queue management
 
     func queueSnapshot() -> [QueueRowSnapshot] {
-        var rows = queue.jobs
+        var pending = queue.jobs
             .filter { $0.jobID != activeJobID }
             .map { job in
                 QueueRowSnapshot(
                     jobID: job.jobID,
                     isActive: false,
                     statusHTML: job.statusHTML,
-                    statusView: job.statusView,
+                    statusView: presentationStatusView(for: job),
                     thumbnailPaths: cardThumbnailPaths(job.thumbnailPaths),
                     fullPrompt: job.fullPrompt,
                     referencesInvalid: job.referencesInvalid,
                     pluginUnavailable: job.pluginUnavailable,
                     statusLabel: job.statusLabel,
-                    copiesTotal: job.copiesTotal
+                    copiesTotal: job.copiesTotal,
+                    jobNumber: job.jobNumber,
+                    held: job.held,
+                    inError: job.inError
                 )
             }
+        pending = orderSnapshotRowsUnheldBeforeHeld(pending)
         if let activeJobID {
-            let insertAt = max(0, min(activeDisplayIndex, rows.count))
             let activeRow = QueueRowSnapshot(
                 jobID: activeJobID,
                 isActive: true,
@@ -384,11 +389,30 @@ final class ImageGenController {
                 referencesInvalid: false,
                 pluginUnavailable: false,
                 statusLabel: progressMessage,
-                copiesTotal: copiesTotal
+                copiesTotal: copiesTotal,
+                jobNumber: activeJobNumber,
+                held: activeJobHeld(),
+                inError: false
             )
-            rows.insert(activeRow, at: insertAt)
+            return [activeRow] + pending
         }
-        return rows
+        return pending
+    }
+
+    private func orderSnapshotRowsUnheldBeforeHeld(_ rows: [QueueRowSnapshot]) -> [QueueRowSnapshot] {
+        let unheld = rows.filter { !$0.held }
+        let held = rows.filter { $0.held }
+        return unheld + held
+    }
+
+    private func presentationStatusView(for job: ImageGenQueuedJob) -> QueueJobStatusView? {
+        if job.inError {
+            return QueueJobStatusView.queueStatusViewWithErrorBanner(
+                job.statusView,
+                errorMessage: job.errorMessage
+            )
+        }
+        return job.statusView
     }
 
     func moveJob(before beforeJobID: String?, jobID: String) {
@@ -436,9 +460,79 @@ final class ImageGenController {
         queue.jobs[index].steps = steps
         queue.jobs[index].fullPrompt = submitValues["prompt"] as? String ?? ""
         queue.jobs[index].statusHTML = "Queued"
+        queue.jobs[index].pluginUnavailable = false
+        queue.jobs[index].inError = false
+        queue.jobs[index].errorMessage = ""
         await refreshQueuedJobStatus(at: index)
+        clearQueueErrorDisplay()
+        if activeJobID == jobID {
+            resetActiveGenerationStateForQueueRetry()
+        }
         persistQueue()
         bumpQueueRevision()
+        if !isProcessing, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed {
+            processNextIfIdle()
+        }
+    }
+
+    /// Clear jobs-pane error text after Replace/Update (stale ``lastError`` is not a start gate).
+    private func clearQueueErrorDisplay() {
+        lastError = ""
+        if !isProcessing, activeJobID == nil {
+            progressMessage = ""
+            taskStatusHTML = ""
+        }
+    }
+
+    /// Drop in-flight controller state for a queue row that failed to start (Python ``_clear_active_job_head_without_demote``).
+    private func resetActiveGenerationStateForQueueRetry() {
+        stopLiveStatusTimer()
+        removeAspectPadTemps()
+        clearCopyCycleExifSnapshot()
+        activeJobID = nil
+        activeJobNumber = nil
+        isProcessing = false
+        progressMessage = ""
+        taskStatusHTML = ""
+        activeStatusView = nil
+        activeStripView = ActiveJobStripStatusView()
+        resetActiveJobProgressTracking()
+        generationStartTime = nil
+        skipSeriesCopyInFlight = false
+        progressivePreviewPath = nil
+        activeOutputPath = nil
+        progressiveBrowseOpened = false
+        activeThumbnailPaths = []
+        activeJobCardThumbnailPathsCache = []
+        stepRunning = nil
+        stepPendingDoc = nil
+        copyBatchActive = false
+        copiesTotal = 0
+        copiesDone = 0
+        jobAIStageActive = false
+        activePluginID = ""
+        activeFunction = "create"
+        pendingValues = [:]
+        copyBatchCancelled = false
+        pendingCancelJobID = ""
+    }
+
+    /// Status-bar task dot (Python ``_update_status_bar_indicator``).
+    func statusBarIndicatorKind() -> String? {
+        guard isEnabled else { return nil }
+        if modelTasks.workerNeedsCleanup {
+            return "cleanup"
+        }
+        if cooldownSecondsRemaining > 0 {
+            return "cooldown"
+        }
+        if foregroundTasks.isBusy {
+            return "caption"
+        }
+        if modelTasks.isBusy || jobAIStageActive || isProcessing {
+            return "generate"
+        }
+        return nil
     }
 
     func updateActiveJobRemaining(jobID: String, pluginID: String, values: [String: Any]) async throws {
@@ -684,14 +778,96 @@ final class ImageGenController {
 
     func jobsHeaderStatusText() -> String {
         let rows = queueSnapshot()
-        if holdJobQueue {
-            let held = rows.count
-            if held > 0 { return "=\(held) " }
-            return ""
+        let waiting = rows.filter { !$0.isActive && !$0.held }.count
+        if waiting <= 0 { return "" }
+        if holdJobQueue { return "=\(waiting) " }
+        return "+\(waiting) "
+    }
+
+    func jobHeld(jobID: String) -> Bool {
+        let id = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+        if id == activeJobID { return activeJobHeld() }
+        return queue.jobs.first(where: { $0.jobID == id })?.held ?? false
+    }
+
+    func jobInError(jobID: String) -> Bool {
+        let id = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+        return queue.jobs.first(where: { $0.jobID == id })?.inError ?? false
+    }
+
+    func canClickJobNumber(jobID: String) -> Bool {
+        if jobInError(jobID: jobID) { return true }
+        return canToggleJobHeld(jobID: jobID)
+    }
+
+    func canToggleJobHeld(jobID: String) -> Bool {
+        let id = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+        if id != activeJobID {
+            return queue.jobs.contains(where: { $0.jobID == id })
         }
-        let waiting = rows.filter { !$0.isActive }.count
-        if waiting > 0 { return "+\(waiting) " }
-        return ""
+        guard activeJobID != nil else { return false }
+        if jobAIStageActive || modelTasks.isBusy || cooldownSecondsRemaining > 0 {
+            return true
+        }
+        if isProcessing || copyBatchActive {
+            return true
+        }
+        return true
+    }
+
+    @discardableResult
+    func releaseJobFromError(jobID: String) -> Bool {
+        let id = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, let index = queue.jobs.firstIndex(where: { $0.jobID == id }) else { return false }
+        guard queue.jobs[index].inError else { return false }
+        queue.jobs[index].inError = false
+        queue.jobs[index].errorMessage = ""
+        queue.jobs[index].statusHTML = "Queued"
+        bumpQueueRevision()
+        Task {
+            await refreshQueuedJobStatus(at: index)
+            persistQueue()
+            bumpQueueRevision()
+            if activeJobID == nil, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed {
+                await startNextQueuedJobIfIdle()
+            }
+        }
+        return true
+    }
+
+    @discardableResult
+    func toggleJobHeld(jobID: String) -> Bool {
+        let id = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, canToggleJobHeld(jobID: id) else { return false }
+        let newHeld = !jobHeld(jobID: id)
+        if id == activeJobID {
+            setActiveJobHeld(newHeld)
+        } else if let index = queue.jobs.firstIndex(where: { $0.jobID == id }) {
+            queue.jobs[index].held = newHeld
+        } else {
+            return false
+        }
+        persistQueue()
+        bumpQueueRevision()
+        if !newHeld, activeJobID == nil, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed {
+            Task { await startNextQueuedJobIfIdle() }
+        }
+        return true
+    }
+
+    private func activeJobHeld() -> Bool {
+        JobStepQueue.parseHeldFromDoc(stepPendingDoc)
+    }
+
+    private func setActiveJobHeld(_ held: Bool) {
+        guard let doc = stepPendingDoc else { return }
+        stepPendingDoc = JobStepQueue.applyHeldToDoc(doc, held: held)
+        if !queuePersistSuppressed {
+            JobStepPersistence.saveActivePending(stepPendingDoc, config: config)
+        }
     }
 
     // MARK: - Internal processing
@@ -710,16 +886,28 @@ final class ImageGenController {
             }
             return
         }
-        if let head = queue.jobs.first, head.pluginUnavailable {
+        if let head = queue.jobs.first, head.pluginUnavailable, isRunnableQueuedJob(head) {
             lastError =
                 "The first queued job uses an unavailable model (\(head.pluginID)). "
                 + "Edit or remove it to continue."
             return
         }
-        guard let index = queue.jobs.firstIndex(where: { $0.statusHTML == "Queued" || $0.statusLabel == "Queued" }) else {
+        if let head = queue.jobs.first, head.referencesInvalid, isRunnableQueuedJob(head) {
+            lastError =
+                "The first queued job has missing reference files. "
+                + "Edit or remove it to continue."
             return
         }
+        guard let index = queue.jobs.firstIndex(where: { isRunnableQueuedJob($0) }) else {
+            return
+        }
+        clearQueueErrorDisplay()
         var job = queue.jobs[index]
+        if job.jobNumber == nil {
+            job.jobNumber = ImageGenJobNumber.allocate(config: config)
+            queue.jobs[index].jobNumber = job.jobNumber
+        }
+        activeJobNumber = job.jobNumber
         let resolvedPrompt = JobStepQueue.resolvedFullPrompt(
             stored: job.fullPrompt,
             values: job.values,
@@ -780,7 +968,8 @@ final class ImageGenController {
             function: job.function,
             steps: steps,
             fullPrompt: resolvedPrompt,
-            thumbnailPaths: job.thumbnailPaths
+            thumbnailPaths: job.thumbnailPaths,
+            held: job.held
         )
         persistQueue()
         await promoteAndRunNextStep()
@@ -1040,6 +1229,10 @@ final class ImageGenController {
                 let message = error.isEmpty ? "Image generation failed." : String(error.prefix(4000))
                 StyledMessageDialog.showCritical(title: "Generation failed", message: message)
             }
+            let err = error.isEmpty ? "Image generation failed." : error
+            if requeueFailedActiveJobAtHead(errorMessage: err) {
+                return
+            }
             finishCopyBatch(cancelled: false)
             return
         }
@@ -1102,6 +1295,7 @@ final class ImageGenController {
         removeAspectPadTemps()
         clearCopyCycleExifSnapshot()
         activeJobID = nil
+        activeJobNumber = nil
         isProcessing = false
         progressMessage = ""
         taskStatusHTML = ""
@@ -1154,6 +1348,9 @@ final class ImageGenController {
         lastError = message
         progressMessage = "Failed"
         taskStatusHTML = progressMessage
+        if requeueFailedActiveJobAtHead(errorMessage: message) {
+            return
+        }
         if let jobID = activeJobID,
            let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) {
             markQueuedJobFailed(at: index, message: message)
@@ -1161,13 +1358,168 @@ final class ImageGenController {
         finishOrAbortQueuedJobStart()
     }
 
+    private func isRunnableQueuedJob(_ job: ImageGenQueuedJob) -> Bool {
+        if job.held || job.inError { return false }
+        return job.statusHTML == "Queued" || job.statusLabel == "Queued"
+    }
+
     private func markQueuedJobFailed(at index: Int, message: String) {
         guard queue.jobs.indices.contains(index) else { return }
-        queue.jobs[index].statusHTML = "Failed"
+        let msg = message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Job failed."
+            : message
+        queue.jobs[index].statusHTML = "Queued"
+        queue.jobs[index].held = false
+        queue.jobs[index].inError = true
+        queue.jobs[index].errorMessage = msg
         if message.contains("No MFLUX CLI mapping") {
             queue.jobs[index].pluginUnavailable = true
         }
-        persistQueue()
+        Task {
+            await refreshQueuedJobStatus(at: index)
+            persistQueue()
+            bumpQueueRevision()
+        }
+    }
+
+    @discardableResult
+    private func requeueFailedActiveJobAtHead(errorMessage: String) -> Bool {
+        let jobID = activeJobID ?? ""
+        guard !jobID.isEmpty, !activePluginID.isEmpty else { return false }
+        let msg = errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Job failed."
+            : errorMessage
+        guard let collected = collectActiveRemainingStepsForRequeue() else { return false }
+
+        let (steps, values, copies) = collected
+        var submitValues = values
+        submitValues["copies"] = copies
+        let fullPrompt = JobStepQueue.resolvedFullPrompt(
+            stored: (stepPendingDoc?["display"] as? [String: Any])?["full_prompt"] as? String ?? "",
+            values: submitValues,
+            steps: steps,
+            statusView: activeStatusView
+        )
+        let thumbs = activeThumbnailPaths.isEmpty
+            ? (queue.jobs.first(where: { $0.jobID == jobID })?.thumbnailPaths ?? [])
+            : activeThumbnailPaths
+        let insertAt = max(0, min(activeDisplayIndex, queue.jobs.count))
+
+        if let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) {
+            queue.jobs[index].pluginID = activePluginID
+            queue.jobs[index].function = activeFunction
+            queue.jobs[index].pluginUnavailable = false
+            queue.jobs[index].values = submitValues
+            queue.jobs[index].copiesTotal = copies
+            queue.jobs[index].steps = steps
+            queue.jobs[index].fullPrompt = fullPrompt
+            queue.jobs[index].thumbnailPaths = thumbs
+            queue.jobs[index].held = false
+            queue.jobs[index].inError = true
+            queue.jobs[index].errorMessage = msg
+            queue.jobs[index].statusHTML = "Queued"
+            if let activeJobNumber {
+                queue.jobs[index].jobNumber = activeJobNumber
+            }
+            Task {
+                await refreshQueuedJobStatus(at: index)
+                finalizeRequeuedActiveJob()
+            }
+            return true
+        }
+
+        let job = ImageGenQueuedJob(
+            jobID: jobID,
+            pluginID: activePluginID,
+            function: activeFunction,
+            values: submitValues,
+            copiesTotal: copies,
+            statusHTML: "Queued",
+            fullPrompt: fullPrompt,
+            thumbnailPaths: thumbs,
+            steps: steps,
+            jobNumber: activeJobNumber,
+            inError: true,
+            errorMessage: msg
+        )
+        queue.jobs.insert(job, at: insertAt)
+        Task {
+            await refreshQueuedJobStatus(at: insertAt)
+            finalizeRequeuedActiveJob()
+        }
+        return true
+    }
+
+    private func finalizeRequeuedActiveJob() {
+        cooldownTask?.cancel()
+        cooldownDisplayTask?.cancel()
+        cooldownSecondsRemaining = 0
+        removeAspectPadTemps()
+        clearCopyCycleExifSnapshot()
+        activeJobID = nil
+        activeJobNumber = nil
+        isProcessing = false
+        progressMessage = ""
+        taskStatusHTML = ""
+        stopLiveStatusTimer()
+        activeStatusView = nil
+        activeStripView = ActiveJobStripStatusView()
+        resetActiveJobProgressTracking()
+        generationStartTime = nil
+        skipSeriesCopyInFlight = false
+        progressivePreviewPath = nil
+        activeOutputPath = nil
+        progressiveBrowseOpened = false
+        activeThumbnailPaths = []
+        activeJobCardThumbnailPathsCache = []
+        stepRunning = nil
+        stepPendingDoc = nil
+        copyBatchActive = false
+        copiesTotal = 0
+        copiesDone = 0
+        jobAIStageActive = false
+        copyBatchCancelled = false
+        pendingCancelJobID = ""
+        activePluginID = ""
+        activeFunction = "create"
+        pendingValues = [:]
+        if !queuePersistSuppressed {
+            JobStepPersistence.saveActiveRunning(nil, config: config)
+            JobStepPersistence.saveActivePending(nil, config: config)
+            persistQueue()
+        }
+        bumpQueueRevision()
+        if !holdJobQueue, !queueAdvanceSuppressed, !startupQueueHold {
+            if !queue.jobs.isEmpty, jobCooldownSeconds() > 0 {
+                scheduleJobCooldownThen { await self.startNextQueuedJobIfIdle() }
+            } else {
+                Task { await startNextQueuedJobIfIdle() }
+            }
+        }
+    }
+
+    private func collectActiveRemainingStepsForRequeue() -> (steps: [[String: Any]], values: [String: Any], copies: Int)? {
+        guard !activePluginID.isEmpty else { return nil }
+        let pendingCount = JobStepQueue.pendingStepCount(stepPendingDoc)
+        let continuous = JobStepQueue.isSeriesContinuousCopies(copiesTotal)
+        if pendingCount <= 0, stepRunning == nil, !continuous { return nil }
+
+        var steps: [[String: Any]] = []
+        if let stepRunning {
+            steps.append(stepRunning)
+        }
+        if let raw = stepPendingDoc?["steps"] as? [[String: Any]] {
+            steps.append(contentsOf: raw)
+        }
+        if steps.isEmpty, continuous {
+            return nil
+        }
+        guard !steps.isEmpty else { return nil }
+
+        var values = pendingValues
+        let copies = JobStepQueue.normalizeCopies(values["copies"] ?? copiesTotal)
+        values["copies"] = copies
+        return (steps, values, copies)
     }
 
     private func finishOrAbortQueuedJobStart() {
@@ -1193,32 +1545,7 @@ final class ImageGenController {
 
     /// Reset after a queued job failed to start; queue row stays in place (Python ``_abort_queued_job_start``).
     private func abortQueuedJobStart() {
-        stopLiveStatusTimer()
-        removeAspectPadTemps()
-        clearCopyCycleExifSnapshot()
-        activeJobID = nil
-        isProcessing = false
-        progressMessage = ""
-        taskStatusHTML = ""
-        activeStatusView = nil
-        activeStripView = ActiveJobStripStatusView()
-        resetActiveJobProgressTracking()
-        generationStartTime = nil
-        skipSeriesCopyInFlight = false
-        progressivePreviewPath = nil
-        activeOutputPath = nil
-        progressiveBrowseOpened = false
-        activeThumbnailPaths = []
-        activeJobCardThumbnailPathsCache = []
-        stepRunning = nil
-        stepPendingDoc = nil
-        copyBatchActive = false
-        copiesTotal = 0
-        copiesDone = 0
-        jobAIStageActive = false
-        activePluginID = ""
-        activeFunction = "create"
-        pendingValues = [:]
+        resetActiveGenerationStateForQueueRetry()
         if !queuePersistSuppressed {
             JobStepPersistence.saveActiveRunning(nil, config: config)
             JobStepPersistence.saveActivePending(nil, config: config)
@@ -1359,7 +1686,9 @@ final class ImageGenController {
             statusHTML: taskStatusHTML,
             fullPrompt: pendingValues["prompt"] as? String ?? "",
             thumbnailPaths: activeThumbnailPaths,
-            steps: stepPendingDoc?["steps"] as? [[String: Any]] ?? []
+            steps: stepPendingDoc?["steps"] as? [[String: Any]] ?? [],
+            jobNumber: activeJobNumber,
+            held: activeJobHeld()
         )
     }
 
@@ -1775,11 +2104,24 @@ final class ImageGenController {
             queue.jobs[index].thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
             queue.jobs[index].fullPrompt = built.fullPrompt
             queue.jobs[index].referencesInvalid = built.referencesInvalid
+            if queue.jobs[index].inError {
+                queue.jobs[index].statusView = QueueJobStatusView.queueStatusViewWithErrorBanner(
+                    queue.jobs[index].statusView,
+                    errorMessage: queue.jobs[index].errorMessage
+                )
+            }
         } catch {
-            queue.jobs[index].statusView = QueueJobStatusView.degradedFallback(
+            var view = QueueJobStatusView.degradedFallback(
                 prompt: job.fullPrompt,
                 copiesTotal: job.copiesTotal
             )
+            if queue.jobs[index].inError {
+                view = QueueJobStatusView.queueStatusViewWithErrorBanner(
+                    view,
+                    errorMessage: queue.jobs[index].errorMessage
+                )
+            }
+            queue.jobs[index].statusView = view
         }
     }
 
@@ -2375,6 +2717,10 @@ final class ImageGenController {
 
     private func restorePersistedJobQueue() {
         queue = JobStepPersistence.loadQueue(config: config)
+        ImageGenJobNumber.reconcile(
+            knownNumbers: queue.jobs.compactMap(\.jobNumber),
+            config: config
+        )
         activeDisplayIndex = queue.activeDisplayIndex
         let hasActive = restoreActiveJobFromStepFiles()
         Task { await refreshAllQueuedJobStatusViews() }

@@ -23,6 +23,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onSubtractSeries: ((Int, Bool) -> Void)?
     var onToggleImageRefinement: ((String, Bool) -> Void)?
     var onToggleTextRefinement: ((String, Bool) -> Void)?
+    var onJobNumberClick: ((String) -> Void)?
     var actionBarStateProvider: ((String) -> JobQueueActionBarState)?
     var onActionBarEmbedded: ((CGFloat) -> Void)?
 
@@ -256,6 +257,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         card.onCancel = { [weak self] cascade in self?.onCancel?(row.jobID, cascade) }
         card.onSelect = { [weak self] in self?.onSelect?(row.jobID) }
         card.onOpenReferences = { [weak self] paths in self?.onOpenReferences?(paths) }
+        card.onJobNumberClick = { [weak self] in self?.onJobNumberClick?(row.jobID) }
     }
 
     private func takePooledCard() -> JobCardNSView {
@@ -606,6 +608,84 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 }
 
+private enum JobNumberBadgeColors {
+    static let queuedUnheld = NSColor(red: 0.8, green: 0.67, blue: 0.13, alpha: 1)
+    static let activeRunning = NSColor(red: 0.4, green: 0.8, blue: 0.4, alpha: 1)
+    static let heldRunning = NSColor(red: 0.6, green: 0.4, blue: 0.8, alpha: 1)
+    static let errorBackground = NSColor(red: 1, green: 0.4, blue: 0.4, alpha: 1)
+}
+
+@MainActor
+private final class JobNumberBadgeLabel: NSView {
+    var onClick: (() -> Void)?
+    private let textField = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        textField.isEditable = false
+        textField.isSelectable = false
+        textField.isBezeled = false
+        textField.drawsBackground = false
+        textField.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        textField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(textField)
+        NSLayoutConstraint.activate([
+            textField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            textField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            textField.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            textField.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func apply(
+        jobNumber: Int?,
+        isActive: Bool,
+        held: Bool,
+        inError: Bool,
+        clickable: Bool,
+        cellBackground: NSColor
+    ) {
+        guard let jobNumber else {
+            isHidden = true
+            return
+        }
+        isHidden = false
+        textField.stringValue = ImageGenJobNumber.format(jobNumber)
+        let showError = inError && !isActive
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        if showError {
+            textField.textColor = .white
+            layer?.backgroundColor = JobNumberBadgeColors.errorBackground.cgColor
+        } else {
+            layer?.backgroundColor = cellBackground.cgColor
+            if isActive {
+                textField.textColor = held ? JobNumberBadgeColors.heldRunning : JobNumberBadgeColors.activeRunning
+            } else if held {
+                textField.textColor = JobNumberBadgeColors.errorBackground
+            } else {
+                textField.textColor = JobNumberBadgeColors.queuedUnheld
+            }
+        }
+        toolTip = showError
+            ? "Click to clear error and allow this job to run"
+            : (clickable ? "Click to hold or release this job" : nil)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1 {
+            onClick?()
+        }
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: onClick != nil ? .pointingHand : .arrow)
+    }
+}
+
 @MainActor
 final class JobCardNSView: NSView {
     override var isFlipped: Bool { true }
@@ -615,6 +695,7 @@ final class JobCardNSView: NSView {
     var onCancel: ((Bool) -> Void)?
     var onSelect: (() -> Void)?
     var onOpenReferences: (([String]) -> Void)?
+    var onJobNumberClick: (() -> Void)?
 
     private let backgroundView = NSView()
     private let contentView = NSView()
@@ -646,6 +727,10 @@ final class JobCardNSView: NSView {
     private var lastHasBelowRefs = false
     private var lastSelected = false
     private var lastActive = false
+    private var lastJobNumber: Int?
+    private var lastJobNumberHeld = false
+    private var lastJobNumberInError = false
+    private let jobNumberBadge = JobNumberBadgeLabel()
     private(set) var layoutHeight: CGFloat = 40
 
     override init(frame frameRect: NSRect) {
@@ -681,6 +766,9 @@ final class JobCardNSView: NSView {
         contentView.addSubview(column)
         addSubview(backgroundView)
         addSubview(contentView)
+        jobNumberBadge.translatesAutoresizingMaskIntoConstraints = false
+        jobNumberBadge.onClick = { [weak self] in self?.onJobNumberClick?() }
+        addSubview(jobNumberBadge, positioned: .above, relativeTo: contentView)
 
         let margin = JobQueueLayout.cardOuterMargin
         contentFillsCardBottomConstraint = contentView.bottomAnchor.constraint(
@@ -778,6 +866,7 @@ final class JobCardNSView: NSView {
                 layoutRefs(contentWidth: contentWidth, inline: useInline)
                 syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
             }
+            updateJobNumberDisplay(row: row)
             updateChrome(selected: selected, running: row.isActive)
             return
         }
@@ -891,8 +980,46 @@ final class JobCardNSView: NSView {
         lastInlineRefs = useInline
         lastSelected = selected
         lastActive = row.isActive
+        updateJobNumberDisplay(row: row)
         updateChrome(selected: selected, running: row.isActive)
         invalidateIntrinsicContentSize()
+    }
+
+    private func updateJobNumberDisplay(row: QueueRowSnapshot) {
+        lastJobNumber = row.jobNumber
+        lastJobNumberHeld = row.held
+        lastJobNumberInError = row.inError
+        let cellBg = NSColor(
+            row.isActive ? colors.jobQueueRunningCellBackground : colors.jobQueueCellBackground
+        )
+        jobNumberBadge.apply(
+            jobNumber: row.jobNumber,
+            isActive: row.isActive,
+            held: row.held,
+            inError: row.inError,
+            clickable: true,
+            cellBackground: cellBg
+        )
+        positionJobNumberBadge()
+    }
+
+    private func positionJobNumberBadge() {
+        guard !jobNumberBadge.isHidden else { return }
+        let inset: CGFloat = 2
+        let fit = jobNumberBadge.fittingSize
+        let w = max(44, fit.width + 8)
+        let h = fit.height + 2
+        jobNumberBadge.frame = NSRect(
+            x: bounds.width - w - inset,
+            y: inset,
+            width: w,
+            height: h
+        )
+    }
+
+    override func layout() {
+        super.layout()
+        positionJobNumberBadge()
     }
 
     private func rowContentUnchanged(
@@ -930,12 +1057,20 @@ final class JobCardNSView: NSView {
         if useInline != lastInlineRefs { return false }
         if selected != lastSelected { return false }
         if row.isActive != lastActive { return false }
+        if row.jobNumber != lastJobNumber { return false }
+        if row.held != lastJobNumberHeld { return false }
+        if row.inError != lastJobNumberInError { return false }
         return true
     }
 
     private func updateChrome(selected: Bool, running: Bool) {
         let bg = running ? colors.jobQueueRunningCellBackground : colors.jobQueueCellBackground
-        backgroundView.layer?.backgroundColor = NSColor(bg).cgColor
+        let cellNS = NSColor(bg)
+        backgroundView.layer?.backgroundColor = cellNS.cgColor
+        let showErrorBadge = lastJobNumberInError && !running
+        if !jobNumberBadge.isHidden, !showErrorBadge {
+            jobNumberBadge.layer?.backgroundColor = cellNS.cgColor
+        }
         if selected {
             backgroundView.layer?.borderWidth = CGFloat(colors.currentImageBorderWidth)
             backgroundView.layer?.borderColor = NSColor(colors.jobQueueSelectionBorder).cgColor
@@ -1254,6 +1389,14 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         }
         panel.onToggleTextRefinement = { jobID, enabled in
             appState.imageGen.setSeriesRefinement(for: jobID, image: nil, text: enabled)
+        }
+        panel.onJobNumberClick = { jobID in
+            let gen = appState.imageGen
+            if gen.jobInError(jobID: jobID) {
+                gen.releaseJobFromError(jobID: jobID)
+            } else {
+                gen.toggleJobHeld(jobID: jobID)
+            }
         }
     }
 

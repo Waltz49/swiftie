@@ -30,12 +30,6 @@ struct JobQueuePanelView: View {
             } else {
                 queueContent(mode: mode)
             }
-
-            if !controller.lastError.isEmpty {
-                Text(controller.lastError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
         }
         .padding(compactForFloating ? 10 : 8)
         .frame(maxWidth: .infinity, alignment: .top)

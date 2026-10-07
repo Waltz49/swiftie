@@ -68,10 +68,12 @@ struct ImageGenUnifiedDialog: View {
         .frame(minWidth: 880, minHeight: 560)
         .background(
             ImageGenDialogKeyHandler(
+                windowIdentifier: Self.windowIdentifier,
                 onCommandLeft: { cycleFunction(delta: -1) },
                 onCommandRight: { cycleFunction(delta: 1) },
                 onCommandReturn: { Task { await primarySubmit() } },
                 onCommandW: { performClose() },
+                onEscape: { performClose() },
                 onOptionReturn: { false },
                 onShiftOptionReturn: { false }
             )
@@ -96,7 +98,6 @@ struct ImageGenUnifiedDialog: View {
         .onDisappear {
             appState.closeImageGenUnifiedDialog()
         }
-        .onExitCommand { performClose() }
     }
 
     private var header: some View {
@@ -534,6 +535,10 @@ struct ImageGenUnifiedDialog: View {
 
     private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {
         var out = input
+        if out["random_seed"] as? Bool ?? true {
+            let seed = Int.random(in: 0...(2_147_483_647))
+            out["seed"] = seed
+        }
         switch selectedFunction {
         case "create":
             out.removeValue(forKey: "source_image_path")

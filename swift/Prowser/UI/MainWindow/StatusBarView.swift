@@ -8,25 +8,32 @@ struct StatusBarView: View {
 
     var body: some View {
         let _ = refreshTrigger
+        let _ = appState.imageGenUIRevision
         let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
         let sortReversed = appState.config.bool(forKey: "sort_reversed", default: false)
         let displayed = appState.fileData.displayedImages
         let currentPath = appState.fileData.currentImagePath
         let filterPattern = appState.filterSettings.filterPattern
         let viewMode = appState.fileData.currentViewMode
+        let jobIndicatorKind = appState.imageGen.statusBarIndicatorKind()
 
         HStack(spacing: 0) {
             ForEach(StatusBarLayout.SectionID.displayOrder, id: \.self) { sectionID in
-                sectionView(
-                    sectionID,
-                    sortMode: sortMode,
-                    sortReversed: sortReversed,
-                    displayed: displayed,
-                    currentPath: currentPath,
-                    filterPattern: filterPattern,
-                    viewMode: viewMode
-                )
-                if sectionID.showsSeparatorAfter {
+                if sectionID == .jobIndicator, jobIndicatorKind == nil {
+                    EmptyView()
+                } else {
+                    sectionView(
+                        sectionID,
+                        sortMode: sortMode,
+                        sortReversed: sortReversed,
+                        displayed: displayed,
+                        currentPath: currentPath,
+                        filterPattern: filterPattern,
+                        viewMode: viewMode,
+                        jobIndicatorKind: jobIndicatorKind
+                    )
+                }
+                if sectionID.showsSeparatorAfter, !(sectionID == .fileCount && jobIndicatorKind == nil) {
                     StatusBarSeparator()
                 }
             }
@@ -55,7 +62,8 @@ struct StatusBarView: View {
         displayed: [String],
         currentPath: String?,
         filterPattern: String,
-        viewMode: ViewMode
+        viewMode: ViewMode,
+        jobIndicatorKind: String?
     ) -> some View {
         switch sectionID {
         case .sort:
@@ -123,6 +131,26 @@ struct StatusBarView: View {
                 enabled: true,
                 action: { StatusBarMenus.showFileCountMenu(appState: appState, relativeTo: $0) }
             )
+        case .jobIndicator:
+            if let kind = jobIndicatorKind {
+                StatusBarJobIndicator(kind: kind) {
+                    appState.showJobsPanel()
+                }
+                .help(statusBarJobIndicatorHelp(kind))
+            }
+        }
+    }
+
+    private func statusBarJobIndicatorHelp(_ kind: String) -> String {
+        switch kind {
+        case "caption":
+            return "AI caption in progress (click for job queue)"
+        case "cooldown":
+            return "Cooling down between image generations (click for job queue)"
+        case "cleanup":
+            return "Releasing GPU memory before the next job (click for job queue)"
+        default:
+            return "Image generation in progress (click for job queue)"
         }
     }
 

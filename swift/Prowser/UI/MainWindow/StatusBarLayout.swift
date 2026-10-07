@@ -10,15 +10,16 @@ enum StatusBarLayout {
         case date
         case fitMode
         case fileCount
+        case jobIndicator
 
         /// Python `section_order` in `_apply_layout`.
         static let displayOrder: [SectionID] = [
-            .sort, .filter, .filename, .dimensions, .date, .fitMode, .fileCount,
+            .sort, .filter, .filename, .dimensions, .date, .fitMode, .fileCount, .jobIndicator,
         ]
 
-        /// Python separator after each section except file count.
+        /// Python separator after each section except the trailing indicator.
         var showsSeparatorAfter: Bool {
-            self != .fileCount
+            self != .jobIndicator
         }
 
         var expands: Bool {
@@ -29,7 +30,7 @@ enum StatusBarLayout {
             switch self {
             case .filename:
                 return .leading
-            case .sort, .filter, .dimensions, .date, .fitMode, .fileCount:
+            case .sort, .filter, .dimensions, .date, .fitMode, .fileCount, .jobIndicator:
                 return .center
             }
         }
