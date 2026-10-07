@@ -149,7 +149,7 @@ enum ImageGenMfluxPrep {
         guard let cg = ImageGenOutpaintMask.loadCGImage(path: source) else {
             throw MfluxCLIError.missingField("source_image_path")
         }
-        let maxSide = intValue(run["max_generation_dimension"], default: 2048)
+        // let maxSide = intValue(run["max_generation_dimension"], default: 2048)
         let w = intValue(run["width"], default: 1024)
         let h = intValue(run["height"], default: 1024)
         let px = intValue(run["placement_x"], default: 0)

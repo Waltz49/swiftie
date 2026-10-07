@@ -24,10 +24,10 @@ enum ImageGenOutpaintMask {
     ) -> (background: CGImage, mask: CGImage) {
         let cw = canvasW
         let ch = canvasH
-        var px = max(0, min(x, cw - 1))
-        var py = max(0, min(y, ch - 1))
-        var pw = max(128, min(w, cw - px))
-        var ph = max(128, min(h, ch - py))
+        let px = max(0, min(x, cw - 1))
+        let py = max(0, min(y, ch - 1))
+        let pw = max(128, min(w, cw - px))
+        let ph = max(128, min(h, ch - py))
 
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let bgCtx = CGContext(
