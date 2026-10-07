@@ -37,6 +37,8 @@ actor ThumbnailCache {
     private var decodeQueueGeneration: UInt64 = 0
     /// Last background batch session accepted from the thumbnail grid (`backgroundLoadSession`).
     private var acceptedBackgroundLoadSession: UInt64 = 0
+    /// Built once per cache lifecycle; avoids per-image `contentsOfDirectory` in `scaledDownFromLarger`.
+    private var lazyDiskThumbnailIndex: DiskThumbnailIndex?
     private let decodePool = ThumbnailDecodePool(maxConcurrent: 4)
 
     init(paths: ProfilePaths, ignoreExifRotation: Bool) {
@@ -53,6 +55,7 @@ actor ThumbnailCache {
             memoryKeysByPath.removeAll()
             diskSizesByPath.removeAll()
             mtimeStatCache.removeAll()
+            lazyDiskThumbnailIndex = nil
         }
     }
 
@@ -96,7 +99,17 @@ actor ThumbnailCache {
         memoryKeysByPath.removeAll()
         diskSizesByPath.removeAll()
         mtimeStatCache.removeAll()
+        lazyDiskThumbnailIndex = nil
         await decodePool.cancelWaiters(withPriorityAtMost: ThumbnailLoadPriority.visible.rawValue)
+    }
+
+    private func diskIndexOrBuild() -> DiskThumbnailIndex {
+        if let lazyDiskThumbnailIndex {
+            return lazyDiskThumbnailIndex
+        }
+        let built = diskThumbnailIndex()
+        lazyDiskThumbnailIndex = built
+        return built
     }
 
     func cacheKey(for imagePath: String) -> String {
@@ -426,15 +439,16 @@ actor ThumbnailCache {
             }
         }
         if bestDiskURL == nil {
-            guard let filenames = try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path) else {
-                return nil
-            }
-            for filename in filenames where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
-                guard let cachedSize = parseSize(fromDiskFilename: filename, prefix: prefix) else { continue }
-                registerDiskSize(imagePath: imagePath, size: cachedSize)
-                if cachedSize >= size && cachedSize < bestDiskSize {
+            let index = diskIndexOrBuild()
+            if let sizes = index.sizesByKey[base] {
+                for cachedSize in sizes where cachedSize >= size && cachedSize < bestDiskSize {
                     bestDiskSize = cachedSize
-                    bestDiskURL = thumbnailDirectory.appendingPathComponent(filename)
+                    bestDiskURL = thumbnailDirectory.appendingPathComponent(
+                        ThumbnailCacheKey.diskFilename(cacheKey: base, size: cachedSize)
+                    )
+                }
+                for cachedSize in sizes {
+                    registerDiskSize(imagePath: imagePath, size: cachedSize)
                 }
             }
         }

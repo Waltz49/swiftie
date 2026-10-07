@@ -47,6 +47,8 @@ enum ThumbnailSectionedLayout {
         var overlayHeights: [Int: CGFloat]
         var wrappedLines: [Int: [String]]
         var rowLayout: RowLayout
+        var rowVerticalBounds: [(minY: CGFloat, maxY: CGFloat)] = []
+        var usesUniformRowHeights: Bool = false
     }
 
     /// Largest overlay band in duplicate section mode (for thumbnail size calculation).
@@ -163,8 +165,8 @@ enum ThumbnailSectionedLayout {
         return lines.isEmpty ? [text] : lines
     }
 
-    private static func measureAdvance(_ text: String, font: NSFont) -> CGFloat {
-        (text as NSString).size(withAttributes: [.font: font]).width
+    static func measureAdvance(_ text: String, font: NSFont) -> CGFloat {
+        ThumbnailFontMetricsCache.advanceWidth(for: text, font: font)
     }
 
     static func computeDuplicateLayout(

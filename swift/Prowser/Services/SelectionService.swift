@@ -301,6 +301,13 @@ enum SelectionService {
         clearSelection(appState: appState)
         appState.eventBus.emit(.directoryLoaded, payload: .string(directory))
         appState.watchCurrentDirectory()
+        // Python `load_specific_files` → `generate_thumbnails(force_refresh=True)` recalculates grid size.
+        ThumbnailGridLayoutService.invalidateOptimalSizeCache()
+        if let grid = appState.thumbnailGridHost {
+            grid.specificFilesActive = true
+            grid.applyDisplayedPaths(selected, updateKind: .fullReplace)
+            grid.reloadLayoutIfNeeded(force: true)
+        }
         return true
     }
 

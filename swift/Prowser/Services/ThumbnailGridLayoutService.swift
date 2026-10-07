@@ -3,6 +3,20 @@ import Foundation
 
 /// Optimal thumbnail grid sizing. Port of `thumbnails/thumbnail_operations_manager.py`.
 enum ThumbnailGridLayoutService {
+    private struct OptimalSizeCacheKey: Hashable {
+        var numImages: Int
+        var availableWidthBits: UInt64
+        var availableHeightBits: UInt64
+        var overlayHeightBits: UInt64
+    }
+
+    private static var optimalSizeCache: [OptimalSizeCacheKey: Int] = [:]
+
+    /// Call when displayed count or viewport meaningfully changes (e.g. specific-files level).
+    static func invalidateOptimalSizeCache() {
+        optimalSizeCache.removeAll()
+    }
+
     /// Python `MIN_THUMBNAIL_SIZE` from `files/image_extensions_helpers.py`.
     static let minThumbnailSize = 150
     static let maxThumbnailSize = 450
@@ -21,12 +35,22 @@ enum ThumbnailGridLayoutService {
         overlayHeight: CGFloat
     ) -> Int {
         let availableWidth = viewportWidth - scrollbarWidth - baseMargin * 2
+        let key = OptimalSizeCacheKey(
+            numImages: numImages,
+            availableWidthBits: UInt64(availableWidth.bitPattern),
+            availableHeightBits: UInt64(viewportHeight.bitPattern),
+            overlayHeightBits: UInt64(overlayHeight.bitPattern)
+        )
+        if let cached = optimalSizeCache[key] {
+            return cached
+        }
         let result = calculateGridForImages(
             numImages: numImages,
             availableWidth: availableWidth,
             availableHeight: viewportHeight,
             overlayHeight: overlayHeight
         )
+        optimalSizeCache[key] = result.optimalSize
         return result.optimalSize
     }
 
@@ -109,8 +133,11 @@ enum ThumbnailGridLayoutService {
         if bestColumns <= 1 {
             let cellSize = CGFloat(minThumbnailSize) + ThumbnailLayout.borderSpace + spacing
             bestColumns = max(1, Int(availableWidth / cellSize))
+            if bestColumns > numImages { bestColumns = numImages }
             bestRows = (numImages + bestColumns - 1) / bestColumns
-            optimalSize = minThumbnailSize
+            if bestEfficiency == 0 {
+                optimalSize = minThumbnailSize
+            }
         }
 
         if optimalSize > minThumbnailSize {

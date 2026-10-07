@@ -30,6 +30,13 @@ protocol ThumbnailGridDelegate: AnyObject {
     func thumbnailGridDidUpdateLayout(columns: Int, sectionedRowLayout: ThumbnailSectionedLayout.RowLayout?)
 }
 
+/// How `displayedImages` changed relative to the previous grid list (Python `reorder_thumbnails` deltas).
+enum ThumbnailDisplayedPathsUpdateKind {
+    case fullReplace
+    case reorderOnly
+    case membershipChanged(removed: Set<String>)
+}
+
 /// Custom-painted thumbnail grid. Port of `thumbnails/thumbnail_canvas.py` (phase 1).
 @MainActor
 final class ThumbnailGridNSView: NSView, NSDraggingSource {
@@ -37,18 +44,62 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     weak var configSource: AppConfig?
     weak var appState: AppState?
 
-    var imagePaths: [String] = [] {
-        didSet {
-            if oldValue != imagePaths {
-                invalidateThumbnailLoadingSession()
-            }
-            let keeping = Set(imagePaths)
-            imageDimensionCache = imageDimensionCache.filter { keeping.contains($0.key) }
-            basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: imagePaths)
+    private(set) var imagePaths: [String] = []
+
+    /// Port of Python `reorder_thumbnails` — preserve view pixmaps and avoid full cache nukes when possible.
+    func applyDisplayedPaths(_ paths: [String], updateKind: ThumbnailDisplayedPathsUpdateKind) {
+        guard imagePaths != paths else { return }
+        let previous = imagePaths
+        imagePaths = paths
+        let keeping = Set(paths)
+        imageDimensionCache = imageDimensionCache.filter { keeping.contains($0.key) }
+
+        switch updateKind {
+        case .fullReplace:
+            invalidateThumbnailLoadingSession()
+            basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
+            pathsOrderFingerprint = Self.pathsOrderFingerprint(paths)
             ThumbnailFilenameOverlayCache.shared.clear()
-            reloadLayoutIfNeeded()
+            ThumbnailFontMetricsCache.clear()
+        case .reorderOnly:
+            pathsOrderFingerprint = Self.pathsOrderFingerprint(paths)
+            layoutDefersBackgroundLoads = true
+            if Set(previous) != keeping {
+                basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
+            }
+        case .membershipChanged(let removed):
+            pathsOrderFingerprint = Self.pathsOrderFingerprint(paths)
+            if !removed.isEmpty {
+                ThumbnailFilenameOverlayCache.shared.removeEntries(forPaths: removed)
+            }
+            basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
+            invalidateThumbnailLoadingSession()
         }
+
+        let forceRelayout: Bool
+        if case .reorderOnly = updateKind {
+            forceRelayout = true
+        } else {
+            forceRelayout = false
+        }
+        reloadLayoutIfNeeded(force: forceRelayout)
     }
+
+    private static func pathsOrderFingerprint(_ paths: [String]) -> UInt64 {
+        guard !paths.isEmpty else { return 0 }
+        var hash: UInt64 = UInt64(paths.count)
+        let samples = [0, paths.count / 2, paths.count - 1]
+        for index in samples where paths.indices.contains(index) {
+            hash = hash &* 1_099_511_628_289 &+ UInt64(bitPattern: Int64(paths[index].hashValue))
+        }
+        return hash
+    }
+
+    private var pathsOrderFingerprint: UInt64 = 0
+    private var cachedLockedFilenames: Set<String> = []
+    private var cachedLockedFilenamesDirectory: String?
+    private var lastVisiblePathsForReprioritize: [String] = []
+    private var layoutDefersBackgroundLoads = false
 
     /// When false (browse/list/etc.), visible and background thumbnail requests are not started.
     var thumbnailLoadingActive = true {
@@ -101,6 +152,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             }
         }
     }
+    /// Python `specific_files_active` — recalculate grid size for the partial page (`generate_thumbnails`).
+    var specificFilesActive = false
     /// Reference-graph presentation (Python `reference_graph_data`).
     var referenceGraph: ReferenceGraph? {
         didSet { reloadLayoutIfNeeded() }
@@ -186,6 +239,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let viewportWidth: CGFloat
         let viewportHeight: CGFloat
         let itemCount: Int
+        let pathsOrderFingerprint: UInt64
         let showFilename: Bool
         let showImageSize: Bool
         let cellSize: CGFloat
@@ -240,6 +294,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         needsDisplay = true
     }
 
+    func noteLockedFilenamesCacheInvalidated() {
+        cachedLockedFilenamesDirectory = nil
+        cachedLockedFilenames = []
+    }
+
     private var showsEmptyCanvas: Bool {
         isLoadingDirectory || imagePaths.isEmpty
     }
@@ -247,7 +306,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     func beginDirectoryLoad() {
         isLoadingDirectory = true
         imagePaths = []
+        pathsOrderFingerprint = 0
         clearThumbnails()
+        invalidateThumbnailLoadingSession()
         canvasLayoutResult = nil
         referenceLayout = nil
         reloadLayout()
@@ -260,10 +321,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         needsDisplay = true
     }
 
-    func reloadLayoutIfNeeded() {
+    func reloadLayoutIfNeeded(force: Bool = false) {
         let snapshot = currentLayoutSnapshot()
-        if snapshot == lastLayoutSnapshot { return }
-        reloadLayout()
+        if !force, snapshot == lastLayoutSnapshot { return }
+        reloadLayout(scheduleBackgroundLoads: !layoutDefersBackgroundLoads)
+        layoutDefersBackgroundLoads = false
     }
 
     /// Waits until visible viewport cells finish loading (used to dismiss CNN/CLIP search progress).
@@ -323,7 +385,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
     }
 
-    func reloadLayout() {
+    func reloadLayout(scheduleBackgroundLoads: Bool = true) {
+        let layoutStart = CFAbsoluteTimeGetCurrent()
+        ThumbnailGridPerfDiagnostics.resetMeasureAdvanceCalls()
         let viewportWidth = viewportWidthForLayout()
         lastLayoutViewportWidth = viewportWidth
         lastLayoutSnapshot = currentLayoutSnapshot(viewportWidth: viewportWidth)
@@ -405,7 +469,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 contentSize: standard.contentSize,
                 overlayHeights: standard.overlayHeights,
                 wrappedLines: standard.wrappedLines,
-                rowLayout: standard.rowLayout
+                rowLayout: standard.rowLayout,
+                rowVerticalBounds: standard.rowVerticalBounds,
+                usesUniformRowHeights: standard.usesUniformRowHeights
             )
         }
         canvasLayoutResult = layout
@@ -425,11 +491,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             )
         )
         needsDisplay = true
-        scheduleLoadVisibleThumbnails(debounced: false)
+        hydrateVisibleThumbnailsFromCacheIfNeeded()
+        if scheduleBackgroundLoads {
+            scheduleLoadVisibleThumbnails(debounced: false, allowBackgroundSweep: true)
+        } else {
+            scheduleLoadVisibleThumbnails(debounced: false, allowBackgroundSweep: false)
+        }
         gridDelegate?.thumbnailGridDidUpdateLayout(
             columns: layout.columns,
             sectionedRowLayout: layout.rowLayout
         )
+        let layoutMs = (CFAbsoluteTimeGetCurrent() - layoutStart) * 1000
+        ThumbnailGridPerfDiagnostics.recordLayout(durationMs: layoutMs)
     }
 
     private func reloadReferenceGraphLayout(graph: ReferenceGraph, viewportWidth: CGFloat) {
@@ -572,7 +645,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     func clearThumbnails() {
-        invalidateThumbnailLoadingSession()
         thumbnails.removeAll()
         loadingPaths.removeAll()
         needsDisplay = true
@@ -593,11 +665,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         backgroundLoadSession += 1
         backgroundLoadingSuspended = false
         loadingPaths.removeAll()
+        lastVisiblePathsForReprioritize = []
         cancelPendingBackgroundBatches()
         visibleLoadDebounceWorkItem?.cancel()
         visibleLoadDebounceWorkItem = nil
         visibleLoadRetryWorkItem?.cancel()
         visibleLoadRetryWorkItem = nil
+        if let appState {
+            let session = backgroundLoadSession
+            Task { await appState.thumbnailCache.noteBackgroundLoadSession(session) }
+        }
     }
 
     private func suspendBackgroundThumbnailLoading() {
@@ -657,9 +734,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let drawStart = CFAbsoluteTimeGetCurrent()
         if showsEmptyCanvas {
             emptyStateStyle.background.setFill()
-            bounds.fill()
+            dirtyRect.fill()
             let area = NSRect(origin: .zero, size: emptyStateViewportSize())
             if let message = ThumbnailEmptyStateRenderer.message(
                 directory: currentDirectory,
@@ -682,8 +760,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
 
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.clip(to: dirtyRect)
         emptyStateStyle.background.setFill()
-        bounds.fill()
+        dirtyRect.fill()
 
         if isReferenceGraphMode, let layout = referenceLayout {
             ReferenceGraphEdgeRenderer.paint(
@@ -699,7 +779,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let thumbnailLockingEnabled = appState?.config.bool(forKey: "allow_thumbnail_locking", default: false) ?? false
         let lockedFilenames: Set<String> = {
             guard thumbnailLockingEnabled, let directory = currentDirectory else { return [] }
-            return PrsortIO.lockedFilenames(in: directory)
+            if cachedLockedFilenamesDirectory == directory {
+                return cachedLockedFilenames
+            }
+            let locked = PrsortIO.lockedFilenames(in: directory)
+            cachedLockedFilenamesDirectory = directory
+            cachedLockedFilenames = locked
+            return locked
         }()
         if let canvasLayoutResult {
             for separator in canvasLayoutResult.separators where separator.rect.intersects(dirtyRect) {
@@ -770,6 +856,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         if let rect = dropIndicatorRect {
             drawDropIndicator(in: rect)
         }
+        context.restoreGState()
+        let drawMs = (CFAbsoluteTimeGetCurrent() - drawStart) * 1000
+        ThumbnailGridPerfDiagnostics.recordDraw(durationMs: drawMs)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -1098,14 +1187,15 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let paths = localFilePaths(from: sender)
         guard !paths.isEmpty else { return [] }
         let point = convert(sender.draggingLocation, from: nil)
-        let insertion = ThumbnailReorderService.insertionIndex(
-            at: CGPoint(x: point.x, y: point.y),
-            metrics: metrics,
-            itemCount: imagePaths.count
-        )
+        let insertion = insertionIndex(at: point)
         dropInsertionIndex = insertion
-        dropIndicatorRect = dropIndicatorRect(for: insertion)
-        needsDisplay = true
+        let indicator = dropIndicatorRect(for: insertion)
+        if let previous = dropIndicatorRect {
+            setNeedsDisplay(previous.union(indicator))
+        } else {
+            setNeedsDisplay(indicator)
+        }
+        dropIndicatorRect = indicator
         return internalReorderDropOperation(for: paths)
     }
 
@@ -1438,7 +1528,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         abs(lhs.width - rhs.width) < 0.5 && abs(lhs.height - rhs.height) < 0.5
     }
 
-    private func scheduleLoadVisibleThumbnails(debounced: Bool) {
+    private func scheduleLoadVisibleThumbnails(debounced: Bool, allowBackgroundSweep: Bool = true) {
         if debounced {
             visibleLoadDebounceWorkItem?.cancel()
             let work = DispatchWorkItem { [weak self] in
@@ -1452,7 +1542,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         } else {
             visibleLoadDebounceWorkItem?.cancel()
             backgroundLoadingSuspended = false
-            loadVisibleThumbnails(scheduleBackground: true)
+            loadVisibleThumbnails(
+                scheduleBackground: allowBackgroundSweep,
+                allowBackgroundSweep: allowBackgroundSweep
+            )
         }
     }
 
@@ -1490,20 +1583,60 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
+    /// Fill view-layer pixmaps from disk/memory cache for the viewport (Python reuse loaded pixmap).
+    private func hydrateVisibleThumbnailsFromCacheIfNeeded() {
+        guard thumbnailLoadingActive, let appState, let scrollView = enclosingScrollView else { return }
+        let visible = visibleThumbnailIndices(in: scrollView.documentVisibleRect)
+        guard !visible.isEmpty else { return }
+        let pixelSize = thumbnailGenerationPixelSize()
+        let pathsToHydrate: [String] = visible.prefix(80).compactMap { index in
+            guard imagePaths.indices.contains(index) else { return nil }
+            let path = imagePaths[index]
+            return thumbnails[path] == nil ? path : nil
+        }
+        guard !pathsToHydrate.isEmpty else { return }
+        let cache = appState.thumbnailCache
+        Task { @MainActor in
+            for path in pathsToHydrate {
+                guard self.imagePaths.contains(path), self.thumbnails[path] == nil else { continue }
+                guard let cgImage = await cache.cachedThumbnail(for: path, size: pixelSize) else { continue }
+                let image = NSImage(
+                    cgImage: cgImage,
+                    size: NSSize(width: cgImage.width, height: cgImage.height)
+                )
+                self.thumbnails[path] = image
+                if let paintIndex = self.imagePaths.firstIndex(of: path) {
+                    self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
+                }
+            }
+        }
+    }
+
+    private func offscreenPathsNeedLoading(excluded: Set<Int>) -> Bool {
+        for index in 0..<imagePaths.count where !excluded.contains(index) {
+            if thumbnails[imagePaths[index]] == nil {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Python `current_thumbnail_size` when auto; config `thumbnail_cell_size` when manual.
     private func resolvedLayoutCellSize(
         viewportWidth: CGFloat,
         viewportHeight: CGFloat,
         sectionedDuplicateFilenames: Bool = false
     ) -> CGFloat {
-        let manual = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        let manualFlag = configSource?.bool(forKey: "manual_thumbnail_size", default: false) ?? false
+        let manual = manualFlag && !specificFilesActive
         if manual {
             let raw = configSource?.double(forKey: "thumbnail_cell_size", default: ThumbnailLayout.defaultCellSize)
                 ?? ThumbnailLayout.defaultCellSize
-            return min(
+            let size = min(
                 ThumbnailLayout.maxCellSize,
                 max(ThumbnailLayout.minCellSize, CGFloat(raw))
             )
+            return size
         }
         var overlay = ThumbnailFilenameOverlayService.conservativeOverlayHeight(
             showFilename: showFilenames,
@@ -1543,6 +1676,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             viewportWidth: width,
             viewportHeight: height,
             itemCount: imagePaths.count,
+            pathsOrderFingerprint: pathsOrderFingerprint,
             showFilename: showFilenames,
             showImageSize: showImageSize,
             cellSize: cellSize,
@@ -1571,10 +1705,31 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let pad = expandBy ?? 0
         let query = pad > 0 ? rect.insetBy(dx: -pad, dy: -pad) : rect
         if let canvasLayoutResult {
-            return (0..<imagePaths.count).filter { index in
+            let rowBounds = canvasLayoutResult.rowVerticalBounds
+            if !rowBounds.isEmpty {
+                let rows = rowIndicesIntersecting(query, rowBounds: rowBounds)
+                var result: [Int] = []
+                for row in rows {
+                    guard let indices = canvasLayoutResult.rowLayout.rowToIndices[row] else { continue }
+                    if canvasLayoutResult.usesUniformRowHeights {
+                        result.append(contentsOf: indices)
+                    } else {
+                        for index in indices {
+                            if canvasLayoutResult.itemFrames[index]?.intersects(query) == true {
+                                result.append(index)
+                            }
+                        }
+                    }
+                }
+                ThumbnailGridPerfDiagnostics.recordIntersectionScan(count: result.count)
+                return result
+            }
+            let scanned = (0..<imagePaths.count).filter { index in
                 guard let frame = canvasLayoutResult.itemFrames[index] else { return false }
                 return frame.intersects(query)
             }
+            ThumbnailGridPerfDiagnostics.recordIntersectionScan(count: scanned.count)
+            return scanned
         }
         if isReferenceGraphMode {
             return ThumbnailLayout.indicesIntersecting(
@@ -1584,12 +1739,25 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 referenceNodeFrames: referenceNodeFrames
             )
         }
-        return ThumbnailLayout.indicesIntersecting(
+        let fallback = ThumbnailLayout.indicesIntersecting(
             query,
             metrics: metrics,
             itemCount: imagePaths.count,
             referenceNodeFrames: nil
         )
+        ThumbnailGridPerfDiagnostics.recordIntersectionScan(count: fallback.count)
+        return fallback
+    }
+
+    private func rowIndicesIntersecting(_ query: NSRect, rowBounds: [(minY: CGFloat, maxY: CGFloat)]) -> [Int] {
+        guard !rowBounds.isEmpty, !query.isEmpty else { return [] }
+        var result: [Int] = []
+        for (row, bounds) in rowBounds.enumerated() {
+            if bounds.maxY < query.minY { continue }
+            if bounds.minY > query.maxY { break }
+            result.append(row)
+        }
+        return result
     }
 
     private func visibleThumbnailIndices(in visibleRect: NSRect) -> [Int] {
@@ -1672,11 +1840,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 guard let self else { return }
                 self.loadingPaths.remove(path)
                 guard let image else {
-                    if priority == .visible || priority == .nearVisible,
-                       self.thumbnailLoadingActive,
+                    if self.thumbnailLoadingActive,
                        self.appState?.fileData.currentViewMode == .thumbnail,
                        self.imagePaths.contains(path) {
-                        self.scheduleLoadVisibleThumbnails(debounced: true)
+                        if priority == .visible || priority == .nearVisible {
+                            self.scheduleLoadVisibleThumbnails(debounced: true)
+                        } else if priority == .background {
+                            self.startBackgroundThumbnailLoadingIfNeeded()
+                        }
                     }
                     return
                 }
@@ -1792,7 +1963,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
-    private func loadVisibleThumbnails(scheduleBackground: Bool = true) {
+    private func loadVisibleThumbnails(scheduleBackground: Bool = true, allowBackgroundSweep: Bool = true) {
         guard thumbnailLoadingActive else { return }
         guard let scrollView = enclosingScrollView else { return }
         let visible = scrollView.documentVisibleRect
@@ -1820,13 +1991,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         // in-flight decodes without retry — common after disk cache clear / tree "Clear cache".
         Task { @MainActor in
             guard loadGeneration == self.visibleThumbnailLoadGeneration else { return }
-            await appState.thumbnailCache.reprioritizeForViewport(
-                orderedVisiblePaths: visiblePaths,
-                orderedNearPaths: nearPaths
-            )
+            if visiblePaths != self.lastVisiblePathsForReprioritize {
+                await appState.thumbnailCache.reprioritizeForViewport(
+                    orderedVisiblePaths: visiblePaths,
+                    orderedNearPaths: nearPaths
+                )
+                self.lastVisiblePathsForReprioritize = visiblePaths
+            }
             guard loadGeneration == self.visibleThumbnailLoadGeneration else { return }
 
+            var loadRequests = 0
             for (order, path) in visiblePaths.enumerated() {
+                loadRequests += 1
                 self.requestThumbnailLoad(
                     for: path,
                     priority: .visible,
@@ -1834,14 +2010,19 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 )
             }
             for (order, path) in nearPaths.enumerated() {
+                loadRequests += 1
                 self.requestThumbnailLoad(
                     for: path,
                     priority: .nearVisible,
                     queueOrder: order
                 )
             }
+            ThumbnailGridPerfDiagnostics.recordThumbnailLoadRequests(count: loadRequests)
 
-            if scheduleBackgroundAfterLoad, !self.backgroundLoadingSuspended {
+            if scheduleBackgroundAfterLoad,
+               allowBackgroundSweep,
+               !self.backgroundLoadingSuspended,
+               self.offscreenPathsNeedLoading(excluded: excluded) {
                 self.scheduleBackgroundThumbnailLoading(excluded: excluded)
             }
         }
@@ -1982,7 +2163,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         ]
         var y = pillRect.minY + 2
         for line in wrappedLines {
-            let lineWidth = (line as NSString).size(withAttributes: attrs).width
+            let lineWidth = ThumbnailFontMetricsCache.advanceWidth(for: line, font: font)
             let drawX = pillRect.midX - lineWidth / 2
             let drawY = y + (lineHeight - font.boundingRectForFont.height) / 2
             (line as NSString).draw(at: NSPoint(x: drawX, y: drawY), withAttributes: attrs)
@@ -1992,6 +2173,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func dimensionText(for path: String) -> String? {
         if let cached = imageDimensionCache[path] { return cached }
+        if let dims = appState?.metadataCache.pixelSize(path: path), dims.width > 0, dims.height > 0 {
+            let text = "\(dims.width)x\(dims.height)"
+            imageDimensionCache[path] = text
+            return text
+        }
         guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = props[kCGImagePropertyPixelWidth] as? Int,
@@ -2004,6 +2190,22 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         return text
     }
 
+    /// Insertion index from pointer position using the same cell frames as painting (`cellFrame`).
+    private func insertionIndex(at point: NSPoint) -> Int {
+        let count = imagePaths.count
+        guard count > 0 else { return 0 }
+        for index in 0..<count {
+            let cell = cellFrame(for: index)
+            if point.y < cell.minY {
+                return index
+            }
+            if cell.minY <= point.y, point.y <= cell.maxY, point.x < cell.midX {
+                return index
+            }
+        }
+        return count
+    }
+
     private func dropIndicatorRect(for insertion: Int) -> NSRect {
         guard !imagePaths.isEmpty else {
             return NSRect(
@@ -2014,12 +2216,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             )
         }
 
-        let refIndex = min(max(insertion, 0), imagePaths.count - 1)
-        let cell = ThumbnailLayout.frame(for: refIndex, metrics: metrics)
-        let x = insertion < imagePaths.count
-            ? cell.minX
-            : cell.maxX + ThumbnailLayout.horizontalSpacing
-        return NSRect(x: x - 1, y: cell.minY, width: 2, height: cell.height)
+        if insertion >= imagePaths.count {
+            let last = cellFrame(for: imagePaths.count - 1)
+            let x = last.maxX + ThumbnailLayout.horizontalSpacing
+            return NSRect(x: x - 1, y: last.minY, width: 2, height: last.height)
+        }
+        let cell = cellFrame(for: insertion)
+        return NSRect(x: cell.minX - 1, y: cell.minY, width: 2, height: cell.height)
     }
 
     private func drawDropIndicator(in rect: NSRect) {

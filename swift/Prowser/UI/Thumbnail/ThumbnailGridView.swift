@@ -286,18 +286,30 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
 
             let directory = appState.fileData.currentDirectory
-            if lastSyncedDirectory != directory {
+            let directoryChanged = lastSyncedDirectory != directory
+            if directoryChanged {
                 gridView.clearThumbnails()
                 lastSyncedDirectory = directory
                 lastSyncedIndex = -1
+                gridView.noteLockedFilenamesCacheInvalidated()
             }
             gridView.currentDirectory = directory
             gridView.filterPattern = appState.filterSettings.filterPattern
             gridView.isLoadingDirectory = fingerprint.showDirectoryLoadingCanvas
+            gridView.specificFilesActive = appState.specificFilesActive
             gridView.imageExtensions = appState.config.imageExtensions
-            if gridView.imagePaths != paths {
+            if directoryChanged || gridView.imagePaths != paths {
                 gridView.pruneThumbnails(keeping: Set(paths))
-                gridView.imagePaths = paths
+                let updateKind: ThumbnailDisplayedPathsUpdateKind
+                if directoryChanged {
+                    updateKind = .fullReplace
+                } else {
+                    updateKind = Self.displayedPathsUpdateKind(
+                        from: gridView.imagePaths,
+                        to: paths
+                    )
+                }
+                gridView.applyDisplayedPaths(paths, updateKind: updateKind)
                 lastSyncedIndex = -1
             }
             gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
@@ -383,6 +395,18 @@ struct ThumbnailGridView: NSViewRepresentable {
         private func canvasLayoutUsesRowNavigation(_ gridView: ThumbnailGridNSView) -> Bool {
             !gridView.imagePaths.isEmpty
                 && gridView.referenceGraph == nil
+        }
+
+        private static func displayedPathsUpdateKind(
+            from old: [String],
+            to new: [String]
+        ) -> ThumbnailDisplayedPathsUpdateKind {
+            let oldSet = Set(old)
+            let newSet = Set(new)
+            if oldSet == newSet {
+                return .reorderOnly
+            }
+            return .membershipChanged(removed: oldSet.subtracting(newSet))
         }
 
         private func resolvedHighlightIndex(in paths: [String]) -> Int {

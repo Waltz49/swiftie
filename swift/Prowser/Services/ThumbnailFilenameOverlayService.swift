@@ -133,8 +133,8 @@ enum ThumbnailFilenameOverlayService {
         let inner = lineWrapWidth(cellWidth: cellWidth, wrapMode: wrapMode)
         switch wrapMode {
         case .sectionedMax:
-            let flatWidth = (displayText.replacingOccurrences(of: "\n", with: " ") as NSString)
-                .size(withAttributes: [.font: overlayFont]).width
+            let flat = displayText.replacingOccurrences(of: "\n", with: " ")
+            let flatWidth = ThumbnailFontMetricsCache.advanceWidth(for: flat, font: overlayFont)
             if flatWidth > inner + 8 {
                 return displayText
                     .split(separator: "\n", omittingEmptySubsequences: false)
@@ -188,6 +188,12 @@ final class ThumbnailFilenameOverlayCache {
     func clear() {
         storage.removeAll()
         computeCount = 0
+    }
+
+    /// Drop entries for paths no longer displayed (avoid full clear on delete/reorder).
+    func removeEntries(forPaths removed: Set<String>) {
+        guard !removed.isEmpty else { return }
+        storage = storage.filter { !removed.contains($0.key.path) }
     }
 
     func lookup(_ key: Key) -> ThumbnailFilenameOverlay? {
