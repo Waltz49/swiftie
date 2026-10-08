@@ -73,6 +73,12 @@ enum ImageGenExifImport {
                 if let prompt = values["prompt"] as? String, !prompt.isEmpty {
                     updated["prompt"] = prompt
                 }
+                // Size controls stay as the user left them (Python plugin-switch preserve).
+                for key in ["width", "height", "use_custom_size", "aspect_ratio_lock"] {
+                    if let value = values[key] {
+                        updated[key] = value
+                    }
+                }
             }
         }
 
