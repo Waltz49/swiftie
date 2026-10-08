@@ -41,6 +41,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var cardPool: [JobCardNSView] = []
     private var dropLine = NSView()
     private var rows: [QueueRowSnapshot] = []
+    /// When the running job id changes, force a card rebuild (pool reuse can leave stale running chrome).
+    private var lastDisplayedActiveJobID: String?
     private var dragJobID: String?
     private var pendingDropInsertIndex: Int?
     private var reorderApplied = false
@@ -183,13 +185,17 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             lastConfiguredScrollWidth = scrollWidth
         }
 
+        let activeJobID = rows.first(where: { $0.isActive })?.jobID
+        let activeJobChanged = activeJobID != lastDisplayedActiveJobID
+        lastDisplayedActiveJobID = activeJobID
+
         preserveScrollPosition {
             if rows.isEmpty {
                 parkAllCards()
-            } else if cardsAlignWithSnapshot(rows) {
-                refreshAlignedRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
-            } else {
+            } else if activeJobChanged || !cardsAlignWithSnapshot(rows) {
                 rebuildRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
+            } else {
+                refreshAlignedRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
             }
             updateDocumentHeight()
         }
@@ -200,7 +206,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private func cardsAlignWithSnapshot(_ rows: [QueueRowSnapshot]) -> Bool {
         guard rows.count == cardViews.count else { return false }
         for (card, row) in zip(cardViews, rows) {
-            if card.boundJobID != row.jobID { return false }
+            if !card.matchesSnapshotRow(row) { return false }
         }
         return true
     }
@@ -446,6 +452,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         guard abs(lastConfiguredScrollWidth - scrollWidth) > 0.5, !rows.isEmpty else { return }
         jobsPaneDebug("reconfigure width \(lastConfiguredScrollWidth) -> \(scrollWidth) cardsBefore=\(cardLayoutHeightsForDebug)")
         preserveScrollPosition {
+            guard cardViews.count == rows.count,
+                  zip(cardViews, rows).allSatisfy({ $0.matchesSnapshotRow($1) }) else {
+                rebuildRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
+                updateDocumentHeight()
+                return
+            }
             for (index, row) in rows.enumerated() {
                 let card = cardViews[index]
                 let isSelected = row.jobID == selectedJobID
@@ -1090,6 +1102,10 @@ final class JobCardNSView: NSView {
         refsView.needsLayout = true
     }
 
+    func matchesSnapshotRow(_ row: QueueRowSnapshot) -> Bool {
+        boundJobID == row.jobID && lastActive == row.isActive
+    }
+
     func configure(
         row: QueueRowSnapshot,
         index: Int,
@@ -1098,10 +1114,11 @@ final class JobCardNSView: NSView {
         colors: ThemeColors,
         skipUnchanged: Bool = false
     ) {
+        let identityChanged = !boundJobID.isEmpty && boundJobID != row.jobID
         boundJobID = row.jobID
         self.colors = colors
 
-        if skipUnchanged, rowContentUnchanged(row: row, scrollWidth: scrollWidth, selected: selected) {
+        if skipUnchanged, !identityChanged, rowContentUnchanged(row: row, scrollWidth: scrollWidth, selected: selected) {
             updateChrome(selected: selected, running: row.isActive)
             return
         }

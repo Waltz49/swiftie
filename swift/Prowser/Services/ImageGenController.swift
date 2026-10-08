@@ -249,6 +249,8 @@ final class ImageGenController {
         holdJobQueue = enabled
         mutateImagegen { $0["hold_job_queue"] = enabled }
         if enabled {
+            // A multi-copy job already between copies must leave the running slot now.
+            _ = applyQueueHoldAfterCurrentCopy()
             scheduleUnloadImageModelForQueueHold()
         }
         if !enabled {
@@ -945,9 +947,12 @@ final class ImageGenController {
 
     func jobsHeaderStatusText() -> String {
         let rows = queueSnapshot()
-        let waiting = rows.filter { !$0.isActive && !$0.held }.count
+        if holdJobQueue {
+            if rows.isEmpty { return "" }
+            return "=\(rows.count) "
+        }
+        let waiting = rows.filter { !$0.isActive }.count
         if waiting <= 0 { return "" }
-        if holdJobQueue { return "=\(waiting) " }
         return "+\(waiting) "
     }
 
@@ -1118,6 +1123,7 @@ final class ImageGenController {
             return
         }
         activeJobID = job.jobID
+        bumpQueueRevision()
         activePluginID = job.pluginID
         activeFunction = job.function
         pendingValues = job.values
@@ -1143,6 +1149,10 @@ final class ImageGenController {
     }
 
     private func promoteAndRunNextStep() async {
+        if holdJobQueue {
+            _ = demoteActiveRemainingToQueue()
+            return
+        }
         guard var doc = stepPendingDoc else {
             finishOrAbortQueuedJobStart()
             return
@@ -1411,6 +1421,15 @@ final class ImageGenController {
         if finishCurrentUnitAndMaybeQuit() {
             return
         }
+        if holdJobQueue {
+            if seriesContinues() {
+                _ = demoteActiveRemainingToQueue()
+            } else {
+                finishActiveJob(cancelled: false)
+            }
+            scheduleUnloadImageModelForQueueHold()
+            return
+        }
         if seriesContinues() {
             scheduleCopyCooldownThen { await self.promoteAndRunNextStep() }
         } else {
@@ -1428,6 +1447,15 @@ final class ImageGenController {
         completeRunningStepAfterCopy()
         skipSeriesCopyInFlight = false
         resetActiveJobProgressTracking()
+        if holdJobQueue {
+            if seriesContinues() {
+                _ = demoteActiveRemainingToQueue()
+            } else {
+                finishCopyBatch(cancelled: false)
+            }
+            scheduleUnloadImageModelForQueueHold()
+            return
+        }
         if seriesContinues() {
             await promoteAndRunNextStep()
         } else {
@@ -1453,11 +1481,21 @@ final class ImageGenController {
             return
         }
         let cancelledJobID = cancelled ? (activeJobID ?? pendingCancelJobID) : ""
+        let finishedJobID = activeJobID
         cooldownTask?.cancel()
         cooldownDisplayTask?.cancel()
         cooldownSecondsRemaining = 0
         if cancelled, !cancelledJobID.isEmpty {
             removeCancelledJobFromQueue(jobID: cancelledJobID)
+        } else if let finishedJobID, !finishedJobID.isEmpty {
+            let before = queue.jobs.count
+            queue.jobs.removeAll { $0.jobID == finishedJobID }
+            if queue.jobs.count != before, !queuePersistSuppressed {
+                persistQueue()
+            }
+            if selectedJobID == finishedJobID {
+                selectJob(id: queue.jobs.first?.jobID)
+            }
         }
         removeAspectPadTemps()
         clearCopyCycleExifSnapshot()
@@ -1547,6 +1585,139 @@ final class ImageGenController {
             persistQueue()
             bumpQueueRevision()
         }
+    }
+
+    /// Port of ``ImageGenController._demote_active_remaining_to_queue``.
+    @discardableResult
+    private func demoteActiveRemainingToQueue() -> Bool {
+        guard !copyBatchCancelled else { return false }
+        let jobID = activeJobID ?? ""
+        guard !jobID.isEmpty, !activePluginID.isEmpty else { return false }
+        let pendingCount = JobStepQueue.pendingStepCount(stepPendingDoc)
+        let continuous = JobStepQueue.isSeriesContinuousCopies(copiesTotal)
+            || JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning)
+        if pendingCount <= 0, stepRunning == nil, !continuous { return false }
+        guard let collected = collectActiveRemainingStepsForDemote() else { return false }
+
+        let (steps, submitValues, copies) = collected
+        let storedPrompt = (stepPendingDoc?["display"] as? [String: Any])?["full_prompt"] as? String ?? ""
+        let fullPrompt = JobStepQueue.resolvedFullPrompt(
+            stored: storedPrompt,
+            values: submitValues,
+            steps: steps,
+            statusView: activeStatusView
+        )
+        let thumbs = activeThumbnailPaths.isEmpty
+            ? (queue.jobs.first(where: { $0.jobID == jobID })?.thumbnailPaths ?? [])
+            : activeThumbnailPaths
+        let built = buildQueueStatusView(
+            pluginID: activePluginID,
+            function: activeFunction,
+            values: submitValues,
+            copiesTotal: copies,
+            running: false
+        )
+        let held = activeJobHeld()
+        let insertAt = max(0, min(activeDisplayIndex, queue.jobs.count))
+
+        if let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) {
+            queue.jobs[index].pluginID = activePluginID
+            queue.jobs[index].function = activeFunction
+            queue.jobs[index].pluginUnavailable = false
+            queue.jobs[index].values = submitValues
+            queue.jobs[index].copiesTotal = copies
+            queue.jobs[index].steps = steps
+            queue.jobs[index].fullPrompt = fullPrompt
+            queue.jobs[index].thumbnailPaths = thumbs
+            queue.jobs[index].held = held
+            queue.jobs[index].inError = false
+            queue.jobs[index].errorMessage = ""
+            queue.jobs[index].statusHTML = "Queued"
+            queue.jobs[index].statusView = built.statusView
+            if let activeJobNumber {
+                queue.jobs[index].jobNumber = activeJobNumber
+            }
+        } else {
+            let job = ImageGenQueuedJob(
+                jobID: jobID,
+                pluginID: activePluginID,
+                function: activeFunction,
+                values: submitValues,
+                copiesTotal: copies,
+                statusHTML: "Queued",
+                fullPrompt: fullPrompt,
+                thumbnailPaths: thumbs,
+                steps: steps,
+                statusView: built.statusView,
+                jobNumber: activeJobNumber,
+                held: held
+            )
+            queue.jobs.insert(job, at: insertAt)
+        }
+
+        activeDisplayIndex = 0
+        finalizeRequeuedActiveJob()
+        Task {
+            guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+            await refreshQueuedJobStatus(at: index)
+            persistQueue()
+            bumpQueueRevision()
+        }
+        return true
+    }
+
+    /// After the in-flight copy of a held queue finishes, demote when idle between copies.
+    @discardableResult
+    private func applyQueueHoldAfterCurrentCopy() -> Bool {
+        guard holdJobQueue else { return false }
+        if quitAfterCurrentWorker, !deferredQuitWaitAllJobs { return false }
+        let copyInFlight = stepRunning != nil || jobAIStageActive || foregroundTasks.isBusy
+        guard !copyInFlight else { return false }
+        guard demoteActiveRemainingToQueue() else { return false }
+        scheduleUnloadImageModelForQueueHold()
+        return true
+    }
+
+    private func collectActiveRemainingStepsForDemote() -> (steps: [[String: Any]], values: [String: Any], copies: Int)? {
+        guard !activePluginID.isEmpty else { return nil }
+        let continuous = JobStepQueue.isSeriesContinuousCopies(copiesTotal)
+            || JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning)
+        var steps: [[String: Any]] = []
+        if let stepRunning {
+            steps.append(stepRunning)
+        }
+        if let raw = stepPendingDoc?["steps"] as? [[String: Any]] {
+            steps.append(contentsOf: raw)
+        }
+        if steps.isEmpty, continuous {
+            var template = pendingValues
+            template["copies"] = JobStepQueue.seriesContinuousCopies
+            if let materialized = try? JobStepQueue.materializeSteps(
+                pluginID: activePluginID,
+                templateValues: template,
+                copiesTotal: JobStepQueue.seriesContinuousCopies
+            ), !materialized.isEmpty {
+                steps = materialized
+            } else if let templateStep = stepPendingDoc?[JobStepQueue.continuousTemplateKey] as? [String: Any] {
+                steps = [[
+                    "step_id": JobStepQueue.newStepID(),
+                    "values": JobStepQueue.mergeStepIntoValues(templateStep),
+                    "needs_ai": false,
+                ]]
+            } else {
+                steps = [[
+                    "step_id": JobStepQueue.newStepID(),
+                    "values": template,
+                    "needs_ai": false,
+                ] as [String: Any]]
+            }
+        }
+        guard !steps.isEmpty else { return nil }
+        let copies = continuous ? JobStepQueue.seriesContinuousCopies : steps.count
+        JobStepQueue.stampSeriesCopiesOnSteps(&steps, copies: copies)
+        var values = JobStepQueue.mergeStepIntoValues(steps[0])
+        values["copies"] = copies
+        return (steps, values, copies)
     }
 
     @discardableResult
@@ -1799,6 +1970,15 @@ final class ImageGenController {
         }
         if copyBatchCancelled {
             finishCopyBatch(cancelled: true)
+            return
+        }
+        if holdJobQueue {
+            if seriesContinues() {
+                _ = demoteActiveRemainingToQueue()
+            } else {
+                finishActiveJob(cancelled: false)
+            }
+            scheduleUnloadImageModelForQueueHold()
             return
         }
         await action()
@@ -3040,17 +3220,19 @@ final class ImageGenController {
 
     private func resumeAfterHoldReleased() {
         if queueAdvanceSuppressed { return }
-        if copyBatchActive, !copyBatchCancelled, pendingBatchCopies() > 0, !modelTasks.isBusy, cooldownSecondsRemaining == 0 {
-            Task { await promoteAndRunNextStep() }
-            return
-        }
-        if activeJobID != nil, !modelTasks.isBusy {
-            resumeRestoredActiveJobIfIdle()
-            return
+        if let activeJobID, queuedJob(byID: activeJobID) == nil, activeBatchHasRemainingWork() {
+            _ = demoteActiveRemainingToQueue()
         }
         if !modelTasks.isBusy {
             processNextIfIdle()
         }
+    }
+
+    private func activeBatchHasRemainingWork() -> Bool {
+        if copyBatchCancelled { return false }
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return true }
+        if JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning) { return true }
+        return pendingBatchCopies() > 0
     }
 
     private func resumeDeferredQuitQueueAdvance() {
