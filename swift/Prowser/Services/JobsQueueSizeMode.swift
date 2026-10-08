@@ -17,91 +17,54 @@ enum JobsQueueSizeMode: String, CaseIterable {
         guard let index = modes.firstIndex(of: self) else { return .all }
         return modes[(index + 1) % modes.count]
     }
-
-    /// Fallback content height below the pane titlebar when live measurement is unavailable.
-    func estimatedContentHeight(jobCount: Int, isProcessing: Bool) -> CGFloat {
-        JobQueuePaneMetrics.contentHeight(
-            mode: self,
-            cardStackHeight: 0,
-            activeStripHeight: 0,
-            jobCount: jobCount,
-            isProcessing: isProcessing,
-            showsActiveStrip: isProcessing || jobCount > 0,
-            hasMeasuredCards: false,
-            includesToolbar: false
-        )
-    }
 }
 
 /// Port of `job_queue_panel.py` pane content height helpers.
 enum JobQueuePaneMetrics {
     static let panelPadding: CGFloat = 8
-    static let vstackSpacing: CGFloat = 4
-    static let bottomSlack: CGFloat = 5
-    static let emptyStateHeight: CGFloat = 18
-    static let fallbackStripHeight: CGFloat = 36
-    static let fallbackSingleCardHeight: CGFloat = 96
+    static let vstackSpacing: CGFloat = 4 // spacing between active strip and queue block in ``JobQueuePanelView``
     /// Matches ``JobPaneToolbar`` row height + bottom margin in ``jobs_toolbar.py``.
     static let toolbarBlockHeight: CGFloat = 29
+    /// Reserved bottom buffer for sidebar auto-resize; matches ``ChromeLayoutAnimator.statusBarHeight``.
+    static let statusBarFitBufferHeight: CGFloat = 24
 
-    static func contentHeight(
+    /// Bottom inset for sidebar pane auto-resize: pane border, fit slack, and status-bar row buffer.
+    static func paneAutoResizeBottomInset(
         mode: JobsQueueSizeMode,
-        cardStackHeight: CGFloat,
-        activeStripHeight: CGFloat,
+        shrinkWrap: Bool,
         jobCount: Int,
-        isProcessing: Bool,
-        showsActiveStrip: Bool,
-        hasMeasuredCards: Bool,
-        includesToolbar: Bool = false
+        viewBorderWidthPx: Int
     ) -> CGFloat {
-        let padding = panelPadding * 2
-        let toolbar = includesToolbar ? toolbarBlockHeight : 0
-        let stripBlock = stripBlockHeight(
-            showsActiveStrip: showsActiveStrip,
-            activeStripHeight: activeStripHeight
-        )
-
-        switch mode {
-        case .strip:
-            if showsActiveStrip {
-                return padding + toolbar + stripBlock
-            }
-            if jobCount > 0 {
-                return padding + toolbar + max(stripBlock, 22)
-            }
-            return padding + toolbar + emptyStateHeight
-
-        case .one:
-            let total = padding + toolbar + stripBlock
-            if jobCount == 0 {
-                return max(total + (isProcessing ? 22 : emptyStateHeight), padding + toolbar + emptyStateHeight)
-            }
-            let cardH = hasMeasuredCards ? cardStackHeight : fallbackSingleCardHeight
-            return total + cardH + bottomSlack
-
-        case .all:
-            let total = padding + toolbar + stripBlock
-            if jobCount == 0 {
-                return max(total + (isProcessing ? 56 : emptyStateHeight), padding + toolbar + emptyStateHeight)
-            }
-            if jobCount <= 1 {
-                let cardH = hasMeasuredCards ? cardStackHeight : fallbackSingleCardHeight
-                return total + cardH + bottomSlack
-            }
-            let stackH = hasMeasuredCards
-                ? cardStackHeight
-                : min(320, 56 + CGFloat(jobCount) * fallbackSingleCardHeight * 0.75)
-            return total + stackH + bottomSlack
-        }
+        if mode == .strip { return 0 }
+        let border = CGFloat(max(1, viewBorderWidthPx))
+        guard jobCount > 0, !shrinkWrap else { return border }
+        return border
+            + JobQueueLayout.paneFitBottomSlack
+            + statusBarFitBufferHeight
     }
 
-    private static func stripBlockHeight(
-        showsActiveStrip: Bool,
-        activeStripHeight: CGFloat
-    ) -> CGFloat {
-        guard showsActiveStrip else { return 0 }
-        let strip = activeStripHeight > 0 ? activeStripHeight : fallbackStripHeight
-        return strip + vstackSpacing
+    /// Port of ``ActiveJobStripWidget.content_height`` / ``_active_strip_block_height`` using strip row layout.
+    static func estimatedActiveStripHeight(for strip: ActiveJobStripStatusView) -> CGFloat {
+        if strip.isEmpty { return 0 }
+        let rowLine = max(JobQueueLayout.stripBarHeight, ceil(JobQueueLayout.fontSize * 1.25))
+        var content: CGFloat = 0
+        var rowCount = 0
+        for row in strip.rows {
+            switch row {
+            case .bar, .count:
+                content += rowLine
+                rowCount += 1
+            }
+        }
+        if rowCount > 1 {
+            content += CGFloat(rowCount - 1) * 2
+        }
+        if !strip.cooldownText.isEmpty {
+            if rowCount > 0 { content += 2 }
+            content += rowLine + 4
+        }
+        // Match ``ActiveJobStripNSView.measuredContentHeight`` frame chrome (border + inner padding).
+        return 10 + max(content, 18)
     }
 }
 

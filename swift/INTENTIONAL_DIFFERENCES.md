@@ -5,7 +5,8 @@ Planning reference only. Python reference: `~/dev/testchat/image_browser`. Each 
 | Swift | Python |
 |-------|--------|
 | **`--min`**: no **Image** menu or **Job Control** pane; **Face Recognition** tab hidden in Preferences | **`--min`**: hides image-generation-related UI (frozen bundle / launch flag) |
-| **Image** generation via **MFLUX CLI** + thin `registry_bridge` subprocess (no `model_tasks_worker`) | In-process / worker-based generation with full Python pipelines |
+| **Image** generation via **bundled ImageGenPython** + profile venv + **MFLUX CLI** / pipeline workers (no long-lived registry; no external repo root) | In-process / worker-based generation with full Python Qt app |
+| **Job Control**: shared action bar pinned below the queue list when a job is selected (keeps the bar inside the SwiftUI-sized pane so its buttons stay clickable) | Action bar embedded at the bottom of the selected job card |
 | **LoRA** UI and settings editor stubbed; no LoRA on CLI | Full LoRA catalog and CLI args |
 | Flux-prompt **AI queue steps** skipped when AI bridge unavailable | LM Studio / flux-prompt steps run in queue |
 | No **Chat** pane | **Chat** pane in full Python app |

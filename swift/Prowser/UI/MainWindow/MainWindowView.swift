@@ -86,6 +86,8 @@ struct MainWindowView: View {
             if show {
                 NSApp.activate(ignoringOtherApps: true)
                 openWindow(id: "imagegen-unified")
+            } else {
+                dismissWindow(id: "imagegen-unified")
             }
         }
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in

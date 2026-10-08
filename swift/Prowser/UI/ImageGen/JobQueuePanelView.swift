@@ -13,8 +13,11 @@ struct JobQueuePanelView: View {
 
     var body: some View {
         let _ = appState.imageGenUIRevision
+        let _ = appState.measuredJobsCardStackHeight
         let controller = appState.imageGen
+        let _ = controller.queueRevision
         let mode = appState.jobsQueueSizeMode
+        let activeStripStructureKey = controller.activeStripView.structureKey()
 
         VStack(alignment: .leading, spacing: 4) {
             if shouldShowActiveStrip(controller: controller, mode: mode) {
@@ -41,6 +44,9 @@ struct JobQueuePanelView: View {
         .onChange(of: mode) { _, _ in
             appState.syncJobsPaneGeometry()
         }
+        .onChange(of: activeStripStructureKey) { _, _ in
+            appState.syncJobsPaneGeometry()
+        }
     }
 
     @ViewBuilder
@@ -51,6 +57,13 @@ struct JobQueuePanelView: View {
             Text("No jobs in the queue.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .onTapGesture {
+                    // Python `_on_empty_label_press`: clicking the empty label in the floating
+                    // dialog returns jobs to the sidebar pane.
+                    if compactForFloating {
+                        appState.showJobsPane()
+                    }
+                }
         }
     }
 
@@ -58,24 +71,49 @@ struct JobQueuePanelView: View {
         controller.isProcessing || controller.cooldownSecondsRemaining > 0
     }
 
+    /// Python strip mode: cards hidden; ``queue_hold_compact_message`` only when held and idle.
+    @ViewBuilder
+    private func stripModeBody(controller: ImageGenController) -> some View {
+        if let message = queueHoldCompactMessage(controller: controller) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            EmptyView()
+        }
+    }
+
+    /// Port of ``ImageGenController.queue_hold_compact_message``.
+    private func queueHoldCompactMessage(controller: ImageGenController) -> String? {
+        guard controller.holdJobQueue, !shouldShowActiveStrip(controller: controller, mode: .strip) else { return nil }
+        let jobCount = controller.queueSnapshot().count
+        guard jobCount > 0 else { return nil }
+        return "Job queue held with \(jobCount) \(jobCount == 1 ? "job" : "jobs")"
+    }
+
     @ViewBuilder
     private func queueContent(mode: JobsQueueSizeMode) -> some View {
+        let controller = appState.imageGen
         switch mode {
         case .strip:
-            EmptyView()
+            stripModeBody(controller: controller)
         case .one:
             JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+                .contentShape(Rectangle())
         case .all:
             if appState.imageGen.queue.jobs.count <= 1 {
                 JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .contentShape(Rectangle())
             } else {
                 ExpandingLayout {
                     JobQueuePanelNSViewRepresentable(
                         compactForFloating: compactForFloating,
                         fillsAvailableHeight: true
                     )
+                    .contentShape(Rectangle())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }

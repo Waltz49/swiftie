@@ -1,0 +1,13 @@
+{
+  "_job_values_snapshotted": true,
+  "debug_mode": false,
+  "height": 1024,
+  "hf_model_id": "Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers",
+  "max_generation_dimension": 1024,
+  "mflux_lora_stack": [],
+  "output_path": "/var/folders/1c/cvcvczxn41v2nflwsys6sdh00000gn/T/out.png",
+  "pipeline_id": "sana_sprint_600m",
+  "prompt": "test",
+  "steps": 2,
+  "width": 1024
+}

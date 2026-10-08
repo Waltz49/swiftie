@@ -12,7 +12,8 @@ struct JobQueueActionBarState {
     static let empty = JobQueueActionBarState()
 }
 
-/// Per-card action bar embedded when selected. Port of `JobQueueActionBar` in Python.
+/// Shared action bar for the selected queue row. Port of `JobQueueActionBar` in Python.
+/// Embedded at the bottom of the selected job card.
 @MainActor
 final class JobQueueActionBarNSView: NSView {
     var onEdit: (() -> Void)?
@@ -39,14 +40,19 @@ final class JobQueueActionBarNSView: NSView {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(equalToConstant: JobQueueLayout.actionBarHeight),
         ])
         rebuildButtons()
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: JobQueueLayout.actionBarHeight)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     func configure(state: JobQueueActionBarState) {
         imageRefineButton?.isHidden = !state.imageRefinementVisible

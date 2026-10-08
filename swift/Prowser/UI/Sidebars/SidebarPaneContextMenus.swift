@@ -28,8 +28,10 @@ enum SidebarPaneContextMenus {
     ) {
         let menu = buildMenu(kind: kind, appState: appState)
         PaneMenuActions.shared.appState = appState
-        let point = NSPoint(x: 0, y: anchor.bounds.height)
-        menu.popUp(positioning: nil, at: anchor.convert(point, to: nil), in: nil)
+        guard let window = anchor.window, let content = window.contentView else { return }
+        let anchorInContent = anchor.convert(anchor.bounds, to: content)
+        let point = NSPoint(x: anchorInContent.minX, y: anchorInContent.minY)
+        menu.popUp(positioning: nil, at: point, in: content)
     }
 
     static func buildMenu(kind: SidebarPaneContextMenuKind, appState: AppState) -> NSMenu {
@@ -171,7 +173,6 @@ enum SidebarPaneContextMenus {
     private static func stripMenuIcons(_ menu: NSMenu) {
         for item in menu.items {
             item.image = nil
-            item.onStateImage = nil
             if let submenu = item.submenu {
                 stripMenuIcons(submenu)
             }

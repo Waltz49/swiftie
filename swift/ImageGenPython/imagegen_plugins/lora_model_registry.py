@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""Per-base-model LoRA settings (full Hugging Face model ids)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
+
+from imagegen_plugins.hf_model_ids import (
+    FLUX1_DEV,
+    FLUX1_FILL_DEV,
+    FLUX1_SCHNELL,
+    FLUX2_KLEIN_4B,
+    FLUX2_KLEIN_9B,
+    FLUX2_KLEIN_9B_KV,
+    LORA_PROBE_MODEL_ORDER,
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    SD15_LORA_MODEL_KEYS,
+    SDXL_BASE_1_0,
+    SDXL_LORA_MODEL_KEYS,
+    ANYTHING_FURRY,
+    REALISTIC_VISION_V4_NOVAE,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
+)
+from imagegen_plugins.lora_entry import FluxLoraEntry
+from imagegen_plugins.lora_host_registry import (
+    HOST_FLUX1_FILL,
+    HOST_FLUX1_T2I,
+    HOST_FLUX2_KLEIN,
+    HOST_SD15,
+    HOST_SDXL,
+    HOST_Z_IMAGE_TURBO,
+)
+
+if TYPE_CHECKING:
+    from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+
+LORA_SETTINGS_MODEL_ORDER: Tuple[str, ...] = LORA_PROBE_MODEL_ORDER
+
+# Display order for Settings → LoRA “Available in” (supports multiple functions per model).
+_LORA_FUNCTION_DISPLAY_ORDER: Tuple[str, ...] = (
+    "create",
+    "edit",
+    "expand",
+    "infill",
+    "infill_paint",
+)
+
+
+@dataclass(frozen=True)
+class LoraSettingsModel:
+    model_key: str
+    display_name: str
+    used_in: str
+    available_in: Tuple[str, ...] = ()
+
+
+LORA_SETTINGS_MODELS: Tuple[LoraSettingsModel, ...] = (
+    LoraSettingsModel(
+        FLUX1_SCHNELL,
+        FLUX1_SCHNELL,
+        "Create image dialog when FLUX.1 Schnell is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        FLUX1_DEV,
+        FLUX1_DEV,
+        "Create image dialog when FLUX.1 Dev is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        FLUX1_FILL_DEV,
+        FLUX1_FILL_DEV,
+        "Expand and Infill dialogs",
+        ("expand", "infill"),
+    ),
+    LoraSettingsModel(
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_4B,
+        "Create and Edit dialogs (4B model)",
+        ("create", "edit"),
+    ),
+    LoraSettingsModel(
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B,
+        "Create and Edit dialogs (9B model)",
+        ("create", "edit"),
+    ),
+    LoraSettingsModel(
+        FLUX2_KLEIN_9B_KV,
+        FLUX2_KLEIN_9B_KV,
+        "Create and Edit dialogs (9B KV model)",
+        ("create", "edit"),
+    ),
+    LoraSettingsModel(
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        "Create, Edit, and Expand dialogs (SceneWorks MLX 9B KV)",
+        ("create", "edit", "expand"),
+    ),
+    LoraSettingsModel(
+        REALISTIC_VISION_V4_NOVAE,
+        REALISTIC_VISION_V4_NOVAE,
+        "Create image dialog when Realistic Vision V4.0 is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        ANYTHING_FURRY,
+        ANYTHING_FURRY,
+        "Create image dialog when Anything Furry is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        SDXL_BASE_1_0,
+        SDXL_BASE_1_0,
+        "Create image dialog when SDXL 1.0 Base is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        Z_IMAGE_TURBO_MFLUX_4BIT,
+        Z_IMAGE_TURBO_MFLUX_4BIT,
+        "Create image dialog when Z-Image Turbo (4-bit) is selected",
+        ("create",),
+    ),
+)
+
+
+def lora_models_for_settings() -> Tuple[LoraSettingsModel, ...]:
+    by_key = {m.model_key: m for m in LORA_SETTINGS_MODELS}
+    return tuple(by_key[k] for k in LORA_SETTINGS_MODEL_ORDER if k in by_key)
+
+
+def lora_settings_model(model_key: str) -> Optional[LoraSettingsModel]:
+    mk = (model_key or "").strip()
+    if not mk:
+        return None
+    return next((m for m in LORA_SETTINGS_MODELS if m.model_key == mk), None)
+
+
+def lora_functions_for_model_key(model_key: str) -> Tuple[str, ...]:
+    """
+    Image-gen functions whose plugins use this base model and support LoRAs.
+
+    Uses registered plugins when available; falls back to catalog ``available_in``.
+    """
+    mk = (model_key or "").strip()
+    if not mk:
+        return ()
+
+    found: List[str] = []
+    try:
+        from imagegen_plugins import discover_plugins, plugins_for_function
+
+        all_plugins = discover_plugins()
+        for fn in _LORA_FUNCTION_DISPLAY_ORDER:
+            for plugin in plugins_for_function(fn, all_plugins):
+                if (getattr(plugin, "hf_model_id", None) or "").strip() != mk:
+                    continue
+                if not getattr(plugin, "lora_host_id", None):
+                    continue
+                if fn not in found:
+                    found.append(fn)
+                break
+    except Exception:
+        found = []
+
+    if found:
+        return tuple(found)
+
+    model = lora_settings_model(mk)
+    if model is not None and model.available_in:
+        return model.available_in
+    return ()
+
+
+_FUNCTION_SHORT_LABELS = {
+    "create": "Create",
+    "edit": "Edit",
+    "expand": "Expand",
+    "infill": "Infill",
+    "infill_paint": "Infill",
+}
+
+
+def lora_model_available_in_label(model_key: str) -> str:
+    """Settings line: ``Available in: Create, Edit, …``"""
+    labels: List[str] = []
+    for fn in lora_functions_for_model_key(model_key):
+        label = _FUNCTION_SHORT_LABELS.get(fn, fn)
+        if label not in labels:
+            labels.append(label)
+    if not labels:
+        return ""
+    return "Available in: " + ", ".join(labels)
+
+
+def lora_models_for_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
+    """Base model keys this LoRA is intended for (full hf_model_id)."""
+    if entry.host_id == HOST_SD15:
+        return SD15_LORA_MODEL_KEYS
+    if entry.host_id == HOST_SDXL:
+        return SDXL_LORA_MODEL_KEYS
+    if entry.base_hf_model_id:
+        return (entry.base_hf_model_id,)
+    if entry.host_id == HOST_FLUX1_FILL:
+        return (FLUX1_FILL_DEV,)
+    if entry.host_id == HOST_FLUX1_T2I:
+        return (FLUX1_SCHNELL, FLUX1_DEV)
+    if entry.host_id == HOST_FLUX2_KLEIN:
+        return (
+            FLUX2_KLEIN_4B,
+            FLUX2_KLEIN_9B,
+            FLUX2_KLEIN_9B_KV,
+            SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        )
+    if entry.host_id == HOST_Z_IMAGE_TURBO:
+        return (Z_IMAGE_TURBO_MFLUX_4BIT,)
+    return ()
+
+
+def lora_probe_pipeline_id(model_key: str) -> Optional[str]:
+    """Pipeline used to test whether base weights for Check LoRAs are on disk."""
+    mk = (model_key or "").strip()
+    if mk in (FLUX1_SCHNELL, FLUX1_DEV):
+        return "flux_schnell_mflux_play"
+    if mk == FLUX1_FILL_DEV:
+        return "mflux_fill_infill"
+    if mk in (
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    ):
+        return "mflux_flux2_klein_edit"
+    if mk in SD15_LORA_MODEL_KEYS:
+        return "sd15_diffusers"
+    if mk in SDXL_LORA_MODEL_KEYS:
+        return "sdxl_diffusers"
+    if mk == Z_IMAGE_TURBO_MFLUX_4BIT:
+        return "mflux_z_image_turbo"
+    return None
+
+
+def lora_probe_default_steps(model_key: str) -> int:
+    """Default inference steps for Check LoRAs on model_key (plugin, else pipeline)."""
+    from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
+
+    mk = (model_key or "").strip()
+    pipeline_id = lora_probe_pipeline_id(mk)
+    preferred: Optional[int] = None
+    fallback: Optional[int] = None
+    try:
+        from imagegen_plugins import discover_plugins
+
+        for plugin in discover_plugins():
+            if (plugin.hf_model_id or "").strip() != mk:
+                continue
+            raw = plugin.model_defaults.get("steps")
+            if raw is None:
+                continue
+            steps_i = int(raw)
+            if pipeline_id and plugin.pipeline_id == pipeline_id:
+                preferred = steps_i
+                break
+            if fallback is None:
+                fallback = steps_i
+    except Exception:
+        pass
+    if preferred is not None:
+        return preferred
+    if fallback is not None:
+        return fallback
+    if pipeline_id:
+        return int(get_pipeline(pipeline_id).steps_default)
+    return 4
+
+
+def lora_probe_model_is_local(model_key: str) -> bool:
+    """True when the base model is present locally (no download during Check LoRAs)."""
+    from imagegen_plugins.image_gen_model_availability import pipeline_model_is_local
+
+    pipeline_id = lora_probe_pipeline_id(model_key)
+    if not pipeline_id:
+        return True
+    return pipeline_model_is_local(pipeline_id, model_key)
+
+
+def klein_lora_model_aliases(model_key: str) -> Tuple[str, ...]:
+    """Edit models that accept the same Klein LoRAs as full 9B."""
+    mk = (model_key or "").strip()
+    if mk == FLUX2_KLEIN_9B_KV:
+        return (FLUX2_KLEIN_9B_KV, FLUX2_KLEIN_9B)
+    if mk == SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX:
+        return (SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX, FLUX2_KLEIN_9B_KV, FLUX2_KLEIN_9B)
+    return (mk,) if mk else ()
+
+
+def _raw_model_support_dict(
+    *,
+    model_support: Optional[Dict[str, Any]] = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if isinstance(model_support, dict):
+        return model_support
+    if isinstance(settings, dict):
+        from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings
+
+        lc = lora_catalog_from_settings(settings)
+        raw = lc.get("model_support")
+        if isinstance(raw, dict):
+            return raw
+    return {}
+
+
+def _probe_supported_on_model(
+    entry: FluxLoraEntry,
+    model_key: str,
+    model_support: Dict[str, Any],
+) -> bool:
+    """True when Check LoRAs recorded a pass for this LoRA on model_key."""
+    raw = model_support.get(entry.lora_id, ())
+    supported = raw if isinstance(raw, (list, tuple)) else ()
+    if not supported:
+        return False
+    supported_set = {str(x) for x in supported}
+    aliases = klein_lora_model_aliases(model_key)
+    return any(str(m) in supported_set for m in aliases)
+
+
+def entry_matches_lora_model(
+    entry: FluxLoraEntry,
+    model_key: str,
+    *,
+    model_support: Optional[Dict[str, Any]] = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> bool:
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    ms = _raw_model_support_dict(model_support=model_support, settings=settings)
+    if ms and _probe_supported_on_model(entry, model_key, ms):
+        return True
+
+    if is_user_lora_id(entry.lora_id):
+        expected_host = host_id_for_lora_model(model_key)
+        if expected_host and entry.host_id != expected_host:
+            return False
+        return False
+    entry_models = lora_models_for_entry(entry)
+    return any(m in entry_models for m in klein_lora_model_aliases(model_key))
+
+
+def lora_model_key_for_plugin(plugin: "ImageGenModelPlugin") -> Optional[str]:
+    hf = (getattr(plugin, "hf_model_id", None) or "").strip()
+    return hf or None
+
+
+def lora_model_key_from_values(values: dict) -> Optional[str]:
+    hf = str(values.get("hf_model_id") or "").strip()
+    return hf or None
+
+
+def is_cross_family_lora_model(entry: FluxLoraEntry, model_key: str) -> bool:
+    """True when model_key belongs to a different LoRA host family than entry.host_id."""
+    mk = (model_key or "").strip()
+    if not mk:
+        return False
+    entry_host = (entry.host_id or "").strip()
+    model_host = host_id_for_lora_model(mk)
+    if not entry_host or not model_host:
+        return False
+    return entry_host != model_host
+
+
+def cross_family_models_for_entry(
+    entry: FluxLoraEntry,
+    supported_model_keys: Iterable[str],
+) -> Tuple[str, ...]:
+    """Model keys in supported_model_keys that are cross-family for this entry."""
+    return tuple(
+        mk
+        for mk in supported_model_keys
+        if is_cross_family_lora_model(entry, str(mk))
+    )
+
+
+def host_id_for_lora_model(model_key: str) -> Optional[str]:
+    if model_key in (FLUX1_SCHNELL, FLUX1_DEV):
+        return HOST_FLUX1_T2I
+    if model_key == FLUX1_FILL_DEV:
+        return HOST_FLUX1_FILL
+    if model_key in (
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    ):
+        return HOST_FLUX2_KLEIN
+    if model_key in SD15_LORA_MODEL_KEYS:
+        return HOST_SD15
+    if model_key in SDXL_LORA_MODEL_KEYS:
+        return HOST_SDXL
+    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
+        return HOST_Z_IMAGE_TURBO
+    return None

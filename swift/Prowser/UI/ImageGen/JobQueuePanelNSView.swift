@@ -10,6 +10,10 @@ func jobsPaneDebug(_ message: @autoclosure () -> String) {
     print("[jobs-pane] \(message())")
 }
 
+private final class JobsPaneNonFocusScrollView: NSScrollView {
+    override var acceptsFirstResponder: Bool { false }
+}
+
 @MainActor
 final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onReorder: ((String, String?) -> Void)?
@@ -19,8 +23,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onOpenReferences: (([String]) -> Void)?
     /// Card heights changed after a width reflow; the measured pane geometry must be re-reported.
     var onCardGeometryChanged: (() -> Void)?
-    var onAddSeries: ((Int, Bool) -> Void)?
-    var onSubtractSeries: ((Int, Bool) -> Void)?
+    var onAddSeries: ((String, Int, Bool) -> Void)?
+    var onSubtractSeries: ((String, Int, Bool) -> Void)?
     var onToggleImageRefinement: ((String, Bool) -> Void)?
     var onToggleTextRefinement: ((String, Bool) -> Void)?
     var onJobNumberClick: ((String) -> Void)?
@@ -30,7 +34,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var themeColors: ThemeColors = .dark
     var selectedJobID: String?
 
-    private let scrollView = NSScrollView()
+    private let scrollView = JobsPaneNonFocusScrollView()
     private let documentView = FlippedView()
     private let stackView = NSStackView()
     private var cardViews: [JobCardNSView] = []
@@ -42,9 +46,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var reorderApplied = false
     private var autoScrollTimer: Timer?
     private var lastConfiguredScrollWidth: CGFloat = 0
+    private var documentWidthConstraint: NSLayoutConstraint?
+    private var documentHeightConstraint: NSLayoutConstraint?
     private var pendingScrollWidth: CGFloat?
     private var scrollWidthReconfigureScheduled = false
-    private var actionBarEmbeddedOnCard = false
+    private var actionBarVisible = false
+    /// Job id for the card that currently hosts ``sharedActionBar`` (toolbar actions target this, not a stale selection).
+    private var actionBarHostJobID = ""
     private let sharedActionBar = JobQueueActionBarNSView()
     var paneContextMenuKind: SidebarPaneContextMenuKind?
     weak var paneContextMenuAppState: AppState?
@@ -65,6 +73,11 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         scrollView.backgroundColor = .clear
         scrollView.contentView.drawsBackground = false
         scrollView.documentView = documentView
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentWidthConstraint = documentView.widthAnchor.constraint(equalToConstant: 260)
+        documentHeightConstraint = documentView.heightAnchor.constraint(equalToConstant: 40)
+        documentWidthConstraint?.isActive = true
+        documentHeightConstraint?.isActive = true
 
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.orientation = .vertical
@@ -77,6 +90,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         documentView.addSubview(dropLine)
 
         sharedActionBar.isHidden = true
+        sharedActionBar.translatesAutoresizingMaskIntoConstraints = false
         wireActionBar()
 
         addSubview(scrollView)
@@ -88,11 +102,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             stackView.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 4),
             stackView.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -4),
             stackView.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 4),
-            documentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
         ])
     }
 
     override var isOpaque: Bool { false }
+
+    override var acceptsFirstResponder: Bool { false }
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
@@ -120,27 +135,35 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func actionBarTargetJobID() -> String? {
+        if !actionBarHostJobID.isEmpty { return actionBarHostJobID }
+        return selectedJobID
+    }
+
     private func wireActionBar() {
         sharedActionBar.onEdit = { [weak self] in
-            guard let id = self?.selectedJobID else { return }
+            guard let id = self?.actionBarTargetJobID() else { return }
             self?.onEdit?(id)
         }
         sharedActionBar.onCancel = { [weak self] cascade in
-            guard let id = self?.selectedJobID else { return }
+            guard let id = self?.actionBarTargetJobID() else { return }
             self?.onCancel?(id, cascade)
         }
         sharedActionBar.onAddSeries = { [weak self] delta, option in
-            self?.onAddSeries?(delta, option)
+            guard let self else { return }
+            guard let jobID = actionBarTargetJobID() else { return }
+            self.onAddSeries?(jobID, delta, option)
         }
         sharedActionBar.onSubtractSeries = { [weak self] delta, option in
-            self?.onSubtractSeries?(delta, option)
+            guard let self, let jobID = actionBarTargetJobID() else { return }
+            self.onSubtractSeries?(jobID, delta, option)
         }
         sharedActionBar.onToggleImageRefinement = { [weak self] enabled in
-            guard let id = self?.selectedJobID else { return }
+            guard let id = self?.actionBarTargetJobID() else { return }
             self?.onToggleImageRefinement?(id, enabled)
         }
         sharedActionBar.onToggleTextRefinement = { [weak self] enabled in
-            guard let id = self?.selectedJobID else { return }
+            guard let id = self?.actionBarTargetJobID() else { return }
             self?.onToggleTextRefinement?(id, enabled)
         }
     }
@@ -170,6 +193,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             }
             updateDocumentHeight()
         }
+        refreshActionBarState()
         invalidateIntrinsicContentSize()
     }
 
@@ -197,12 +221,14 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 scrollWidth: scrollWidth,
                 selected: isSelected,
                 colors: themeColors,
+                // Fingerprint covers status rows + copiesTotal; queued rows skip CoreText relayout when unchanged.
                 skipUnchanged: !row.isActive
             )
             if isSelected { selectedCard = card }
         }
         attachActionBar(to: selectedCard)
         refreshActionBarState()
+        notifyCardGeometryChangedIfNeeded()
     }
 
     private func rebuildRows(
@@ -250,6 +276,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         }
         attachActionBar(to: selectedCard)
         refreshActionBarState()
+        notifyCardGeometryChangedIfNeeded()
     }
 
     private func wireCardCallbacks(_ card: JobCardNSView, row: QueueRowSnapshot) {
@@ -287,6 +314,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     private func poolCard(_ card: JobCardNSView) {
+        if card.hasEmbeddedActionBar {
+            card.detachActionBar()
+        }
         if !cardPool.contains(where: { $0 === card }) {
             cardPool.append(card)
         }
@@ -361,8 +391,40 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         return card.layoutHeight + 8
     }
 
+    func measuredQueueContentHeight() -> CGFloat {
+        measuredCardStackHeight()
+    }
+
+    /// Height for pane auto-resize after layout at ``layoutWidth`` (reflows cards when width is known).
+    func intrinsicPanelBlockHeight(mode: JobsQueueSizeMode, layoutWidth: CGFloat) -> CGFloat {
+        if layoutWidth > 1, abs(lastConfiguredScrollWidth - layoutWidth) > 0.5, !rows.isEmpty {
+            reconfigureRowsForScrollWidth(layoutWidth)
+        }
+        layoutSubtreeIfNeeded()
+        switch mode {
+        case .strip:
+            return 0
+        case .one:
+            return max(measuredFirstCardHeight(), 40)
+        case .all:
+            return max(measuredQueueContentHeight(), 40)
+        }
+    }
+
+    /// Width used to wrap card text. The document view itself stays at the clip width.
+    func layoutViewportWidth() -> CGFloat {
+        let clipW = scrollView.contentView.bounds.width
+        if clipW > 20 {
+            return clipW
+        }
+        if bounds.width > 20 {
+            return bounds.width
+        }
+        return max(lastConfiguredScrollWidth, 260)
+    }
+
     private func effectiveScrollWidth() -> CGFloat {
-        bounds.width > 1 ? bounds.width : max(lastConfiguredScrollWidth, 1)
+        layoutViewportWidth()
     }
 
     /// Coalesces per-frame width changes into one card reconfigure (avoids CoreText relayout storms).
@@ -406,10 +468,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         stackView.layoutSubtreeIfNeeded()
         let measured = measuredCardStackHeight()
         let contentHeight = max(measured > 0 ? measured : fittingContentHeight, 40)
-        let width = effectiveScrollWidth()
-        guard abs(documentView.frame.width - width) > 0.5
-            || abs(documentView.frame.height - contentHeight) > 1 else { return }
-        documentView.frame = NSRect(x: 0, y: 0, width: width, height: contentHeight)
+        let docW = max(scrollView.contentView.bounds.width, bounds.width, 1)
+        let widthDelta = abs((documentWidthConstraint?.constant ?? 0) - docW)
+        let heightDelta = abs((documentHeightConstraint?.constant ?? 0) - contentHeight)
+        guard widthDelta > 0.5 || heightDelta > 1 else { return }
+        documentWidthConstraint?.constant = docW
+        documentHeightConstraint?.constant = contentHeight
+        documentView.frame = NSRect(x: 0, y: 0, width: docW, height: contentHeight)
         stackView.layoutSubtreeIfNeeded()
     }
 
@@ -424,43 +489,55 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         )
         if abs(lastConfiguredScrollWidth - width) > 0.5, !rows.isEmpty {
             scheduleReconfigureForScrollWidth(width)
-            return
         }
-        guard abs(documentView.frame.width - width) > 0.5 else { return }
+        let docW = max(scrollView.contentView.bounds.width, bounds.width, 1)
+        guard abs(documentView.frame.width - docW) > 0.5
+            || abs(documentView.frame.height - max(measuredCardStackHeight(), 40)) > 1 else { return }
         preserveScrollPosition {
             updateDocumentHeight()
         }
     }
 
-    private func attachActionBar(to card: JobCardNSView?) {
-        let wasEmbedded = actionBarEmbeddedOnCard
-        for existingCard in cardViews {
-            existingCard.detachActionBar()
-        }
-        sharedActionBar.isHidden = card == nil
-        guard let card else {
-            actionBarEmbeddedOnCard = false
-            return
-        }
-        card.attachActionBar(sharedActionBar)
-        sharedActionBar.applyTheme(themeColors)
-        refreshActionBarState()
-        updateDocumentHeight()
-        actionBarEmbeddedOnCard = true
-        if !wasEmbedded {
-            let growth = card.embeddedActionBarGrowthHeight()
-            if growth > 0 {
-                onActionBarEmbedded?(growth)
-            }
+    private func detachActionBarFromAllCards() {
+        for card in cardViews where card.hasEmbeddedActionBar {
+            card.detachActionBar()
         }
     }
 
+    private func attachActionBar(to card: JobCardNSView?) {
+        let wasVisible = actionBarVisible
+        detachActionBarFromAllCards()
+        if let card {
+            actionBarHostJobID = card.boundJobID
+            actionBarVisible = true
+            card.attachActionBar(sharedActionBar)
+            sharedActionBar.applyTheme(themeColors)
+        } else {
+            actionBarHostJobID = ""
+            actionBarVisible = false
+            sharedActionBar.isHidden = true
+            sharedActionBar.removeFromSuperview()
+        }
+        refreshActionBarState()
+        updateDocumentHeight()
+        if actionBarVisible, !wasVisible {
+            onActionBarEmbedded?(JobQueueLayout.actionBarHeight)
+        }
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        notifyCardGeometryChangedIfNeeded()
+    }
+
+    private func notifyCardGeometryChangedIfNeeded() {
+        onCardGeometryChanged?()
+    }
+
     private func refreshActionBarState() {
-        guard let selectedJobID, let actionBarStateProvider else {
+        guard let jobID = actionBarTargetJobID(), let actionBarStateProvider else {
             sharedActionBar.configure(state: .empty)
             return
         }
-        sharedActionBar.configure(state: actionBarStateProvider(selectedJobID))
+        sharedActionBar.configure(state: actionBarStateProvider(jobID))
     }
 
 
@@ -686,6 +763,30 @@ private final class JobNumberBadgeLabel: NSView {
     }
 }
 
+/// Transparent layer above status text; receives row clicks (Python ``JobCard.eventFilter``).
+@MainActor
+private final class JobCardClickOverlay: NSView {
+    weak var card: JobCardNSView?
+    private var receivedMouseDown = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        receivedMouseDown = true
+        card?.handleSelectionMouseDown(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard receivedMouseDown else { return }
+        receivedMouseDown = false
+        card?.handleSelectionMouseUp(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        card?.handleSelectionMouseDragged(event)
+    }
+}
+
 @MainActor
 final class JobCardNSView: NSView {
     override var isFlipped: Bool { true }
@@ -699,6 +800,7 @@ final class JobCardNSView: NSView {
 
     private let backgroundView = NSView()
     private let contentView = NSView()
+    private let clickOverlay = JobCardClickOverlay()
     private let statusWidget = JobCardStatusNSView()
     private let refsView = JobReferenceThumbsNSView()
     private var refsWidthConstraint: NSLayoutConstraint?
@@ -709,15 +811,10 @@ final class JobCardNSView: NSView {
     private var mouseDownLocation: NSPoint = .zero
     private var clickCount = 0
     private var colors: ThemeColors = .dark
-    private var actionBarContainer: NSView?
     private var statusWidthConstraint: NSLayoutConstraint?
     private var cardHeightConstraint: NSLayoutConstraint?
     private var contentHeightConstraint: NSLayoutConstraint?
     private var contentFillsCardBottomConstraint: NSLayoutConstraint?
-    private var actionBarTopConstraint: NSLayoutConstraint?
-    private var actionBarLeadingConstraint: NSLayoutConstraint?
-    private var actionBarTrailingConstraint: NSLayoutConstraint?
-    private var actionBarBottomConstraint: NSLayoutConstraint?
     private var stackWidthConstraint: NSLayoutConstraint?
     private var lastViewFingerprint = ""
     private var lastScrollWidth: CGFloat = 0
@@ -730,8 +827,60 @@ final class JobCardNSView: NSView {
     private var lastJobNumber: Int?
     private var lastJobNumberHeld = false
     private var lastJobNumberInError = false
+    private var lastCopiesTotal: Int?
     private let jobNumberBadge = JobNumberBadgeLabel()
     private(set) var layoutHeight: CGFloat = 40
+    private weak var embeddedActionBar: JobQueueActionBarNSView?
+    private var actionBarLayoutConstraints: [NSLayoutConstraint] = []
+
+    var hasEmbeddedActionBar: Bool { embeddedActionBar != nil }
+
+    func attachActionBar(_ bar: JobQueueActionBarNSView) {
+        if embeddedActionBar === bar {
+            bar.isHidden = false
+            resyncHeightAfterActionBarChange()
+            return
+        }
+        detachActionBar()
+        embeddedActionBar = bar
+        bar.removeFromSuperview()
+        addSubview(bar)
+        bar.isHidden = false
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        contentFillsCardBottomConstraint?.isActive = false
+        let margin = JobQueueLayout.cardOuterMargin
+        let contentBottom = contentView.bottomAnchor.constraint(
+            equalTo: bar.topAnchor,
+            constant: -JobQueueLayout.cardInnerSpacing
+        )
+        // Card height is required. This edge can yield so a 1pt mismatch cannot collapse the card.
+        contentBottom.priority = NSLayoutConstraint.Priority(999)
+        let constraints = [
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margin),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margin),
+            bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margin),
+            bar.heightAnchor.constraint(equalToConstant: JobQueueLayout.actionBarHeight),
+            contentBottom,
+        ]
+        actionBarLayoutConstraints = constraints
+        NSLayoutConstraint.activate(constraints)
+        resyncHeightAfterActionBarChange()
+    }
+
+    func detachActionBar() {
+        guard embeddedActionBar != nil else { return }
+        NSLayoutConstraint.deactivate(actionBarLayoutConstraints)
+        actionBarLayoutConstraints = []
+        embeddedActionBar?.removeFromSuperview()
+        embeddedActionBar?.isHidden = true
+        embeddedActionBar = nil
+        contentFillsCardBottomConstraint?.isActive = true
+        resyncHeightAfterActionBarChange()
+    }
+
+    private func resyncHeightAfterActionBarChange() {
+        syncCardHeight(inlineRefs: lastInlineRefs, hasBelowRefs: lastHasBelowRefs)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -741,6 +890,8 @@ final class JobCardNSView: NSView {
         backgroundView.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
+        clickOverlay.translatesAutoresizingMaskIntoConstraints = false
+        clickOverlay.card = self
         statusWidget.translatesAutoresizingMaskIntoConstraints = false
         refsView.onOpenPaths = { [weak self] paths in self?.onOpenReferences?(paths) }
 
@@ -764,6 +915,7 @@ final class JobCardNSView: NSView {
         column.addArrangedSubview(mainRow)
 
         contentView.addSubview(column)
+        contentView.addSubview(clickOverlay)
         addSubview(backgroundView)
         addSubview(contentView)
         jobNumberBadge.translatesAutoresizingMaskIntoConstraints = false
@@ -775,6 +927,7 @@ final class JobCardNSView: NSView {
             equalTo: bottomAnchor,
             constant: -margin
         )
+        contentFillsCardBottomConstraint?.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([
             backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
             backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -787,6 +940,10 @@ final class JobCardNSView: NSView {
             column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             column.topAnchor.constraint(equalTo: contentView.topAnchor),
             column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            clickOverlay.leadingAnchor.constraint(equalTo: statusWidget.leadingAnchor),
+            clickOverlay.trailingAnchor.constraint(equalTo: statusWidget.trailingAnchor),
+            clickOverlay.topAnchor.constraint(equalTo: statusWidget.topAnchor),
+            clickOverlay.bottomAnchor.constraint(equalTo: statusWidget.bottomAnchor),
             widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
         ])
         contentFillsCardBottomConstraint?.isActive = true
@@ -822,7 +979,7 @@ final class JobCardNSView: NSView {
         selected: Bool,
         colors: ThemeColors
     ) {
-        let contentWidth = max(80, scrollWidth - JobQueueLayout.cardContentMargin)
+        let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
         let useInline = Self.useInlineRefs(
             scrollWidth: scrollWidth,
@@ -857,7 +1014,11 @@ final class JobCardNSView: NSView {
                 copiesTotal: row.copiesTotal
             )
         }
-        let fingerprint = "\(textWidth)|\(statusView.fingerprint())"
+        let fingerprint = statusFingerprint(
+            textWidth: textWidth,
+            copiesTotal: row.copiesTotal,
+            statusView: statusView
+        )
         let widthChanged = scrollWidth != lastScrollWidth
         lastScrollWidth = scrollWidth
         if fingerprint == lastViewFingerprint {
@@ -870,6 +1031,11 @@ final class JobCardNSView: NSView {
             updateChrome(selected: selected, running: row.isActive)
             return
         }
+
+        lastJobNumber = row.jobNumber
+        lastJobNumberHeld = row.held
+        lastJobNumberInError = row.inError
+        updateJobNumberDisplay(row: row)
 
         statusWidthConstraint?.isActive = false
         statusWidthConstraint = statusWidget.widthAnchor.constraint(equalToConstant: textWidth)
@@ -942,7 +1108,7 @@ final class JobCardNSView: NSView {
 
         applyTheme(colors)
 
-        let contentWidth = max(80, scrollWidth - JobQueueLayout.cardContentMargin)
+        let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
         refsView.configure(paths: refs, referencesInvalid: row.referencesInvalid, colors: colors)
         let useInline = Self.useInlineRefs(
@@ -965,6 +1131,11 @@ final class JobCardNSView: NSView {
                 copiesTotal: row.copiesTotal
             )
         }
+        lastJobNumber = row.jobNumber
+        lastJobNumberHeld = row.held
+        lastJobNumberInError = row.inError
+        updateJobNumberDisplay(row: row)
+
         statusWidthConstraint?.isActive = false
         statusWidthConstraint = statusWidget.widthAnchor.constraint(equalToConstant: textWidth)
         statusWidthConstraint?.priority = .required
@@ -973,16 +1144,26 @@ final class JobCardNSView: NSView {
         lastHasBelowRefs = !useInline && refsView.cellCount > 0
         syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
 
-        lastViewFingerprint = "\(textWidth)|\(statusView.fingerprint())"
+        lastViewFingerprint = statusFingerprint(
+            textWidth: textWidth,
+            copiesTotal: row.copiesTotal,
+            statusView: statusView
+        )
         lastScrollWidth = scrollWidth
         lastThumbnailPaths = refs
         lastReferencesInvalid = row.referencesInvalid
         lastInlineRefs = useInline
-        lastSelected = selected
-        lastActive = row.isActive
-        updateJobNumberDisplay(row: row)
+        lastCopiesTotal = row.copiesTotal
         updateChrome(selected: selected, running: row.isActive)
         invalidateIntrinsicContentSize()
+    }
+
+    private func statusFingerprint(
+        textWidth: CGFloat,
+        copiesTotal: Int,
+        statusView: QueueJobStatusView
+    ) -> String {
+        "\(textWidth)|c:\(copiesTotal)|\(statusView.fingerprint())"
     }
 
     private func updateJobNumberDisplay(row: QueueRowSnapshot) {
@@ -1000,18 +1181,23 @@ final class JobCardNSView: NSView {
             clickable: true,
             cellBackground: cellBg
         )
-        positionJobNumberBadge()
+        applyJobNumberBadgeLayout()
     }
 
-    private func positionJobNumberBadge() {
+    private func applyJobNumberBadgeLayout() {
+        let margin = JobQueueLayout.cardOuterMargin
+        let borderInset = CGFloat(lastSelected ? colors.currentImageBorderWidth : 1)
+        positionJobNumberBadge(borderInset: borderInset, outerMargin: margin)
+    }
+
+    private func positionJobNumberBadge(borderInset: CGFloat, outerMargin: CGFloat) {
         guard !jobNumberBadge.isHidden else { return }
-        let inset: CGFloat = 2
         let fit = jobNumberBadge.fittingSize
         let w = max(44, fit.width + 8)
         let h = fit.height + 2
         jobNumberBadge.frame = NSRect(
-            x: bounds.width - w - inset,
-            y: inset,
+            x: bounds.width - w - outerMargin - borderInset,
+            y: outerMargin + borderInset,
             width: w,
             height: h
         )
@@ -1019,7 +1205,8 @@ final class JobCardNSView: NSView {
 
     override func layout() {
         super.layout()
-        positionJobNumberBadge()
+        let borderInset = CGFloat(lastSelected ? colors.currentImageBorderWidth : 1)
+        positionJobNumberBadge(borderInset: borderInset, outerMargin: JobQueueLayout.cardOuterMargin)
     }
 
     private func rowContentUnchanged(
@@ -1028,7 +1215,7 @@ final class JobCardNSView: NSView {
         selected: Bool
     ) -> Bool {
         guard boundJobID == row.jobID else { return false }
-        let contentWidth = max(80, scrollWidth - JobQueueLayout.cardContentMargin)
+        let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
         let useInline = Self.useInlineRefs(
             scrollWidth: scrollWidth,
@@ -1049,8 +1236,13 @@ final class JobCardNSView: NSView {
             scrollWidth: scrollWidth,
             inlineRefs: useInline
         )
-        let fingerprint = "\(textWidth)|\(statusView.fingerprint())"
+        let fingerprint = statusFingerprint(
+            textWidth: textWidth,
+            copiesTotal: row.copiesTotal,
+            statusView: statusView
+        )
         if fingerprint != lastViewFingerprint { return false }
+        if row.copiesTotal != lastCopiesTotal { return false }
         if scrollWidth != lastScrollWidth { return false }
         if refs != lastThumbnailPaths { return false }
         if row.referencesInvalid != lastReferencesInvalid { return false }
@@ -1080,74 +1272,14 @@ final class JobCardNSView: NSView {
         }
         lastSelected = selected
         lastActive = running
-    }
-
-    func attachActionBar(_ bar: NSView) {
-        if actionBarContainer === bar, bar.superview === self {
-            bar.isHidden = false
-            updateActionBarLayoutConstraints()
-            resyncHeightAfterActionBarChange()
-            return
-        }
-        detachActionBar()
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.isHidden = false
-        addSubview(bar, positioned: .above, relativeTo: contentView)
-        actionBarContainer = bar
-        updateActionBarLayoutConstraints()
-        resyncHeightAfterActionBarChange()
-    }
-
-    func detachActionBar() {
-        guard let bar = actionBarContainer else { return }
-        actionBarTopConstraint?.isActive = false
-        actionBarLeadingConstraint?.isActive = false
-        actionBarTrailingConstraint?.isActive = false
-        actionBarBottomConstraint?.isActive = false
-        bar.removeFromSuperview()
-        actionBarContainer = nil
-        updateActionBarLayoutConstraints()
-        resyncHeightAfterActionBarChange()
-    }
-
-    private func updateActionBarLayoutConstraints() {
-        let margin = JobQueueLayout.cardOuterMargin
-        let spacing = JobQueueLayout.cardInnerSpacing
-        if let bar = actionBarContainer, !bar.isHidden {
-            contentFillsCardBottomConstraint?.isActive = false
-            if actionBarTopConstraint == nil {
-                actionBarLeadingConstraint = bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margin)
-                actionBarTrailingConstraint = bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margin)
-                actionBarTopConstraint = bar.topAnchor.constraint(equalTo: contentView.bottomAnchor, constant: spacing)
-                actionBarBottomConstraint = bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margin)
-            }
-            actionBarLeadingConstraint?.isActive = true
-            actionBarTrailingConstraint?.isActive = true
-            actionBarTopConstraint?.isActive = true
-            actionBarBottomConstraint?.isActive = true
-        } else {
-            actionBarTopConstraint?.isActive = false
-            actionBarLeadingConstraint?.isActive = false
-            actionBarTrailingConstraint?.isActive = false
-            actionBarBottomConstraint?.isActive = false
-            contentFillsCardBottomConstraint?.isActive = true
+        applyJobNumberBadgeLayout()
+        if lastScrollWidth > 0, !lastViewFingerprint.isEmpty {
+            syncCardHeight(inlineRefs: lastInlineRefs, hasBelowRefs: lastHasBelowRefs)
         }
     }
 
-    private func resyncHeightAfterActionBarChange() {
-        syncCardHeight(inlineRefs: lastInlineRefs, hasBelowRefs: lastHasBelowRefs)
-    }
-
-    func embeddedActionBarGrowthHeight() -> CGFloat {
-        actionBarBlockHeight()
-    }
-
-    private func actionBarBlockHeight() -> CGFloat {
-        guard let bar = actionBarContainer, !bar.isHidden else { return 0 }
-        bar.layoutSubtreeIfNeeded()
-        let measured = bar.fittingSize.height
-        let barHeight = measured > 0 ? measured : JobQueueLayout.actionBarHeight
-        return JobQueueLayout.cardInnerSpacing + barHeight
+    private static func infoContentWidth(viewportWidth: CGFloat) -> CGFloat {
+        JobQueueLayout.infoContentWidth(viewportWidth: viewportWidth)
     }
 
     private static func statusTextWidth(
@@ -1180,26 +1312,36 @@ final class JobCardNSView: NSView {
 
         contentHeightConstraint?.isActive = false
         contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: contentH)
-        contentHeightConstraint?.priority = .required
+        contentHeightConstraint?.priority = .defaultHigh
         contentHeightConstraint?.isActive = true
 
-        let frameH = JobQueueLayout.cardOuterMargin * 2 + contentH + actionBarBlockHeight()
+        let actionBarBlock: CGFloat
+        if embeddedActionBar != nil, embeddedActionBar?.isHidden == false {
+            actionBarBlock = JobQueueLayout.cardInnerSpacing + JobQueueLayout.actionBarHeight
+        } else {
+            actionBarBlock = 0
+        }
+        // Must match content top/bottom + optional action bar. Extra border height
+        // conflicts with those constraints and collapses the card.
+        let frameH = JobQueueLayout.cardOuterMargin * 2 + contentH + actionBarBlock
         layoutHeight = max(frameH, 40)
         cardHeightConstraint?.isActive = false
         cardHeightConstraint = heightAnchor.constraint(equalToConstant: layoutHeight)
         cardHeightConstraint?.priority = .required
         cardHeightConstraint?.isActive = true
-        updateActionBarLayoutConstraints()
         invalidateIntrinsicContentSize()
     }
 
-    override func mouseDown(with event: NSEvent) {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    func handleSelectionMouseDown(_ event: NSEvent) {
         mouseDownLocation = event.locationInWindow
         clickCount = event.clickCount
     }
 
-    override func mouseUp(with event: NSEvent) {
+    func handleSelectionMouseUp(_ event: NSEvent) {
         if event.clickCount >= 2 || clickCount >= 2 {
+            jobsPaneDebug("card dbl-click edit job=\(boundJobID)")
             onEdit?()
             return
         }
@@ -1207,17 +1349,30 @@ final class JobCardNSView: NSView {
         let dx = current.x - mouseDownLocation.x
         let dy = current.y - mouseDownLocation.y
         if (dx * dx + dy * dy) <= 16 {
+            jobsPaneDebug("card select job=\(boundJobID)")
             onSelect?()
         }
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    func handleSelectionMouseDragged(_ event: NSEvent) {
         let current = event.locationInWindow
         let dx = current.x - mouseDownLocation.x
         let dy = current.y - mouseDownLocation.y
         if (dx * dx + dy * dy) > 16 {
             onBeginDrag?(boundJobID, event)
         }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        handleSelectionMouseDown(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        handleSelectionMouseUp(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        handleSelectionMouseDragged(event)
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -1275,8 +1430,40 @@ final class JobCardNSView: NSView {
     }
 }
 
+/// Pins the queue panel to the SwiftUI representable bounds (host frame is the hit target).
+@MainActor
+final class JobQueuePanelHostView: NSView {
+    let panel = JobQueuePanelNSView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(panel)
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            panel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            panel.topAnchor.constraint(equalTo: topAnchor),
+            panel.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    override func layout() {
+        super.layout()
+        guard let appState = panel.paneContextMenuAppState else { return }
+        let width = panel.layoutViewportWidth()
+        let mode = appState.jobsQueueSizeMode
+        let panelH = panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
+        appState.noteJobsQueuePanelMeasurement(panelHeight: panelH)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { false }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1297,33 +1484,42 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
     var compactForFloating: Bool = false
     var fillsAvailableHeight: Bool = false
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: JobQueuePanelNSView, context: Context) -> CGSize? {
-        let width = resolvedLayoutWidth(proposal: proposal, panel: nsView)
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: JobQueuePanelHostView, context: Context) -> CGSize? {
+        let panel = nsView.panel
+        let width = resolvedLayoutWidth(proposal: proposal, panel: panel)
         let height: CGFloat
         if fillsAvailableHeight {
-            height = max(proposal.height ?? nsView.bounds.height, 40)
-        } else if nsView.isLaidOutAtPlaceholderWidth {
+            height = max(proposal.height ?? panel.bounds.height, 40)
+        } else if panel.isLaidOutAtPlaceholderWidth {
             // Inflated placeholder-width layout; use the last real measurement until the reflow lands.
             height = max(appState.measuredJobsCardStackHeight, 40)
         } else {
-            height = max(measuredQueueHeight(panel: nsView, mode: appState.jobsQueueSizeMode), 40)
+            height = max(measuredQueueHeight(panel: panel, mode: appState.jobsQueueSizeMode), 40)
         }
         return CGSize(width: width, height: height)
     }
 
-    func makeNSView(context: Context) -> JobQueuePanelNSView {
-        let panel = JobQueuePanelNSView()
-        configurePanel(panel, context: context)
-        context.coordinator.panel = panel
-        return panel
+    func makeNSView(context: Context) -> JobQueuePanelHostView {
+        let host = JobQueuePanelHostView()
+        configurePanel(host.panel, context: context)
+        context.coordinator.panel = host.panel
+        return host
     }
 
-    func updateNSView(_ panel: JobQueuePanelNSView, context: Context) {
-        let uiRevision = appState.imageGenUIRevision
-        let dataChanged = context.coordinator.revision != uiRevision
-        context.coordinator.revision = uiRevision
+    func updateNSView(_ host: JobQueuePanelHostView, context: Context) {
+        let panel = host.panel
+        context.coordinator.panel = panel
         panel.paneContextMenuKind = compactForFloating ? .jobs(floating: true) : .jobs(floating: false)
         panel.paneContextMenuAppState = appState
+        if !compactForFloating {
+            appState.jobsQueuePanelMeasureHost = host
+        }
+        syncPanelToController(panel)
+        scheduleMeasuredGeometryReport(panel: panel, appState: appState, mode: appState.jobsQueueSizeMode)
+    }
+
+    @MainActor
+    private func syncPanelToController(_ panel: JobQueuePanelNSView) {
         let controller = appState.imageGen
         let mode = appState.jobsQueueSizeMode
         let rows: [QueueRowSnapshot]
@@ -1335,12 +1531,17 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         case .strip:
             rows = []
         }
-        panel.applyTheme(appState.theme.colors)
-        if dataChanged {
-            let scrollWidth = resolvedLayoutWidth(proposal: nil, panel: panel)
-            panel.updateRows(rows, selectedJobID: controller.selectedJobID, scrollWidth: scrollWidth)
+        // Python ``_ensure_single_job_auto_selection``: a sole visible card is always selected
+        // (one-job mode or single queue row), so its action bar shows without a click.
+        var selectedJobID = controller.selectedJobID
+        if let sole = rows.first, mode == .one || rows.count == 1, selectedJobID != sole.jobID {
+            selectedJobID = sole.jobID
+            // Deferred: this runs inside SwiftUI's update pass; selectJob bumps observed state.
+            DispatchQueue.main.async { controller.selectJob(id: sole.jobID) }
         }
-        scheduleMeasuredGeometryReport(panel: panel, appState: appState, mode: mode)
+        panel.applyTheme(appState.theme.colors)
+        let scrollWidth = resolvedLayoutWidth(proposal: nil, panel: panel)
+        panel.updateRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
     }
 
     @MainActor
@@ -1358,7 +1559,23 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
             appState.confirmCancelJob(id: jobID, cascade: cascade)
         }
         panel.onSelect = { jobID in
-            appState.imageGen.selectJob(id: jobID)
+            let gen = appState.imageGen
+            guard let jobID else {
+                gen.selectJob(id: nil)
+                syncPanelToController(panel)
+                return
+            }
+            let mode = appState.jobsQueueSizeMode
+            let rowCount = gen.queueSnapshot().count
+            let soleVisible = mode != .strip && (mode == .one || rowCount == 1)
+            if soleVisible {
+                gen.selectJob(id: jobID)
+            } else if gen.selectedJobID == jobID {
+                gen.selectJob(id: nil)
+            } else {
+                gen.selectJob(id: jobID)
+            }
+            syncPanelToController(panel)
         }
         panel.onOpenReferences = { paths in
             // Python ``open_reference_thumbnail_paths``: one image → browse; several → custom-sort level.
@@ -1372,11 +1589,15 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
             guard let panel else { return }
             scheduleMeasuredGeometryReport(panel: panel, appState: appState, mode: appState.jobsQueueSizeMode)
         }
-        panel.onAddSeries = { delta, option in
-            appState.imageGen.addActiveSeriesCycle(delta: option ? 50 : delta)
+        panel.onAddSeries = { jobID, delta, option in
+            if option {
+                appState.imageGen.setSeriesContinuous(forJobID: jobID)
+            } else {
+                appState.imageGen.addSeriesCycle(forJobID: jobID, delta: delta)
+            }
         }
-        panel.onSubtractSeries = { delta, option in
-            appState.imageGen.subtractActiveSeriesRemaining(delta: delta, removeAll: option)
+        panel.onSubtractSeries = { jobID, _, option in
+            appState.imageGen.subtractSeriesRemaining(forJobID: jobID, removeAll: option)
         }
         panel.actionBarStateProvider = { jobID in
             appState.imageGen.actionBarState(for: jobID)
@@ -1398,6 +1619,20 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
                 gen.toggleJobHeld(jobID: jobID)
             }
         }
+        context.coordinator.appState = appState
+        appState.jobsQueuePanelSync = { [weak panel] in
+            guard let panel else { return }
+            syncPanelToController(panel)
+        }
+    }
+
+    static func dismantleNSView(_ host: JobQueuePanelHostView, coordinator: Coordinator) {
+        if coordinator.appState?.jobsQueuePanelMeasureHost === host {
+            coordinator.appState?.jobsQueuePanelMeasureHost = nil
+        }
+        coordinator.appState?.jobsQueuePanelSync = nil
+        coordinator.panel = nil
+        coordinator.appState = nil
     }
 
     private func scheduleMeasuredGeometryReport(
@@ -1437,7 +1672,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         case .one:
             cardHeight = panel.measuredFirstCardHeight()
         case .all:
-            cardHeight = panel.measuredCardStackHeight()
+            cardHeight = panel.measuredQueueContentHeight()
         }
         jobsPaneDebug(
             "report mode=\(mode) cardHeight=\(cardHeight) panelBounds=\(panel.bounds.size) "
@@ -1453,7 +1688,8 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         panel: JobQueuePanelNSView
     ) -> CGFloat {
         if let proposalWidth = proposal?.width, proposalWidth > 1 { return proposalWidth }
-        return max(panel.bounds.width, 1)
+        // Match pre-992af3d layout: avoid 1px placeholder width (breaks card metrics / hit targets).
+        return max(panel.bounds.width, panel.lastConfiguredScrollWidthForDebug, 260)
     }
 
     @MainActor
@@ -1464,7 +1700,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         case .one:
             return panel.measuredFirstCardHeight()
         case .all:
-            return panel.measuredCardStackHeight()
+            return panel.measuredQueueContentHeight()
         }
     }
 
@@ -1472,6 +1708,6 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
 
     final class Coordinator {
         weak var panel: JobQueuePanelNSView?
-        var revision = 0
+        weak var appState: AppState?
     }
 }

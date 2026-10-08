@@ -52,6 +52,9 @@ let packageTargets: [Target] = [
             .process("Resources/image_recognition_models.json"),
             .process("Resources/dlib_face_models.json"),
             .process("Resources/waltzremote_search_models.cer"),
+            .process("Resources/ImageGenPluginCatalogSnapshot.json"),
+            .copy("Resources/ImageGenPython"),
+            .copy("Resources/requirements-imagegen.txt"),
         ],
         linkerSettings: [
             .linkedFramework("Photos"),

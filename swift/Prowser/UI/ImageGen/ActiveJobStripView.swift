@@ -117,11 +117,19 @@ final class ActiveJobStripNSView: NSView {
     }
 
     private func measuredContentHeight() -> CGFloat {
-        let cooldownHeight = cooldownRow.isHidden ? 0 : cooldownRow.fittingSize.height
-        let rowsHeight = rowsStack.fittingSize.height
+        var rowsHeight: CGFloat = 0
+        for subview in rowsStack.arrangedSubviews {
+            let rowH = subview.fittingSize.height
+            let floor = max(JobQueueLayout.stripBarHeight, ceil(JobQueueLayout.fontSize * 1.25))
+            rowsHeight += rowH > 1 ? rowH : floor
+        }
+        if rowsHeight > 0, rowsStack.arrangedSubviews.count > 1 {
+            rowsHeight += CGFloat(rowsStack.arrangedSubviews.count - 1) * rowsStack.spacing
+        }
+        let cooldownHeight = cooldownRow.isHidden ? 0 : max(cooldownRow.fittingSize.height, 20)
         let contentHeight = cooldownHeight + rowsHeight
         // Match Python ``_ACTIVE_JOB_STRIP_FRAME_CHROME_V`` (border + inner padding).
-        return 10 + max(contentHeight, 28 - 10)
+        return 10 + max(contentHeight, 18)
     }
 
     private func scheduleContentHeightReport() {
@@ -250,6 +258,14 @@ final class ActiveJobStripNSView: NSView {
         }
         cachedContentHeight = 0
         invalidateIntrinsicContentSize()
+        let measureWidth = bounds.width > 1 ? bounds.width : 280
+        layoutSubtreeIfNeeded()
+        refreshCachedContentHeight(forWidth: measureWidth)
+        let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: stripView)
+        if cachedContentHeight < estimated {
+            cachedContentHeight = estimated
+            invalidateIntrinsicContentSize()
+        }
         scheduleContentHeightReport()
     }
 
@@ -353,6 +369,12 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
             guard let view else { return }
             reportMeasuredHeight(nsView: view, appState: appState)
         }
+        appState.jobsQueueStripMeasureRefresh = { [weak view] in
+            guard let view else { return }
+            let width = max(view.bounds.width, 280)
+            view.refreshCachedContentHeight(forWidth: width)
+            reportMeasuredHeight(nsView: view, appState: appState)
+        }
         return view
     }
 
@@ -360,6 +382,12 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         let colors = appState.theme.colors
         nsView.onContentHeightChanged = { [weak nsView] in
             guard let nsView else { return }
+            reportMeasuredHeight(nsView: nsView, appState: appState)
+        }
+        appState.jobsQueueStripMeasureRefresh = { [weak nsView] in
+            guard let nsView else { return }
+            let width = max(nsView.bounds.width, 280)
+            nsView.refreshCachedContentHeight(forWidth: width)
             reportMeasuredHeight(nsView: nsView, appState: appState)
         }
         nsView.update(stripView: stripView, colors: colors)
@@ -378,6 +406,7 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     private func reportMeasuredHeight(nsView: ActiveJobStripNSView, appState: AppState) {
         let width = max(nsView.bounds.width, 1)
         nsView.refreshCachedContentHeight(forWidth: width)
-        appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, 28))
+        let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: appState.imageGen.activeStripView)
+        appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, estimated, 28))
     }
 }

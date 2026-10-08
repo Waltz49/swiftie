@@ -65,6 +65,20 @@ final class AppConfig {
         return url
     }
 
+    /// Profile venv for imagegen (`~/.swift-prowser/venvs/imagegen` by default).
+    func imagegenVenvURL() -> URL {
+        let raw = string(forKey: "imagegen_venv_path", default: "")
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath).standardizedFileURL
+        }
+        return ImageGenVenvPaths.defaultVenvURL(prowserHome: prowserHome)
+    }
+
+    func imagegenVenvPythonPath() -> String {
+        ImageGenVenvPaths.pythonExecutable(in: imagegenVenvURL()).path
+    }
+
     var lastDirectory: String? {
         if let dir = restoreStateDict()["last_directory"] as? String, !dir.isEmpty {
             return dir

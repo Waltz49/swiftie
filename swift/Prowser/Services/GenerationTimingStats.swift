@@ -27,6 +27,14 @@ struct GenerationTimingKey: Equatable, Hashable {
     let height: Int
     let quant: String
 
+    init(modelID: String, steps: Int, width: Int, height: Int, quant: String) {
+        self.modelID = modelID
+        self.steps = steps
+        self.width = width
+        self.height = height
+        self.quant = quant
+    }
+
     init?(bridgeArray: [Any]) {
         guard bridgeArray.count >= 5 else { return nil }
         guard let modelID = bridgeArray[0] as? String, !modelID.isEmpty else { return nil }

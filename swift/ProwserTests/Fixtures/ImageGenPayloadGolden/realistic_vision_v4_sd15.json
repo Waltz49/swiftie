@@ -1,0 +1,13 @@
+{
+  "_job_values_snapshotted": true,
+  "debug_mode": false,
+  "height": 512,
+  "hf_model_id": "SG161222/Realistic_Vision_V4.0_noVAE",
+  "max_generation_dimension": 768,
+  "output_path": "/var/folders/1c/cvcvczxn41v2nflwsys6sdh00000gn/T/out.png",
+  "pipeline_id": "sd15_diffusers",
+  "prompt": "test",
+  "show_progressive_images": true,
+  "steps": 25,
+  "width": 512
+}

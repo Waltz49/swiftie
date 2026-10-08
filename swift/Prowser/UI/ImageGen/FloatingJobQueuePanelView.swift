@@ -30,12 +30,14 @@ struct FloatingJobQueuePanelView: View {
                     SidebarPaneToolsMenuButton(kind: .jobs(floating: true))
                         .foregroundStyle(colors.sidebarHeaderText)
                     Button {
-                        appState.hideJobsPanel()
+                        // Python `_close_to_pane_mode`: header close returns jobs to the sidebar pane
+                        // (⌘J / window close only hide the panel).
+                        appState.showJobsPane()
                     } label: {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.plain)
-                    .help("Close floating job panel (⌘J)")
+                    .help("Close job control dialog")
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -77,29 +79,26 @@ struct FloatingJobQueuePanelView: View {
             alwaysOnTop: appState.jobsPanelAlwaysOnTop,
             hidesStandardWindowButtons: true
         )
+        .background {
+            SceneWindowLifecycleBridge(windowIdentifier: SceneWindowChrome.jobsPanelID) {
+                appState.hideJobsPanel()
+            }
+        }
         .onChange(of: appState.jobsPanelAlwaysOnTop) { _, enabled in
-            applyJobsPanelWindowLevel(alwaysOnTop: enabled)
+            SceneWindowChrome.applyJobsPanelAlwaysOnTop(enabled)
         }
         .onAppear {
             appState.syncJobsPaneGeometry()
+            SceneWindowChrome.applyJobsPanelAlwaysOnTop(appState.jobsPanelAlwaysOnTop)
         }
         .onChange(of: appState.showFloatingJobsPanel) { _, show in
             if !show {
                 dismiss()
             }
         }
-        .onDisappear {
-            appState.hideJobsPanel()
-        }
         .onChange(of: appState.jobsQueueSizeMode) { _, _ in
             appState.syncJobsPaneGeometry()
         }
     }
 
-    private func applyJobsPanelWindowLevel(alwaysOnTop: Bool) {
-        guard let window = NSApp.windows.first(where: {
-            $0.identifier?.rawValue == "jobs-panel" || $0.title == "Job Control"
-        }) else { return }
-        window.level = alwaysOnTop ? .floating : .normal
-    }
 }

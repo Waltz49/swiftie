@@ -7,7 +7,7 @@ final class ImageGenController {
     private let config: AppConfig
     private let modelTasks: MfluxGenerationTasks
     private let foregroundTasks: FluxPromptTasksStub
-    private let registry: ImageGenRegistryBridge
+    private let registry: ImageGenRegistry
 
     private(set) var queue: ImageGenQueueFile = ImageGenQueueFile()
     private(set) var activeJobID: String?
@@ -81,7 +81,11 @@ final class ImageGenController {
     var onDeferredQuitComplete: (() -> Void)?
 
     var isEnabled: Bool {
-        BundleCapabilities.imageGenUIEnabled && registry.isAvailable && MfluxToolchain.shared.isAvailable
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        if registry.isAvailable { return true }
+        if MfluxToolchain.shared.isAvailable { return true }
+        return FileManager.default.isExecutableFile(atPath: config.imagegenVenvPythonPath())
+            && ImageGenPythonBundle.rootURL() != nil
     }
 
     /// Status-bar hint when ``isEnabled`` is false (menu uses the same gate).
@@ -89,13 +93,14 @@ final class ImageGenController {
         if !BundleCapabilities.imageGenUIEnabled {
             return "Image generation is not included in this build."
         }
-        if !registry.isAvailable {
-            return "Image generation: set Python repo root in Preferences → Image Generation."
+        if ImageGenPythonBundle.rootURL() == nil {
+            return "Image generation: bundled pipeline scripts are missing from the app."
         }
-        if !MfluxToolchain.shared.isAvailable {
+        if !MfluxToolchain.shared.isAvailable,
+           !FileManager.default.isExecutableFile(atPath: config.imagegenVenvPythonPath()) {
             let detail = MfluxToolchain.shared.lastProbeError
             if !detail.isEmpty { return detail }
-            return "Image generation: set MFLUX venv path in Preferences → Image Generation."
+            return "Image generation: install the imagegen venv in Preferences → Image Generation."
         }
         return "Image generation is not available."
     }
@@ -148,7 +153,7 @@ final class ImageGenController {
         config: AppConfig,
         modelTasks: MfluxGenerationTasks,
         foregroundTasks: FluxPromptTasksStub,
-        registry: ImageGenRegistryBridge
+        registry: ImageGenRegistry
     ) {
         self.config = config
         self.modelTasks = modelTasks
@@ -309,32 +314,10 @@ final class ImageGenController {
             fullPrompt: prompt,
             steps: steps
         )
-        if isEnabled {
-            do {
-                let built = try await registry.buildQueueStatusView(
-                    pluginID: pluginID,
-                    function: function,
-                    values: submitValues,
-                    copiesTotal: normalizedCopies
-                )
-                job.statusView = built.statusView
-                job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
-                job.fullPrompt = built.fullPrompt
-                job.referencesInvalid = built.referencesInvalid
-            } catch {
-                job.statusView = QueueJobStatusView.degradedFallback(
-                    prompt: prompt,
-                    copiesTotal: normalizedCopies
-                )
-            }
-        } else {
-            job.statusView = QueueJobStatusView.degradedFallback(
-                prompt: prompt,
-                copiesTotal: normalizedCopies
-            )
-        }
         job.jobNumber = ImageGenJobNumber.allocate(config: config)
         queue.jobs.append(job)
+        let index = queue.jobs.count - 1
+        await refreshQueuedJobStatus(at: index)
         persistQueue()
         bumpQueueRevision()
         if !isProcessing && !holdJobQueue {
@@ -591,11 +574,17 @@ final class ImageGenController {
             for jobID in suffix where jobID != activeJobID {
                 queue.jobs.removeAll { $0.jobID == jobID }
             }
+            if let selectedJobID, suffix.contains(selectedJobID) {
+                self.selectedJobID = nil
+            }
             persistQueue()
             bumpQueueRevision()
             return
         }
         queue.jobs.removeAll { $0.jobID == id }
+        if selectedJobID == id {
+            selectedJobID = nil
+        }
         persistQueue()
         bumpQueueRevision()
     }
@@ -621,6 +610,161 @@ final class ImageGenController {
     }
 
     // MARK: - Series controls
+
+    func rowIndex(forJobID jobID: String) -> Int? {
+        let rows = queueSnapshot()
+        return rows.firstIndex(where: { $0.jobID == jobID })
+    }
+
+    /// Python ``add_series_cycle_for_row`` / action bar + (targets selected row, not only active).
+    func addSeriesCycle(forJobID jobID: String, delta: Int = 1) {
+        Task { @MainActor in
+            await addSeriesCycleAsync(jobID: jobID, delta: delta)
+        }
+    }
+
+    func setSeriesContinuous(forJobID jobID: String) {
+        Task { @MainActor in
+            await setSeriesContinuousAsync(jobID: jobID)
+        }
+    }
+
+    func subtractSeriesRemaining(forJobID jobID: String, removeAll: Bool = false) {
+        Task { @MainActor in
+            if removeAll {
+                await clearSeriesRemainingAsync(jobID: jobID)
+            } else if jobID == activeJobID {
+                subtractActiveSeriesRemaining()
+            } else {
+                await adjustQueuedSeriesTotalAsync(jobID: jobID, delta: -1)
+            }
+        }
+    }
+
+    private func addSeriesCycleAsync(jobID: String, delta: Int) async {
+        guard delta != 0 else { return }
+        if jobID == activeJobID {
+            if delta > 0 {
+                addActiveSeriesCycle(delta: delta)
+            } else {
+                subtractActiveSeriesRemaining()
+            }
+            return
+        }
+        await adjustQueuedSeriesTotalAsync(jobID: jobID, delta: delta)
+    }
+
+    private func setSeriesContinuousAsync(jobID: String) async {
+        if jobID == activeJobID {
+            setActiveSeriesContinuous()
+            return
+        }
+        guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        var job = queue.jobs[index]
+        if job.pluginUnavailable || JobStepQueue.isSeriesContinuousCopies(job.copiesTotal) { return }
+        do {
+            var values = job.values
+            values["copies"] = JobStepQueue.seriesContinuousCopies
+            if job.steps.isEmpty {
+                job.steps = try await registry.materializeSteps(
+                    pluginID: job.pluginID,
+                    values: values,
+                    copies: JobStepQueue.seriesContinuousCopies
+                )
+            }
+            job.values = values
+            job.copiesTotal = JobStepQueue.seriesContinuousCopies
+            queue.jobs[index] = job
+            await refreshQueuedJobStatus(at: index)
+            persistQueue()
+            bumpQueueRevision()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    private func clearSeriesRemainingAsync(jobID: String) async {
+        if jobID == activeJobID {
+            if clearActiveSeriesRemaining() {
+                bumpQueueRevision()
+            }
+            return
+        }
+        guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        var job = queue.jobs[index]
+        if !job.steps.isEmpty {
+            job.steps = [job.steps[0]]
+        }
+        job.copiesTotal = 1
+        job.values["copies"] = 1
+        JobStepQueue.stampSeriesCopiesOnSteps(&job.steps, copies: 1)
+        queue.jobs[index] = job
+        await refreshQueuedJobStatus(at: index)
+        persistQueue()
+        bumpQueueRevision()
+    }
+
+    private func adjustQueuedSeriesTotalAsync(jobID: String, delta: Int) async {
+        guard delta != 0,
+              let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        var job = queue.jobs[index]
+        if job.pluginUnavailable { return }
+        do {
+            if job.steps.isEmpty {
+                job.steps = try await registry.materializeSteps(
+                    pluginID: job.pluginID,
+                    values: job.values,
+                    copies: max(1, job.copiesTotal)
+                )
+            }
+            if delta > 0 {
+                if job.steps.count >= JobStepQueue.seriesContinuousCopies { return }
+                let newTotal = min(JobStepQueue.seriesContinuousCopies, job.steps.count + delta)
+                guard newTotal > job.steps.count else { return }
+                let template = JobStepQueue.mergeStepIntoValues(job.steps[0])
+                let extra = try JobStepQueue.materializePendingStepsFromUpdate(
+                    pluginID: job.pluginID,
+                    templateValues: template,
+                    count: newTotal - job.steps.count
+                )
+                job.steps.append(contentsOf: extra)
+            } else {
+                if JobStepQueue.isSeriesContinuousCopies(job.copiesTotal) {
+                    let newTotal = JobStepQueue.seriesContinuousCopies - 1
+                    let template = JobStepQueue.mergeStepIntoValues(job.steps[0])
+                    var values = template
+                    values["copies"] = newTotal
+                    job.steps = try await registry.materializeSteps(
+                        pluginID: job.pluginID,
+                        values: values,
+                        copies: newTotal
+                    )
+                } else {
+                    let remaining = max(0, job.steps.count - 1)
+                    guard remaining > 0 else { return }
+                    let newTotal = max(1, job.steps.count + delta)
+                    guard newTotal != job.steps.count else { return }
+                    job.steps = job.steps.prefix(newTotal).map { $0 }
+                }
+            }
+            job.copiesTotal = job.steps.count
+            job.values["copies"] = job.copiesTotal
+            JobStepQueue.stampSeriesCopiesOnSteps(&job.steps, copies: job.copiesTotal)
+            queue.jobs[index] = job
+            await refreshQueuedJobStatus(at: index)
+            persistQueue()
+            bumpQueueRevision()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    private func clearActiveSeriesRemaining() -> Bool {
+        guard activeSeriesRemainingAfter() > 0 else { return false }
+        subtractActiveSeriesRemaining(removeAll: true)
+        return true
+    }
 
     func addActiveSeriesCycle(delta: Int = 1) {
         guard activeJobID != nil else { return }
@@ -691,8 +835,11 @@ final class ImageGenController {
         if let text {
             queue.jobs[index].values["series_prompt_refinement"] = text
         }
-        persistQueue()
-        bumpQueueRevision()
+        Task {
+            await refreshQueuedJobStatus(at: index)
+            persistQueue()
+            bumpQueueRevision()
+        }
     }
 
     func actionBarState(for jobID: String) -> JobQueueActionBarState {
@@ -713,22 +860,42 @@ final class ImageGenController {
 
     private func seriesRemainingAfter(for jobID: String) -> Int {
         if jobID == activeJobID {
-            let inProgress = isProcessing ? 1 : 0
-            return max(0, copiesTotal - copiesDone - inProgress)
+            return activeSeriesRemainingAfter()
         }
         guard let job = queue.jobs.first(where: { $0.jobID == jobID }) else { return 0 }
-        return max(1, job.copiesTotal)
+        if !job.steps.isEmpty {
+            return max(0, job.steps.count - 1)
+        }
+        return max(0, job.copiesTotal - 1)
     }
 
     private func canAddSeriesCycle(for jobID: String) -> Bool {
-        guard jobID == activeJobID else { return false }
-        guard !JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return false }
-        return copiesTotal < 50
+        if jobID == activeJobID {
+            guard activeJobID != nil else { return false }
+            guard !JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return false }
+            return copiesTotal < JobStepQueue.seriesContinuousCopies
+        }
+        guard let job = queue.jobs.first(where: { $0.jobID == jobID }) else { return false }
+        if job.pluginUnavailable { return false }
+        return !JobStepQueue.isSeriesContinuousCopies(job.copiesTotal)
     }
 
     private func canSubtractSeriesCycle(for jobID: String) -> Bool {
-        guard jobID == activeJobID else { return false }
+        if jobID == activeJobID {
+            return canSubtractActiveSeriesCycle()
+        }
+        guard let job = queue.jobs.first(where: { $0.jobID == jobID }) else { return false }
+        if JobStepQueue.isSeriesContinuousCopies(job.copiesTotal) { return true }
         return seriesRemainingAfter(for: jobID) > 0
+    }
+
+    private func canSubtractActiveSeriesCycle() -> Bool {
+        activeSeriesRemainingAfter() > 0
+    }
+
+    private func activeSeriesRemainingAfter() -> Int {
+        let inProgress = isProcessing ? 1 : 0
+        return max(0, copiesTotal - copiesDone - inProgress)
     }
 
     private func seriesRefinementEnabled(for jobID: String) -> Bool {
@@ -1872,21 +2039,14 @@ final class ImageGenController {
         } else if let steps = values["steps"] as? NSNumber {
             liveStepTotal = steps.intValue
         }
-        guard isEnabled, !activePluginID.isEmpty else { return }
-        if let timing = try? await registry.buildGenerationTimingKey(
+        guard !activePluginID.isEmpty else { return }
+        let timing = GenerationTimingKeyBuilder.build(
             pluginID: activePluginID,
-            values: values
-        ) {
-            generationTimingKey = timing.key
-            if let key = timing.key {
-                historicalAvgTotalSeconds = GenerationTimingStats.lookupAverage(
-                    key: key,
-                    dataDirectory: config.dataDirectory
-                )
-            } else {
-                historicalAvgTotalSeconds = nil
-            }
-        }
+            values: values,
+            dataDirectory: config.dataDirectory
+        )
+        generationTimingKey = timing.key
+        historicalAvgTotalSeconds = timing.averageSeconds
         _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
         rebuildActiveStripViewLocally()
         bumpStripUI()
@@ -1991,10 +2151,12 @@ final class ImageGenController {
 
     private func recordGenerationTimingRun(values: [String: Any], elapsedSeconds: Double) async {
         guard elapsedSeconds > 0 else { return }
-        if let timing = try? await registry.buildGenerationTimingKey(
+        let timingKey = GenerationTimingKeyBuilder.build(
             pluginID: activePluginID,
-            values: values
-        ), let key = timing.key {
+            values: values,
+            dataDirectory: config.dataDirectory
+        ).key ?? generationTimingKey
+        if let key = timingKey {
             GenerationTimingStats.recordRun(
                 key: key,
                 elapsedSeconds: elapsedSeconds,
@@ -2074,7 +2236,6 @@ final class ImageGenController {
     }
 
     private func refreshAllQueuedJobStatusViews() async {
-        guard isEnabled else { return }
         for index in queue.jobs.indices {
             await refreshQueuedJobStatus(at: index)
         }
@@ -2082,78 +2243,153 @@ final class ImageGenController {
         bumpQueueRevision()
     }
 
+    private func queueStatusPreviewOutputPath() -> String {
+        let dir = (NSTemporaryDirectory() as NSString).appendingPathComponent("prowser_imagegen")
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return (dir as NSString).appendingPathComponent(".__imagegen_queue_preview__.png")
+    }
+
+    /// Port of ``refresh_queued_job_status`` in ``model_task_queue.py``.
     private func refreshQueuedJobStatus(at index: Int) async {
         guard queue.jobs.indices.contains(index) else { return }
-        let job = queue.jobs[index]
-        guard isEnabled else {
-            queue.jobs[index].statusView = QueueJobStatusView.degradedFallback(
-                prompt: job.fullPrompt,
-                copiesTotal: job.copiesTotal
-            )
-            return
-        }
-        do {
-            let built = try await registry.buildQueueStatusView(
+        var job = queue.jobs[index]
+
+        if job.pluginUnavailable || ImageGenPluginCatalog.plugin(pluginID: job.pluginID) == nil {
+            let built = buildQueueStatusView(
                 pluginID: job.pluginID,
                 function: job.function,
                 values: job.values,
                 copiesTotal: job.copiesTotal,
-                pluginUnavailable: job.pluginUnavailable
+                pluginUnavailable: true
             )
-            queue.jobs[index].statusView = built.statusView
-            queue.jobs[index].thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
-            queue.jobs[index].fullPrompt = built.fullPrompt
-            queue.jobs[index].referencesInvalid = built.referencesInvalid
-            if queue.jobs[index].inError {
-                queue.jobs[index].statusView = QueueJobStatusView.queueStatusViewWithErrorBanner(
-                    queue.jobs[index].statusView,
-                    errorMessage: queue.jobs[index].errorMessage
-                )
-            }
+            job.statusView = built.statusView
+            job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
+            job.fullPrompt = built.fullPrompt
+            job.referencesInvalid = built.referencesInvalid
+            queue.jobs[index] = job
+            applyQueuedJobErrorBanner(at: index)
+            bumpStripUI()
+            return
+        }
+
+        let hasFluxAI = job.values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] != nil
+        let applyImageExit = !hasFluxAI
+
+        var payload: [String: Any] = [:]
+        do {
+            payload = try await registry.buildPayload(
+                pluginID: job.pluginID,
+                values: job.values,
+                outputPath: queueStatusPreviewOutputPath(),
+                applyImageExit: applyImageExit
+            )
         } catch {
-            var view = QueueJobStatusView.degradedFallback(
-                prompt: job.fullPrompt,
-                copiesTotal: job.copiesTotal
+            payload = [:]
+        }
+
+        if hasFluxAI, !job.fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["prompt"] = job.fullPrompt
+        }
+
+        if let hf = payload["hf_model_id"] {
+            job.values["hf_model_id"] = hf
+        }
+
+        let exited = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !exited.isEmpty, !hasFluxAI {
+            job.fullPrompt = exited
+        } else {
+            job.fullPrompt = JobStepQueue.resolvedFullPrompt(
+                stored: job.fullPrompt,
+                values: job.values,
+                steps: job.steps,
+                statusView: job.statusView
             )
-            if queue.jobs[index].inError {
-                view = QueueJobStatusView.queueStatusViewWithErrorBanner(
-                    view,
-                    errorMessage: queue.jobs[index].errorMessage
-                )
-            }
-            queue.jobs[index].statusView = view
+        }
+
+        let displayCopiesTotal = max(job.copiesTotal, job.steps.isEmpty ? 1 : job.steps.count)
+        if displayCopiesTotal != job.copiesTotal {
+            job.copiesTotal = displayCopiesTotal
+            job.values["copies"] = displayCopiesTotal
+        }
+        let built = buildQueueStatusView(
+            pluginID: job.pluginID,
+            function: job.function,
+            values: job.values,
+            copiesTotal: displayCopiesTotal,
+            payload: payload.isEmpty ? nil : payload,
+            withAI: hasFluxAI
+        )
+        job.statusView = built.statusView
+        job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
+        job.referencesInvalid = built.referencesInvalid
+        queue.jobs[index] = job
+        applyQueuedJobErrorBanner(at: index)
+        bumpStripUI()
+    }
+
+    private func applyQueuedJobErrorBanner(at index: Int) {
+        guard queue.jobs.indices.contains(index) else { return }
+        if queue.jobs[index].inError {
+            queue.jobs[index].statusView = QueueJobStatusView.queueStatusViewWithErrorBanner(
+                queue.jobs[index].statusView,
+                errorMessage: queue.jobs[index].errorMessage
+            )
         }
     }
 
     func refreshActiveJobStatusView() async {
-        guard activeJobID != nil, isEnabled else { return }
-        let stepsLabel = jobAIStageActive ? "AI:" : "Steps:"
+        guard activeJobID != nil else { return }
         let timing = currentTimingForDisplay()
-        do {
-            let built = try await registry.buildQueueStatusView(
-                pluginID: activePluginID,
-                function: activeFunction,
-                values: pendingValues,
-                copiesTotal: copiesTotal,
-                running: isProcessing,
-                omitLiveStepsRow: true,
-                withAI: jobAIStageActive,
-                step: liveStepTotal > 0 ? liveStep : nil,
-                stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
-                elapsedSeconds: timing.elapsed,
-                estimateSeconds: timing.estimate
-            )
-            activeStatusView = built.statusView
-            let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
-            activeThumbnailPaths = cardPaths
-            activeJobCardThumbnailPathsCache = cardPaths
-        } catch {
-            activeStatusView = QueueJobStatusView.degradedFallback(
-                prompt: pendingValues["prompt"] as? String ?? "",
-                copiesTotal: copiesTotal
-            )
-        }
-        _ = stepsLabel
+        let built = buildQueueStatusView(
+            pluginID: activePluginID,
+            function: activeFunction,
+            values: pendingValues,
+            copiesTotal: copiesTotal,
+            running: isProcessing,
+            omitLiveStepsRow: true,
+            withAI: jobAIStageActive,
+            step: liveStepTotal > 0 ? liveStep : nil,
+            stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
+            elapsedSeconds: timing.elapsed,
+            estimateSeconds: timing.estimate
+        )
+        activeStatusView = built.statusView
+        let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
+        activeThumbnailPaths = cardPaths
+        activeJobCardThumbnailPathsCache = cardPaths
+    }
+
+    private func buildQueueStatusView(
+        pluginID: String,
+        function: String,
+        values: [String: Any],
+        copiesTotal: Int,
+        payload: [String: Any]? = nil,
+        pluginUnavailable: Bool = false,
+        running: Bool = false,
+        omitLiveStepsRow: Bool = false,
+        withAI: Bool = false,
+        step: Int? = nil,
+        stepTotal: Int? = nil,
+        elapsedSeconds: Double? = nil,
+        estimateSeconds: Double? = nil
+    ) -> QueueJobStatusBuildResult {
+        QueueJobStatusBuilder.build(
+            pluginID: pluginID,
+            function: function,
+            values: values,
+            copiesTotal: copiesTotal,
+            payload: payload,
+            pluginUnavailable: pluginUnavailable,
+            running: running,
+            omitLiveStepsRow: omitLiveStepsRow,
+            withAI: withAI,
+            step: step,
+            stepTotal: stepTotal,
+            elapsedSeconds: elapsedSeconds,
+            estimateSeconds: estimateSeconds
+        )
     }
 
     /// Python ``_copy_cycle_exif_values`` / ``_copy_cycle_exif_plugin``.
@@ -2200,15 +2436,15 @@ final class ImageGenController {
     private func repairCancelledOutputExifReferences(outputPath: String) async {
         guard !outputPath.isEmpty,
               FileManager.default.fileExists(atPath: outputPath),
-              isEnabled,
               !copyCycleExifPluginID.isEmpty else { return }
         let values = copyCycleExifValues
         let fallback = exifFallbackSourcePaths(from: values)
-        _ = try? await registry.repairCancelledOutputExifReferences(
+        _ = try? await ImageGenGenerationExifService.repairCancelledOutputExifReferences(
             pluginID: copyCycleExifPluginID,
             outputPath: outputPath,
             values: values,
-            fallbackSourcePaths: fallback
+            fallbackSourcePaths: fallback,
+            tempRoot: config.temporaryFilesDirectory.path
         )
     }
 
@@ -2217,7 +2453,6 @@ final class ImageGenController {
         guard showProgressiveImages,
               !path.isEmpty,
               FileManager.default.fileExists(atPath: path),
-              isEnabled,
               !copyCycleExifPluginID.isEmpty else { return }
         let step = liveStep
         let total = liveStepTotal
@@ -2225,14 +2460,15 @@ final class ImageGenController {
         let values = copyCycleExifValues
         let elapsed = liveGenerationElapsedSeconds()
         let fallback = exifFallbackSourcePaths(from: values)
-        _ = try? await registry.makeReadableUserCommentBeforeBrowse(
+        _ = try? await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
             pluginID: copyCycleExifPluginID,
             outputPath: path,
             values: values,
             elapsedSeconds: elapsed,
             completedStep: step,
             totalSteps: total,
-            fallbackSourcePaths: fallback
+            fallbackSourcePaths: fallback,
+            tempRoot: config.temporaryFilesDirectory.path
         )
     }
 
@@ -2246,19 +2482,6 @@ final class ImageGenController {
     ) async {
         guard FileManager.default.fileExists(atPath: outputPath) else { return }
         do {
-            if isEnabled, !pluginID.isEmpty {
-                let success = try await registry.writeGenerationExif(
-                    pluginID: pluginID,
-                    values: values,
-                    outputPath: outputPath,
-                    workerResult: workerResult,
-                    elapsedSeconds: elapsedSeconds,
-                    localElapsed: elapsedSeconds,
-                    fallbackSourcePaths: fallbackSourcePaths
-                )
-                if success { return }
-                throw ExifService.ExifError.writeFailed
-            }
             try await writeGenerationExifFallback(
                 outputPath: outputPath,
                 pluginID: pluginID,
@@ -2268,26 +2491,7 @@ final class ImageGenController {
                 fallbackSourcePaths: fallbackSourcePaths
             )
         } catch {
-            print(
-                "DEBUG writeGenerationExif: failed for \(outputPath): \(error) "
-                    + "(registry: \(registry.lastError))"
-            )
-            if isEnabled, !pluginID.isEmpty {
-                do {
-                    try await writeGenerationExifFallback(
-                        outputPath: outputPath,
-                        pluginID: pluginID,
-                        values: values,
-                        workerResult: workerResult,
-                        elapsedSeconds: elapsedSeconds,
-                        fallbackSourcePaths: fallbackSourcePaths
-                    )
-                } catch {
-                    print(
-                        "DEBUG writeGenerationExif: fallback failed for \(outputPath): \(error)"
-                    )
-                }
-            }
+            print("DEBUG writeGenerationExif: failed for \(outputPath): \(error)")
         }
     }
 
@@ -2300,13 +2504,14 @@ final class ImageGenController {
         fallbackSourcePaths: [String] = []
     ) async throws {
         var comment: String
-        if isEnabled, !pluginID.isEmpty {
-            comment = try await registry.formatGenerationExifComment(
+        if !pluginID.isEmpty {
+            let formatted = ImageGenGenerationExifService.formatGenerationExifComment(
                 pluginID: pluginID,
                 values: values,
-                elapsedSeconds: elapsedSeconds,
-                workerResult: workerResult
+                workerResult: workerResult,
+                elapsedSeconds: elapsedSeconds
             )
+            comment = formatted.isEmpty ? (values["prompt"] as? String ?? "") : formatted
         } else if let prompt = values["prompt"] as? String {
             comment = prompt
         } else {

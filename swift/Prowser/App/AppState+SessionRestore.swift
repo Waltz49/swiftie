@@ -69,7 +69,37 @@ extension AppState {
     func prepareBrowseReturnStateIfNeeded() {
         guard browseReturnThumbnailState == nil else { return }
         guard shouldStashThumbnailContextForBrowse() else { return }
-        browseReturnThumbnailState = BrowseReturnThumbnailState(
+        browseReturnThumbnailState = currentBrowseReturnSnapshot()
+    }
+
+    /// Push the current folder before opening an image in a different one.
+    /// Esc from that browse stays in the new folder; the next Esc (thumbnail) returns here.
+    func displaceCurrentLevelIfOpeningNewDirectory(_ path: String) {
+        guard let newDirectory = FileDataModel.parentDirectory(of: path) else { return }
+        let newNorm = FileDataModel.normalizePath(newDirectory) ?? newDirectory
+        guard thumbnailContextWouldChange(forNewDirectory: newNorm) else { return }
+        directoryHistory.saveCurrent(fileData: fileData, config: config, selection: selection)
+    }
+
+    /// Python `thumbnail_context_would_change`: specific-files / reference graph, or a different folder.
+    func thumbnailContextWouldChange(forNewDirectory newDirectory: String) -> Bool {
+        if specificFilesActive || referenceGraphActive { return true }
+        let newNorm = FileDataModel.normalizePath(newDirectory) ?? newDirectory
+        if let current = fileData.currentDirectory,
+           let currentNorm = FileDataModel.normalizePath(current),
+           currentNorm != newNorm {
+            return true
+        }
+        if let first = fileData.displayedImages.first,
+           let shown = FileDataModel.parentDirectory(of: first),
+           shown != newNorm {
+            return true
+        }
+        return false
+    }
+
+    private func currentBrowseReturnSnapshot() -> BrowseReturnThumbnailState {
+        BrowseReturnThumbnailState(
             displayedImages: fileData.displayedImages,
             currentIndex: fileData.currentIndex,
             currentImagePath: fileData.currentImagePath,

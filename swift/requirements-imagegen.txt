@@ -1,0 +1,15 @@
+# Image generation venv for Swift Prowser (~/.swift-prowser/venvs/imagegen).
+# Install: python3 -m venv ~/.swift-prowser/venvs/imagegen && \
+#   ~/.swift-prowser/venvs/imagegen/bin/pip install -r requirements-imagegen.txt
+#
+# MFLUX CLI tools are installed separately into the same venv (see MFLUX docs).
+
+mflux
+torch
+diffusers
+transformers
+accelerate
+safetensors
+pillow
+piexif
+huggingface-hub

@@ -119,6 +119,95 @@ enum JobStepQueue {
         return clamped >= seriesContinuousCopies ? seriesContinuousCopies : clamped
     }
 
+    static func materializeSteps(
+        pluginID: String,
+        templateValues: [String: Any],
+        copiesTotal: Int
+    ) throws -> [[String: Any]] {
+        guard ImageGenPluginCatalog.plugin(pluginID: pluginID) != nil else {
+            throw ImageGenRegistryError.unknownPlugin(pluginID)
+        }
+        var count = max(1, copiesTotal)
+        if count > seriesContinuousCopies - 1 {
+            count = seriesContinuousCopies
+        }
+        let hasAI = hasFluxPromptAIJob(templateValues)
+        var steps: [[String: Any]] = []
+        for _ in 0..<count {
+            var values = templateValues
+            values["copies"] = count
+            // Python ``materialize_steps``: Job AI refines before every copy; otherwise
+            // text series refinement marks the step.
+            let needsAI = hasAI || values["series_prompt_refinement"] as? Bool == true
+            steps.append(copyStep(from: values, needsAI: needsAI))
+        }
+        return steps
+    }
+
+    /// Port of ``materialize_pending_steps_from_update`` (series + / Update remaining copies).
+    static func materializePendingStepsFromUpdate(
+        pluginID: String,
+        templateValues: [String: Any],
+        count: Int
+    ) throws -> [[String: Any]] {
+        let n = max(0, count)
+        if n <= 0 { return [] }
+        guard ImageGenPluginCatalog.plugin(pluginID: pluginID) != nil else {
+            throw ImageGenRegistryError.unknownPlugin(pluginID)
+        }
+        let hasAI = hasFluxPromptAIJob(templateValues)
+        var steps: [[String: Any]] = []
+        for _ in 0..<n {
+            steps.append(copyStep(from: templateValues, needsAI: hasAI))
+        }
+        return steps
+    }
+
+    /// Port of ``_stamp_series_copies_on_steps``.
+    static func stampSeriesCopiesOnSteps(_ steps: inout [[String: Any]], copies: Int) {
+        for index in steps.indices {
+            var values = stepValues(steps[index])
+            values["copies"] = copies
+            steps[index]["values"] = jsonSafeDict(values)
+        }
+    }
+
+    private static func hasFluxPromptAIJob(_ values: [String: Any]) -> Bool {
+        guard let meta = values[fluxPromptAIJobKey] as? [String: Any] else { return false }
+        return !(meta["kind"] as? String ?? "").isEmpty
+    }
+
+    private static func copyStep(from values: [String: Any], needsAI: Bool) -> [String: Any] {
+        var step: [String: Any] = [
+            "step_id": newStepID(),
+            "values": jsonSafeDict(values),
+            "needs_ai": needsAI,
+        ]
+        if let meta = values[fluxPromptAIJobKey] as? [String: Any] {
+            step[fluxPromptAIJobKey] = meta
+        }
+        if values["series_refinement"] as? Bool == true {
+            step["series_refinement"] = true
+        }
+        if values["series_prompt_refinement"] as? Bool == true {
+            step["series_prompt_refinement"] = true
+        }
+        return step
+    }
+
+    private static func jsonSafeDict(_ values: [String: Any]) -> [String: Any] {
+        // JSONSerialization-safe subset (NSNumber, String, Bool, arrays, dicts).
+        var out: [String: Any] = [:]
+        for (key, value) in values {
+            if JSONSerialization.isValidJSONObject([key: value]) {
+                out[key] = value
+            } else if let url = value as? URL {
+                out[key] = url.path
+            }
+        }
+        return out
+    }
+
     static func pendingStepCount(_ doc: [String: Any]?) -> Int {
         guard let doc, let steps = doc["steps"] as? [[String: Any]] else { return 0 }
         return steps.count

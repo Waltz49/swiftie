@@ -81,6 +81,7 @@ final class JobCardStatusNSView: NSView {
                 let display = (rowRunning || view.running) ? "\(title) (Running)" : title
                 let field = makeLabel(display, muted: false, bold: true)
                 field.alignment = .center
+                field.lineBreakMode = .byTruncatingTail
                 let wrap = NSView()
                 wrap.translatesAutoresizingMaskIntoConstraints = false
                 field.translatesAutoresizingMaskIntoConstraints = false

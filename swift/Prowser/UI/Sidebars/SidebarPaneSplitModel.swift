@@ -286,41 +286,34 @@ final class SidebarPaneSplitModel {
         appState.beginJobsPaneGeometryAdjustment()
         defer { appState.endJobsPaneGeometryAdjustment() }
 
+        appState.refreshJobsPaneLiveMeasurements()
+
         let mode = appState.jobsQueueSizeMode
         let jobCount = appState.imageGen.queue.jobs.count
         let shrinkWrap = appState.shouldShrinkWrapJobsClient()
+        let target = appState.jobsPaneTargetPaneHeight()
+        let current = sizes[2]
+        let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: target)
 
-        // ALL + multiple jobs: keep user-expanded height; only grow when still too small.
+        jobsPaneDebug(
+            "resizeToMode \(mode) target=\(target) current=\(current) "
+            + "liveContent=\(appState.jobsPaneLiveContentHeight()) "
+            + "panel=\(appState.jobsQueuePanelIntrinsicHeight) "
+            + "cards=\(appState.measuredJobsCardStackHeight) strip=\(appState.measuredActiveJobStripHeight)"
+        )
+
+        // ALL + multiple jobs: never shrink user-expanded height.
         if mode == .all, !shrinkWrap, jobCount > 1 {
-            let needed = jobsPaneHeight(appState: appState, headerOnly: false)
-            jobsPaneDebug(
-                "resizeToMode all/multi needed=\(needed) sizes=\(sizes) total=\(sizes.reduce(0, +)) "
-                + "content=\(appState.jobsQueuePaneContentHeight()) measuredStack=\(appState.measuredJobsCardStackHeight) "
-                + "strip=\(appState.measuredActiveJobStripHeight)"
-            )
-            if sizes[2] < needed {
-                resizePaneToHeight(paneIndex: 2, targetHeight: needed, appState: appState)
+            if target > current + tolerance {
+                resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
             }
             return
         }
 
-        var previousNeeded: CGFloat = -1
-        var previousCurrent: CGFloat = -1
-        for _ in 0..<3 {
-            let needed = jobsPaneHeight(appState: appState, headerOnly: false)
-            let current = sizes[2]
-            jobsPaneDebug(
-                "resizeToMode \(mode) needed=\(needed) sizes=\(sizes) total=\(sizes.reduce(0, +)) "
-                + "measuredStack=\(appState.measuredJobsCardStackHeight) strip=\(appState.measuredActiveJobStripHeight)"
-            )
-            if previousNeeded >= 0,
-               abs(needed - previousNeeded) <= 1,
-               abs(current - previousCurrent) <= 1 {
-                break
-            }
-            resizePaneToHeight(paneIndex: 2, targetHeight: needed, appState: appState)
-            previousNeeded = needed
-            previousCurrent = sizes[2]
+        // Pin modes: grow to fit live content; never shrink (avoids relayout ↔ formula oscillation).
+        let newHeight = max(current, target)
+        if newHeight > current + tolerance {
+            resizePaneToHeight(paneIndex: 2, targetHeight: newHeight, appState: appState)
         }
     }
 
@@ -342,8 +335,8 @@ final class SidebarPaneSplitModel {
     private func jobsPaneHeight(appState: AppState, headerOnly: Bool) -> CGFloat {
         let header = headerHeight(for: 2)
         if headerOnly { return header }
-        let content = appState.jobsQueuePaneContentHeight()
-        return header + max(content, SidebarPaneLayout.minJobsQueueContentHeight)
+        appState.refreshJobsPaneLiveMeasurements()
+        return appState.jobsPaneTargetPaneHeight()
     }
 
     private func expandPaneToFit(paneIndex: Int, needed: CGFloat, appState: AppState) {

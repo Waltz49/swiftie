@@ -469,7 +469,10 @@ final class KeyboardHandlerController {
     private func shouldHandle(_ event: NSEvent, fromTreeFocus: Bool = false) -> Bool {
         guard appState != nil else { return false }
         if NSApp.modalWindow != nil { return false }
-        if !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event) {
+        let keyWindow = event.window ?? NSApp.keyWindow
+        if SceneWindowChrome.isJobsPanelWindow(keyWindow) {
+            if isTextInputFocused(in: keyWindow) { return false }
+        } else if !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event) {
             return false
         }
         if !fromTreeFocus, appState!.fileTreePaneHasKeyboardFocus(in: event.window) {
@@ -505,6 +508,10 @@ final class KeyboardHandlerController {
         if isWindowChromeCommand(event) { return false }
 
         let keyWindow = NSApp.keyWindow
+        if SceneWindowChrome.isJobsPanelWindow(keyWindow) {
+            let textInJobsPanel = (keyWindow?.firstResponder).map(Self.isTextEditingResponder) ?? false
+            if !textInJobsPanel { return false }
+        }
         let textFocused = (keyWindow?.firstResponder).map(isTextEditingResponder) ?? false
         let dialogOwns = !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event)
         guard textFocused || dialogOwns else { return false }
@@ -870,6 +877,8 @@ final class KeyboardHandlerController {
         case "b":
             appState.toggleStatusBar()
             return true
+        case "j":
+            return toggleJobsPaneShortcut(appState: appState)
         case "a":
             appState.toggleBrowseActualSize()
             return true
@@ -1074,6 +1083,13 @@ final class KeyboardHandlerController {
         return true
     }
 
+    /// Python View ▸ Jobs Pane (`QKeySequence('J')` → `toggle_jobs_pane`).
+    private func toggleJobsPaneShortcut(appState: AppState) -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        appState.toggleJobsPane()
+        return true
+    }
+
     private func handleLetter(_ event: NSEvent, appState: AppState) -> Bool {
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "h":
@@ -1118,6 +1134,8 @@ final class KeyboardHandlerController {
         case "b":
             appState.toggleStatusBar()
             return true
+        case "j":
+            return toggleJobsPaneShortcut(appState: appState)
         case "q":
             if appState.fileData.currentViewMode == .list {
                 appState.fileData.setViewMode(.thumbnail)

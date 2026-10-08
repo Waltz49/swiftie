@@ -8,6 +8,9 @@ struct ImageGenerationSettingsSection: View {
     @State private var showPrefixPostfix = false
     @State private var imageOutputEnabled = false
     @State private var imageOutputPath = ""
+    @State private var imagegenVenvPath = ""
+    @State private var venvInstallMessage = ""
+    @State private var venvInstallInProgress = false
 
     var body: some View {
         Group {
@@ -15,19 +18,16 @@ struct ImageGenerationSettingsSection: View {
 
             Divider()
 
-            pathField(
-                title: "Python repo root",
-                subtitle: "Checkout containing imagegen_plugins (or set PROWSER_PYTHON_ROOT).",
-                key: "python_root"
-            )
+            imagegenVenvSection()
+
             pathField(
                 title: "Python executable",
-                subtitle: "Optional override for registry_bridge subprocess.",
+                subtitle: "Optional override; defaults to imagegen venv python3.",
                 key: "python_executable"
             )
             pathField(
                 title: "MFLUX venv path",
-                subtitle: "Virtualenv root or bin directory for mflux-generate-* CLIs.",
+                subtitle: "Optional; defaults to imagegen venv for mflux-generate-* CLIs.",
                 key: "mflux_venv_path"
             )
 
@@ -83,7 +83,74 @@ struct ImageGenerationSettingsSection: View {
         }
         .sheet(isPresented: $showExitScripts) { ExitScriptsSheet() }
         .sheet(isPresented: $showPrefixPostfix) { PrefixPostfixSheet() }
-        .onAppear { loadImageCreationDirectory() }
+        .onAppear {
+            loadImageCreationDirectory()
+            imagegenVenvPath = appState.config.imagegenVenvURL().path
+        }
+    }
+
+    @ViewBuilder
+    private func imagegenVenvSection() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Imagegen Python environment")
+                .font(.headline)
+            Text(
+                "Bundled imagegen modules ship inside the app. Install torch/diffusers/MFLUX into a venv under your profile (system python3 -m venv)."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("Venv directory", text: $imagegenVenvPath)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { persistImagegenVenvPath() }
+                Button("Choose…") { chooseImagegenVenvDirectory() }
+                Button(venvInstallInProgress ? "Installing…" : "Install dependencies…") {
+                    installImagegenVenv()
+                }
+                .disabled(venvInstallInProgress)
+            }
+            if !venvInstallMessage.isEmpty {
+                Text(venvInstallMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func persistImagegenVenvPath() {
+        let trimmed = imagegenVenvPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        appState.config.updateSetting("imagegen_venv_path", value: trimmed.isEmpty ? nil : trimmed)
+        settingsChanged()
+    }
+
+    private func chooseImagegenVenvDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        if !imagegenVenvPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: (imagegenVenvPath as NSString).expandingTildeInPath)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        imagegenVenvPath = url.path
+        persistImagegenVenvPath()
+    }
+
+    private func installImagegenVenv() {
+        persistImagegenVenvPath()
+        venvInstallInProgress = true
+        venvInstallMessage = ""
+        Task {
+            let result = await ImageGenVenvInstaller.install(config: appState.config)
+            venvInstallInProgress = false
+            venvInstallMessage = result.message
+            if result.success {
+                imagegenVenvPath = appState.config.imagegenVenvURL().path
+                settingsChanged()
+            }
+        }
     }
 
     @ViewBuilder

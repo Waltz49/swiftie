@@ -49,12 +49,20 @@ final class AppState {
     var showImageGenUnifiedDialog = false
     var imageGenDialogReloadToken = 0
     var imageGenUIRevision = 0
+    /// Refreshes the AppKit job queue panel when queue rows change (copies, status, etc.).
+    var jobsQueuePanelSync: (@MainActor () -> Void)?
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     var jobsToolbarVisible = true
     var jobsPanelAlwaysOnTop = false
     var measuredJobsCardStackHeight: CGFloat = 0
     var measuredActiveJobStripHeight: CGFloat = 0
     var isAdjustingJobsPaneGeometry = false
+    /// Latest AppKit measurement from ``JobQueuePanelHostView`` (cards + action bar; not strip).
+    var jobsQueuePanelIntrinsicHeight: CGFloat = 0
+    weak var jobsQueuePanelMeasureHost: JobQueuePanelHostView?
+    var jobsQueueStripMeasureRefresh: (@MainActor () -> Void)?
+    var jobsPaneRefitDeferred = false
+    var jobsPaneResizeDebounce: DispatchWorkItem?
     var progressiveRefreshTask: Task<Void, Never>?
     var pendingProgressivePath: String?
     var pendingProgressiveForceEnterBrowse = false
@@ -267,12 +275,14 @@ final class AppState {
             foregroundTasks: workers.foregroundModelTasks,
             registry: workers.imageGenRegistry
         )
-        ExifBridgeSupport.registry = workers.imageGenRegistry
         renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
         informationSectionState = InformationSectionState(config: config)
         loadSidebarToolbarSettings()
+        // Python `apply_saved_jobs_display_mode`: panel mode hides the sidebar jobs pane; the
+        // floating panel itself stays closed until the user shows it (⌘J).
+        jobsDisplayMode = JobsDisplayMode.normalize(config.string(forKey: "jobs_display_mode", default: "pane"))
         observeViewModeChanges()
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
@@ -319,6 +329,7 @@ final class AppState {
         }
         imageGen.onQueueChanged = { [weak self] in
             self?.bumpImageGenUI()
+            self?.jobsQueuePanelSync?()
         }
         KeyboardInputTracer.installIfNeeded(config: config)
 
@@ -1349,9 +1360,14 @@ final class AppState {
 
     func openImageInBrowse(path: String, saveHistory: Bool = true) {
         guard FileManager.default.fileExists(atPath: path) else { return }
-        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
-        if directory != fileData.currentDirectory {
-            loadDirectory(directory, saveHistory: saveHistory)
+        if saveHistory {
+            displaceCurrentLevelIfOpeningNewDirectory(path)
+        }
+        let directory = FileDataModel.parentDirectory(of: path)
+            ?? URL(fileURLWithPath: path).deletingLastPathComponent().path
+        let current = fileData.currentDirectory.flatMap { FileDataModel.normalizePath($0) }
+        if FileDataModel.normalizePath(directory) != current {
+            loadDirectory(directory, saveHistory: false, pinnedImagePath: path)
         }
         fileData.setCurrentImagePath(path)
         DisplayedImagesSync.ensureActiveImageListed(

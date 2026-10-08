@@ -217,7 +217,7 @@ enum ImageGenExifImport {
         guard !trimmed.isEmpty else { return out }
 
         if let modelName = parseExifModelName(trimmed) {
-            out["model"] = modelName
+            out["model"] = ImageGenExifCommentFormatting.presentedModelName(modelName)
         }
 
         var inModelBlock = false
@@ -289,6 +289,13 @@ enum ImageGenExifImport {
     }
 
     private static func parseExifModelName(_ fullComment: String) -> String? {
+        if let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(fullComment) {
+            let raw = (meta["model_config"] as? String) ?? (meta["model"] as? String) ?? ""
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed.lowercased() != "none" {
+                return ImageGenExifCommentFormatting.presentedModelName(trimmed)
+            }
+        }
         var inModelBlock = false
         for line in fullComment.split(separator: "\n", omittingEmptySubsequences: false) {
             let stripped = line.trimmingCharacters(in: .whitespaces)
@@ -306,7 +313,7 @@ enum ImageGenExifImport {
                 continue
             }
             if stripped.hasPrefix("\u{00a0}") { continue }
-            return stripped
+            return ImageGenExifCommentFormatting.presentedModelName(stripped)
         }
         return nil
     }

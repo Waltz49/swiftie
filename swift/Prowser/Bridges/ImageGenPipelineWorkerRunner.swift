@@ -8,18 +8,12 @@ enum ImageGenPipelineWorkerRunner {
         let stderrText: String
     }
 
-    static func scriptURL(pipelineID: String, repoRoot: URL) -> URL? {
-        let relative: String?
-        switch pipelineID {
-        case "mflux_flux2_klein_create":
-            relative = "imagegen_plugins/pipelines/mflux_flux2_klein_create.py"
-        case "mflux_flux2_klein_edit", "mflux_flux2_klein_expand":
-            relative = "imagegen_plugins/pipelines/mflux_flux2_klein_edit.py"
-        default:
-            relative = nil
+    static func scriptURL(pipelineID: String, bundleRoot: URL) -> URL? {
+        guard let script = ImageGenPipelineCatalog.workerScriptName(pipelineID: pipelineID) else {
+            return nil
         }
-        guard let relative else { return nil }
-        let url = repoRoot.appendingPathComponent(relative)
+        let url = bundleRoot
+            .appendingPathComponent("imagegen_plugins/pipelines/\(script)")
         return FileManager.default.isReadableFile(atPath: url.path) ? url : nil
     }
 
@@ -29,7 +23,7 @@ enum ImageGenPipelineWorkerRunner {
         environment: PythonLocator.Environment,
         onProcessStarted: (@Sendable @MainActor (Process) -> Void)? = nil
     ) async throws -> RunResult {
-        guard let script = scriptURL(pipelineID: pipelineID, repoRoot: environment.repoRoot) else {
+        guard let script = scriptURL(pipelineID: pipelineID, bundleRoot: environment.bundleRoot) else {
             throw MfluxCLIError.processFailed("Missing Python worker for pipeline \(pipelineID)")
         }
         let jsonData = try JSONSerialization.data(withJSONObject: payload)
@@ -41,10 +35,8 @@ enum ImageGenPipelineWorkerRunner {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: environment.executable)
             proc.arguments = ["-u", script.path]
-            proc.currentDirectoryURL = environment.repoRoot
-            var env = ProcessInfo.processInfo.environment
-            env["PYTHONPATH"] = environment.repoRoot.path
-            proc.environment = env
+            proc.currentDirectoryURL = environment.bundleRoot
+            proc.environment = PythonLocator.processEnvironment(for: environment)
 
             let stdinPipe = Pipe()
             let stdoutPipe = Pipe()

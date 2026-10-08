@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 final class ImageGenServices {
     let modelTasks = MfluxGenerationTasks()
-    let imageGenRegistry: ImageGenRegistryBridge
+    let imageGenRegistry: SwiftImageGenRegistry
     let lora: LoRABridgeStub
     let foregroundModelTasks = FluxPromptTasksStub()
 
@@ -13,9 +13,9 @@ final class ImageGenServices {
     init(profilePath: String?, config: AppConfig) {
         MfluxToolchain.shared.bind(config: config)
         modelTasks.bind(config: config)
-        imageGenRegistry = ImageGenRegistryBridge(profilePath: profilePath, config: config)
+        imageGenRegistry = SwiftImageGenRegistry(config: config)
         lora = LoRABridgeStub()
-        pythonAvailable = imageGenRegistry.isAvailable
+        pythonAvailable = imageGenPythonPipelinesAvailable(config: config)
         if let environment = PythonLocator.resolve(profilePath: profilePath, config: config) {
             PythonLocator.reapOrphanWorkers(environment: environment)
         }
@@ -25,10 +25,16 @@ final class ImageGenServices {
         MfluxToolchain.shared.bind(config: config)
         modelTasks.bind(config: config)
         imageGenRegistry.reloadSettings(config: config)
+        pythonAvailable = imageGenPythonPipelinesAvailable(config: config)
     }
 
     func shutdown() {
         modelTasks.shutdown()
         imageGenRegistry.shutdown()
+    }
+
+    private func imageGenPythonPipelinesAvailable(config: AppConfig) -> Bool {
+        ImageGenPythonBundle.rootURL() != nil
+            && ImageGenPluginAvailability.venvPythonReady(config: config)
     }
 }

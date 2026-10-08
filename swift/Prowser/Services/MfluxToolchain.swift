@@ -61,6 +61,10 @@ final class MfluxToolchain {
             let bin = venv.appendingPathComponent("bin", isDirectory: true)
             if FileManager.default.fileExists(atPath: bin.path) { return bin }
         }
+        let imagegenBin = config.imagegenVenvURL().appendingPathComponent("bin", isDirectory: true)
+        if FileManager.default.fileExists(atPath: imagegenBin.path) {
+            return imagegenBin
+        }
         let fallbacks = [
             "/Library/Frameworks/Python.framework/Versions/3.12/bin",
             "/opt/homebrew/bin",
@@ -128,7 +132,7 @@ enum MfluxCLIPipeline {
         }
     }
 
-    private static func buildFluxSchnellArgs(payload: [String: Any]) throws -> [String] {
+    private static func buildFluxSchnellArgs(payload: [String: Any], includeModel: Bool = true) throws -> [String] {
         let prompt = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { throw MfluxCLIError.missingField("prompt") }
         let output = payload["output_path"] as? String ?? ""
@@ -140,8 +144,11 @@ enum MfluxCLIPipeline {
         let height = intValue(payload["height"], default: 1024)
         let seed = resolvedSeed(payload)
         let guidance = doubleValue(payload["guidance_scale"], default: 3.5)
-        var args = [
-            "--model", model,
+        var args: [String] = []
+        if includeModel {
+            args += ["--model", model]
+        }
+        args += [
             "-q", "\(quantize)",
             "--steps", "\(steps)",
             "--width", "\(width)",
@@ -160,10 +167,19 @@ enum MfluxCLIPipeline {
         return args
     }
 
+    private static let zImageTurboQuantChoices: Set<Int> = [3, 4, 5, 6, 8]
+
     private static func buildZImageTurboArgs(payload: [String: Any]) throws -> [String] {
         var copy = payload
-        copy["mflux_quantize"] = copy["mflux_quantize"] ?? 8
-        return try buildFluxSchnellArgs(payload: copy)
+        let quantize = intValue(copy["mflux_quantize"], default: 4)
+        guard zImageTurboQuantChoices.contains(quantize) else {
+            throw MfluxCLIError.processFailed(
+                "mflux_quantize must be one of \(zImageTurboQuantChoices.sorted())"
+            )
+        }
+        copy["mflux_quantize"] = quantize
+        // mflux-generate-z-image-turbo already targets Z-Image Turbo; do not pass --model.
+        return try buildFluxSchnellArgs(payload: copy, includeModel: false)
     }
 
     private static func buildFillArgs(payload: [String: Any]) throws -> [String] {

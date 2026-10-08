@@ -1,0 +1,1027 @@
+#!/usr/bin/env python3
+"""Image menu (local AI image generation; shown even when no models are registered)."""
+
+from __future__ import annotations
+
+import os
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QDialog, QMenu, QWidget, QWidgetAction
+
+from imagegen_plugins import (
+    create_menu_plugins,
+    discover_plugins,
+    function_has_plugins,
+    plugins_for_function,
+)
+from imagegen_plugins.image_gen_active_model import (
+    FUNCTION_CREATE,
+    FUNCTION_EDIT,
+    FUNCTION_EXPAND,
+    FUNCTION_INFILL,
+    FUNCTION_INFILL_PAINT,
+    effective_last_function,
+    normalize_imagegen_menu_function,
+    remember_last_function,
+    set_active_plugin_for_function,
+)
+from imagegen_plugins.image_gen_controller import get_imagegen_controller
+from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
+from imagegen_plugins.image_gen_edit_dialog import MAX_EDIT_SOURCE_IMAGES
+from imagegen_plugins.image_gen_function_prerequisites import normalize_edit_source_paths
+from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+from imagegen_plugins.image_gen_session_state import (
+    FunctionSessionState,
+    mask_to_png_bytes,
+)
+from imagegen_plugins.image_gen_unified_dialog import ImageGenUnifiedDialog
+from imagegen_plugins.image_gen_install_hint import imagegen_backend_missing_message
+from imagegen_plugins.image_gen_persistence import (
+    load_imagegen_dialog_geometry_hex,
+    save_imagegen_dialog_geometry_hex,
+)
+from imagegen_plugins.image_gen_model_availability import confirm_model_download_if_needed
+from imagegen_plugins.image_gen_model_selector import (
+    available_plugins,
+    installed_plugins,
+    warm_installed_cache,
+)
+from imagegen_plugins.image_gen_pipeline_modes import warm_pipeline_availability_cache
+from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.pixelmator_export import (
+    missing_infill_export_paths,
+    pixelmator_mask_file_to_paint_qimage,
+)
+from menu_manager import TextSeparator
+from utils import (
+    restore_dialog_geometry_hex,
+    refresh_visible_cursor,
+    save_dialog_geometry_hex,
+    show_styled_information,
+    show_styled_warning,
+)
+
+_ALT_SLASH = QKeySequence(Qt.AltModifier | Qt.Key_Slash)
+_SHIFT_ALT_SLASH = QKeySequence(Qt.ShiftModifier | Qt.AltModifier | Qt.Key_Slash)
+
+FAST_OPEN_FROM_TEXT = "from_text"
+FAST_OPEN_EDIT_IMAGE = "edit_image"
+
+_CREATE_FUNCTION_ACTIONS = (
+    (FUNCTION_CREATE, "Create an image from text..."),
+    (FUNCTION_EDIT, "Edit an image with AI..."),
+    (FUNCTION_EXPAND, "Expand existing image..."),
+    (FUNCTION_INFILL_PAINT, "Infill by painting..."),
+)
+
+_FUNCTION_LABELS = {fn: label for fn, label in _CREATE_FUNCTION_ACTIONS}
+
+
+def _iter_job_queue_panels(main_window):
+    jobs = getattr(main_window, "sidebar_jobs_widget", None)
+    if jobs is not None:
+        yield jobs
+    dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
+    panel = getattr(dlg, "_panel", None) if dlg is not None else None
+    if panel is not None:
+        yield panel
+
+
+def begin_imagegen_dialog_build(main_window) -> None:
+    main_window._imagegen_dialog_building = True
+    for jobs in _iter_job_queue_panels(main_window):
+        if hasattr(jobs, "pause_live_refresh"):
+            jobs.pause_live_refresh()
+
+
+def end_imagegen_dialog_build(main_window) -> None:
+    main_window._imagegen_dialog_building = False
+    for jobs in _iter_job_queue_panels(main_window):
+        if hasattr(jobs, "resume_live_refresh"):
+            jobs.resume_live_refresh()
+
+
+def _raise_imagegen_function_dialog(dlg: QDialog) -> None:
+    from utils import present_auxiliary_dialog
+
+    present_auxiliary_dialog(dlg)
+
+
+def _start_generation_from_function_dialog(
+    main_window,
+    controller,
+    function: str,
+    dlg,
+) -> None:
+    values = dlg.accepted_values()
+    plugin = dlg.accepted_plugin()
+    if not values or plugin is None:
+        return
+    if not confirm_model_download_if_needed(plugin, main_window):
+        return
+    set_active_plugin_for_function(main_window, function, plugin)
+    QTimer.singleShot(
+        0,
+        lambda: controller.start_generation(plugin, values),
+    )
+
+
+def start_imagegen_without_closing(
+    dialog,
+    function: str,
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+) -> bool:
+    """Start generation from a persistent panel without closing it."""
+    from imagegen_plugins.image_gen_source_nav import resolve_image_gen_main_window
+
+    main_window = resolve_image_gen_main_window(dialog)
+    if main_window is None:
+        return False
+    controller = get_imagegen_controller(main_window)
+    if not confirm_model_download_if_needed(plugin, main_window):
+        return False
+    set_active_plugin_for_function(main_window, function, plugin)
+    return bool(controller.start_generation(plugin, values))
+
+
+def _cursor_refresh_target(main_window) -> QWidget | None:
+    container = getattr(main_window, "thumbnail_container", None)
+    canvas = getattr(container, "canvas", None) if container is not None else None
+    if canvas is not None:
+        return canvas
+    return getattr(main_window, "image_container", None)
+
+
+def _on_imagegen_function_dialog_finished(
+    main_window,
+    controller,
+    function: str,
+    dlg,
+    result: int,
+) -> None:
+    if getattr(main_window, "_imagegen_function_dialog", None) is dlg:
+        main_window._imagegen_function_dialog = None
+    main_window._imagegen_dialog_open = False
+    refresh_target = _cursor_refresh_target(main_window)
+
+    def _restore_pointer_after_dialog() -> None:
+        refresh_visible_cursor(refresh_target, host_window=main_window)
+
+    refresh_visible_cursor(refresh_target, host_window=main_window)
+    QTimer.singleShot(100, _restore_pointer_after_dialog)
+    end_imagegen_dialog_build(main_window)
+    if result != QDialog.DialogCode.Accepted:
+        return
+    if getattr(dlg, "_image_gen_persistent_panel", False):
+        return
+    _start_generation_from_function_dialog(main_window, controller, function, dlg)
+
+
+def _show_imagegen_function_dialog(
+    main_window,
+    controller,
+    function: str,
+    dlg: QDialog,
+) -> None:
+    """Show the unified image-generation dialog (non-modal)."""
+    existing = getattr(main_window, "_imagegen_function_dialog", None)
+    if existing is not None and existing is not dlg and existing.isVisible():
+        existing.close()
+
+    main_window._imagegen_function_dialog = dlg
+    main_window._imagegen_dialog_open = True
+    if not getattr(dlg, "_imagegen_finished_connected", False):
+        dlg.finished.connect(
+            lambda result, d=dlg: _on_imagegen_function_dialog_finished(
+                main_window, controller, function, d, result
+            )
+        )
+        dlg._imagegen_finished_connected = True
+    _raise_imagegen_function_dialog(dlg)
+
+
+def _job_session_state(
+    function: str,
+    job_values: Dict[str, Any],
+    plugin_id: str,
+) -> FunctionSessionState:
+    placement = None
+    keys = ("placement_x", "placement_y", "placement_w", "placement_h")
+    if all(k in job_values for k in keys):
+        try:
+            placement = (
+                int(job_values["placement_x"]),
+                int(job_values["placement_y"]),
+                int(job_values["placement_w"]),
+                int(job_values["placement_h"]),
+            )
+        except (TypeError, ValueError):
+            placement = None
+
+    mask_png_bytes = None
+    mask_path = str(job_values.get("pixelmator_mask_path") or "")
+    if mask_path and os.path.isfile(mask_path):
+        paint_mask = pixelmator_mask_file_to_paint_qimage(mask_path)
+        if paint_mask is not None:
+            mask_png_bytes = mask_to_png_bytes(paint_mask)
+
+    source_paths = None
+    source_path = None
+    if function == FUNCTION_EDIT:
+        paths = [
+            p for p in resolve_source_image_paths(job_values) if p and os.path.isfile(p)
+        ]
+        source_paths = paths or None
+        source_path = paths[0] if paths else None
+    elif function in (FUNCTION_EXPAND, FUNCTION_INFILL_PAINT):
+        source_path = str(
+            job_values.get("source_image_path")
+            or job_values.get("pixelmator_base_path")
+            or job_values.get("pixelmator_doc_path")
+            or ""
+        ).strip() or None
+
+    return FunctionSessionState(
+        values=dict(job_values),
+        plugin_id=plugin_id,
+        source_path=source_path,
+        source_paths=source_paths,
+        placement=placement,
+        mask_png_bytes=mask_png_bytes,
+    )
+
+
+def _open_or_switch_unified_dialog(
+    main_window,
+    controller,
+    function: str,
+    *,
+    initial_prompt: Optional[str] = None,
+    auto_import_available: bool = False,
+    auto_generate: bool = False,
+    geometry_hex: Optional[str] = None,
+    seed_state: Optional[FunctionSessionState] = None,
+    replace_job_id: Optional[str] = None,
+    function_plugins: Optional[List[ImageGenModelPlugin]] = None,
+    source_image_paths: Optional[List[str]] = None,
+) -> None:
+    existing = getattr(main_window, "_imagegen_function_dialog", None)
+    if isinstance(existing, ImageGenUnifiedDialog) and existing.isVisible():
+        if source_image_paths:
+            existing.set_edit_source_paths_override(source_image_paths)
+        if not existing.switch_to_function(
+            function,
+            initial_prompt=initial_prompt,
+            auto_import_available=auto_import_available,
+            auto_generate=auto_generate,
+            seed_state=seed_state,
+            edit_source_paths=source_image_paths,
+        ):
+            _warn_unified_dialog_open_failed(
+                main_window,
+                function,
+                from_job=seed_state is not None,
+                source_image_paths=source_image_paths,
+                function_plugins=function_plugins,
+            )
+            return
+        existing.set_queue_replace_context(replace_job_id)
+        _raise_imagegen_function_dialog(existing)
+        return
+
+    begin_imagegen_dialog_build(main_window)
+    dlg = ImageGenUnifiedDialog(main_window, controller, main_window)
+    if source_image_paths:
+        dlg.set_edit_source_paths_override(source_image_paths)
+    if function_plugins is not None:
+        dlg.set_function_plugins(function, function_plugins)
+    apply_preserved_imagegen_dialog_geometry(dlg, geometry_hex)
+    if not dlg.finish_panel_load(
+        function,
+        initial_prompt=initial_prompt,
+        auto_import_available=auto_import_available,
+        auto_generate=auto_generate,
+        seed_state=seed_state,
+        replace_job_id=replace_job_id,
+        edit_source_paths=source_image_paths,
+    ):
+        _warn_unified_dialog_open_failed(
+            main_window,
+            function,
+            from_job=seed_state is not None,
+            source_image_paths=source_image_paths,
+            function_plugins=function_plugins,
+        )
+        return
+    _show_imagegen_function_dialog(main_window, controller, function, dlg)
+
+
+def _warn_missing_job_paths(main_window, missing: list[str]) -> None:
+    if not missing:
+        return
+    preview = "\n".join(f"• {p}" for p in missing[:6])
+    extra = f"\n…and {len(missing) - 6} more." if len(missing) > 6 else ""
+    show_styled_warning(
+        main_window,
+        "Missing job files",
+        "Some files from the original job are no longer available:\n"
+        f"{preview}{extra}\n\nThe dialog will open with what could be restored.",
+    )
+
+
+def open_imagegen_dialog_from_job(
+    main_window,
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    *,
+    replace_job_id: Optional[str] = None,
+) -> None:
+    """Reopen the function dialog prefilled from a queue job (active or pending)."""
+    controller = get_imagegen_controller(main_window)
+    job_values = dict(values)
+    function = plugin.function
+    initial_plugin_id = plugin.plugin_id
+    initial_prompt = str(job_values.get("prompt") or "").strip() or None
+
+    if replace_job_id:
+        editor_copies = controller.copies_for_job_editor(replace_job_id)
+        if editor_copies is not None:
+            job_values["copies"] = editor_copies
+
+    missing: list[str] = []
+
+    if function == FUNCTION_EDIT:
+        source_paths = resolve_source_image_paths(job_values)
+        source_paths = [p for p in source_paths if p and os.path.isfile(p)]
+        for raw in resolve_source_image_paths(job_values):
+            if raw and not os.path.isfile(raw):
+                missing.append(raw)
+        if not source_paths:
+            show_styled_warning(
+                main_window,
+                "Edit",
+                "Source image files for this job are no longer available.",
+            )
+            return
+    elif function == FUNCTION_EXPAND:
+        source_path = str(job_values.get("source_image_path") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            missing.append(source_path or "(source image)")
+            show_styled_warning(
+                main_window,
+                "Expand",
+                "Source image for this job is no longer available.",
+            )
+            return
+    elif function == FUNCTION_INFILL:
+        missing.extend(missing_infill_export_paths(job_values))
+
+    function = normalize_imagegen_menu_function(function)
+
+    _warn_missing_job_paths(main_window, missing)
+    seed_state = _job_session_state(function, job_values, initial_plugin_id)
+    source_image_paths = None
+    if function == FUNCTION_EDIT:
+        source_image_paths = list(seed_state.source_paths or [])
+        if not source_image_paths and seed_state.source_path:
+            source_image_paths = [seed_state.source_path]
+    _open_or_switch_unified_dialog(
+        main_window,
+        controller,
+        function,
+        initial_prompt=initial_prompt,
+        seed_state=seed_state,
+        replace_job_id=replace_job_id,
+        source_image_paths=source_image_paths,
+    )
+
+
+def _resolved_last_function(main_window) -> str:
+    actions = getattr(main_window, "imagegen_function_actions", None) or {}
+    last_fn = normalize_imagegen_menu_function(effective_last_function(main_window))
+    if last_fn not in actions and actions:
+        last_fn = next(iter(actions))
+    return last_fn
+
+
+def remember_imagegen_last_function(main_window, function: str) -> None:
+    """Update ⌥/ target after switching mode in the combined dialog."""
+    remember_last_function(main_window, function)
+    _sync_function_menu_shortcuts(main_window)
+
+
+def _primary_imagegen_menu_label(last_fn: str) -> str:
+    label = _FUNCTION_LABELS.get(
+        normalize_imagegen_menu_function(last_fn), _FUNCTION_LABELS[FUNCTION_EDIT]
+    )
+    return f"Create or Modify — {label}\t⌥/"
+
+
+def apply_preserved_imagegen_dialog_geometry(dialog, geometry_hex: Optional[str]) -> None:
+    """Apply saved geometry before first show (e.g. when switching dialog type in place)."""
+    if not geometry_hex:
+        return
+    dialog._geometry_restore_attempted = True
+    try:
+        dialog._geometry_was_restored = restore_dialog_geometry_hex(
+            dialog, geometry_hex, dialog.parent()
+        )
+    except Exception:
+        dialog._geometry_was_restored = False
+
+
+def _sync_function_menu_shortcuts(main_window) -> None:
+    """Bind ⌥/ to the primary action and show the last-used type in its label."""
+    actions = getattr(main_window, "imagegen_function_actions", None) or {}
+    last_fn = _resolved_last_function(main_window)
+    primary = getattr(main_window, "imagegen_primary_action", None)
+    if primary is not None:
+        primary.setText(_primary_imagegen_menu_label(last_fn))
+    for function, action in actions.items():
+        action.setText(_FUNCTION_LABELS[function])
+        action.setShortcut(QKeySequence())
+
+
+def imagegen_plugins_available() -> bool:
+    """True when at least one image-generation plugin is registered."""
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        if not imagegen_ui_enabled():
+            return False
+        return bool(discover_plugins())
+    except Exception:
+        return False
+
+
+def imagegen_edit_plugins_available() -> bool:
+    """True when at least one edit-function plugin is registered."""
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        if not imagegen_ui_enabled():
+            return False
+        return function_has_plugins(FUNCTION_EDIT)
+    except Exception:
+        return False
+
+
+def imagegen_edit_from_text_available() -> bool:
+    """True when Edit-with-AI can run (plugin registered and pipeline backend installed)."""
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        if not imagegen_ui_enabled():
+            return False
+        if not function_has_plugins(FUNCTION_EDIT):
+            return False
+        from imagegen_plugins.image_gen_model_selector import available_plugins
+
+        return bool(available_plugins(plugins_for_function(FUNCTION_EDIT)))
+    except Exception:
+        return False
+
+
+def imagegen_create_from_text_available() -> bool:
+    """True when Create-from-text can run (plugin registered and pipeline backend installed)."""
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        if not imagegen_ui_enabled():
+            return False
+        if not function_has_plugins(FUNCTION_CREATE):
+            return False
+        from imagegen_plugins.image_gen_model_selector import available_plugins
+
+        return bool(available_plugins(plugins_for_function(FUNCTION_CREATE)))
+    except Exception:
+        return False
+
+
+def initial_prompt_from_usercomment(raw: Optional[str]) -> Optional[str]:
+    """Prompt text from EXIF user comment (same rules as image-gen Import)."""
+    if raw is not None and not str(raw).strip():
+        return ""
+    if not raw:
+        return None
+    from exif.exif_utils import truncate_usercomment_before_prompt
+
+    text = truncate_usercomment_before_prompt(raw).strip()
+    return text or None
+
+
+def _dialog_initial_prompt_from_user_comment(
+    user_comment: Optional[str],
+) -> Optional[str]:
+    """Priming for unified dialogs; empty EXIF comment maps to an empty prompt field."""
+    if user_comment is not None and not str(user_comment).strip():
+        return ""
+    return initial_prompt_from_usercomment(user_comment)
+
+
+def _user_comment_for_active_image(main_window) -> str:
+    """User comment for image-gen priming (matches File Information pane)."""
+    path = getattr(main_window, "current_image_path", None)
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        from exif.exif_utils import (
+            get_exif_dict_named_from_image_path,
+            get_user_description_from_exif_dict,
+        )
+
+        exif_dict = get_exif_dict_named_from_image_path(path)
+        desc = get_user_description_from_exif_dict(exif_dict)
+        if not desc:
+            return ""
+        from imagegen_plugins.image_gen_naming import format_user_comment_text_for_display
+
+        return format_user_comment_text_for_display(desc) or ""
+    except Exception:
+        return ""
+
+
+
+def open_imagegen_create_from_text_dialog(
+    main_window,
+    *,
+    user_comment: Optional[str] = None,
+    auto_generate: bool = False,
+    auto_import_exif: bool = False,
+) -> None:
+    """Open Create > Create an image from text..., optionally primed."""
+    if not function_has_plugins(FUNCTION_CREATE):
+        return
+    controller = get_imagegen_controller(main_window)
+    _schedule_open_dialog_for_function(
+        FUNCTION_CREATE,
+        main_window,
+        controller,
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
+        auto_generate=auto_generate,
+        auto_import_available=auto_import_exif,
+    )
+
+
+def open_imagegen_edit_from_text_dialog(
+    main_window,
+    *,
+    user_comment: Optional[str] = None,
+    auto_generate: bool = False,
+    source_image_paths: Optional[List[str]] = None,
+) -> None:
+    """Open Edit > Edit image with AI..., optionally primed from chat."""
+    paths = normalize_edit_source_paths(source_image_paths, max_count=MAX_EDIT_SOURCE_IMAGES)
+    if not paths:
+        return
+    if not function_has_plugins(FUNCTION_EDIT):
+        return
+    controller = get_imagegen_controller(main_window)
+    _schedule_open_dialog_for_function(
+        FUNCTION_EDIT,
+        main_window,
+        controller,
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
+        auto_generate=auto_generate,
+        source_image_paths=paths,
+    )
+
+
+def open_imagegen_edit_dialog(
+    main_window, *, user_comment: Optional[str] = None
+) -> None:
+    """Open the AI image edit dialog (File Information pane entry)."""
+    if not imagegen_edit_plugins_available():
+        return
+    controller = get_imagegen_controller(main_window)
+    _schedule_open_dialog_for_function(
+        FUNCTION_EDIT,
+        main_window,
+        controller,
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
+        auto_import_available=True,
+    )
+
+
+def _function_error_title(function: str) -> str:
+    return _FUNCTION_LABELS.get(
+        normalize_imagegen_menu_function(function), "Image generation"
+    )
+
+
+def _no_plugins_message(function: str) -> str:
+    label = _function_error_title(function).lower()
+    return f"No models are registered for {label}."
+
+
+def _no_available_plugins_message(function: str) -> str:
+    plugins = plugins_for_function(function)
+    if plugins:
+        return imagegen_backend_missing_message(plugins[0])
+    return _no_plugins_message(function)
+
+
+def _function_action_label(function: str) -> str:
+    return _function_error_title(function).rstrip(".")
+
+
+_MANAGE_MODELS_HINT = "Open Image > Manage models... to download a model, then try again."
+
+
+def _unified_dialog_open_failure_details(
+    function: str,
+    *,
+    from_job: bool = False,
+    function_plugins: Optional[List[ImageGenModelPlugin]] = None,
+) -> tuple[str, str]:
+    """Explain why the unified image-gen dialog could not open or switch mode."""
+    title = "Job editor" if from_job else _function_error_title(function)
+    plugins = function_plugins if function_plugins is not None else plugins_for_function(function)
+    if not plugins:
+        return title, _no_plugins_message(function)
+
+    usable = available_plugins(plugins)
+    if not usable:
+        if from_job:
+            return title, (
+                "Could not reopen this job's settings: the image-generation backend "
+                "is not available.\n\n"
+                f"{_no_available_plugins_message(function)}"
+            )
+        return "Image generation not installed", _no_available_plugins_message(function)
+
+    if not installed_plugins(usable):
+        action = _function_action_label(function).lower()
+        if from_job:
+            return title, (
+                "Could not reopen this job's settings: no AI model weights are "
+                f"downloaded for {action}.\n\n{_MANAGE_MODELS_HINT}"
+            )
+        return title, (
+            f"No AI model weights are downloaded yet for {action}.\n\n"
+            f"{_MANAGE_MODELS_HINT}"
+        )
+
+    if function == FUNCTION_EDIT:
+        if from_job:
+            return title, (
+                "Could not reopen this job's settings: the source image files are "
+                "missing or could not be loaded."
+            )
+        return title, (
+            "Could not open the editor because the source image files are missing "
+            "or could not be loaded."
+        )
+
+    if from_job:
+        return title, (
+            "Could not reopen this job's settings. Some required files may be "
+            "missing, or this job type is no longer available."
+        )
+    return title, (
+        f"Could not open {_function_action_label(function).lower()} because a "
+        "required file or setting is missing."
+    )
+
+
+def _warn_unified_dialog_open_failed(
+    main_window,
+    function: str,
+    *,
+    from_job: bool = False,
+    source_image_paths: Optional[List[str]] = None,
+    function_plugins: Optional[List[ImageGenModelPlugin]] = None,
+) -> None:
+    from imagegen_plugins.image_gen_function_prerequisites import (
+        validate_function_prerequisites,
+    )
+
+    if not validate_function_prerequisites(
+        function,
+        main_window,
+        parent=main_window,
+        source_image_paths=source_image_paths,
+        show_warning=False,
+    ):
+        # _ensure_panel already showed the prerequisite warning.
+        return
+
+    title, message = _unified_dialog_open_failure_details(
+        function,
+        from_job=from_job,
+        function_plugins=function_plugins,
+    )
+    show_styled_warning(main_window, title, message)
+
+
+def switch_imagegen_function_dialog_in_place(
+    dialog,
+    target_function: str,
+    main_window,
+) -> None:
+    """Switch function inside the unified dialog without closing the window."""
+    if not isinstance(dialog, ImageGenUnifiedDialog):
+        return
+    try:
+        geometry_hex = save_dialog_geometry_hex(dialog)
+        save_imagegen_dialog_geometry_hex(geometry_hex)
+    except Exception:
+        pass
+    dialog.switch_to_function(target_function)
+
+
+def _open_dialog_for_function(
+    function: str,
+    main_window,
+    controller,
+    *,
+    initial_prompt: Optional[str] = None,
+    auto_import_available: bool = False,
+    auto_generate: bool = False,
+    geometry_hex: Optional[str] = None,
+    source_image_paths: Optional[List[str]] = None,
+) -> None:
+    function = normalize_imagegen_menu_function(function)
+    all_plugins = discover_plugins()
+    function_plugins = plugins_for_function(function, all_plugins)
+    if not function_plugins:
+        show_styled_information(
+            main_window,
+            _function_error_title(function),
+            _no_plugins_message(function),
+        )
+        return
+
+    usable = available_plugins(function_plugins)
+    if not usable:
+        show_styled_information(
+            main_window,
+            "Image generation not installed",
+            _no_available_plugins_message(function),
+        )
+        return
+
+    from imagegen_plugins.image_gen_function_prerequisites import (
+        validate_function_prerequisites,
+    )
+
+    if not validate_function_prerequisites(
+        function,
+        main_window,
+        parent=main_window,
+        source_image_paths=source_image_paths,
+    ):
+        return
+
+    _open_or_switch_unified_dialog(
+        main_window,
+        controller,
+        function,
+        initial_prompt=initial_prompt,
+        auto_import_available=auto_import_available,
+        auto_generate=auto_generate,
+        geometry_hex=geometry_hex,
+        function_plugins=function_plugins,
+        source_image_paths=normalize_edit_source_paths(
+            source_image_paths, max_count=MAX_EDIT_SOURCE_IMAGES
+        )
+        or None,
+    )
+
+
+def _schedule_open_dialog_for_function(
+    function: str,
+    main_window,
+    controller,
+    *,
+    initial_prompt: Optional[str] = None,
+    auto_import_available: bool = False,
+    auto_generate: bool = False,
+    geometry_hex: Optional[str] = None,
+    source_image_paths: Optional[List[str]] = None,
+) -> None:
+    """Open the function dialog on the next event-loop turn (after menu handlers)."""
+    QTimer.singleShot(
+        0,
+        lambda: _open_dialog_for_function(
+            function,
+            main_window,
+            controller,
+            initial_prompt=initial_prompt,
+            auto_import_available=auto_import_available,
+            auto_generate=auto_generate,
+            geometry_hex=geometry_hex,
+            source_image_paths=source_image_paths,
+        ),
+    )
+
+
+def _refresh_create_menu_availability(main_window) -> None:
+    """Re-check backend installs and enable Image menu function items."""
+    actions = getattr(main_window, "imagegen_function_actions", None) or {}
+    if not actions:
+        return
+    all_plugins = discover_plugins()
+    warm_pipeline_availability_cache(all_plugins)
+    warm_installed_cache(all_plugins)
+    any_usable = False
+    for function, action in actions.items():
+        plugins = plugins_for_function(function, all_plugins)
+        usable = available_plugins(plugins)
+        action.setEnabled(bool(plugins))
+        if usable:
+            any_usable = True
+        if not plugins:
+            action.setToolTip("No models are registered for this action.")
+        elif not usable:
+            action.setToolTip(
+                "Install optional dependencies (see Help or minimal_requirements.txt)"
+            )
+        else:
+            action.setToolTip("")
+    primary = getattr(main_window, "imagegen_primary_action", None)
+    if primary is not None:
+        primary.setEnabled(any_usable)
+
+
+def _run_create_menu_availability_refresh(main_window) -> None:
+    main_window._imagegen_menu_availability_scheduled = False
+    try:
+        from pyinstaller_frozen_support import log_frozen_imagegen_availability_once
+
+        log_frozen_imagegen_availability_once()
+    except ImportError:
+        pass
+    _refresh_create_menu_availability(main_window)
+
+
+def _schedule_create_menu_availability_refresh(main_window) -> None:
+    """Coalesce availability probes onto one deferred GUI-thread pass."""
+    if getattr(main_window, "_imagegen_menu_availability_scheduled", False):
+        return
+    main_window._imagegen_menu_availability_scheduled = True
+    QTimer.singleShot(0, lambda: _run_create_menu_availability_refresh(main_window))
+
+
+def start_active_imagegen_generation(
+    main_window, *, initial_prompt: Optional[str] = None
+) -> None:
+    """Run the dialog for the last-used Image menu function (⌥/)."""
+    existing = getattr(main_window, "_imagegen_function_dialog", None)
+    if isinstance(existing, ImageGenUnifiedDialog) and existing.isVisible():
+        existing._on_close()
+        return
+    if not create_menu_plugins():
+        return
+    actions = getattr(main_window, "imagegen_function_actions", None) or {}
+    function = normalize_imagegen_menu_function(effective_last_function(main_window))
+    plugins = plugins_for_function(function)
+    if not plugins or function not in actions:
+        for fn, _label in _CREATE_FUNCTION_ACTIONS:
+            if plugins_for_function(fn):
+                function = fn
+                break
+        else:
+            return
+    controller = get_imagegen_controller(main_window)
+    _schedule_open_dialog_for_function(
+        function, main_window, controller, initial_prompt=initial_prompt
+    )
+
+
+def start_fast_imagegen_generation(main_window) -> None:
+    """Open image-gen dialog primed from the current image (⇧⌥/)."""
+    from config import get_config
+
+    action = get_config().load_settings().get(
+        "imagegen_fast_open_action", FAST_OPEN_FROM_TEXT
+    )
+    user_comment = _user_comment_for_active_image(main_window)
+    if action == FAST_OPEN_EDIT_IMAGE:
+        open_imagegen_edit_dialog(main_window, user_comment=user_comment)
+    else:
+        open_imagegen_create_from_text_dialog(
+            main_window, user_comment=user_comment, auto_import_exif=True
+        )
+
+
+def _open_download_models_dialog(main_window) -> None:
+    from imagegen_plugins.debug_download_models_dialog import run_download_models_dialog
+
+    run_download_models_dialog(main_window)
+
+
+def _open_download_loras_dialog(main_window) -> None:
+    from imagegen_plugins.debug_download_script_dialog import (
+        run_flux_lora_download_script_dialog,
+    )
+
+    run_flux_lora_download_script_dialog(main_window)
+
+
+def setup_create_menu(menubar, main_window) -> None:
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        if not imagegen_ui_enabled():
+            return
+    except ImportError:
+        pass
+
+    all_plugins = discover_plugins()
+
+    create_menu = menubar.addMenu("Image")
+    main_window.imagegen_create_menu = create_menu
+    controller = get_imagegen_controller(main_window)
+    main_window.imagegen_function_actions = {}
+
+    main_window._imagegen_last_function = effective_last_function(main_window)
+    primary_action = QAction(
+        _primary_imagegen_menu_label(_resolved_last_function(main_window)),
+        main_window,
+    )
+    primary_action.setShortcut(_ALT_SLASH)
+    primary_action.triggered.connect(
+        lambda: start_active_imagegen_generation(main_window)
+    )
+    create_menu.addAction(primary_action)
+    main_window.imagegen_primary_action = primary_action
+
+    fast_open_action = QAction("Fast open image generation", main_window)
+    fast_open_action.setShortcut(_SHIFT_ALT_SLASH)
+    fast_open_action.triggered.connect(
+        lambda: start_fast_imagegen_generation(main_window)
+    )
+    main_window.addAction(fast_open_action)
+    main_window.imagegen_fast_open_action = fast_open_action
+
+    create_menu.addSeparator()
+
+    def _on_function_selected(function: str) -> None:
+        _schedule_open_dialog_for_function(function, main_window, controller)
+
+    for function, label in _CREATE_FUNCTION_ACTIONS:
+        action = QAction(label, main_window)
+        action.setData(function)
+        plugins = plugins_for_function(function, all_plugins)
+        action.setEnabled(bool(plugins))
+        if not plugins:
+            action.setToolTip("No models are registered for this action.")
+        action.triggered.connect(
+            lambda _checked=False, fn=function: _on_function_selected(fn)
+        )
+        create_menu.addAction(action)
+        main_window.imagegen_function_actions[function] = action
+
+    _sync_function_menu_shortcuts(main_window)
+    create_menu.aboutToShow.connect(
+        lambda: _sync_function_menu_shortcuts(main_window)
+    )
+    create_menu.aboutToShow.connect(
+        lambda: _schedule_create_menu_availability_refresh(main_window)
+    )
+
+    create_menu.addSeparator()
+    queue_action = QAction("Job Queue...", main_window)
+    queue_action.setShortcut(QKeySequence("Ctrl+J"))
+    queue_action.triggered.connect(
+        lambda: toggle_jobs_panel(main_window)
+    )
+    create_menu.addAction(queue_action)
+
+    cancel_action = QAction("Cancel Generation / Caption", main_window)
+    cancel_action.setEnabled(False)
+    cancel_action.triggered.connect(
+        lambda: controller.confirm_cancel_generation(main_window)
+    )
+    create_menu.addAction(cancel_action)
+    main_window.imagegen_cancel_action = cancel_action
+
+    def _sync_cancel_action_enabled() -> None:
+        try:
+            cancel_action.setEnabled(controller.has_pending_work())
+        except Exception:
+            pass
+
+    controller.generation_started.connect(_sync_cancel_action_enabled)
+    controller.generation_finished.connect(
+        lambda _ok, _path, _err: _sync_cancel_action_enabled()
+    )
+    controller.queue_changed.connect(_sync_cancel_action_enabled)
+    controller.caption_finished.connect(_sync_cancel_action_enabled)
+
+    create_menu.addSeparator()
+    download_models_action = QAction("Manage models...", main_window)
+    download_models_action.triggered.connect(
+        lambda: _open_download_models_dialog(main_window)
+    )
+    create_menu.addAction(download_models_action)
+
+    download_loras_action = QAction("Download LoRAs...", main_window)
+    download_loras_action.triggered.connect(
+        lambda: _open_download_loras_dialog(main_window)
+    )
+    create_menu.addAction(download_loras_action)

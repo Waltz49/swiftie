@@ -197,6 +197,11 @@ struct ProwserCommands: Commands {
                 PaneToggleButton(appState: appState, pane: .organizeSidebar)
                     .keyboardShortcut("o", modifiers: [])
 
+                if BundleCapabilities.imageGenUIEnabled {
+                    PaneToggleButton(appState: appState, pane: .jobsSidebar)
+                        .keyboardShortcut("j", modifiers: [])
+                }
+
                 ThemeMenuContent(appState: appState, applyTheme: applyTheme)
 
                 Button("Enter Image Viewer") {
@@ -857,6 +862,7 @@ private enum PaneToggleKind {
     case preview
     case organizeSidebar
     case informationSidebar
+    case jobsSidebar
     case statusBar
 }
 
@@ -883,6 +889,10 @@ private struct PaneToggleButton: View {
             return ("Organize Sidebar", appState.config.bool(forKey: "shortcuts_sidebar_visible", default: true))
         case .informationSidebar:
             return ("Information Sidebar", appState.config.bool(forKey: "information_sidebar_visible", default: true))
+        case .jobsSidebar:
+            let paneShowing = appState.jobsDisplayMode == .pane
+                && appState.config.bool(forKey: "jobs_visible", default: true)
+            return ("Jobs Pane", paneShowing)
         case .statusBar:
             return ("Status Bar", appState.config.bool(forKey: "status_bar_visible", default: true))
         }
@@ -895,6 +905,7 @@ private struct PaneToggleButton: View {
         case .preview: appState.togglePreviewPane()
         case .organizeSidebar: appState.toggleShortcutsSidebar()
         case .informationSidebar: appState.toggleInformationSidebar()
+        case .jobsSidebar: appState.toggleJobsPane()
         case .statusBar: appState.toggleStatusBar()
         }
     }

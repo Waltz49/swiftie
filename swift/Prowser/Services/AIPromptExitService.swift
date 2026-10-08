@@ -12,6 +12,13 @@ enum AIPromptExitService {
         return invokeExitScript(raw: raw, text: text)
     }
 
+    static func applyImageAIExit(_ text: String, config: AppConfig) -> String {
+        guard promptFilterExitsEnabled(config: config) else { return text }
+        let raw = config.string(forKey: ExitScriptUtils.settingImageAIExit)
+        guard !raw.isEmpty else { return text }
+        return invokeExitScript(raw: raw, text: text)
+    }
+
     private static func promptFilterExitsEnabled(config: AppConfig) -> Bool {
         if config.bool(forKey: "use_prompt_filter_exits", default: false) { return true }
         if !config.string(forKey: ExitScriptUtils.settingTextAIExit).isEmpty { return true }

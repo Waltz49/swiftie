@@ -1,0 +1,798 @@
+#!/usr/bin/env python3
+"""Table-driven pipeline modes (shared backends for image generation plugins)."""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
+from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL, lora_host_for_pipeline
+from imagegen_plugins.mflux_lora_presets import (
+    coerce_lora_preset_id,
+    effective_lora_ids_from_values,
+    effective_steps_for_lora,
+    effective_steps_for_lora_stack,
+    lora_preset_min_steps,
+    lora_stack_min_steps,
+    normalize_lora_stack_from_values,
+)
+
+MFLUX_QUANT_CHOICES = (3, 4, 5, 6, 8)
+_PACKAGE_DIR = Path(__file__).resolve().parent
+
+# MFLUX FlowMatchEulerDiscreteScheduler builds timesteps with / (num_steps - 1).
+MFLUX_FLOW_MATCH_MIN_STEPS = 2
+_MFLUX_PIPELINE_IDS = frozenset(
+    {
+        "flux_schnell_mflux_play",
+        "mflux_fill_expand",
+        "mflux_fill_infill",
+        "mflux_flux2_klein_edit",
+        "mflux_flux2_klein_create",
+        "mflux_flux2_klein_expand",
+    }
+)
+
+_KLEIN_EXPAND_PROMPT_PREFIX = (
+    "Extend the image only into the gray border areas; "
+    "preserve the existing center content.\n"
+)
+
+
+def klein_expand_prompt(user_prompt: str) -> str:
+    text = (user_prompt or "").strip()
+    if text:
+        return _KLEIN_EXPAND_PROMPT_PREFIX + text
+    return _KLEIN_EXPAND_PROMPT_PREFIX.rstrip("\n")
+
+
+@dataclass(frozen=True)
+class PipelineMode:
+    pipeline_id: str
+    worker_script: str  # relative to imagegen_plugins/pipelines/
+    steps_min: int = 1
+    steps_max: int = 12
+    steps_default: int = 4
+    guidance_min: float = 0.0
+    guidance_max: float = 10.0
+    guidance_default: float = 3.5
+    width_min: int = 256
+    width_max: int = 1440
+    height_min: int = 256
+    height_max: int = 1440
+    dim_step: int = 16
+    supports_negative_prompt: bool = False
+    supports_progressive_images: bool = False
+    prompt_label: str = "Image Prompt"
+    prompt_status_label: str = "Prompt:"
+    prompt_required: bool = True
+    requires_source_image: bool = False
+    supports_optional_source_image: bool = False
+    includes_output_dimensions: bool = True
+    supports_low_ram: bool = False
+    # More than one entry shows a quantization selector; a single entry is applied with no control.
+    quant_choices: tuple[int, ...] = ()
+
+
+PIPELINE_MODES: Dict[str, PipelineMode] = {
+    "flux_schnell_mflux_play": PipelineMode(
+        pipeline_id="flux_schnell_mflux_play",
+        worker_script="mflux_schnell.py",
+        steps_min=MFLUX_FLOW_MATCH_MIN_STEPS,
+        steps_default=4,
+        steps_max=30,
+        guidance_default=3.5,
+        supports_progressive_images=True,
+        supports_low_ram=True,
+    ),
+    "sana_sprint_600m": PipelineMode(
+        pipeline_id="sana_sprint_600m",
+        worker_script="sana_sprint.py",
+        steps_default=2,
+        steps_max=50,
+        guidance_default=4.5,
+        guidance_min=1.0,
+        guidance_max=20.0,
+        width_min=256,
+        width_max=1024,
+        height_min=256,
+        height_max=1024,
+        dim_step=32,
+        supports_negative_prompt=False,
+        supports_progressive_images=False,
+    ),
+    "z_image_turbo_sdnq": PipelineMode(
+        pipeline_id="z_image_turbo_sdnq",
+        worker_script="z_image_turbo.py",
+        steps_default=9,
+        steps_max=20,
+        guidance_min=0.0,
+        guidance_max=0.0,
+        guidance_default=0.0,
+        width_min=256,
+        width_max=1024,
+        height_min=256,
+        height_max=1024,
+        dim_step=16,
+        supports_negative_prompt=False,
+        supports_progressive_images=False,
+    ),
+    "mflux_z_image_turbo": PipelineMode(
+        pipeline_id="mflux_z_image_turbo",
+        worker_script="mflux_z_image_turbo.py",
+        steps_default=9,
+        steps_max=20,
+        guidance_min=0.0,
+        guidance_max=0.0,
+        guidance_default=0.0,
+        width_min=256,
+        width_max=1440,
+        height_min=256,
+        height_max=1440,
+        dim_step=16,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+        supports_low_ram=True,
+        quant_choices=(3, 4, 5, 6, 8),
+    ),
+    "sd15_diffusers": PipelineMode(
+        pipeline_id="sd15_diffusers",
+        worker_script="sd15_diffusers.py",
+        steps_default=25,
+        steps_max=50,
+        guidance_default=7.5,
+        guidance_min=1.0,
+        guidance_max=20.0,
+        width_min=256,
+        width_max=768,
+        height_min=256,
+        height_max=768,
+        dim_step=8,
+        supports_negative_prompt=True,
+        supports_progressive_images=True,
+    ),
+    "sdxl_diffusers": PipelineMode(
+        pipeline_id="sdxl_diffusers",
+        worker_script="sdxl_diffusers.py",
+        steps_default=30,
+        steps_max=50,
+        guidance_default=7.5,
+        guidance_min=1.0,
+        guidance_max=20.0,
+        width_min=256,
+        width_max=896,
+        height_min=256,
+        height_max=896,
+        dim_step=8,
+        supports_negative_prompt=True,
+        supports_progressive_images=True,
+    ),
+    "mflux_fill_expand": PipelineMode(
+        pipeline_id="mflux_fill_expand",
+        worker_script="mflux_fill_expand.py",
+        steps_min=8,
+        steps_max=40, # DGN was 30
+        steps_default=20,
+        guidance_min=1.0,
+        guidance_max=50.0,
+        guidance_default=30.0,
+        width_min=128,
+        width_max=1024,
+        height_min=128,
+        height_max=1024,
+        dim_step=32,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+        prompt_label="Outfill prompt",
+        prompt_status_label="Outfill:",
+        prompt_required=False,
+        requires_source_image=True,
+        supports_low_ram=True,
+    ),
+    "mflux_fill_infill": PipelineMode(
+        pipeline_id="mflux_fill_infill",
+        worker_script="mflux_fill_expand.py",
+        steps_min=8,
+        steps_max=30,
+        steps_default=20,
+        guidance_min=1.0,
+        guidance_max=50.0,
+        guidance_default=30.0,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+        prompt_label="Infill prompt",
+        prompt_status_label="Infill:",
+        prompt_required=False,
+        requires_source_image=False,
+        includes_output_dimensions=False,
+        supports_low_ram=True,
+    ),
+    "mflux_flux2_klein_create": PipelineMode(
+        pipeline_id="mflux_flux2_klein_create",
+        worker_script="mflux_flux2_klein_create.py",
+        steps_min=MFLUX_FLOW_MATCH_MIN_STEPS,
+        steps_max=30,
+        steps_default=4,
+        guidance_min=1.0,
+        guidance_max=1.0,
+        guidance_default=1.0,
+        width_min=256,
+        width_max=2048,
+        height_min=256,
+        height_max=2048,
+        dim_step=16,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+        prompt_required=True,
+        requires_source_image=False,
+        supports_optional_source_image=True,
+        supports_low_ram=True,
+    ),
+    "mflux_flux2_klein_edit": PipelineMode(
+        pipeline_id="mflux_flux2_klein_edit",
+        worker_script="mflux_flux2_klein_edit.py",
+        steps_min=MFLUX_FLOW_MATCH_MIN_STEPS,
+        steps_max=30,
+        steps_default=4,
+        guidance_min=1.0,
+        guidance_max=1.0,
+        guidance_default=1.0,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+        prompt_label="Edit prompt",
+        prompt_status_label="Prompt:",
+        prompt_required=True,
+        requires_source_image=True,
+        includes_output_dimensions=False,
+        supports_low_ram=True,
+    ),
+    "mflux_flux2_klein_expand": PipelineMode(
+        pipeline_id="mflux_flux2_klein_expand",
+        worker_script="mflux_flux2_klein_edit.py",
+        steps_min=MFLUX_FLOW_MATCH_MIN_STEPS,
+        steps_max=30,
+        steps_default=4,
+        guidance_min=1.0,
+        guidance_max=1.0,
+        guidance_default=1.0,
+        width_min=256,
+        width_max=2048,
+        height_min=256,
+        height_max=2048,
+        dim_step=16,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+        prompt_label="Outfill prompt",
+        prompt_status_label="Outfill:",
+        prompt_required=False,
+        requires_source_image=True,
+        supports_low_ram=True,
+    ),
+}
+
+
+def pipeline_supports_low_ram(pipeline_id: str) -> bool:
+    return get_pipeline(pipeline_id).supports_low_ram
+
+
+def load_imagegen_low_ram() -> bool:
+    """Global Low RAM preference (General settings → Image Generation)."""
+    from config import get_config
+
+    settings = get_config().load_settings()
+    return bool(settings.get("imagegen_low_ram", True))
+
+
+def get_pipeline(pipeline_id: str) -> PipelineMode:
+    mode = PIPELINE_MODES.get(pipeline_id)
+    if mode is None:
+        raise KeyError(f"Unknown pipeline_id: {pipeline_id}")
+    return mode
+
+
+def pipeline_supports_series_image_refinement(pipeline_id: str) -> bool:
+    """True when a multi-copy job may chain prior outputs as image input."""
+    mode = get_pipeline(pipeline_id)
+    if mode.requires_source_image:
+        return True
+    return mode.supports_optional_source_image
+
+
+def effective_pipeline_id_for_values(
+    pipeline_id: str, values: Dict[str, Any]
+) -> str:
+    """Worker pipeline when optional source images are present (e.g. create→edit)."""
+    if pipeline_id == "mflux_flux2_klein_create":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        if resolve_source_image_paths(values):
+            return "mflux_flux2_klein_edit"
+    return pipeline_id
+
+
+def job_run_uses_source_image(pipeline_id: str, values: Dict[str, Any]) -> bool:
+    """True when this run will condition on one or more source images."""
+    mode = get_pipeline(pipeline_id)
+    if mode.requires_source_image:
+        return True
+    if not mode.supports_optional_source_image:
+        return False
+    from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+    return bool(resolve_source_image_paths(values))
+
+
+def scale_dims_to_max_side(
+    width: int,
+    height: int,
+    *,
+    effective_max_side: int,
+) -> tuple[int, int]:
+    """Scale down proportionally when either edge exceeds effective max; no pipeline snap."""
+    w, h = int(width), int(height)
+    max_side = int(effective_max_side)
+    if w <= 0 or h <= 0 or max_side <= 0:
+        return w, h
+    scale = min(1.0, max_side / w, max_side / h)
+    if scale >= 1.0:
+        return w, h
+    return int(w * scale), int(h * scale)
+
+
+def align_dims_for_pipeline(
+    pipeline_id: str,
+    width: int,
+    height: int,
+    *,
+    effective_max_side: int,
+) -> tuple[int, int]:
+    """Snap dialog dimensions to pipeline bounds; scale down proportionally when over max."""
+    mode = get_pipeline(pipeline_id)
+    max_side = int(effective_max_side)
+    w, h = scale_dims_to_max_side(width, height, effective_max_side=max_side)
+    if pipeline_id == "flux_schnell_mflux_play":
+        from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
+
+        return align_mflux_dims(w, h, max_side=max_side)
+    if pipeline_id in ("mflux_flux2_klein_create", "mflux_flux2_klein_expand"):
+        from imagegen_plugins.pipelines.mflux_flux2_klein_create import (
+            align_mflux_flux2_klein_dims,
+        )
+
+        return align_mflux_flux2_klein_dims(w, h, max_side=max_side)
+    if pipeline_id == "sd15_diffusers":
+        from imagegen_plugins.pipelines.sd15_diffusers import align_sd15_dims
+
+        return align_sd15_dims(w, h, max_side=max_side)
+    if pipeline_id == "sdxl_diffusers":
+        from imagegen_plugins.pipelines.sdxl_diffusers import align_sdxl_dims
+
+        return align_sdxl_dims(w, h, max_side=max_side)
+    if pipeline_id in ("z_image_turbo_sdnq", "mflux_z_image_turbo"):
+        from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
+
+        return align_z_image_dims(w, h, max_side=max_side)
+    step = int(mode.dim_step or 1)
+    w = max(mode.width_min, w - (w % step))
+    h = max(mode.height_min, h - (h % step))
+    return w, h
+
+
+def clamp_output_dims_in_values(
+    pipeline_id: str,
+    values: Dict[str, Any],
+    *,
+    effective_max_side: int,
+) -> Dict[str, Any]:
+    """Scale width/height down together when either edge exceeds effective max."""
+    mode = get_pipeline(pipeline_id)
+    if not mode.includes_output_dimensions:
+        return values
+    out = dict(values)
+    try:
+        w = int(out.get("width", 1024))
+        h = int(out.get("height", 1024))
+    except (TypeError, ValueError):
+        return values
+    w, h = scale_dims_to_max_side(w, h, effective_max_side=effective_max_side)
+    out["width"] = w
+    out["height"] = h
+    return out
+
+
+def generation_status_display_size(
+    pipeline_id: str,
+    values: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    effective_max_side: int,
+) -> Optional[tuple[int, int]]:
+    """Output dimensions shown in job control / queue (matches worker target size)."""
+    merged = dict(values)
+    if payload:
+        merged.update(payload)
+    max_side = int(merged.get("max_generation_dimension") or effective_max_side)
+    pipeline_id = effective_pipeline_id_for_values(pipeline_id, merged)
+
+    if pipeline_id == "mflux_flux2_klein_edit":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.outpaint_mask import fit_edit_output_dims
+
+        if merged.get("use_custom_size"):
+            try:
+                w = int(merged.get("width", 0))
+                h = int(merged.get("height", 0))
+            except (TypeError, ValueError):
+                return None
+            if w <= 0 or h <= 0:
+                return None
+            return fit_edit_output_dims(w, h, max_side=max_side)
+        paths = resolve_source_image_paths(merged)
+        if not paths:
+            return None
+        from PIL import Image
+
+        with Image.open(paths[0]) as image:
+            src_w, src_h = image.size
+        return fit_edit_output_dims(src_w, src_h, max_side=max_side)
+
+    if pipeline_id == "mflux_fill_infill":
+        base_path = str(merged.get("pixelmator_base_path") or "")
+        if not base_path or not os.path.isfile(base_path):
+            return None
+        from PIL import Image
+        from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
+
+        with Image.open(base_path) as image:
+            src_w, src_h = image.size
+        return align_mflux_dims(src_w, src_h, max_side=max_side)
+
+    mode = get_pipeline(pipeline_id)
+    if not mode.includes_output_dimensions:
+        return None
+
+    w = h = None
+    if payload is not None:
+        try:
+            pw = payload.get("width")
+            ph = payload.get("height")
+            if pw is not None and ph is not None:
+                w, h = int(pw), int(ph)
+        except (TypeError, ValueError):
+            w = h = None
+    if w is None or h is None or w <= 0 or h <= 0:
+        try:
+            w = int(merged.get("width", 0))
+            h = int(merged.get("height", 0))
+        except (TypeError, ValueError):
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        w, h = align_dims_for_pipeline(
+            pipeline_id, w, h, effective_max_side=max_side
+        )
+
+    if pipeline_id == "mflux_fill_expand":
+        from imagegen_plugins.outpaint_mask import clamp_outpaint_dims
+
+        return clamp_outpaint_dims(w, h, max_side=max_side)
+
+    return w, h
+
+
+_pipeline_available_cache: dict[str, bool] = {}
+
+
+
+def warm_pipeline_availability_cache(
+    plugins: Optional[Iterable[Any]] = None,
+) -> None:
+    """Prime pipeline_is_available once per unique pipeline_id (menu / dialog probes)."""
+    if plugins is None:
+        from imagegen_plugins import discover_plugins
+
+        plugins = discover_plugins()
+    seen: set[str] = set()
+    for plugin in plugins:
+        pipeline_id = getattr(plugin, "pipeline_id", None)
+        if not pipeline_id or pipeline_id in seen:
+            continue
+        seen.add(pipeline_id)
+        pipeline_is_available(pipeline_id)
+
+
+def pipeline_is_available(pipeline_id: str) -> bool:
+    cached = _pipeline_available_cache.get(pipeline_id)
+    if cached is not None:
+        return cached
+    from imagegen_plugins.pipeline_check_registry import pipeline_availability_checker
+
+    checker = pipeline_availability_checker(pipeline_id)
+    result = bool(checker()) if checker is not None else False
+    _pipeline_available_cache[pipeline_id] = result
+    return result
+
+
+def worker_script_path(pipeline_id: str) -> str:
+    mode = get_pipeline(pipeline_id)
+    return str(_PACKAGE_DIR / "pipelines" / mode.worker_script)
+
+
+def resolve_steps_for_run(pipeline_id: str, values: Dict[str, Any]) -> int:
+    """Steps sent to the worker after pipeline bounds and LoRA minimums."""
+    mode = get_pipeline(pipeline_id)
+    steps = int(values.get("steps", mode.steps_default))
+    steps = max(mode.steps_min, min(mode.steps_max, steps))
+    if pipeline_id == "flux_schnell_mflux_play":
+        stack = effective_lora_ids_from_values(
+            values, pipeline_id=pipeline_id, pop=False
+        )
+        if stack:
+            steps = effective_steps_for_lora_stack(steps, stack, for_fill=False)
+        else:
+            lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+            steps = effective_steps_for_lora(steps, lora_id, for_fill=False)
+        steps = max(mode.steps_min, min(mode.steps_max, steps))
+    if pipeline_id == "mflux_z_image_turbo":
+        stack = effective_lora_ids_from_values(
+            values, pipeline_id=pipeline_id, pop=False
+        )
+        if stack:
+            steps = effective_steps_for_lora_stack(steps, stack, for_fill=False)
+        steps = max(mode.steps_min, min(mode.steps_max, steps))
+    if pipeline_id in _MFLUX_PIPELINE_IDS:
+        steps = max(MFLUX_FLOW_MATCH_MIN_STEPS, steps)
+    return steps
+
+
+def finalize_run_values(pipeline_id: str, values: Dict[str, Any]) -> Dict[str, Any]:
+    """Dialog/saved settings aligned with what build_worker_payload will run."""
+    from imagegen_plugins.job_values_snapshot import job_values_snapshotted
+
+    out = dict(values)
+    if job_values_snapshotted(out):
+        mode = get_pipeline(pipeline_id)
+        steps = int(out.get("steps", mode.steps_default))
+        steps = max(mode.steps_min, min(mode.steps_max, steps))
+        if pipeline_id in _MFLUX_PIPELINE_IDS:
+            steps = max(MFLUX_FLOW_MATCH_MIN_STEPS, steps)
+        out["steps"] = steps
+    else:
+        out["steps"] = resolve_steps_for_run(pipeline_id, out)
+    if get_pipeline(pipeline_id).supports_progressive_images:
+        from imagegen_plugins.image_gen_persistence import load_show_progressive_images
+
+        # Match low_ram: always honor the live toolbar toggle for each copy/run,
+        # not a value frozen when the job was queued.
+        out["show_progressive_images"] = load_show_progressive_images()
+    if pipeline_supports_low_ram(pipeline_id):
+        out["low_ram"] = load_imagegen_low_ram()
+    else:
+        out.pop("low_ram", None)
+    return out
+
+
+def merge_defaults(
+    pipeline_id: str,
+    model_defaults: Dict[str, Any],
+    saved: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Pipeline bounds + model defaults + per-plugin saved settings."""
+    mode = get_pipeline(pipeline_id)
+    base: Dict[str, Any] = {
+        "prompt": "",
+        "negative_prompt": "",
+        "steps": mode.steps_default,
+        "guidance_scale": mode.guidance_default,
+        "mflux_quantize": 4,
+        "seed": 0,
+        "random_seed": True,
+        "copies": 1,
+        "mflux_lora": "none",
+        "mflux_lora_stack": [],
+    }
+    if mode.includes_output_dimensions:
+        base["width"] = 1024
+        base["height"] = 1024
+        base["aspect_ratio_lock"] = False
+    base.update(model_defaults or {})
+    if saved:
+        base.update(saved)
+    base.pop("low_ram", None)
+    if lora_host_for_pipeline(pipeline_id) == HOST_SD15:
+        from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
+
+        host_id = HOST_SD15
+        strip_lora_payload_keys_for_host(base, host_id=host_id, pop=True)
+        raw_stack = base.get("mflux_lora_stack")
+        pid = coerce_lora_preset_id(base.get("mflux_lora", "none"))
+        if pid == "none" and isinstance(raw_stack, list) and raw_stack:
+            migrated = normalize_lora_stack_from_values(
+                {"mflux_lora_stack": raw_stack},
+                pop=False,
+            )
+            if migrated:
+                base["mflux_lora"] = migrated[0]
+        base.pop("mflux_lora_stack", None)
+        if "mflux_lora" in base:
+            base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
+    elif lora_host_for_pipeline(pipeline_id) is not None:
+        from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
+        from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
+
+        host_id = lora_host_for_pipeline(pipeline_id) or HOST_FLUX1_T2I
+        strip_lora_payload_keys_for_host(base, host_id=host_id, pop=True)
+        if "mflux_lora" in base:
+            base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
+        raw_stack = base.get("mflux_lora_stack")
+        if isinstance(raw_stack, list):
+            if raw_stack:
+                base["mflux_lora_stack"] = normalize_lora_stack_from_values(
+                    {"mflux_lora_stack": raw_stack},
+                    pop=False,
+                )
+            else:
+                base["mflux_lora_stack"] = []
+        elif base.get("mflux_lora"):
+            pid = coerce_lora_preset_id(base.get("mflux_lora", "none"))
+            base["mflux_lora_stack"] = [] if pid == "none" else [pid]
+        else:
+            base["mflux_lora_stack"] = []
+        base.pop("mflux_lora", None)
+    return base
+
+
+def build_worker_payload(
+    pipeline_id: str,
+    values: Dict[str, Any],
+    output_path: str,
+    hf_model_id: str,
+    *,
+    effective_max_side: int,
+    apply_image_exit: bool = True,
+) -> Dict[str, Any]:
+    from imagegen_plugins.flux_prompt_job import clear_flux_prompt_ai_job
+
+    run_values = dict(values)
+    clear_flux_prompt_ai_job(run_values)
+    merged = finalize_run_values(pipeline_id, run_values)
+    merged["pipeline_id"] = pipeline_id
+    merged["output_path"] = output_path
+    merged["hf_model_id"] = hf_model_id
+    merged["max_generation_dimension"] = int(effective_max_side)
+    mode = get_pipeline(pipeline_id)
+    if mode.includes_output_dimensions:
+        w, h = align_dims_for_pipeline(
+            pipeline_id,
+            int(merged.get("width", 1024)),
+            int(merged.get("height", 1024)),
+            effective_max_side=int(effective_max_side),
+        )
+        merged["width"] = w
+        merged["height"] = h
+    if pipeline_id in ("flux_schnell_mflux_play", "mflux_fill_expand", "mflux_fill_infill"):
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
+
+        merged.pop("copies", None)
+        apply_lora_to_mflux_payload(
+            merged,
+            for_fill=(pipeline_id in ("mflux_fill_expand", "mflux_fill_infill")),
+        )
+    if pipeline_id == "mflux_z_image_turbo":
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
+
+        merged.pop("copies", None)
+        apply_lora_to_mflux_payload(merged, for_z_image=True)
+    if pipeline_id == "mflux_fill_infill":
+        from imagegen_plugins.pixelmator_export import missing_infill_export_paths
+
+        missing = missing_infill_export_paths(merged)
+        if missing:
+            preview = ", ".join(missing[:3])
+            raise ValueError(
+                "Infill base image or mask is not available on disk "
+                f"({preview}). Re-run infill from the paint or Pixelmator dialog."
+            )
+    if pipeline_id == "mflux_fill_expand":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        source_paths = resolve_source_image_paths(merged)
+        if source_paths:
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
+    if pipeline_id == "mflux_flux2_klein_create":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
+
+        apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
+        if resolve_source_image_paths(merged):
+            pipeline_id = "mflux_flux2_klein_edit"
+            merged["pipeline_id"] = pipeline_id
+    if pipeline_id == "sd15_diffusers":
+        from imagegen_plugins.sd15_lora_presets import apply_lora_to_sd15_payload
+
+        merged.pop("copies", None)
+        apply_lora_to_sd15_payload(merged)
+    if pipeline_id == "sdxl_diffusers":
+        from imagegen_plugins.sdxl_lora_presets import apply_lora_to_sdxl_payload
+
+        merged.pop("copies", None)
+        apply_lora_to_sdxl_payload(merged)
+    if pipeline_id == "mflux_flux2_klein_expand":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
+
+        merged["prompt"] = klein_expand_prompt(str(merged.get("prompt") or ""))
+        apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
+        source_paths = resolve_source_image_paths(merged)
+        if source_paths:
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
+    if pipeline_id == "mflux_flux2_klein_edit":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
+
+        apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
+        source_paths = resolve_source_image_paths(merged)
+        if source_paths:
+            merged["_canonical_source_image_paths"] = list(source_paths)
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
+            pad_temps: list[str] = []
+            if merged.get("use_custom_size"):
+                from imagegen_plugins.edit_aspect_pad import (
+                    SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX,
+                    generator_paths_with_screen_size_expansion,
+                )
+
+                try:
+                    target_w = int(merged.get("width", 0))
+                    target_h = int(merged.get("height", 0))
+                except (TypeError, ValueError):
+                    target_w = target_h = 0
+                if target_w > 0 and target_h > 0:
+                    source_paths, screen_temps = (
+                        generator_paths_with_screen_size_expansion(
+                            source_paths,
+                            target_width=target_w,
+                            target_height=target_h,
+                        )
+                    )
+                    pad_temps.extend(screen_temps)
+                    prompt = str(merged.get("prompt") or "")
+                    merged["prompt"] = prompt + SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX
+            if merged.get("aspect_ratio_test"):
+                from imagegen_plugins.edit_aspect_pad import (
+                    generator_paths_with_aspect_padding,
+                )
+
+                gen_paths, aspect_temps = generator_paths_with_aspect_padding(
+                    source_paths
+                )
+                source_paths = gen_paths
+                pad_temps.extend(aspect_temps)
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
+            if pad_temps:
+                merged["_aspect_pad_temp_paths"] = pad_temps
+        merged.pop("width", None)
+        merged.pop("height", None)
+    merged.pop("aspect_ratio_lock", None)
+    merged.pop("_pixelmator_batch_dir", None)
+    merged.pop("series_refinement", None)
+    merged.pop("series_prompt_refinement", None)
+    merged.pop("aspect_ratio_test", None)
+    merged.pop("use_custom_size", None)
+    merged.pop("pass_image_to_ai_with_prompt", None)
+    from imagegen_plugins.lora_trigger_prompt_guard import apply_lora_triggers_for_run
+
+    apply_lora_triggers_for_run(merged)
+    if apply_image_exit:
+        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_payload
+
+        apply_image_ai_exit_to_payload(merged)
+    return merged

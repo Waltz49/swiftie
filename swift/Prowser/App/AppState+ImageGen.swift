@@ -54,8 +54,12 @@ extension AppState {
             for _ in 0..<40 {
                 if Task.isCancelled { return }
                 if FileManager.default.fileExists(atPath: path) {
+                    // Stack the folder we are leaving. Esc from this browse stays in the
+                    // output folder; the next Esc returns to the stacked folder.
+                    displaceCurrentLevelIfOpeningNewDirectory(path)
                     ensureImageListedForBrowse(path: path)
                     openImageInBrowse(path: path, saveHistory: false)
+                    clearBrowseReturnState()
                     reloadBrowseImageIfCurrent(path: path)
                     return
                 }
@@ -211,8 +215,7 @@ extension AppState {
     }
 
     func syncJobsPaneGeometry() {
-        guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
-        rightSidebarSplit.resizeJobsPaneToMode(appState: self)
+        scheduleJobsPaneGeometryRefit()
     }
 
     func growJobsPaneForActionBar(extra: CGFloat) {
@@ -220,34 +223,19 @@ extension AppState {
         rightSidebarSplit.growJobsPaneForActionBar(extraContentHeight: extra, appState: self)
     }
 
-    func jobsQueuePaneContentHeight(for mode: JobsQueueSizeMode? = nil) -> CGFloat {
-        let mode = mode ?? jobsQueueSizeMode
-        let jobCount = imageGen.queue.jobs.count
-        let showsActiveStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
-        return JobQueuePaneMetrics.contentHeight(
-            mode: mode,
-            cardStackHeight: measuredJobsCardStackHeight,
-            activeStripHeight: measuredActiveJobStripHeight,
-            jobCount: jobCount,
-            isProcessing: imageGen.isProcessing,
-            showsActiveStrip: showsActiveStrip,
-            hasMeasuredCards: measuredJobsCardStackHeight > 0,
-            includesToolbar: jobsToolbarVisible && jobsDisplayMode == .pane
-        )
-    }
-
     func updateMeasuredActiveJobStripHeight(_ height: CGFloat) {
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: height)
         guard abs(measuredActiveJobStripHeight - height) > tolerance else { return }
         measuredActiveJobStripHeight = height
-        syncJobsPaneGeometry()
+        scheduleJobsPaneGeometryRefit()
     }
 
     func updateMeasuredJobsQueueGeometry(cardStackHeight: CGFloat) {
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: cardStackHeight)
         guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
         measuredJobsCardStackHeight = cardStackHeight
-        syncJobsPaneGeometry()
+        bumpImageGenUI()
+        scheduleJobsPaneGeometryRefit()
     }
 
     func beginJobsPaneGeometryAdjustment() {
@@ -256,6 +244,10 @@ extension AppState {
 
     func endJobsPaneGeometryAdjustment() {
         isAdjustingJobsPaneGeometry = false
+        if jobsPaneRefitDeferred {
+            jobsPaneRefitDeferred = false
+            scheduleJobsPaneGeometryRefit()
+        }
     }
     func openImageGenDialog(
         function: String? = nil,
@@ -353,12 +345,14 @@ extension AppState {
         let prompt = row.isActive ? "Cancel the running job?" : "Remove this job from the queue?"
         let confirmTitle = row.isActive ? "Cancel Job" : "Remove"
         let keepTitle = row.isActive ? "Keep Running" : "Keep"
+        let parent = BrowserWindowIdentity.resolveMainBrowserWindow()
         if StyledMessageDialog.showConfirm(
             title: "Cancel job?",
             message: prompt,
             confirmTitle: confirmTitle,
             cancelTitle: keepTitle,
-            defaultCancel: true
+            defaultCancel: true,
+            parentWindow: parent
         ) {
             imageGen.cancelJob(id: id)
         }
@@ -419,5 +413,6 @@ extension AppState {
         imagegen["job_queue_always_on_top"] = enabled
         config.updateSetting("imagegen", value: imagegen)
         config.applySettingsChange(emit: eventBus)
+        SceneWindowChrome.applyJobsPanelAlwaysOnTop(enabled)
     }
 }

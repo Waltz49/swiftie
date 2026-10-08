@@ -250,6 +250,11 @@ enum JobQueueLayout {
     static let cardCornerRadius: CGFloat = 4
     static let cardOuterMargin: CGFloat = 2
     static let cardContentMargin: CGFloat = 12
+
+    /// Status column width inside a card (Python ``_info_content_width``).
+    static func infoContentWidth(viewportWidth: CGFloat) -> CGFloat {
+        max(80, viewportWidth - cardContentMargin)
+    }
     static let cardInnerSpacing: CGFloat = 2
     static let listSpacing: CGFloat = 8
     static let inlineRefsMinScrollWidth: CGFloat = 350

@@ -17,7 +17,7 @@ enum ImageGenExifCommentFormatting {
         "stablediffusionapi/anythingfurry": "Anything Furry",
         "stabilityai/stable-diffusion-xl-base-1.0": "SDXL 1.0 Base",
         "Disty0/Z-Image-Turbo-SDNQ-int8": "Z-Image Turbo",
-        "filipstrand/Z-Image-Turbo-mflux-4bit": "Z-Image Turbo 4-bit",
+        "filipstrand/Z-Image-Turbo-mflux-4bit": "Z-Image Turbo",
     ]
 
     private static let promptSectionSkipHeadings: Set<String> = [
@@ -97,7 +97,7 @@ enum ImageGenExifCommentFormatting {
         if let meta = parseMfluxMetadataJSON(trimmed) {
             return normalizeExifLoraDisplayLines(formatExifCommentFromMfluxMetadata(meta))
         }
-        return normalizeExifLoraDisplayLines(trimmed)
+        return normalizeExifLoraDisplayLines(canonicalizeDisplayedZImageTurboModel(trimmed))
     }
 
     /// Prompt text from MFLUX JSON or formatted/plain comment (port of import / clipboard rules).
@@ -173,7 +173,7 @@ enum ImageGenExifCommentFormatting {
             paramLines.append("Guidance: \(formatGuidance(guidance))")
         }
 
-        let name = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = presentedModelName(modelName)
         if !name.isEmpty {
             var modelBlock = "Image Model:\n\(name)"
             if !paramLines.isEmpty {
@@ -215,16 +215,72 @@ enum ImageGenExifCommentFormatting {
 
     // MARK: - Model / LoRA labels
 
+    /// Any Z-Image Turbo variant, including “(4 bit)” / 4-bit / 8-bit labels, is “Z-Image Turbo”.
+    static func presentedModelName(_ modelName: String) -> String {
+        let trimmed = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if isZImageTurboIdentity(trimmed) {
+            return "Z-Image Turbo"
+        }
+        return trimmed
+    }
+
     static func menuLabelForHFModelId(_ modelId: String) -> String {
         let id = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty, id.lowercased() != "none" else { return "" }
+        if isZImageTurboIdentity(id) {
+            return "Z-Image Turbo"
+        }
         if let label = hfModelDisplayNames[id] {
             return label
         }
         if let slash = id.lastIndex(of: "/") {
-            return String(id[id.index(after: slash)...])
+            return presentedModelName(String(id[id.index(after: slash)...]))
         }
         return id
+    }
+
+    private static func isZImageTurboIdentity(_ raw: String) -> Bool {
+        let folded = raw.lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        let compact = folded.split { character in
+            character.isWhitespace || character == "(" || character == ")" || character == "/" || character == "."
+        }.joined(separator: " ")
+        return compact.contains("z image turbo")
+    }
+
+    /// Rewrite the Image Model line when an older comment still says Z-Image Turbo (4 bit) or similar.
+    private static func canonicalizeDisplayedZImageTurboModel(_ text: String) -> String {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var inModelBlock = false
+        var replaced = false
+        for index in lines.indices {
+            let stripped = lines[index].trimmingCharacters(in: .whitespaces)
+            let lower = stripped.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            if lower == "image model" {
+                inModelBlock = true
+                continue
+            }
+            if lower.hasPrefix("prompt") || lower.hasPrefix("references") {
+                inModelBlock = false
+            }
+            guard inModelBlock, !replaced, !stripped.isEmpty else { continue }
+            if stripped.range(
+                of: #"^\s*(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\s*:"#,
+                options: .regularExpression
+            ) != nil {
+                continue
+            }
+            if stripped.hasPrefix("\u{00a0}") { continue }
+            let presented = presentedModelName(stripped)
+            if presented != stripped {
+                let indent = lines[index].prefix { $0 == " " || $0 == "\t" }
+                lines[index] = String(indent) + presented
+            }
+            replaced = true
+        }
+        return lines.joined(separator: "\n")
     }
 
     static func loraNameForExifFromPathsAndScales(paths: Any?, scales: Any?) -> String? {

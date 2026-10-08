@@ -1,24 +1,20 @@
 import Foundation
 
-/// Locates the Python interpreter and repo root for worker subprocesses.
+/// Locates system Python and the vendored ImageGenPython bundle for worker subprocesses.
 @MainActor
 enum PythonLocator {
     struct Environment: Sendable {
         let executable: String
-        let repoRoot: URL
+        /// Vendored bundle root (`ImageGenPython` on `PYTHONPATH`).
+        let bundleRoot: URL
         let profilePath: String?
     }
 
     static func resolve(profilePath: String?, config: AppConfig? = nil) -> Environment? {
-        let repoRoot = locateRepoRoot(config: config)
-        guard let repoRoot else { return nil }
-
+        guard let bundleRoot = ImageGenPythonBundle.rootURL() else { return nil }
         let effectiveProfile = resolvedProfilePath(explicit: profilePath, config: config)
-
-        if let executable = locatePythonExecutable(repoRoot: repoRoot, config: config) {
-            return Environment(executable: executable, repoRoot: repoRoot, profilePath: effectiveProfile)
-        }
-        return nil
+        guard let executable = locatePythonExecutable(config: config) else { return nil }
+        return Environment(executable: executable, bundleRoot: bundleRoot, profilePath: effectiveProfile)
     }
 
     /// Python defaults to `~/.prowser` when `PROWSER_PROFILE` is unset; match Swift's active profile.
@@ -32,45 +28,21 @@ enum PythonLocator {
         return nil
     }
 
-    static func locateRepoRoot(config: AppConfig? = nil) -> URL? {
-        if let config,
-           let raw = config.rawSettings()["python_root"] as? String,
-           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let url = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL
-            if url.appendingPathComponent("prowser.py").exists
-                || url.appendingPathComponent("imagegen_plugins").exists {
-                return url
-            }
-        }
-        if let env = ProcessInfo.processInfo.environment["PROWSER_PYTHON_ROOT"], !env.isEmpty {
-            return URL(fileURLWithPath: env).standardizedFileURL
-        }
-        if let fromProfile = ProfilePaths.pythonRoot() {
-            return fromProfile
-        }
-        let bundle = Bundle.main.bundleURL
-        for candidate in [
-            bundle.deletingLastPathComponent().deletingLastPathComponent(),
-            bundle.deletingLastPathComponent(),
-        ] {
-            if candidate.appendingPathComponent("prowser.py").exists {
-                return candidate
-            }
-        }
-        return nil
-    }
-
-    static func locatePythonExecutable(repoRoot: URL, config: AppConfig? = nil) -> String? {
+    static func locatePythonExecutable(config: AppConfig? = nil) -> String? {
         if let config,
            let raw = config.rawSettings()["python_executable"] as? String,
-           !raw.isEmpty,
-           FileManager.default.isExecutableFile(atPath: (raw as NSString).expandingTildeInPath) {
-            return (raw as NSString).expandingTildeInPath
+           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let path = (raw as NSString).expandingTildeInPath
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
         }
-        let venvPython = repoRoot
-            .appendingPathComponent("venv_image_browser/bin/python")
-        if venvPython.exists { return venvPython.path }
-
+        if let config {
+            let venvPython = config.imagegenVenvPythonPath()
+            if FileManager.default.isExecutableFile(atPath: venvPython) {
+                return venvPython
+            }
+        }
         let fallbacks = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
         for path in fallbacks where FileManager.default.isExecutableFile(atPath: path) {
             return path
@@ -80,6 +52,22 @@ enum PythonLocator {
 
     static func moduleArguments(_ module: String) -> [String] {
         ["-u", "-m", module]
+    }
+
+    nonisolated static func processEnvironment(
+        for environment: Environment,
+        extra: [String: String] = [:]
+    ) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        ImageGenPythonBundle.applyPythonEnvironment(
+            &env,
+            bundleRoot: environment.bundleRoot,
+            profilePath: environment.profilePath
+        )
+        for (key, value) in extra {
+            env[key] = value
+        }
+        return env
     }
 
     /// Kill orphaned worker subprocesses left behind when a prior app instance exited uncleanly.
@@ -93,11 +81,8 @@ enum PythonLocator {
                 + "print(f'[workers] reaped {len(reaped)} orphan worker(s): {reaped}', flush=True) "
                 + "if reaped else None",
         ]
-        process.currentDirectoryURL = environment.repoRoot
-        var env = ProcessInfo.processInfo.environment
-        env["PROWSER_PYTHON_ROOT"] = environment.repoRoot.path
-        env["PYTHONUNBUFFERED"] = "1"
-        process.environment = env
+        process.currentDirectoryURL = environment.bundleRoot
+        process.environment = processEnvironment(for: environment)
         do {
             try process.run()
             process.waitUntilExit()
@@ -105,12 +90,4 @@ enum PythonLocator {
             // Best-effort cleanup; worker startup still proceeds if this fails.
         }
     }
-
-    static func prowserWorkerArguments(_ flag: String) -> [String] {
-        ["-u", "prowser.py", flag]
-    }
-}
-
-private extension URL {
-    var exists: Bool { FileManager.default.fileExists(atPath: path) }
 }

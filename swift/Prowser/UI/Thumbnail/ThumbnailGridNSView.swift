@@ -1270,6 +1270,16 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 self.logKey("claimKeyboardFocus skipped (inline rename)")
                 return
             }
+            if NSApp.modalWindow != nil {
+                self.logKey("claimKeyboardFocus skipped (modal window)")
+                return
+            }
+            if let key = NSApp.keyWindow,
+               key !== window,
+               BrowserWindowIdentity.isAuxiliaryWindow(key) {
+                self.logKey("claimKeyboardFocus skipped (auxiliary key window)")
+                return
+            }
             guard window.isKeyWindow else {
                 self.logKey("claimKeyboardFocus skipped (window not key)")
                 return

@@ -95,8 +95,10 @@ struct ImageGenUnifiedDialog: View {
         .onReceive(NotificationCenter.default.publisher(for: .prowserRaiseImageGenDialog)) { _ in
             raiseWindow()
         }
-        .onDisappear {
-            appState.closeImageGenUnifiedDialog()
+        .background {
+            SceneWindowLifecycleBridge(windowIdentifier: Self.windowIdentifier) {
+                appState.closeImageGenUnifiedDialog()
+            }
         }
     }
 

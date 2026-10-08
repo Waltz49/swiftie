@@ -31,11 +31,20 @@ final class MfluxGenerationTasks {
 
     func startGenerate(payload: [String: Any]) throws -> String {
         guard !isBusy else { throw BridgeError.busy }
-        guard isAvailable else { throw BridgeError.pythonUnavailable }
         let pipelineID = payload["pipeline_id"] as? String ?? ""
-        guard MfluxCLIPipeline.isSupported(pipelineID: pipelineID),
-              MfluxToolchain.shared.isPipelineInstalled(pipelineID) else {
-            throw MfluxCLIError.unsupportedPipeline(pipelineID)
+        let hfModelID = payload["hf_model_id"] as? String ?? ""
+        if ImageGenPipelineRouting.usesPythonWorker(pipelineID: pipelineID, hfModelID: hfModelID) {
+            guard let config,
+                  FileManager.default.isExecutableFile(atPath: config.imagegenVenvPythonPath()),
+                  PythonLocator.resolve(profilePath: nil, config: config) != nil else {
+                throw BridgeError.pythonUnavailable
+            }
+        } else {
+            guard isAvailable else { throw BridgeError.pythonUnavailable }
+            guard MfluxCLIPipeline.isSupported(pipelineID: pipelineID),
+                  MfluxToolchain.shared.isPipelineInstalled(pipelineID) else {
+                throw MfluxCLIError.unsupportedPipeline(pipelineID)
+            }
         }
         let jobID = UUID().uuidString
         activeJobID = jobID
@@ -76,8 +85,11 @@ final class MfluxGenerationTasks {
             var runPayload = try await ImageGenMfluxPrep.apply(to: payload)
             let pipelineID = runPayload["pipeline_id"] as? String ?? ""
             let hfModelID = runPayload["hf_model_id"] as? String ?? payload["hf_model_id"] as? String ?? ""
-            let useSceneWorksPythonWorker = ImageGenSceneWorksKlein.isSceneWorksRepo(hfModelID)
-            if !useSceneWorksPythonWorker {
+            let usePythonWorker = ImageGenPipelineRouting.usesPythonWorker(
+                pipelineID: pipelineID,
+                hfModelID: hfModelID
+            )
+            if !usePythonWorker {
                 guard MfluxToolchain.shared.executableURL(forPipeline: pipelineID) != nil else {
                     throw MfluxCLIError.unsupportedPipeline(pipelineID)
                 }
@@ -103,11 +115,11 @@ final class MfluxGenerationTasks {
             )
             stepwiseWatcher?.start()
 
-            if useSceneWorksPythonWorker {
+            if usePythonWorker {
                 guard let config,
                       let pyEnv = PythonLocator.resolve(profilePath: nil, config: config) else {
                     throw MfluxCLIError.processFailed(
-                        "Python environment not configured for SceneWorks Klein (Settings → Image Generation)."
+                        "Python environment not configured (Settings → Image Generation)."
                     )
                 }
                 runPayload["output_path"] = finalOutputPath
@@ -141,7 +153,7 @@ final class MfluxGenerationTasks {
                 } else if FileManager.default.fileExists(atPath: finalOutputPath) {
                     lastGenerateResult = ["output_path": finalOutputPath, "success": true]
                 } else {
-                    throw MfluxCLIError.processFailed("SceneWorks worker returned no output path.")
+                    throw MfluxCLIError.processFailed("Python worker returned no output path.")
                 }
             } else {
                 guard let executable = MfluxToolchain.shared.executableURL(forPipeline: pipelineID) else {

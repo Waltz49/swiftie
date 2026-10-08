@@ -304,9 +304,16 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
             if let identifier = settings.windowIdentifier {
                 window.identifier = NSUserInterfaceItemIdentifier(identifier)
                 window.isReleasedWhenClosed = false
+                // Geometry/visibility are owned by config + AppState (Python defers the floating
+                // dialog until an explicit show); macOS window restoration would reopen the scene
+                // behind AppState's back with its "show" flag still false.
+                window.isRestorable = false
             }
             if let alwaysOnTop = settings.alwaysOnTop {
                 window.level = alwaysOnTop ? .floating : .normal
+                if alwaysOnTop {
+                    window.collectionBehavior.insert(.fullScreenAuxiliary)
+                }
             }
             if settings.hidesStandardWindowButtons {
                 DialogGeometryPersistence.applyFloatingPanelChrome(to: window)
