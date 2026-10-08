@@ -129,7 +129,10 @@ struct ImageGenPanelShell: View {
             )
         }
 
-        if let comment = selectedPlugin?["model_comment"] as? String, !comment.isEmpty {
+        let loraHostID = selectedPlugin?["lora_host_id"] as? String ?? ""
+        if loraHostID.isEmpty,
+           let comment = selectedPlugin?["model_comment"] as? String,
+           !comment.isEmpty {
             Text(comment).font(.caption).foregroundStyle(.secondary)
         }
 

@@ -157,7 +157,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
 - [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden; remove installed models + cache coordination)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
-- [x] LoRA — `LoRASettingsTab` (minimal; imagegen keys)
+- [~] LoRA — `LoRASettingsTab`, `LoRABridge`, run-dialog stack picker, Map/Check LoRAs (Debug)
 - [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; face model artifacts excluded from generic cache clear when appropriate; idle CLIP/CNN indexing toggles when models installed)
 
 ## Menus — File
@@ -251,7 +251,7 @@ WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and M
 - [~] Job queue in right sidebar pane (AppKit cards + drag reorder)
 - [~] Progressive preview path display (tap opens browse)
 - [~] Job shortcuts: J pane, ⌘J panel, ⌃J size cycle, ⌥[/]\\, ⌥/, ⇧⌥/, ⌘⌥/
-- [~] LoRA stack picker UI — stub “Not implemented yet” on WithGen (CLI omits LoRA; full picker on Python)
+- [~] LoRA stack picker UI — `ImageGenLoraPicker` + MFLUX `--lora-paths` via submit snapshot
 
 ## Menus — Tools
 

@@ -67,7 +67,8 @@ enum ImageGenPluginCatalog {
             pipelineID: "mflux_z_image_turbo",
             function: "create",
             displayName: "Z-Image Turbo",
-            hfModelID: "filipstrand/Z-Image-Turbo-mflux-4bit"
+            hfModelID: "filipstrand/Z-Image-Turbo-mflux-4bit",
+            loraHostID: "z_image_turbo"
         ),
         .init(
             pluginID: "realistic_vision_v4_sd15",
@@ -75,6 +76,7 @@ enum ImageGenPluginCatalog {
             function: "create",
             displayName: "Realistic Vision V4.0",
             hfModelID: "SG161222/Realistic_Vision_V4.0_noVAE",
+            loraHostID: "sd15",
             reportsQuantization: false
         ),
         .init(
@@ -83,6 +85,7 @@ enum ImageGenPluginCatalog {
             function: "create",
             displayName: "Anything Furry",
             hfModelID: "stablediffusionapi/anythingfurry",
+            loraHostID: "sd15",
             reportsQuantization: false
         ),
         .init(
@@ -91,6 +94,7 @@ enum ImageGenPluginCatalog {
             function: "create",
             displayName: "SDXL 1.0 Base",
             hfModelID: "stabilityai/stable-diffusion-xl-base-1.0",
+            loraHostID: "sdxl",
             reportsQuantization: false
         ),
         .init(
@@ -98,14 +102,16 @@ enum ImageGenPluginCatalog {
             pipelineID: "mflux_fill_expand",
             function: "expand",
             displayName: "FLUX.1 Fill expand",
-            hfModelID: "black-forest-labs/FLUX.1-Fill-dev"
+            hfModelID: "black-forest-labs/FLUX.1-Fill-dev",
+            loraHostID: "flux1_fill"
         ),
         .init(
             pluginID: "flux_fill_infill",
             pipelineID: "mflux_fill_infill",
             function: "infill",
             displayName: "FLUX.1 Fill infill",
-            hfModelID: "black-forest-labs/FLUX.1-Fill-dev"
+            hfModelID: "black-forest-labs/FLUX.1-Fill-dev",
+            loraHostID: "flux1_fill"
         ),
         .init(
             pluginID: "flux_klein_4b_create",

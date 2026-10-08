@@ -80,18 +80,26 @@ final class SwiftImageGenRegistry: ImageGenRegistry {
             runValues = ImageGenMfluxPayloadBuilder.applyImagePromptRules(values: runValues, config: config)
             applyExit = false
         }
-        return try ImageGenWorkerPayloadBuilder.build(
+        var payload = try ImageGenWorkerPayloadBuilder.build(
             plugin: plugin,
             values: runValues,
             outputPath: outputPath,
             config: config,
             applyImageExit: applyExit
         )
+        payload = try await ImageGenLoraWorkerPayloadEnrich.enrichPayload(
+            pluginID: pluginID,
+            payload: payload,
+            outputPath: outputPath,
+            applyImageExit: applyExit,
+            config: config
+        )
+        return payload
     }
 
     func normalizeValues(pluginID: String, values: [String: Any], mode: String) async throws -> [String: Any] {
         guard let config else { throw ImageGenRegistryError.unknownPlugin(pluginID) }
-        return try ImageGenJobValuesSnapshot.normalizeValues(
+        return try await ImageGenJobValuesSnapshot.normalizeValues(
             pluginID: pluginID,
             values: values,
             mode: mode,

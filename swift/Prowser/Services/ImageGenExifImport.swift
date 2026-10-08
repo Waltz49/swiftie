@@ -111,7 +111,7 @@ enum ImageGenExifImport {
                     updated["mflux_lora_stack"] = ids
                     updated.removeValue(forKey: "mflux_lora")
                 }
-                if let scales = matched["scales"] as? [String: Double], !scales.isEmpty {
+                if let scales = matched["scales_by_id"] as? [String: Any], !scales.isEmpty {
                     updated["mflux_lora_scales_by_id"] = scales
                 }
             }

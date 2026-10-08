@@ -123,6 +123,7 @@ struct SettingsWindowView: View {
             appState.refreshFileTreeAfterSettingsCommit()
         }
         appState.refreshImageRecognitionForCurrentSettings()
+        NotificationCenter.default.post(name: .prowserSettingsWillCommit, object: nil)
         appState.eventBus.emit(.settingsChanged)
         dismissAction = .committed
         dismissOpenThemeColorPanel(commit: true)

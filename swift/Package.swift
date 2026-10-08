@@ -55,6 +55,9 @@ let packageTargets: [Target] = [
             .process("Resources/ImageGenPluginCatalogSnapshot.json"),
             .copy("Resources/ImageGenPython"),
             .copy("Resources/requirements-imagegen.txt"),
+            .copy("../Scripts/snapshot_job_values.py"),
+            .copy("../Scripts/run_lora_map.py"),
+            .copy("../Scripts/run_check_loras_worker.py"),
         ],
         linkerSettings: [
             .linkedFramework("Photos"),

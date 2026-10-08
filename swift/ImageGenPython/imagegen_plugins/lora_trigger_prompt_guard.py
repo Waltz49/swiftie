@@ -12,6 +12,16 @@ from imagegen_plugins.mflux_lora_presets import effective_lora_ids_from_values
 TRIGGER_USER_PROMPT_SEPARATOR = "------"
 
 
+def _lora_trigger_position() -> int:
+    """0 = top, 1 = bottom, 2 = both. Matches ``thumbnails.thumbnail_constants.TRIGGER_POSITION``."""
+    try:
+        from thumbnails.thumbnail_constants import TRIGGER_POSITION
+
+        return int(TRIGGER_POSITION)
+    except ImportError:
+        return 0
+
+
 def prompt_contains_lora_trigger(prompt: str, trigger: str) -> bool:
     """True when trigger appears in prompt as a phrase or whole token."""
     prompt_s = (prompt or "").strip()
@@ -27,18 +37,17 @@ def prompt_contains_lora_trigger(prompt: str, trigger: str) -> bool:
 
 
 def _format_prompt_with_triggers(prompt_s: str, trigger_block: str) -> str:
-    """Insert trigger text per thumbnails.thumbnail_constants.TRIGGER_POSITION."""
-    from thumbnails.thumbnail_constants import TRIGGER_POSITION
-
+    """Insert trigger text per TRIGGER_POSITION (see ``_lora_trigger_position``)."""
     block = (trigger_block or "").strip()
     if not block:
         return prompt_s
     if not prompt_s:
         return block
     sep = TRIGGER_USER_PROMPT_SEPARATOR
-    if TRIGGER_POSITION == 0:
+    position = _lora_trigger_position()
+    if position == 0:
         return f"{block}\n\n{sep}\n\n{prompt_s}"
-    if TRIGGER_POSITION == 2:
+    if position == 2:
         return f"{block}\n\n{sep}\n\n{prompt_s}\n\n{sep}\n\n{block}"
     return f"{prompt_s}\n\n{sep}\n\n{block}"
 

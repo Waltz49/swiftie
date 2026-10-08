@@ -8,6 +8,7 @@ final class ImageGenController {
     private let modelTasks: MfluxGenerationTasks
     private let foregroundTasks: FluxPromptTasksStub
     private let registry: ImageGenRegistry
+    private weak var loraBridge: LoRABridge?
 
     private(set) var queue: ImageGenQueueFile = ImageGenQueueFile()
     private(set) var activeJobID: String?
@@ -163,6 +164,10 @@ final class ImageGenController {
         reloadToolbarSettings(from: imagegen)
         restorePersistedJobQueue()
         wireBridgeCallbacks()
+    }
+
+    func bind(loraBridge: LoRABridge) {
+        self.loraBridge = loraBridge
     }
 
     func beginImageGenDialogBuild() {
@@ -1297,6 +1302,8 @@ final class ImageGenController {
             } else if let steps = payload["steps"] as? NSNumber {
                 cycleValues["steps"] = steps.intValue
             }
+            ImageGenLoraWorkerPayloadEnrich.mergeLoraFields(from: payload, into: &cycleValues)
+            pendingValues = cycleValues
             copyCycleValues = cycleValues
             copyCyclePluginID = activePluginID
             if let step = stepRunning {
@@ -2474,6 +2481,9 @@ final class ImageGenController {
         if let hf = payload["hf_model_id"] {
             job.values["hf_model_id"] = hf
         }
+        if !payload.isEmpty {
+            ImageGenLoraWorkerPayloadEnrich.mergeLoraFields(from: payload, into: &job.values)
+        }
 
         let exited = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !exited.isEmpty, !hasFluxAI {
@@ -2492,13 +2502,15 @@ final class ImageGenController {
             job.copiesTotal = displayCopiesTotal
             job.values["copies"] = displayCopiesTotal
         }
+        let loraLabel = await resolvedLoraStatusLabel(pluginID: job.pluginID, values: job.values)
         let built = buildQueueStatusView(
             pluginID: job.pluginID,
             function: job.function,
             values: job.values,
             copiesTotal: displayCopiesTotal,
             payload: payload.isEmpty ? nil : payload,
-            withAI: hasFluxAI
+            withAI: hasFluxAI,
+            loraLabel: loraLabel
         )
         job.statusView = built.statusView
         job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
@@ -2521,6 +2533,7 @@ final class ImageGenController {
     func refreshActiveJobStatusView() async {
         guard activeJobID != nil else { return }
         let timing = currentTimingForDisplay()
+        let loraLabel = await resolvedLoraStatusLabel(pluginID: activePluginID, values: pendingValues)
         let built = buildQueueStatusView(
             pluginID: activePluginID,
             function: activeFunction,
@@ -2532,7 +2545,8 @@ final class ImageGenController {
             step: liveStepTotal > 0 ? liveStep : nil,
             stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
             elapsedSeconds: timing.elapsed,
-            estimateSeconds: timing.estimate
+            estimateSeconds: timing.estimate,
+            loraLabel: loraLabel
         )
         activeStatusView = built.statusView
         let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
@@ -2553,7 +2567,8 @@ final class ImageGenController {
         step: Int? = nil,
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
-        estimateSeconds: Double? = nil
+        estimateSeconds: Double? = nil,
+        loraLabel: String? = nil
     ) -> QueueJobStatusBuildResult {
         QueueJobStatusBuilder.build(
             pluginID: pluginID,
@@ -2568,8 +2583,29 @@ final class ImageGenController {
             step: step,
             stepTotal: stepTotal,
             elapsedSeconds: elapsedSeconds,
-            estimateSeconds: estimateSeconds
+            estimateSeconds: estimateSeconds,
+            loraLabel: loraLabel
         )
+    }
+
+    private func resolvedLoraStatusLabel(pluginID: String, values: [String: Any]) async -> String? {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID),
+              plugin.loraHostID != nil else { return nil }
+        if let bridge = loraBridge, bridge.isAvailable {
+            if let text = try? await bridge.exifLabelFromValues(pluginID: pluginID, values: values),
+               !text.isEmpty {
+                return text
+            }
+        }
+        return ImageGenExifCommentFormatting.loraNameForExifFromValues(
+            values: values,
+            pipelineID: plugin.pipelineID,
+            loraHostID: plugin.loraHostID
+        )
+    }
+
+    private func resolvedLoraExifLabel(pluginID: String, values: [String: Any]) async -> String? {
+        await resolvedLoraStatusLabel(pluginID: pluginID, values: values)
     }
 
     /// Python ``_copy_cycle_exif_values`` / ``_copy_cycle_exif_plugin``.
@@ -2685,11 +2721,13 @@ final class ImageGenController {
     ) async throws {
         var comment: String
         if !pluginID.isEmpty {
+            let loraLabel = await resolvedLoraExifLabel(pluginID: pluginID, values: values)
             let formatted = ImageGenGenerationExifService.formatGenerationExifComment(
                 pluginID: pluginID,
                 values: values,
                 workerResult: workerResult,
-                elapsedSeconds: elapsedSeconds
+                elapsedSeconds: elapsedSeconds,
+                lora: loraLabel
             )
             comment = formatted.isEmpty ? (values["prompt"] as? String ?? "") : formatted
         } else if let prompt = values["prompt"] as? String {

@@ -283,6 +283,119 @@ enum ImageGenExifCommentFormatting {
         return lines.joined(separator: "\n")
     }
 
+    /// Port of ``lora_name_for_exif_from_values`` (catalog names via Python bridge when needed).
+    static func loraNameForExifFromValues(
+        values: [String: Any],
+        pipelineID: String,
+        loraHostID: String?
+    ) -> String? {
+        guard loraHostID != nil else { return nil }
+        let stack = effectiveLoraIDsFromValues(values: values, pipelineID: pipelineID, loraHostID: loraHostID)
+        if !stack.isEmpty {
+            for (pathsKey, scalesKey) in loraPathScaleKeys {
+                if let paths = values[pathsKey] as? [Any], paths.count == stack.count,
+                   let label = loraNameForExifFromPathsAndScales(
+                       paths: paths,
+                       scales: values[scalesKey]
+                   ) {
+                    return label
+                }
+            }
+            var labels: [String] = []
+            for (index, presetID) in stack.enumerated() {
+                let scale = loraScaleForExif(values: values, presetID: presetID, index: index)
+                labels.append("\(presetID) [\(formatExifLoraWeight(scale))]")
+            }
+            if labels.count == 1 {
+                return labels[0]
+            }
+            return labels.joined(separator: " + ")
+        }
+        for (pathsKey, scalesKey) in loraPathScaleKeys {
+            if let label = loraNameForExifFromPathsAndScales(
+                paths: values[pathsKey],
+                scales: values[scalesKey]
+            ) {
+                return label
+            }
+        }
+        return nil
+    }
+
+    private static let loraPathScaleKeys: [(String, String)] = [
+        ("mflux_lora_paths", "mflux_lora_scales"),
+        ("sdxl_lora_paths", "sdxl_lora_scales"),
+        ("sd15_lora_paths", "sd15_lora_scales"),
+    ]
+
+    /// Port of ``effective_lora_ids_from_values`` / ``normalize_lora_stack_from_values``.
+    static func effectiveLoraIDsFromValues(
+        values: [String: Any],
+        pipelineID: String,
+        loraHostID: String?
+    ) -> [String] {
+        if loraHostID == "sd15" {
+            let legacy = coerceLoraPresetID(values["mflux_lora"])
+            return legacy.isEmpty ? [] : [legacy]
+        }
+        return normalizeLoraStackFromValues(values)
+    }
+
+    private static func normalizeLoraStackFromValues(_ values: [String: Any]) -> [String] {
+        let stackRaw = values["mflux_lora_stack"]
+        let legacy = values["mflux_lora"]
+        let explicitStack = values.keys.contains("mflux_lora_stack")
+
+        var ids: [String] = []
+        if let stack = stackRaw as? [Any] {
+            for item in stack {
+                let pid = coerceLoraPresetID(item)
+                if !pid.isEmpty, !ids.contains(pid) {
+                    ids.append(pid)
+                }
+            }
+        } else if let single = stackRaw as? String {
+            let pid = coerceLoraPresetID(single)
+            if !pid.isEmpty, !ids.contains(pid) {
+                ids.append(pid)
+            }
+        }
+
+        if explicitStack {
+            return ids
+        }
+
+        if ids.isEmpty, legacy != nil {
+            let pid = coerceLoraPresetID(legacy)
+            if !pid.isEmpty {
+                ids.append(pid)
+            }
+        }
+        return ids
+    }
+
+    private static func coerceLoraPresetID(_ raw: Any?) -> String {
+        let text = String(describing: raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty || text.lowercased() == "none" { return "" }
+        return text
+    }
+
+    /// Port of ``_lora_scale_for_exif`` / ``_lora_scale_for_preset``.
+    static func loraScaleForExif(values: [String: Any], presetID: String, index: Int) -> Double {
+        for key in ["mflux_lora_scales", "sdxl_lora_scales", "sd15_lora_scales"] {
+            if let scales = values[key] as? [Any], index < scales.count {
+                if let scale = doubleValue(scales[index]) {
+                    return scale
+                }
+            }
+        }
+        if let scalesByID = values["mflux_lora_scales_by_id"] as? [String: Any],
+           let raw = scalesByID[presetID] {
+            return doubleValue(raw) ?? 1.0
+        }
+        return 1.0
+    }
+
     static func loraNameForExifFromPathsAndScales(paths: Any?, scales: Any?) -> String? {
         guard let pathList = paths as? [Any], !pathList.isEmpty else { return nil }
         let scaleList = scales as? [Any] ?? []
@@ -402,8 +515,13 @@ enum ImageGenExifCommentFormatting {
         return formatLoraLinesForExif(names: loraNamesFromExifValue(lora))
     }
 
+    /// Split a combined EXIF LoRA parameter (`a + b`) into display tokens.
+    static func exifLoraNames(from combinedValue: String) -> [String] {
+        loraNamesFromExifValue(combinedValue)
+    }
+
     /// Port of `_normalize_exif_lora_display_lines`.
-    private static func normalizeExifLoraDisplayLines(_ text: String) -> String {
+    static func normalizeExifLoraDisplayLines(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)

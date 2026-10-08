@@ -3,7 +3,7 @@ import XCTest
 
 final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     @MainActor
-    func testFluxSchnellPayloadMatchesGolden() throws {
+    func testFluxSchnellPayloadMatchesGolden() async throws {
         let config = AppConfig(dataDirectory: FileManager.default.temporaryDirectory)
         config.setValue(false, forKey: "debug_mode")
         config.setValue(true, forKey: "imagegen_low_ram")
@@ -15,7 +15,7 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
             XCTFail("missing plugin")
             return
         }
-        let snap = ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
+        let snap = try await ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
             plugin: plugin,
             values: [
                 "prompt": "test",

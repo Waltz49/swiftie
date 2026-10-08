@@ -187,8 +187,12 @@ def _handle_save_catalog_state(cmd: Dict[str, Any]) -> Dict[str, Any]:
 def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
     from config import get_config
     from imagegen_plugins import plugin_by_id
-    from imagegen_plugins.image_gen_model_selector import plugin_supports_lora
-    from imagegen_plugins.lora_catalog import get_lora_entry, lora_choices_for_plugin
+    from imagegen_plugins.lora_catalog import (
+        get_lora_entry,
+        lora_choices_for_plugin,
+        lora_run_dialog_empty_hint,
+        plugin_supports_lora,
+    )
     from imagegen_plugins.lora_host_registry import HOST_SD15
     from imagegen_plugins.mflux_lora_presets import (
         LORA_UNSUPPORTED_LABEL,
@@ -249,6 +253,12 @@ def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 pass
         entry = get_lora_entry(pid)
         scales_by_id[pid] = float(entry.scale) if entry is not None else 1.0
+    selectable = [c for c in choice_list if c.get("preset_id") != "none"]
+    empty_hint = (
+        lora_run_dialog_empty_hint(plugin, settings)
+        if plugin is not None and not selectable
+        else None
+    )
     return {
         "type": "result",
         "job_id": cmd.get("job_id", ""),
@@ -259,6 +269,7 @@ def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
         "choices": choice_list,
         "selected_ids": selected_ids,
         "scales_by_id": scales_by_id,
+        "empty_selection_hint": empty_hint,
     }
 
 
@@ -294,6 +305,25 @@ def _handle_selected_display_text(cmd: Dict[str, Any]) -> Dict[str, Any]:
         "job_id": cmd.get("job_id", ""),
         "command": "selected_display_text",
         "text": ", ".join(parts),
+    }
+
+
+def _handle_exif_label_from_values(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    from imagegen_plugins import plugin_by_id
+    from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
+
+    plugin_id = str(cmd.get("plugin_id") or "").strip()
+    values = cmd.get("values")
+    if not isinstance(values, dict):
+        values = {}
+    plugin = plugin_by_id(plugin_id) if plugin_id else None
+    pipeline_id = plugin.pipeline_id if plugin is not None else None
+    label = lora_name_for_exif_from_values(values, pipeline_id=pipeline_id)
+    return {
+        "type": "result",
+        "job_id": cmd.get("job_id", ""),
+        "command": "exif_label_from_values",
+        "text": label or "",
     }
 
 
@@ -909,6 +939,7 @@ def _handle_command(cmd: Dict[str, Any]) -> Any:
         "save_catalog_state": _handle_save_catalog_state,
         "choices_for_plugin": _handle_choices_for_plugin,
         "selected_display_text": _handle_selected_display_text,
+        "exif_label_from_values": _handle_exif_label_from_values,
         "update_entry_scales": _handle_update_entry_scales,
         "install": _handle_install,
         "delete": _handle_delete,

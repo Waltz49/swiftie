@@ -24,10 +24,18 @@ enum ImageGenJobValuesSnapshot {
         plugin: ImageGenPluginDescriptor,
         values: [String: Any],
         config: AppConfig
-    ) -> [String: Any] {
+    ) async throws -> [String: Any] {
         var out = values
         stripDialogLeakedJobQueueFlags(&out)
-        snapshotLoraStub(&out, pipelineID: plugin.pipelineID)
+        if PythonLocator.resolve(profilePath: nil, config: config) != nil {
+            out = try await LoRAJobValuesSnapshot.snapshot(
+                pluginID: plugin.pluginID,
+                values: out,
+                config: config
+            )
+        } else {
+            snapshotLoraFallback(&out, pipelineID: plugin.pipelineID)
+        }
         let pluginMax = ImageGenPluginMetadata.maxGenerationDimension(pluginID: plugin.pluginID)
         let effectiveMax = ImageGenDimLimits.effectiveMaxGenerationDimension(
             pluginMax: pluginMax,
@@ -38,8 +46,8 @@ enum ImageGenJobValuesSnapshot {
         return out
     }
 
-    /// LoRA catalog is stubbed in Swift; keep stack/path keys consistent with Python snapshot shape.
-    private static func snapshotLoraStub(_ values: inout [String: Any], pipelineID: String) {
+    /// When Python snapshot is unavailable, keep dialog keys in a consistent shape.
+    private static func snapshotLoraFallback(_ values: inout [String: Any], pipelineID: String) {
         if pipelineID == "sd15_diffusers" || pipelineID == "sdxl_diffusers" {
             values.removeValue(forKey: "mflux_lora_stack")
             values["mflux_lora_stack"] = values["mflux_lora_stack"] ?? []
@@ -58,7 +66,7 @@ enum ImageGenJobValuesSnapshot {
         values: [String: Any],
         mode: String,
         config: AppConfig
-    ) throws -> [String: Any] {
+    ) async throws -> [String: Any] {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else {
             throw ImageGenRegistryError.unknownPlugin(pluginID)
         }
@@ -67,9 +75,9 @@ enum ImageGenJobValuesSnapshot {
         case "strip_dialog_flags":
             stripDialogLeakedJobQueueFlags(&out)
         case "snapshot":
-            out = snapshotJobValuesAtSubmit(plugin: plugin, values: out, config: config)
+            out = try await snapshotJobValuesAtSubmit(plugin: plugin, values: out, config: config)
         default:
-            out = snapshotJobValuesAtSubmit(plugin: plugin, values: out, config: config)
+            out = try await snapshotJobValuesAtSubmit(plugin: plugin, values: out, config: config)
         }
         return out
     }

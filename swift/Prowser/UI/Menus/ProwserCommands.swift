@@ -468,6 +468,15 @@ struct ProwserCommands: Commands {
                     }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
 
+                    if BundleCapabilities.imageGenUIEnabled {
+                        Button("Check LoRAs") {
+                            Task { @MainActor in CheckLorasController.present(from: appState) }
+                        }
+                        Button("Map LoRAs") {
+                            Task { @MainActor in LoraMapWindowController.shared.show(appState: appState) }
+                        }
+                    }
+
                     if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
                         Button("Remove Facial Rec Models") {
                             Task { @MainActor in appState.removeFacialRecognitionModels() }

@@ -164,6 +164,9 @@ def snapshot_job_values_at_submit(
     plugin: ImageGenModelPlugin, values: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Return a copy of job values frozen for execution at submit time."""
+    from workers.ipc_json import configure_profile_from_env
+
+    configure_profile_from_env()
     from config import get_config
     from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
     from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
@@ -188,6 +191,61 @@ def snapshot_job_values_at_submit(
     return out
 
 
+WORKER_LORA_MERGE_KEYS: tuple[str, ...] = (
+    "mflux_lora_paths",
+    "mflux_lora_scales",
+    "sd15_lora_paths",
+    "sd15_lora_scales",
+    "sdxl_lora_paths",
+    "sdxl_lora_scales",
+    "mflux_lora_scales_by_id",
+    "mflux_lora_trigger_words",
+    "steps",
+)
+
+
+def enrich_values_with_worker_lora_fields(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    *,
+    output_path: str,
+    apply_image_exit: bool = False,
+) -> Dict[str, Any]:
+    """Resolve LoRA stack to worker path/scale keys (``build_worker_payload`` parity)."""
+    from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
+    from imagegen_plugins.image_gen_pipeline_modes import build_worker_payload
+
+    max_side = effective_max_for_plugin(plugin)
+    if job_values_snapshotted(values):
+        snap_max = values.get("max_generation_dimension")
+        if snap_max is not None:
+            try:
+                max_side = int(snap_max)
+            except (TypeError, ValueError):
+                pass
+    # LoRA resolution only; image AI exit needs Qt and is applied in Swift when needed.
+    built = build_worker_payload(
+        plugin.pipeline_id,
+        values,
+        output_path,
+        plugin.hf_model_id,
+        effective_max_side=max_side,
+        apply_image_exit=False,
+    )
+    out = dict(values)
+    path_scale_keys = {
+        k
+        for k in WORKER_LORA_MERGE_KEYS
+        if k.endswith("_paths") or k.endswith("_scales")
+    }
+    for key in WORKER_LORA_MERGE_KEYS:
+        if key in built:
+            out[key] = built[key]
+        elif key in path_scale_keys:
+            out.pop(key, None)
+    return out
+
+
 __all__ = [
     "JOB_QUEUE_ONLY_SUBMIT_KEYS",
     "JOB_VALUES_SNAPSHOTTED_KEY",
@@ -197,4 +255,6 @@ __all__ = [
     "preserve_job_queue_only_keys",
     "snapshot_job_values_at_submit",
     "strip_dialog_leaked_job_queue_flags",
+    "WORKER_LORA_MERGE_KEYS",
+    "enrich_values_with_worker_lora_fields",
 ]

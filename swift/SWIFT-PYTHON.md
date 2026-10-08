@@ -31,7 +31,7 @@ If the bundle or venv is missing, the **Image** menu stays disabled.
 
 ## Not ported / stubbed
 
-- **LoRA** catalog UI and settings editor — stub (“Not implemented yet”); CLI LoRA args are omitted
+- **LoRA** — `LoRABridge` + `lora_bridge.py` worker; Settings LoRA tab, run-dialog stack picker, `snapshot_job_values.py` at submit; weights under `~/.cache/image_browser/mflux_loras`; catalog in profile `data/lora_catalog.json`
 - **Flux-prompt AI** queue steps — skipped when the foreground AI bridge is unavailable
 - **Chat** and Python CLIP/chat workers
 - Whisper / LM Studio captioning (LM Studio uses HTTP from Swift)

@@ -125,16 +125,16 @@ enum InformationPaneLayoutBuilder {
         let tail = disp[bodyStart...]
         let nextRange = tail.range(of: "\n##", options: [])
         let end = nextRange?.lowerBound ?? disp.endIndex
-        let middle = String(disp[bodyStart..<end])
+        var middle = String(disp[bodyStart..<end])
         guard !middle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return disp }
+        middle = ImageGenExifCommentFormatting.normalizeExifLoraDisplayLines(middle)
 
         var rows: [InformationModelTableRow] = []
         for line in middle.components(separatedBy: "\n") {
-            let seg = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !seg.isEmpty else { continue }
-            if let match = modelLoraContPattern?.firstMatch(in: seg, range: NSRange(seg.startIndex..., in: seg)),
-               let contRange = Range(match.range(at: 1), in: seg) {
-                let cont = String(seg[contRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if let match = modelLoraContPattern?.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               let contRange = Range(match.range(at: 1), in: line) {
+                let cont = String(line[contRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 rows.append(InformationModelTableRow(
                     label: "",
                     value: .plain(cont),
@@ -143,7 +143,31 @@ enum InformationPaneLayoutBuilder {
                 ))
                 continue
             }
+            let seg = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if let param = splitImageModelParamLine(seg) {
+                if param.label.lowercased().hasPrefix("lora:"), case .plain(let loraValue) = param.value {
+                    let names = ImageGenExifCommentFormatting.exifLoraNames(from: loraValue)
+                    if names.count > 1 {
+                        for (index, name) in names.enumerated() {
+                            if index == 0 {
+                                rows.append(InformationModelTableRow(
+                                    label: param.label,
+                                    value: .plain(name),
+                                    elideValue: true,
+                                    fullWidth: false
+                                ))
+                            } else {
+                                rows.append(InformationModelTableRow(
+                                    label: "",
+                                    value: .plain(name),
+                                    elideValue: true,
+                                    fullWidth: false
+                                ))
+                            }
+                        }
+                        continue
+                    }
+                }
                 rows.append(InformationModelTableRow(
                     label: param.label,
                     value: param.value,

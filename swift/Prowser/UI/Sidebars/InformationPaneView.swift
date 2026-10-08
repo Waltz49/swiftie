@@ -41,7 +41,10 @@ struct InformationPaneView: View {
                 .environment(\.informationPaneScrollCoordinator, scrollCoordinator)
             }
         }
-        .onChange(of: appState.fileData.currentImagePath) { _, newPath in
+        .onChange(of: appState.fileData.currentImagePath) { oldPath, newPath in
+            if oldPath != newPath {
+                scrollCoordinator.storedOffset = 0
+            }
             scheduleReload(path: newPath)
         }
         .onAppear {
@@ -69,6 +72,10 @@ struct InformationPaneView: View {
             rebuildContent()
         }
         .onChange(of: appState.imageGenUIRevision) { _, _ in
+            let heading = appState.fileData.currentImagePath.flatMap {
+                appState.imageGen.activeJobRelationHeading(for: $0)
+            }
+            guard heading != content?.activeJobHeading else { return }
             rebuildContent()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
@@ -139,12 +146,15 @@ struct InformationPaneView: View {
         let activeJobHeading = appState.fileData.currentImagePath.flatMap {
             appState.imageGen.activeJobRelationHeading(for: $0)
         }
-        content = InformationPaneLayoutBuilder.buildContent(
+        let newContent = InformationPaneLayoutBuilder.buildContent(
             data: overlayData,
             sectionState: sectionState,
             activeJobHeading: activeJobHeading,
             contentWidth: max(160, Int(appState.rightSidebarWidth) - 36)
         )
+        guard newContent != content else { return }
+        scrollCoordinator.captureOffset()
+        content = newContent
         scrollCoordinator.restoreOffset()
     }
 

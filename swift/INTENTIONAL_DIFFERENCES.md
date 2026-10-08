@@ -7,7 +7,7 @@ Planning reference only. Python reference: `~/dev/testchat/image_browser`. Each 
 | **`--min`**: no **Image** menu or **Job Control** pane; **Face Recognition** tab hidden in Preferences | **`--min`**: hides image-generation-related UI (frozen bundle / launch flag) |
 | **Image** generation via **bundled ImageGenPython** + profile venv + **MFLUX CLI** / pipeline workers (no long-lived registry; no external repo root) | In-process / worker-based generation with full Python Qt app |
 | **Job Control**: shared action bar pinned below the queue list when a job is selected (keeps the bar inside the SwiftUI-sized pane so its buttons stay clickable) | Action bar embedded at the bottom of the selected job card |
-| **LoRA** UI and settings editor stubbed; no LoRA on CLI | Full LoRA catalog and CLI args |
+| Swift LoRA UI does not label curated vs user entries (all treated as library rows); sample install pack deferred | Python distinguishes curated catalog vs user imports in places |
 | Flux-prompt **AI queue steps** skipped when AI bridge unavailable | LM Studio / flux-prompt steps run in queue |
 | No **Chat** pane | **Chat** pane in full Python app |
 | **Preferences…** under the application menu (⌘,) | **Settings…** under **File** (⌘,); both use window title **Prowser Preferences** |
@@ -23,7 +23,7 @@ Planning reference only. Python reference: `~/dev/testchat/image_browser`. Each 
 | **Find visually similar** (tree): compares across resolutions with the same aspect shape | **Find visually similar**: compares only within the same oriented pixel width×height |
 | Similar-image and text search may rank or order results differently; optional on-device fallback when models are missing | Similar/text search follows installed PyTorch model behavior |
 | Face Recognition: in-app **download face models** prompts when weights are missing | Face stack assumes models available via install / bundle (no Swift-style first-run download sheet) |
-| Preferences: **LoRA** tab is static “not implemented”; no **Captioning** tab | **Captioning** and full **LoRA** tabs when not in minimal bundle |
+| Preferences: no **Captioning** tab | **Captioning** tab when not in minimal bundle |
 | Floating **Slideshow3**: basic speed keys; not all tuning keys wired | Floating **Slideshow3**: additional number-key controls (e.g. 3–6, 9, 0) |
 | **About Prowser** primarily from the application menu | **About…** also listed under **File** |
 | Edit menu: **Copy Path** | Edit menu: **Copy File Path** (same ⌘C shortcut on thumbnails) |

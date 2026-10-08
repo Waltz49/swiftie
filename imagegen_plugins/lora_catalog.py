@@ -629,6 +629,34 @@ def lora_choices_for_plugin(
     return tuple(choices)
 
 
+def lora_run_dialog_empty_hint(
+    plugin: "ImageGenModelPlugin",
+    settings: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Hint when the run dialog has no selectable LoRAs; None when at least one is selectable."""
+    host_id = getattr(plugin, "lora_host_id", None)
+    model_key = lora_model_key_for_plugin(plugin)
+    if not host_id or not model_key:
+        return "No LoRAs available. Enable and download in Settings → LoRA."
+
+    settings, enabled, support, entries = _lora_choice_context(settings, model_key)
+    for entry in entries:
+        if lora_visible_for_run(
+            entry.lora_id,
+            entry,
+            model_key=model_key,
+            host_id=host_id,
+            settings=settings,
+            enabled_ids=enabled,
+            model_support=support,
+        ):
+            return None
+
+    if not enabled:
+        return "No LoRAs are enabled for this model. Enable them in Settings → LoRA."
+    return "No LoRAs available. Enable and download in Settings → LoRA."
+
+
 _EXIF_LORA_TRIGGER_SUFFIX_RE = re.compile(
     r"\s*-\s*trigger\s*:\s*.+$", re.IGNORECASE
 )

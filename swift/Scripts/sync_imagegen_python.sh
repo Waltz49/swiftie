@@ -51,6 +51,7 @@ for f in ipc_json.py model_tasks_process_registry.py; do
 done
 
 # Bundle-local stub (not copied from monorepo); preserved across sync.
+# ``utils.py`` at bundle root is headless-only (see swift/ImageGenPython/utils.py); not copied from monorepo.
 if [[ ! -f "$DEST/workers/model_tasks_worker.py" ]]; then
   cat > "$DEST/workers/model_tasks_worker.py" <<'PY'
 """Minimal worker helpers for vendored pipeline scripts (Swift ImageGenPython bundle)."""

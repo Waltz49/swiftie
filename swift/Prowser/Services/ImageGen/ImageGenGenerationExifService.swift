@@ -6,7 +6,8 @@ enum ImageGenGenerationExifService {
         pluginID: String,
         values: [String: Any],
         workerResult: [String: Any],
-        elapsedSeconds: Double?
+        elapsedSeconds: Double?,
+        lora: String? = nil
     ) -> String {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else {
             return (values["prompt"] as? String) ?? ""
@@ -27,8 +28,23 @@ enum ImageGenGenerationExifService {
             seed: seed,
             steps: intValue(values["steps"]),
             quantization: quant,
-            lora: loraNameForExif(plugin: plugin, values: values),
+            lora: resolvedLoraForExif(plugin: plugin, values: values, override: lora),
             guidance: doubleValue(values["guidance_scale"])
+        )
+    }
+
+    private static func resolvedLoraForExif(
+        plugin: ImageGenPluginDescriptor,
+        values: [String: Any],
+        override: String?
+    ) -> String? {
+        if let override, !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override
+        }
+        return ImageGenExifCommentFormatting.loraNameForExifFromValues(
+            values: values,
+            pipelineID: plugin.pipelineID,
+            loraHostID: plugin.loraHostID
         )
     }
 
@@ -141,21 +157,6 @@ enum ImageGenGenerationExifService {
         if let seed = intValue(workerResult["used_seed"]) { return seed }
         if values["random_seed"] as? Bool == true { return nil }
         return intValue(values["seed"])
-    }
-
-    private static func loraNameForExif(plugin: ImageGenPluginDescriptor, values: [String: Any]) -> String? {
-        guard plugin.loraHostID != nil else { return nil }
-        if let stack = values["mflux_lora_stack"] as? [[String: Any]], !stack.isEmpty {
-            let names = stack.compactMap { entry -> String? in
-                let n = (entry["name"] as? String ?? entry["path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                return n.isEmpty ? nil : (n as NSString).lastPathComponent
-            }
-            if !names.isEmpty { return names.joined(separator: ", ") }
-        }
-        if let path = values["mflux_lora"] as? String, !path.isEmpty {
-            return (path as NSString).lastPathComponent
-        }
-        return nil
     }
 
     private static func intValue(_ any: Any?) -> Int? {

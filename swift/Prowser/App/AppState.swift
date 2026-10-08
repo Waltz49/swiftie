@@ -277,6 +277,7 @@ final class AppState {
             foregroundTasks: workers.foregroundModelTasks,
             registry: workers.imageGenRegistry
         )
+        imageGen.bind(loraBridge: workers.lora)
         renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
@@ -1267,9 +1268,14 @@ final class AppState {
         return !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var pendingLoraSettingsModelKey: String?
+
     func openSettingsWindow(tab explicitTab: SettingsTab? = nil, userInfo: [String: Any] = [:]) {
         let tab = SettingsTab.resolvedOpenTab(explicit: explicitTab)
         requestedSettingsTab = tab
+        if let loraKey = userInfo["lora_model_key"] as? String, !loraKey.isEmpty {
+            pendingLoraSettingsModelKey = loraKey
+        }
         if userInfo["autoExamineFaces"] as? Bool == true {
             pendingAutoExamineFaces = true
         }

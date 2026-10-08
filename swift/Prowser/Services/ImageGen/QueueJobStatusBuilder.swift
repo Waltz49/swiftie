@@ -25,7 +25,8 @@ enum QueueJobStatusBuilder {
         step: Int? = nil,
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
-        estimateSeconds: Double? = nil
+        estimateSeconds: Double? = nil,
+        loraLabel: String? = nil
     ) -> QueueJobStatusBuildResult {
         let thumbPaths = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
         let refsInvalid = JobCardThumbnailPaths.referencesInvalid(pluginID: pluginID, values: values)
@@ -66,7 +67,7 @@ enum QueueJobStatusBuilder {
             )
         }
 
-        let fields = collectFields(plugin: plugin, values: values, payload: payload)
+        let fields = collectFields(plugin: plugin, values: values, payload: payload, loraLabel: loraLabel)
         let stepsValue = stepsDisplay(fieldsSteps: fields.steps, step: step, stepTotal: stepTotal)
         let showTiming = step != nil && stepTotal != nil && (stepTotal ?? 0) > 0 && elapsedSeconds != nil
 
@@ -178,7 +179,8 @@ enum QueueJobStatusBuilder {
     private static func collectFields(
         plugin: ImageGenPluginDescriptor,
         values: [String: Any],
-        payload: [String: Any]? = nil
+        payload: [String: Any]? = nil,
+        loraLabel: String? = nil
     ) -> StatusFields {
         var effective = values
         if let payload {
@@ -192,7 +194,11 @@ enum QueueJobStatusBuilder {
         if !modelID.isEmpty {
             fields.model = ImageGenExifCommentFormatting.menuLabelForHFModelId(modelID)
         }
-        fields.lora = loraLabelForStatus(plugin: plugin, values: effective)
+        if let loraLabel, !loraLabel.isEmpty {
+            fields.lora = loraLabel
+        } else {
+            fields.lora = loraLabelForStatus(plugin: plugin, values: effective)
+        }
         if let w = intValue(effective["width"]), let h = intValue(effective["height"]), w > 0, h > 0 {
             fields.size = "\(w) x \(h)"
         }
@@ -334,18 +340,11 @@ enum QueueJobStatusBuilder {
     }
 
     private static func loraLabelForStatus(plugin: ImageGenPluginDescriptor, values: [String: Any]) -> String {
-        guard plugin.loraHostID != nil else { return "" }
-        if let stack = values["mflux_lora_stack"] as? [[String: Any]], !stack.isEmpty {
-            let names = stack.compactMap { entry -> String? in
-                let n = (entry["name"] as? String ?? entry["path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                return n.isEmpty ? nil : (n as NSString).lastPathComponent
-            }
-            if !names.isEmpty { return names.joined(separator: ", ") }
-        }
-        if let path = values["mflux_lora"] as? String, !path.isEmpty {
-            return (path as NSString).lastPathComponent
-        }
-        return ""
+        ImageGenExifCommentFormatting.loraNameForExifFromValues(
+            values: values,
+            pipelineID: plugin.pipelineID,
+            loraHostID: plugin.loraHostID
+        ) ?? ""
     }
 
     private static func stepsDisplay(fieldsSteps: String, step: Int?, stepTotal: Int?) -> String {

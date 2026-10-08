@@ -50,7 +50,7 @@ enum PythonLocator {
         return nil
     }
 
-    static func moduleArguments(_ module: String) -> [String] {
+    nonisolated static func moduleArguments(_ module: String) -> [String] {
         ["-u", "-m", module]
     }
 

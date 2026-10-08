@@ -706,8 +706,15 @@ private enum JobNumberBadgeColors {
 
 @MainActor
 private final class JobNumberBadgeLabel: NSView {
+    override var isFlipped: Bool { true }
+
     var onClick: (() -> Void)?
     private let textField = NSTextField(labelWithString: "")
+
+    override var intrinsicContentSize: NSSize {
+        let text = textField.intrinsicContentSize
+        return NSSize(width: max(44, text.width + 8), height: text.height + 4)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -715,14 +722,14 @@ private final class JobNumberBadgeLabel: NSView {
         textField.isSelectable = false
         textField.isBezeled = false
         textField.drawsBackground = false
+        textField.alignment = .right
         textField.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
         textField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(textField)
         NSLayoutConstraint.activate([
-            textField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             textField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            textField.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            textField.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+            textField.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 4),
+            textField.topAnchor.constraint(equalTo: topAnchor, constant: 2),
         ])
     }
 
@@ -761,6 +768,7 @@ private final class JobNumberBadgeLabel: NSView {
         toolTip = showError
             ? "Click to clear error and allow this job to run"
             : (clickable ? "Click to hold or release this job" : nil)
+        invalidateIntrinsicContentSize()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -841,6 +849,8 @@ final class JobCardNSView: NSView {
     private var lastJobNumberInError = false
     private var lastCopiesTotal: Int?
     private let jobNumberBadge = JobNumberBadgeLabel()
+    private var jobNumberBadgeTopConstraint: NSLayoutConstraint?
+    private var jobNumberBadgeTrailingConstraint: NSLayoutConstraint?
     private(set) var layoutHeight: CGFloat = 40
     private weak var embeddedActionBar: JobQueueActionBarNSView?
     private var actionBarLayoutConstraints: [NSLayoutConstraint] = []
@@ -933,8 +943,15 @@ final class JobCardNSView: NSView {
         jobNumberBadge.translatesAutoresizingMaskIntoConstraints = false
         jobNumberBadge.onClick = { [weak self] in self?.onJobNumberClick?() }
         addSubview(jobNumberBadge, positioned: .above, relativeTo: contentView)
+        let badgeTop = jobNumberBadge.topAnchor.constraint(equalTo: topAnchor)
+        let badgeTrailing = jobNumberBadge.trailingAnchor.constraint(equalTo: trailingAnchor)
+        jobNumberBadgeTopConstraint = badgeTop
+        jobNumberBadgeTrailingConstraint = badgeTrailing
+        NSLayoutConstraint.activate([badgeTop, badgeTrailing])
 
         let margin = JobQueueLayout.cardOuterMargin
+        jobNumberBadgeTopConstraint?.constant = margin
+        jobNumberBadgeTrailingConstraint?.constant = -margin
         contentFillsCardBottomConstraint = contentView.bottomAnchor.constraint(
             equalTo: bottomAnchor,
             constant: -margin
@@ -1204,26 +1221,8 @@ final class JobCardNSView: NSView {
     private func applyJobNumberBadgeLayout() {
         let margin = JobQueueLayout.cardOuterMargin
         let borderInset = CGFloat(lastSelected ? colors.currentImageBorderWidth : 1)
-        positionJobNumberBadge(borderInset: borderInset, outerMargin: margin)
-    }
-
-    private func positionJobNumberBadge(borderInset: CGFloat, outerMargin: CGFloat) {
-        guard !jobNumberBadge.isHidden else { return }
-        let fit = jobNumberBadge.fittingSize
-        let w = max(44, fit.width + 8)
-        let h = fit.height + 2
-        jobNumberBadge.frame = NSRect(
-            x: bounds.width - w - outerMargin - borderInset,
-            y: outerMargin + borderInset,
-            width: w,
-            height: h
-        )
-    }
-
-    override func layout() {
-        super.layout()
-        let borderInset = CGFloat(lastSelected ? colors.currentImageBorderWidth : 1)
-        positionJobNumberBadge(borderInset: borderInset, outerMargin: JobQueueLayout.cardOuterMargin)
+        jobNumberBadgeTopConstraint?.constant = margin + borderInset
+        jobNumberBadgeTrailingConstraint?.constant = -(margin + borderInset)
     }
 
     private func rowContentUnchanged(

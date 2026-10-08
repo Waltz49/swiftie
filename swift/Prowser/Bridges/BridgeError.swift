@@ -6,6 +6,7 @@ enum BridgeError: Error, LocalizedError {
     case encodingFailed
     case busy
     case notReady
+    case workerMessage(String)
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +15,7 @@ enum BridgeError: Error, LocalizedError {
         case .encodingFailed: return "Failed to encode bridge command."
         case .busy: return "Worker is busy."
         case .notReady: return "Worker is not ready."
+        case .workerMessage(let text): return text
         }
     }
 }

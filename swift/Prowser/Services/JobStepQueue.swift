@@ -95,6 +95,7 @@ enum JobStepQueue {
         statusViewPrompt: String = ""
     ) -> [String: Any] {
         var values = mergeStepIntoValues(step)
+        mergeMissingLoraFields(from: jobValues, into: &values)
         let stepPrompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !stepPrompt.isEmpty {
             return values
@@ -193,6 +194,21 @@ enum JobStepQueue {
             step["series_prompt_refinement"] = true
         }
         return step
+    }
+
+    private static func mergeMissingLoraFields(from jobValues: [String: Any], into values: inout [String: Any]) {
+        for key in ImageGenLoraWorkerPayloadEnrich.mergeKeys {
+            if values[key] != nil { continue }
+            if let value = jobValues[key] {
+                values[key] = value
+            }
+        }
+        if values["mflux_lora_stack"] == nil, let stack = jobValues["mflux_lora_stack"] {
+            values["mflux_lora_stack"] = stack
+        }
+        if values["mflux_lora"] == nil, let single = jobValues["mflux_lora"] {
+            values["mflux_lora"] = single
+        }
     }
 
     private static func jsonSafeDict(_ values: [String: Any]) -> [String: Any] {

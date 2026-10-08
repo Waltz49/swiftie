@@ -30,6 +30,7 @@ from imagegen_plugins.image_gen_form_layout import (
 )
 from imagegen_plugins.image_gen_persistence import load_plugin_dialog_settings
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.lora_catalog import plugin_supports_lora
 from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL
 from theme.theme_service import get_active_theme
 
@@ -172,12 +173,6 @@ def resolve_active_lora_model_key(widget: Optional[QWidget] = None) -> Optional[
                 return model_key
         host = host.parentWidget()
     return None
-
-
-def plugin_supports_lora(plugin: Optional[ImageGenModelPlugin]) -> bool:
-    """True when the plugin can use LoRAs (host configured on the plugin)."""
-    return plugin is not None and bool(getattr(plugin, "lora_host_id", None))
-
 
 
 def populate_image_gen_lora_combo(

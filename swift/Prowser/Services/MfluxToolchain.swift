@@ -110,8 +110,6 @@ enum MfluxCLIPipeline {
 
     static func buildArguments(payload: [String: Any]) throws -> [String] {
         var payload = payload
-        payload.removeValue(forKey: "mflux_lora_paths")
-        payload.removeValue(forKey: "mflux_lora_scales")
         payload.removeValue(forKey: "mflux_lora_stack")
         payload.removeValue(forKey: "mflux_lora")
 
@@ -164,7 +162,22 @@ enum MfluxCLIPipeline {
         if let dir = payload["stepwise_image_output_dir"] as? String, !dir.isEmpty {
             args += ["--stepwise-image-output-dir", dir]
         }
+        appendLoraCLIArgs(to: &args, payload: payload)
         return args
+    }
+
+    static func appendLoraCLIArgs(to args: inout [String], payload: [String: Any]) {
+        let paths = payload["mflux_lora_paths"] as? [String] ?? []
+        guard !paths.isEmpty else { return }
+        args.append("--lora-paths")
+        args += paths
+        if let scales = payload["mflux_lora_scales"] as? [Double], !scales.isEmpty {
+            args.append("--lora-scales")
+            args += scales.map { String($0) }
+        } else if let scales = payload["mflux_lora_scales"] as? [NSNumber], !scales.isEmpty {
+            args.append("--lora-scales")
+            args += scales.map { $0.stringValue }
+        }
     }
 
     private static let zImageTurboQuantChoices: Set<Int> = [3, 4, 5, 6, 8]
@@ -215,6 +228,7 @@ enum MfluxCLIPipeline {
         if let dir = payload["stepwise_image_output_dir"] as? String, !dir.isEmpty {
             args += ["--stepwise-image-output-dir", dir]
         }
+        appendLoraCLIArgs(to: &args, payload: payload)
         return args
     }
 
