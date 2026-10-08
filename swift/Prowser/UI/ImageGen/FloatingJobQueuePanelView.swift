@@ -58,7 +58,7 @@ struct FloatingJobQueuePanelView: View {
 
             SidebarPaneBody(kind: .jobs(floating: true)) {
                 JobQueuePanelView(compactForFloating: true)
-                    .frame(minWidth: 260, minHeight: 180)
+                    .frame(minWidth: 260, minHeight: 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

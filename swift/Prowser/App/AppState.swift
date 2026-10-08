@@ -63,6 +63,8 @@ final class AppState {
     var jobsQueueStripMeasureRefresh: (@MainActor () -> Void)?
     var jobsPaneRefitDeferred = false
     var jobsPaneResizeDebounce: DispatchWorkItem?
+    /// Remaining layout passes that should snap the showing jobs surface to the measured height.
+    var jobsSurfaceExactSnapPasses = 0
     var progressiveRefreshTask: Task<Void, Never>?
     var pendingProgressivePath: String?
     var pendingProgressiveForceEnterBrowse = false

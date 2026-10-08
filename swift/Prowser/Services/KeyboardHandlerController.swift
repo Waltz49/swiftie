@@ -218,17 +218,17 @@ final class KeyboardHandlerController {
             return true
         }
 
+        // ⌘[ compact, ⌘] one job, ⌘\ all jobs — same as Python ⌥[ / ⌥] / ⌥\.
+        if !hasShift, !hasControl, hasCommand != hasOption,
+           let jobsMode = jobsQueueSizeShortcutMode(event) {
+            return appState.setJobsQueueSizeMode(
+                jobsMode,
+                requireActive: jobsMode != .strip
+            )
+        }
+
         if hasOption, !hasCommand, !hasShift, !hasControl {
             switch event.charactersIgnoringModifiers {
-            case "[", "{":
-                appState.setJobsQueueSizeMode(.strip)
-                return true
-            case "]", "}":
-                appState.setJobsQueueSizeMode(.one, requireActive: true)
-                return true
-            case "\\", "|":
-                appState.setJobsQueueSizeMode(.all, requireActive: true)
-                return true
             case "/", "÷":
                 if BundleCapabilities.imageGenUIEnabled {
                     appState.openImageGenDialog(function: "create")
@@ -559,6 +559,16 @@ final class KeyboardHandlerController {
             return NSApp.sendAction(Selector(("redo:")), to: nil, from: nil)
         default:
             return false
+        }
+    }
+
+    /// `[` `]` `\` — key codes stay stable when Command or Option is held.
+    private func jobsQueueSizeShortcutMode(_ event: NSEvent) -> JobsQueueSizeMode? {
+        switch event.keyCode {
+        case 33: return .strip
+        case 30: return .one
+        case 42: return .all
+        default: return nil
         }
     }
 

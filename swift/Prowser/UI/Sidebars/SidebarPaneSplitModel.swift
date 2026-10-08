@@ -281,6 +281,18 @@ final class SidebarPaneSplitModel {
         }
     }
 
+    /// Shortcut snap to the measured target. Does not change the grow-only refit path.
+    func snapJobsPaneToMeasuredHeight(appState: AppState) {
+        guard side == .right else { return }
+        guard appState.jobsDisplayMode == .pane else { return }
+        guard paneExpanded(configKey: "jobs_visible", default: true) else { return }
+        appState.beginJobsPaneGeometryAdjustment()
+        defer { appState.endJobsPaneGeometryAdjustment() }
+        appState.refreshJobsPaneLiveMeasurements()
+        let target = appState.jobsPaneTargetPaneHeight()
+        resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+    }
+
     func resizeJobsPaneToMode(appState: AppState) {
         guard side == .right else { return }
         appState.beginJobsPaneGeometryAdjustment()

@@ -1511,7 +1511,11 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         context.coordinator.panel = panel
         panel.paneContextMenuKind = compactForFloating ? .jobs(floating: true) : .jobs(floating: false)
         panel.paneContextMenuAppState = appState
-        if !compactForFloating {
+        if compactForFloating {
+            if appState.showFloatingJobsPanel {
+                appState.jobsQueuePanelMeasureHost = host
+            }
+        } else if appState.jobsDisplayMode == .pane {
             appState.jobsQueuePanelMeasureHost = host
         }
         syncPanelToController(panel)

@@ -176,10 +176,27 @@ extension AppState {
         }
     }
 
-    func setJobsQueueSizeMode(_ mode: JobsQueueSizeMode, requireActive: Bool = false) {
-        guard BundleCapabilities.imageGenUIEnabled else { return }
-        if requireActive, !imageGen.isProcessing, imageGen.queue.jobs.isEmpty { return }
+    @discardableResult
+    func setJobsQueueSizeMode(_ mode: JobsQueueSizeMode, requireActive: Bool = false) -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        if requireActive, !imageGen.isProcessing, imageGen.queue.jobs.isEmpty { return false }
+        ensureJobsSurfaceVisible()
+        jobsSurfaceExactSnapPasses = 4
         applyJobsQueueSizeMode(mode, forceRefit: true)
+        return true
+    }
+
+    /// Show the last-used jobs surface when both the pane and the floating panel are hidden.
+    private func ensureJobsSurfaceVisible() {
+        if showFloatingJobsPanel { return }
+        let paneVisible = jobsDisplayMode == .pane
+            && config.bool(forKey: "jobs_visible", default: true)
+        if paneVisible { return }
+        if jobsDisplayMode == .panel {
+            showJobsPanel()
+        } else {
+            showJobsPane()
+        }
     }
 
     func applyJobsQueueSizeMode(_ mode: JobsQueueSizeMode, forceRefit: Bool) {
