@@ -1134,13 +1134,15 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
                 listView.applyColumnLayoutFromSettings(appState.config)
                 didLoadColumnLayout = true
             }
-            let paths = appState.fileData.displayedImages
-            if listView.imagePaths != paths {
-                listView.rowDataByPath = ImageListRowFormatting.buildRowDataMap(
-                    paths: paths,
-                    metadataCache: appState.metadataCache
-                )
-                listView.imagePaths = paths
+            if appState.fileData.currentViewMode == .list {
+                let paths = appState.fileData.displayedImages
+                if listView.imagePaths != paths {
+                    listView.rowDataByPath = ImageListRowFormatting.buildRowDataMap(
+                        paths: paths,
+                        metadataCache: appState.metadataCache
+                    )
+                    listView.imagePaths = paths
+                }
             }
             listView.currentPath = appState.fileData.currentImagePath
             listView.selectedPaths = appState.selection.selectedFiles
@@ -1181,7 +1183,7 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
                 guard let self else { return }
                 self.listView?.commentTooltipsEnabled = self.appState.fileData.currentViewMode == .list
                 guard self.appState.fileData.currentViewMode == .list else { return }
-                self.syncSelectionVisuals()
+                self.syncFromAppState()
                 self.listView?.ensureActiveRowOnScreen()
                 DispatchQueue.main.async { [weak self] in
                     self?.listView?.ensureActiveRowOnScreen()
