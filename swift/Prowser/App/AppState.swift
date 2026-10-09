@@ -1014,14 +1014,22 @@ final class AppState {
         return changed
     }
 
-    func loadDirectory(_ path: String, saveHistory: Bool = true, pinnedImagePath: String? = nil) {
+    func loadDirectory(
+        _ path: String,
+        saveHistory: Bool = true,
+        pinnedImagePath: String? = nil,
+        showLoadingState: Bool = true,
+        onComplete: (() -> Void)? = nil
+    ) {
         setSpecificFilesActive(false)
         clearDeletedPlaceholders()
         backgroundImageRecognition.notePriorityDirectory(path)
         directoryLoader.loadDirectory(
             path,
             saveHistory: saveHistory,
-            pinnedImagePath: pinnedImagePath
+            pinnedImagePath: pinnedImagePath,
+            showLoadingState: showLoadingState,
+            onComplete: onComplete
         )
     }
 
@@ -1089,9 +1097,30 @@ final class AppState {
         }
         guard let dir = fileData.currentDirectory else { return }
         let previous = fileData.displayedImages
-        loadDirectory(dir, saveHistory: false, pinnedImagePath: fileData.currentImagePath)
-        if fileData.displayedImages == previous {
-            DirectoryRefreshService.invalidateThumbnails(appState: self, paths: previous)
+        let pinned = fileData.currentImagePath
+        let snapshot = DirectoryLoadBackgroundWork.Snapshot(
+            path: dir,
+            extensions: config.imageExtensions,
+            filterPattern: filterSettings.filterPattern,
+            sortModeRaw: config.string(forKey: "sort_mode", default: "date"),
+            sortReversed: config.bool(forKey: "sort_reversed", default: false),
+            useExifDate: config.useExifDate
+        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let images = await Task.detached(priority: .userInitiated) {
+                DirectoryLoadBackgroundWork.scanAndSort(snapshot)
+            }.value
+            if images == previous {
+                DirectoryRefreshService.refreshThumbnailPresentation(appState: self)
+                return
+            }
+            self.directoryLoader.applyDirectoryListing(
+                path: dir,
+                images: images,
+                pinnedPath: pinned,
+                showLoadingState: false
+            )
         }
     }
 

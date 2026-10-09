@@ -145,6 +145,7 @@ final class DirectoryLoadCoordinator {
         _ path: String,
         saveHistory: Bool,
         pinnedImagePath: String? = nil,
+        showLoadingState: Bool = true,
         onComplete: (() -> Void)? = nil
     ) {
         guard let normalized = FileDataModel.normalizePath(path) else {
@@ -194,10 +195,12 @@ final class DirectoryLoadCoordinator {
             && appState.fileData.currentViewMode == .thumbnail
             && pin == nil
 
-        appState.isLoadingDirectory = true
-        appState.showThumbnailDirectoryLoadingCanvas = useLoadingCanvas
+        if showLoadingState {
+            appState.isLoadingDirectory = true
+        }
+        appState.showThumbnailDirectoryLoadingCanvas = useLoadingCanvas && showLoadingState
 
-        if useLoadingCanvas {
+        if useLoadingCanvas, showLoadingState {
             appState.fileData.setDisplayedImages([])
             appState.fileData.setCurrentDirectory(normalized)
             appState.beginThumbnailDirectoryLoad()
@@ -208,7 +211,7 @@ final class DirectoryLoadCoordinator {
             }
         }
 
-        activeLoadTask = Task { [weak self] in
+        activeLoadTask = Task { @MainActor [weak self] in
             let images = await Task.detached(priority: .userInitiated) {
                 DirectoryLoadBackgroundWork.scanAndSort(snapshot)
             }.value
@@ -220,6 +223,7 @@ final class DirectoryLoadCoordinator {
                 path: normalized,
                 images: images,
                 pinnedPath: pin,
+                showLoadingState: showLoadingState,
                 onComplete: onComplete
             )
         }
@@ -241,17 +245,43 @@ final class DirectoryLoadCoordinator {
         return images.first
     }
 
+    /// Apply a directory listing produced off the main thread (refresh / rescan).
+    func applyDirectoryListing(
+        path: String,
+        images: [String],
+        pinnedPath: String?,
+        showLoadingState: Bool = false,
+        onComplete: (() -> Void)? = nil
+    ) {
+        activeLoadTask?.cancel()
+        activeLoadGeneration += 1
+        let generation = activeLoadGeneration
+        finishDirectoryLoad(
+            generation: generation,
+            path: path,
+            images: images,
+            pinnedPath: pinnedPath,
+            showLoadingState: showLoadingState,
+            onComplete: onComplete
+        )
+    }
+
     private func finishDirectoryLoad(
         generation: Int,
         path: String,
         images: [String],
         pinnedPath: String?,
+        showLoadingState: Bool,
         onComplete: (() -> Void)?
     ) {
         guard generation == activeLoadGeneration else { return }
 
         appState.fileData.setCurrentDirectory(path)
-        let ordered = DisplayOrderService.applyDisplayOrder(images, appState: appState)
+        let ordered = DisplayOrderService.applyDisplayOrder(
+            images,
+            appState: appState,
+            trustPreSortedFromDirectoryLoad: true
+        )
         appState.fileData.setDisplayedImages(ordered)
         let resolvedActive = Self.resolveActiveImageAfterDirectoryLoad(
             images: appState.fileData.getDisplayedImages(),
@@ -265,9 +295,11 @@ final class DirectoryLoadCoordinator {
             isLoadingDirectory: false
         )
 
-        appState.isLoadingDirectory = false
-        if appState.showThumbnailDirectoryLoadingCanvas {
-            appState.endThumbnailDirectoryLoad()
+        if showLoadingState {
+            appState.isLoadingDirectory = false
+            if appState.showThumbnailDirectoryLoadingCanvas {
+                appState.endThumbnailDirectoryLoad()
+            }
         }
         appState.noteInitialThumbnailDirectoryLoadCompleted()
 

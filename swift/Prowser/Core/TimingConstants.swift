@@ -17,6 +17,8 @@ enum TimingConstants {
     static let thumbnailBackgroundLoadBatchSize = 8
     /// Stagger within a batch so scroll/reprioritize can cancel before the whole batch is queued.
     static let thumbnailBackgroundLoadChunkDelayMs = 40
+    /// Folders at or above this count load viewport/near-visible thumbs only until scroll idle (no full-grid sweep).
+    static let largeFolderAutomaticBackgroundSweepThreshold = 1000
     /// Qt default `SH_ToolTip_WakeUpDelay` used by `IconGraphicTooltipFilter`.
     static let graphicButtonTooltipDelayMs = 700
     /// Idle before background CLIP/CNN indexing (`BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS` is 5 in Python).

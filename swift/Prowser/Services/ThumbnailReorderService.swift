@@ -60,18 +60,24 @@ enum ThumbnailReorderService {
         let isReversed = PrsortIO.readCustomSort(in: directory)?.isReversed
             ?? (appState.config.rawSettings()["sort_reversed"] as? Bool ?? false)
         let locked = PrsortIO.lockedFilenames(in: directory)
-        do {
-            try PrsortIO.writeCustomSort(
-                in: directory,
-                filenames: filenames,
-                isReversed: isReversed,
-                locked: locked
-            )
-        } catch {
-            appState.status.show("Failed to save custom sort: \(error.localizedDescription)")
-            return false
+        let prsortDirectory = directory
+        let prsortFilenames = filenames
+        let prsortReversed = isReversed
+        let prsortLocked = locked
+        Task.detached(priority: .utility) {
+            do {
+                try PrsortIO.writeCustomSort(
+                    in: prsortDirectory,
+                    filenames: prsortFilenames,
+                    isReversed: prsortReversed,
+                    locked: prsortLocked
+                )
+            } catch {
+                await MainActor.run {
+                    appState.status.show("Failed to save custom sort: \(error.localizedDescription)")
+                }
+            }
         }
-
         if switchingToCustom {
             appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         }
@@ -191,7 +197,8 @@ enum ThumbnailReorderService {
                     last = actual
                 }
             } else {
-                last = current
+                // List was date-sorted before reorder; trailing files already satisfy order.
+                break
             }
         }
 

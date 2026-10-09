@@ -38,6 +38,17 @@ enum ThumbnailLayout {
         }
     }
 
+    /// Cheap order/membership fingerprint for large displayed lists (coordinator sync).
+    static func pathsOrderFingerprint(_ paths: [String]) -> UInt64 {
+        guard !paths.isEmpty else { return 0 }
+        var hash: UInt64 = UInt64(paths.count)
+        let samples = [0, paths.count / 2, paths.count - 1]
+        for index in samples where paths.indices.contains(index) {
+            hash = hash &* 1_099_511_628_289 &+ UInt64(bitPattern: Int64(paths[index].hashValue))
+        }
+        return hash
+    }
+
     /// Basenames that appear with more than one extension in the current view (Python `_basenames_needing_extensions`).
     static func basenamesWithMultipleExtensions(in paths: [String]) -> Set<String> {
         var extensionsByStem: [String: Set<String>] = [:]

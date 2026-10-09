@@ -58,17 +58,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         case .fullReplace:
             invalidateThumbnailLoadingSession()
             basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
-            pathsOrderFingerprint = Self.pathsOrderFingerprint(paths)
+            pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             ThumbnailFilenameOverlayCache.shared.clear()
             ThumbnailFontMetricsCache.clear()
         case .reorderOnly:
-            pathsOrderFingerprint = Self.pathsOrderFingerprint(paths)
+            pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             layoutDefersBackgroundLoads = true
             if Set(previous) != keeping {
                 basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
             }
         case .membershipChanged(let removed):
-            pathsOrderFingerprint = Self.pathsOrderFingerprint(paths)
+            pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             if !removed.isEmpty {
                 ThumbnailFilenameOverlayCache.shared.removeEntries(forPaths: removed)
             }
@@ -83,16 +83,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             forceRelayout = false
         }
         reloadLayoutIfNeeded(force: forceRelayout)
-    }
-
-    private static func pathsOrderFingerprint(_ paths: [String]) -> UInt64 {
-        guard !paths.isEmpty else { return 0 }
-        var hash: UInt64 = UInt64(paths.count)
-        let samples = [0, paths.count / 2, paths.count - 1]
-        for index in samples where paths.indices.contains(index) {
-            hash = hash &* 1_099_511_628_289 &+ UInt64(bitPattern: Int64(paths[index].hashValue))
-        }
-        return hash
     }
 
     private var pathsOrderFingerprint: UInt64 = 0
@@ -1586,6 +1576,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let visibleSet = Set(visibleIndices)
         let nearVisible = nearVisibleThumbnailIndices(visibleRect: visible, visible: visibleSet)
         let excluded = visibleSet.union(nearVisible)
+        guard shouldScheduleAutomaticBackgroundSweep() else { return }
         scheduleBackgroundThumbnailLoading(excluded: excluded)
     }
 
@@ -1634,6 +1625,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             }
         }
         return false
+    }
+
+    /// Full-grid background decode is queued for every missing pixmap; skip for very large folders (scroll loads instead).
+    private func shouldScheduleAutomaticBackgroundSweep() -> Bool {
+        imagePaths.count < TimingConstants.largeFolderAutomaticBackgroundSweepThreshold
     }
 
     /// Python `current_thumbnail_size` when auto; config `thumbnail_cell_size` when manual.
@@ -1999,6 +1995,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let nearPaths = orderedNear.map { imagePaths[$0] }
         let scheduleBackgroundAfterLoad = scheduleBackground
         let excluded = visibleSet.union(nearVisible)
+        let needsBackgroundSweep = offscreenPathsNeedLoading(excluded: excluded)
         visibleThumbnailLoadGeneration += 1
         let loadGeneration = visibleThumbnailLoadGeneration
 
@@ -2034,10 +2031,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             }
             ThumbnailGridPerfDiagnostics.recordThumbnailLoadRequests(count: loadRequests)
 
+            let maySweep = allowBackgroundSweep && self.shouldScheduleAutomaticBackgroundSweep()
             if scheduleBackgroundAfterLoad,
-               allowBackgroundSweep,
+               maySweep,
                !self.backgroundLoadingSuspended,
-               self.offscreenPathsNeedLoading(excluded: excluded) {
+               needsBackgroundSweep {
                 self.scheduleBackgroundThumbnailLoading(excluded: excluded)
             }
         }

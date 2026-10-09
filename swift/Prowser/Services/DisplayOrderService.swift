@@ -7,7 +7,9 @@ enum DisplayOrderService {
         _ images: [String],
         appState: AppState,
         skipLocks: Bool? = nil,
-        commentRanks: [String: Int]? = nil
+        commentRanks: [String: Int]? = nil,
+        /// Set when `images` already reflect `DirectoryLoadBackgroundWork` sort (avoids main-thread re-sort).
+        trustPreSortedFromDirectoryLoad: Bool = false
     ) -> [String] {
         guard !images.isEmpty else { return [] }
 
@@ -37,6 +39,9 @@ enum DisplayOrderService {
 
         let (locked, unlocked) = PrsortIO.separateLockedUnlocked(images)
         if locked.isEmpty {
+            if trustPreSortedFromDirectoryLoad {
+                return images
+            }
             return SortingService.sorted(
                 images,
                 options: options,

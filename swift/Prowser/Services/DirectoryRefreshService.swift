@@ -72,41 +72,52 @@ enum DirectoryRefreshService {
         guard let directory = appState.fileData.currentDirectory,
               FileManager.default.fileExists(atPath: directory) else { return }
 
-        let scanned = scannedDiskFiles(appState: appState)
-        let diskSet = Set(scanned)
+        let extensions = appState.config.imageExtensions
+        let filterPattern = appState.filterSettings.filterPattern
         let displayed = appState.fileData.displayedImages
-        let displayedSet = Set(displayed)
-        let rawAdded = diskSet.subtracting(displayedSet)
-        var removed = displayedSet.subtracting(diskSet)
-        removed.subtract(filterOnlyRemovals(from: removed, appState: appState))
-        let added = rawAdded
+        Task { @MainActor in
+            let scanned = await Task.detached(priority: .utility) {
+                DirectoryScanner.scanDirectory(
+                    at: directory,
+                    extensions: extensions,
+                    filterPattern: filterPattern
+                )
+            }.value
 
-        if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
-            if ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState) {
-                return
-            }
-            if appState.fileData.currentViewMode == .browse {
-                if let current = appState.fileData.currentImagePath,
-                   appState.metadataCache.fileChangedOnDisk(path: current) {
-                    invalidateThumbnails(appState: appState, paths: [current])
-                    appState.reloadBrowseImageIfCurrent(path: current)
+            let diskSet = Set(scanned)
+            let displayedSet = Set(displayed)
+            let rawAdded = diskSet.subtracting(displayedSet)
+            var removed = displayedSet.subtracting(diskSet)
+            removed.subtract(filterOnlyRemovals(from: removed, appState: appState))
+            let added = rawAdded
+
+            if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
+                if ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState) {
+                    return
+                }
+                if appState.fileData.currentViewMode == .browse {
+                    if let current = appState.fileData.currentImagePath,
+                       appState.metadataCache.fileChangedOnDisk(path: current) {
+                        invalidateThumbnails(appState: appState, paths: [current])
+                        appState.reloadBrowseImageIfCurrent(path: current)
+                    }
+                    return
+                }
+                guard displayedSet.count < 500 else { return }
+                let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
+                if !modified.isEmpty {
+                    invalidateThumbnails(appState: appState, paths: modified)
                 }
                 return
             }
-            guard displayedSet.count < 500 else { return }
-            let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
-            if !modified.isEmpty {
-                invalidateThumbnails(appState: appState, paths: modified)
-            }
-            return
-        }
 
-        efficientRefreshWithChanges(
-            appState: appState,
-            displayed: displayed,
-            added: added,
-            removed: removed
-        )
+            efficientRefreshWithChanges(
+                appState: appState,
+                displayed: displayed,
+                added: added,
+                removed: removed
+            )
+        }
     }
 
     /// Paths still on disk but absent from a filtered scan (inserted for the active image).
@@ -118,15 +129,6 @@ enum DirectoryRefreshService {
             guard FileManager.default.fileExists(atPath: path) else { return false }
             return URL(fileURLWithPath: path).standardizedFileURL.path == activeNorm
         }
-    }
-
-    private static func scannedDiskFiles(appState: AppState) -> [String] {
-        guard let path = appState.fileData.currentDirectory else { return [] }
-        return DirectoryScanner.scanDirectory(
-            at: path,
-            extensions: appState.config.imageExtensions,
-            filterPattern: appState.filterSettings.filterPattern
-        )
     }
 
     private static func modifiedPaths(
@@ -271,6 +273,13 @@ enum DirectoryRefreshService {
         appState.backgroundImageRecognition.noteIdleScanScopeChanged()
     }
 
+    /// Light refresh when directory listing is unchanged (⌘R) — avoid O(n) main-thread stats + full pixmap drop.
+    static func refreshThumbnailPresentation(appState: AppState) {
+        appState.thumbnailInvalidationGeneration += 1
+        appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+        appState.thumbnailGridHost?.setNeedsDisplay(appState.thumbnailGridHost?.bounds ?? .zero)
+    }
+
     static func invalidateThumbnails(appState: AppState, paths: [String]) {
         guard !paths.isEmpty else { return }
         for path in paths {
@@ -285,8 +294,11 @@ enum DirectoryRefreshService {
         }
         appState.thumbnailInvalidationGeneration += 1
         appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(paths))
-        for path in paths {
-            appState.metadataCache.recordDiskSnapshot(path: path)
+        let pathsToRecord = paths
+        Task { @MainActor in
+            for path in pathsToRecord {
+                appState.metadataCache.recordDiskSnapshot(path: path)
+            }
         }
     }
 }

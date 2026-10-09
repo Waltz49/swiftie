@@ -86,7 +86,8 @@ struct ThumbnailGridView: NSViewRepresentable {
             var themeID: String
             var directory: String?
             var filterPattern: String
-            var imagePaths: [String]
+            var imagePathCount: Int
+            var pathsOrderFingerprint: UInt64
             var referenceGraphActive: Bool
             var referenceGraphPathCount: Int
             var referenceGraphEdgeCount: Int
@@ -251,7 +252,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                 themeID: appState.theme.colors.themeID,
                 directory: appState.fileData.currentDirectory,
                 filterPattern: appState.filterSettings.filterPattern,
-                imagePaths: paths,
+                imagePathCount: paths.count,
+                pathsOrderFingerprint: ThumbnailLayout.pathsOrderFingerprint(paths),
                 referenceGraphActive: appState.referenceGraphActive,
                 referenceGraphPathCount: appState.referenceGraphData?.nodes.count ?? 0,
                 referenceGraphEdgeCount: appState.referenceGraphData?.edges.count ?? 0,
@@ -279,7 +281,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                 syncSelectionVisualsIfNeeded(to: gridView)
                 return
             }
-            let pathsChanged = fingerprint.imagePaths != lastGridSyncFingerprint?.imagePaths
+            let pathsChanged = fingerprint.pathsOrderFingerprint != lastGridSyncFingerprint?.pathsOrderFingerprint
+                || fingerprint.imagePathCount != lastGridSyncFingerprint?.imagePathCount
             lastGridSyncFingerprint = fingerprint
             if pathsChanged {
                 lastSelectionFingerprint = nil
@@ -534,7 +537,10 @@ struct ThumbnailGridView: NSViewRepresentable {
                 appState.thumbnailGridColumns = value
             }
             if appState.thumbnailSectionedRowLayout != sectionedRowLayout {
-                appState.thumbnailSectionedRowLayout = sectionedRowLayout
+                let layout = sectionedRowLayout
+                DispatchQueue.main.async { [weak appState] in
+                    appState?.thumbnailSectionedRowLayout = layout
+                }
             }
         }
 
