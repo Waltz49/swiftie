@@ -210,6 +210,8 @@ final class AppState {
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
     private var suppressDirectoryRefreshUntil: Date?
+    private var manualDirectoryRefreshGeneration = 0
+    private var manualDirectoryRefreshTask: Task<Void, Never>?
     /// While > 0, file tree must not re-sync expansion/scroll to the active image (thumbnail drag-drop).
     private var fileTreeHighlightSyncSuspendCount = 0
 
@@ -1096,8 +1098,7 @@ final class AppState {
             return
         }
         guard let dir = fileData.currentDirectory else { return }
-        let previous = fileData.displayedImages
-        let pinned = fileData.currentImagePath
+        let pinnedAtStart = fileData.currentImagePath
         let snapshot = DirectoryLoadBackgroundWork.Snapshot(
             path: dir,
             extensions: config.imageExtensions,
@@ -1106,19 +1107,25 @@ final class AppState {
             sortReversed: config.bool(forKey: "sort_reversed", default: false),
             useExifDate: config.useExifDate
         )
-        Task { @MainActor [weak self] in
+        manualDirectoryRefreshTask?.cancel()
+        manualDirectoryRefreshGeneration += 1
+        let generation = manualDirectoryRefreshGeneration
+        manualDirectoryRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let images = await Task.detached(priority: .userInitiated) {
                 DirectoryLoadBackgroundWork.scanAndSort(snapshot)
             }.value
-            if images == previous {
+            guard !Task.isCancelled, generation == self.manualDirectoryRefreshGeneration else { return }
+            guard self.fileData.currentDirectory == dir else { return }
+            let currentDisplayed = self.fileData.displayedImages
+            if images == currentDisplayed {
                 DirectoryRefreshService.refreshThumbnailPresentation(appState: self)
                 return
             }
             self.directoryLoader.applyDirectoryListing(
                 path: dir,
                 images: images,
-                pinnedPath: pinned,
+                pinnedPath: self.fileData.currentImagePath ?? pinnedAtStart,
                 showLoadingState: false
             )
         }

@@ -7,7 +7,7 @@ enum ThumbnailReorderService {
         imagePath: String,
         insertionIndex: Int,
         appState: AppState
-    ) -> Bool {
+    ) async -> Bool {
         if PrsortIO.isFileLocked(imagePath) {
             appState.status.show("Cannot reorder locked files")
             return false
@@ -64,19 +64,18 @@ enum ThumbnailReorderService {
         let prsortFilenames = filenames
         let prsortReversed = isReversed
         let prsortLocked = locked
-        Task.detached(priority: .utility) {
-            do {
+        do {
+            try await Task.detached(priority: .utility) {
                 try PrsortIO.writeCustomSort(
                     in: prsortDirectory,
                     filenames: prsortFilenames,
                     isReversed: prsortReversed,
                     locked: prsortLocked
                 )
-            } catch {
-                await MainActor.run {
-                    appState.status.show("Failed to save custom sort: \(error.localizedDescription)")
-                }
-            }
+            }.value
+        } catch {
+            appState.status.show("Failed to save custom sort: \(error.localizedDescription)")
+            return false
         }
         if switchingToCustom {
             appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
