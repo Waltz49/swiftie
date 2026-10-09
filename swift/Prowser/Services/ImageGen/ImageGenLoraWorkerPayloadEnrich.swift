@@ -53,7 +53,9 @@ enum ImageGenLoraWorkerPayloadEnrich {
         }
         if payload["_job_values_snapshotted"] as? Bool == true,
            payloadHasResolvedLoraPaths(payload) {
-            return payload
+            var snapshotted = payload
+            ImageGenLoraTriggerPromptGuard.applyForRun(&snapshotted)
+            return snapshotted
         }
         do {
             let enriched = try await runEnrichCLI(
@@ -65,6 +67,9 @@ enum ImageGenLoraWorkerPayloadEnrich {
             )
             var out = payload
             mergeLoraFields(from: enriched, into: &out)
+            if let prompt = enriched["prompt"] as? String {
+                out["prompt"] = prompt
+            }
             return out
         } catch {
             return payload

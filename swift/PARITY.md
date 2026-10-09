@@ -157,7 +157,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
 - [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden; remove installed models + cache coordination)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
-- [~] LoRA — `LoRASettingsTab`, `LoRABridge`, run-dialog stack picker, Map/Check LoRAs (Debug)
+- [~] LoRA — `LoRASettingsTab`, `LoRABridge`, run-dialog stack picker, Map LoRAs (Debug); Check LoRAs Swift UI + `lora_bridge` probes
 - [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; face model artifacts excluded from generic cache clear when appropriate; idle CLIP/CNN indexing toggles when models installed)
 
 ## Menus — File
@@ -265,7 +265,7 @@ WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and M
 - [~] Wallpaper submenu (⇧⌘W last used + fit modes)
 - [~] Find References to This Image…
 - [ ] LM Studio / voice / transcription tools (when enabled)
-- [~] Debug submenu (⇧⌘D debug, ⌃D view log, ⇧⌘I number overlay, Check LoRAs)
+- [~] Debug submenu (⇧⌘D debug, ⌃D view log, ⇧⌘I number overlay, Check LoRAs Swift UI)
 
 ## Menus — Help
 
@@ -506,7 +506,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 | Move/Copy top-level menu | done | Title follows `destination_menu_action` |
 | Image: create/edit/expand/infill, job queue | partial | Fast-open ⇧⌥/; Check LoRAs + Downloading Models help added |
 | Tools: EXIF, slideshows, wallpaper, screen copy, org | done | Mass rename gated by setting; Exclude Thumbs (⌘X) |
-| Tools: Debug | partial | Check LoRAs headless runner; full Qt probe UI stays Python |
+| Tools: Debug | partial | Check LoRAs Swift UI; MLX probes via `lora_bridge` |
 | Help: shortcuts, about, docs | partial | About complete; PF Keys / Hidden Gems placeholders |
 
 ## Intentional Swift differences (documented)

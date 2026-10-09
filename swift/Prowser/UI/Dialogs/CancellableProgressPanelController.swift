@@ -285,6 +285,10 @@ final class CancellableProgressPanelController {
             flushPendingProgressOnMain()
         }
         isClosed = true
+        cancelTarget.onCancel = nil
+        onCancel = nil
+        etaTimerTarget.owner = nil
+        progressFlushTimerTarget.owner = nil
         etaTimer?.invalidate()
         etaTimer = nil
         progressFlushTimer?.invalidate()

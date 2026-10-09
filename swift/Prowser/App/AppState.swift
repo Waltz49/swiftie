@@ -42,6 +42,7 @@ final class AppState {
     let browseImageHistory = BrowseImageHistoryController()
     let workers: ImageGenServices
     let imageGen: ImageGenController
+    let checkLorasFlow = CheckLorasFlowState()
     var jobsDisplayMode: JobsDisplayMode = .pane
     var jobsQueueSizeMode: JobsQueueSizeMode = .all
     var showFloatingJobsPanel = false
@@ -1472,6 +1473,8 @@ final class AppState {
         static let clipSearch = "clipSearch"
         static let personSearch = "personSearch"
         static let imageRecognitionCaveats = "imageRecognitionCaveats"
+        static let checkLorasOptions = "checkLorasOptions"
+        static let checkLorasResults = "checkLorasResults"
     }
 
     func syncAuxiliaryDialogs() {
@@ -1653,6 +1656,48 @@ final class AppState {
             onClose: { [weak self] in self?.showImageRecognitionCaveats = false }
         ) {
             ImageRecognitionCaveatsView(profilePaths: config.profilePaths)
+        }
+        syncDialog(
+            id: DialogID.checkLorasOptions,
+            show: checkLorasFlow.optionsPrescan != nil,
+            title: "Check LoRAs — Options",
+            defaultSize: NSSize(width: 520, height: 620),
+            minSize: NSSize(width: 480, height: 400),
+            onClose: { [weak self] in
+                guard let self else { return }
+                let pending = self.checkLorasFlow.takePendingRun()
+                self.checkLorasFlow.optionsPrescan = nil
+                if let pending {
+                    Task {
+                        await CheckLorasController.executeRun(
+                            appState: self,
+                            prescan: pending.prescan,
+                            options: pending.options
+                        )
+                    }
+                }
+            }
+        ) {
+            if let prescan = checkLorasFlow.optionsPrescan {
+                CheckLorasOptionsDialogHost(prescan: prescan)
+            }
+        }
+        syncDialog(
+            id: DialogID.checkLorasResults,
+            show: checkLorasFlow.results != nil,
+            title: "Check LoRAs — Results",
+            defaultSize: NSSize(width: 640, height: 520),
+            minSize: NSSize(width: 520, height: 400),
+            onClose: { [weak self] in
+                self?.checkLorasFlow.results = nil
+            }
+        ) {
+            if let results = checkLorasFlow.results {
+                CheckLorasResultsSheetView(
+                    bodyText: results.body,
+                    cancelledBanner: results.cancelledBanner
+                )
+            }
         }
     }
 

@@ -37,6 +37,9 @@ struct LoRASettingsTab: View {
         .onChange(of: viewModel.hideUninstalled) { _, _ in
             Task { await viewModel.reloadEntries() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserLoraCatalogChanged)) { _ in
+            Task { await viewModel.reloadEntries() }
+        }
         .sheet(isPresented: $showAddSheet) {
             LoRAImportSheet(
                 mode: .add,

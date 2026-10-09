@@ -59,6 +59,9 @@ struct LoRAImportSheet: View {
             if !initialSourcePath.isEmpty {
                 sourcePath = initialSourcePath
             }
+            if case .add = mode {
+                referencePrompt = LoraAddReferencePromptSettings.load(config: appState.config)
+            }
             Task { await loadEditIfNeeded() }
         }
         .sheet(isPresented: $showFindSheet) {
@@ -97,7 +100,11 @@ struct LoRAImportSheet: View {
                 triggerWord = entry.triggerWord
                 bestGuess = String(entry.bestGuess)
                 comment = entry.comment
-                referencePrompt = entry.referencePrompt
+                let fromEntry = entry.referencePrompt
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                referencePrompt = fromEntry.isEmpty
+                    ? LoraAddReferencePromptSettings.load(config: appState.config)
+                    : fromEntry
                 sourcePath = entry.localPath.isEmpty ? entry.sourcePath : entry.localPath
                 reuseLoraID = loraID
             }
@@ -142,6 +149,8 @@ struct LoRAImportSheet: View {
             errorMessage = "LoRA services are not available."
             return
         }
+
+        LoraAddReferencePromptSettings.save(referencePrompt, config: appState.config)
 
         if case .edit(let loraID) = mode {
             do {

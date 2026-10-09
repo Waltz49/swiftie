@@ -214,12 +214,14 @@ struct ImageGenLoraPicker: View {
     }
 
     private func currentStackIDs() -> [String] {
-        if let stack = values["mflux_lora_stack"] as? [String], !stack.isEmpty {
-            return stack
-        }
-        if let stack = values["mflux_lora_stack"] as? [Any] {
-            let ids = stack.compactMap { $0 as? String }.filter { !$0.isEmpty && $0 != "none" }
-            if !ids.isEmpty { return ids }
+        if values.keys.contains("mflux_lora_stack") {
+            if let stack = values["mflux_lora_stack"] as? [String] {
+                return stack.filter { !$0.isEmpty && $0 != "none" }
+            }
+            if let stack = values["mflux_lora_stack"] as? [Any] {
+                return stack.compactMap { $0 as? String }.filter { !$0.isEmpty && $0 != "none" }
+            }
+            return []
         }
         if let single = values["mflux_lora"] as? String, single != "none", !single.isEmpty {
             return [single]

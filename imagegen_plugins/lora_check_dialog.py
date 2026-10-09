@@ -33,7 +33,10 @@ from PySide6.QtWidgets import (
 )
 
 from config import get_config
-from imagegen_plugins.check_loras_debug import probe_elapsed_footer_lines
+from imagegen_plugins.check_loras_debug import (
+    apply_lora_check_result,
+    format_check_loras_results_text,
+)
 from imagegen_plugins.hf_model_ids import FLUX1_DEV, lora_model_display_name
 from imagegen_plugins.lora_catalog import (
     LORA_CATALOG,
@@ -41,13 +44,9 @@ from imagegen_plugins.lora_catalog import (
     lora_choice_label,
     lora_probe_history,
 )
-from imagegen_plugins.image_gen_persistence import (
-    clear_lora_probe_history,
-    save_lora_catalog_state,
-)
+from imagegen_plugins.image_gen_persistence import clear_lora_probe_history
 from imagegen_plugins.lora_compatibility_checker import (
     CheckLorasOptions,
-    LoraCheckChange,
     LoraCheckResult,
     LoraCheckStats,
     LoraProbeChoice,
@@ -675,117 +674,6 @@ class CheckLorasOptionsDialog(QDialog):
         return self._result_options
 
 
-def _changes_of(result: LoraCheckResult, kind: str) -> List[LoraCheckChange]:
-    return [c for c in result.changes if c.kind == kind]
-
-
-def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
-    st = result.stats
-    lines = [
-        (
-            "Check LoRAs cancelled (partial results saved)."
-            if result.cancelled
-            else "Check LoRAs finished."
-        ),
-        "",
-        "Summary",
-        f"  On-disk LoRAs tested: {st.loras_done}/{st.loras_total}",
-        f"  Installed models: {st.models_total}",
-        f"  GPU renders: {st.gpu_probes_done}/{st.probes_total}",
-        f"  Passed probes this run: {st.passed_probe_count}",
-        f"  LoRAs with at least one pass: {st.supported_loras}",
-        f"  LoRAs with no pass: {st.removed_loras}",
-        f"  Newly compatible pairs: {st.newly_supported_count}",
-        f"  Newly enabled in Settings: {st.newly_enabled_count}",
-        f"  Failed probes: {st.failed_probe_count}",
-        f"  Skipped (not on disk): {st.skipped_not_on_disk}",
-        f"  Skipped (hidden — not enabled): {st.skipped_hidden_count}",
-    ]
-    if st.skipped_registered_probes:
-        lines.append(f"  Skipped (already registered): {st.skipped_registered_probes}")
-    if st.files_discovered:
-        lines.append(f"  Weight files discovered: {st.files_discovered}")
-        lines.append(f"  MD5 duplicates skipped: {st.files_deduped}")
-    if st.skipped_unchanged:
-        lines.append(f"  Unchanged (history reused): {st.skipped_unchanged}")
-    if st.skipped_unchanged_probes:
-        lines.append(f"  Skipped unchanged renders: {st.skipped_unchanged_probes}")
-    if st.downloads_scanned:
-        lines.append(f"  Downloads scanned: {st.downloads_scanned}")
-        lines.append(f"  Downloads duplicates removed: {st.downloads_deduped}")
-        lines.append(f"  Downloads registered: {st.downloads_registered}")
-        lines.append(f"  Downloads with no passing model: {st.downloads_failed}")
-    if st.skipped_model_probes:
-        lines.append(
-            f"  Base models not installed (not probed): {st.skipped_model_probes}"
-        )
-
-    newly_enabled = _changes_of(result, "newly_enabled")
-    newly_supported = _changes_of(result, "newly_supported")
-    passed = _changes_of(result, "passed")
-    failed = _changes_of(result, "failed")
-    lost = _changes_of(result, "lost_support")
-    hidden = _changes_of(result, "skipped_hidden")
-    not_disk = _changes_of(result, "skipped_not_on_disk")
-    downloads_registered = _changes_of(result, "downloads_registered")
-    downloads_deduped = _changes_of(result, "downloads_deduped")
-    downloads_failed = _changes_of(result, "downloads_failed")
-    enabled_keys = {(c.lora_id, c.model_key) for c in newly_enabled}
-    hidden_keys = {(c.lora_id, c.model_key) for c in hidden}
-    compat_only = [
-        c
-        for c in newly_supported
-        if (c.lora_id, c.model_key) not in enabled_keys
-        and (c.lora_id, c.model_key) not in hidden_keys
-    ]
-
-    def add_section(
-        title: str,
-        items: List[LoraCheckChange],
-        *,
-        with_model: bool = True,
-        limit: int = 250,
-    ) -> None:
-        if not items:
-            return
-        lines.append("")
-        lines.append(f"{title} ({len(items)})")
-        for c in items[:limit]:
-            if with_model and c.model_label:
-                lines.append(f"  • {c.model_label} → {c.lora_label}")
-            else:
-                lines.append(f"  • {c.lora_label}")
-        if len(items) > limit:
-            lines.append(f"  … and {len(items) - limit} more")
-
-    add_section("Passed probes", passed)
-    add_section("Newly enabled", newly_enabled)
-    add_section("Downloads registered", downloads_registered)
-    add_section("Newly compatible (not newly enabled)", compat_only)
-    add_section("Failed probes", failed)
-    add_section("Lost prior compatibility", lost)
-    add_section("Passed but hidden (left disabled)", hidden)
-    add_section("Downloads duplicates removed", downloads_deduped, with_model=False)
-    add_section("Downloads with no passing model", downloads_failed, with_model=False)
-    add_section("Skipped — weights not on disk", not_disk, with_model=False, limit=80)
-
-    lines.extend(
-        [
-            "",
-            "Each on-disk LoRA is probed against every installed base model. Passing "
-            "pairs are recorded and enabled in Settings → LoRA (unless previously Hidden).",
-            "Weights are discovered under ~/.cache/image_browser/mflux_loras, "
-            "~/.cache/mflux_loras (recursive), and top-level ~/Downloads "
-            "*.safetensors. Duplicate files (same md5) are probed once. "
-            "Unchanged files reuse prior probe history.",
-            "Re-run after downloading new LoRA weights. Use Hide in Settings to "
-            "keep a LoRA out of the menus.",
-        ]
-    )
-    lines.extend(probe_elapsed_footer_lines(result))
-    return lines
-
-
 def _show_cancelled_dialog(parent, *, partial: bool) -> None:
     lines = ["Check LoRAs was cancelled."]
     if partial:
@@ -800,16 +688,7 @@ def _show_cancelled_dialog(parent, *, partial: bool) -> None:
 
 
 def _show_results_dialog(parent, result: LoraCheckResult) -> None:
-    from imagegen_plugins.check_loras_debug import LAST_REPORT_PATHS
-
-    text = "\n".join(_format_results_text_sections(result))
-    if LAST_REPORT_PATHS:
-        text = (
-            "Report file(s):\n"
-            + "\n".join(f"  {p}" for p in LAST_REPORT_PATHS)
-            + "\n\n"
-            + text
-        )
+    text = format_check_loras_results_text(result)
     dlg = QDialog(parent)
     dlg.setWindowTitle("Check LoRAs — Results")
     dlg.setWindowModality(Qt.WindowModality.WindowModal)
@@ -832,26 +711,8 @@ def _show_results_dialog(parent, result: LoraCheckResult) -> None:
 
 
 def _apply_check_result(parent, result: LoraCheckResult) -> None:
-    from imagegen_plugins.check_loras_debug import write_check_loras_report
-
-    settings_before = get_config().load_settings()
-    if result.model_support or result.cross_family_models or result.by_model or result.probe_history:
-        save_lora_catalog_state(
-            model_support=result.model_support or None,
-            cross_family_models=result.cross_family_models or None,
-            by_model=result.by_model or None,
-            probe_history=result.probe_history or None,
-        )
-    settings_after = get_config().load_settings()
-    try:
-        write_check_loras_report(
-            result,
-            settings_before=settings_before,
-            settings_after=settings_after,
-        )
-    except OSError as exc:
-        print(f"[Check LoRAs] Report write failed: {exc}")
-    settings = settings_after
+    apply_lora_check_result(result)
+    settings = get_config().load_settings()
     mw = parent
     if hasattr(mw, "refresh_open_imagegen_lora_combos"):
         mw.refresh_open_imagegen_lora_combos()

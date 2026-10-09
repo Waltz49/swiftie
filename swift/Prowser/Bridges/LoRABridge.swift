@@ -91,6 +91,96 @@ struct LoRAModelDraftSlice: Equatable {
     var deletedIDs: [String]
 }
 
+struct CheckLorasInstalledModel: Equatable, Identifiable {
+    var modelKey: String
+    var displayName: String
+    var id: String { modelKey }
+}
+
+struct CheckLorasProbeChoice: Equatable, Identifiable {
+    var key: String
+    var label: String
+    var displayName: String
+    var fromDownloads: Bool
+    var id: String { key }
+
+    static func fromDictionary(_ dict: [String: Any]) -> CheckLorasProbeChoice? {
+        guard let key = dict["key"] as? String, !key.isEmpty else { return nil }
+        return CheckLorasProbeChoice(
+            key: key,
+            label: dict["label"] as? String ?? key,
+            displayName: dict["display_name"] as? String ?? dict["label"] as? String ?? key,
+            fromDownloads: dict["from_downloads"] as? Bool ?? false
+        )
+    }
+}
+
+struct CheckLorasOptions: Equatable {
+    static let modelScopeAll = "all"
+    static let modelScopeSelected = "selected"
+    static let loraScopeAll = "all"
+    static let loraScopeSelected = "selected"
+    static let registrationIgnorePrevious = "ignore_previous"
+    static let registrationSkipRegistered = "skip_registered"
+    static let registrationOnlyRegistered = "only_registered"
+
+    var modelScope: String
+    var selectedModelKeys: [String]
+    var loraScope: String
+    var selectedLoraKeys: [String]
+    var registrationMode: String
+    var probePrompt: String
+    var skipUnchanged: Bool
+    var checkCrossFamilies: Bool
+
+    static func fromDictionary(_ dict: [String: Any]) -> CheckLorasOptions {
+        CheckLorasOptions(
+            modelScope: dict["model_scope"] as? String ?? modelScopeAll,
+            selectedModelKeys: dict["selected_model_keys"] as? [String] ?? [],
+            loraScope: dict["lora_scope"] as? String ?? loraScopeAll,
+            selectedLoraKeys: dict["selected_lora_keys"] as? [String] ?? [],
+            registrationMode: dict["registration_mode"] as? String ?? registrationIgnorePrevious,
+            probePrompt: dict["probe_prompt"] as? String ?? "test",
+            skipUnchanged: dict["skip_unchanged"] as? Bool ?? true,
+            checkCrossFamilies: dict["check_cross_families"] as? Bool ?? true
+        )
+    }
+
+    func bridgeDictionary() -> [String: Any] {
+        [
+            "model_scope": modelScope,
+            "selected_model_keys": selectedModelKeys,
+            "lora_scope": loraScope,
+            "selected_lora_keys": selectedLoraKeys,
+            "registration_mode": registrationMode,
+            "probe_prompt": probePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "test"
+                : probePrompt.trimmingCharacters(in: .whitespacesAndNewlines),
+            "skip_unchanged": skipUnchanged,
+            "check_cross_families": checkCrossFamilies,
+        ]
+    }
+}
+
+struct CheckLorasPrescanResult: Equatable {
+    var choices: [CheckLorasProbeChoice]
+    var installedModels: [CheckLorasInstalledModel]
+    var savedOptions: CheckLorasOptions
+}
+
+struct CheckLorasPrepareResult: Equatable {
+    var success: Bool
+    var nothingToProbe: Bool
+    var message: String?
+}
+
+struct CheckLorasRunResult: Equatable {
+    var cancelled: Bool
+    var probesDone: Int
+    var resultsText: String
+    var reportPaths: [String]
+}
+
 /// LoRA catalog bridge via bundled ``imagegen_plugins.lora_bridge`` worker.
 @MainActor
 final class LoRABridge {
@@ -378,5 +468,68 @@ final class LoRABridge {
             "command": "restore_recommendations",
             "model_key": modelKey,
         ])
+    }
+
+    func checkLorasPrescan() async throws -> CheckLorasPrescanResult {
+        let result = try await request(["command": "check_loras_prescan"])
+        let choices = (result["choices"] as? [[String: Any]] ?? []).compactMap(CheckLorasProbeChoice.fromDictionary)
+        let installed = (result["installed_models"] as? [[String: Any]] ?? []).compactMap { dict -> CheckLorasInstalledModel? in
+            guard let key = dict["model_key"] as? String else { return nil }
+            return CheckLorasInstalledModel(
+                modelKey: key,
+                displayName: dict["display_name"] as? String ?? key
+            )
+        }
+        let saved = CheckLorasOptions.fromDictionary(result["saved_options"] as? [String: Any] ?? [:])
+        return CheckLorasPrescanResult(choices: choices, installedModels: installed, savedOptions: saved)
+    }
+
+    func checkLorasPrepare(options: CheckLorasOptions) async throws -> CheckLorasPrepareResult {
+        let result = try await request([
+            "command": "check_loras_prepare",
+            "options": options.bridgeDictionary(),
+        ])
+        return CheckLorasPrepareResult(
+            success: result["success"] as? Bool ?? false,
+            nothingToProbe: result["nothing_to_probe"] as? Bool ?? false,
+            message: result["message"] as? String
+        )
+    }
+
+    func checkLorasRun(
+        options: CheckLorasOptions,
+        onProgress: @escaping @Sendable ([String: Any]) -> Void
+    ) async throws -> CheckLorasRunResult {
+        let result = try await request(
+            [
+                "command": "check_loras_run",
+                "options": options.bridgeDictionary(),
+            ],
+            awaitFinalResult: true,
+            onProgress: onProgress
+        )
+        return CheckLorasRunResult(
+            cancelled: result["cancelled"] as? Bool ?? false,
+            probesDone: (result["probes_done"] as? NSNumber)?.intValue ?? 0,
+            resultsText: result["results_text"] as? String ?? "",
+            reportPaths: result["report_paths"] as? [String] ?? []
+        )
+    }
+
+    func checkLorasCancel() async throws {
+        _ = try await request(["command": "check_loras_cancel"])
+    }
+
+    func checkLorasProbeHistoryCount() async throws -> Int {
+        let result = try await request([
+            "command": "check_loras_clear_probe_history",
+            "dry_run": true,
+        ])
+        return (result["count_before"] as? NSNumber)?.intValue ?? 0
+    }
+
+    func checkLorasClearProbeHistory() async throws -> Int {
+        let result = try await request(["command": "check_loras_clear_probe_history"])
+        return (result["removed"] as? NSNumber)?.intValue ?? 0
     }
 }

@@ -444,13 +444,16 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     }
 
     private func close() {
+        panel.delegate = nil
         if let sheetParent {
             sheetParent.endSheet(panel)
             self.sheetParent = nil
         } else {
             panel.orderOut(nil)
         }
-        NSApp.stopModal()
+        if NSApp.modalWindow === panel {
+            NSApp.stopModal()
+        }
         BrowserWindowIdentity.restoreBrowserKeyAfterAuxiliaryDialog()
     }
 
