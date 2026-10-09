@@ -1371,8 +1371,8 @@ def _run_baseline_vs_lora_probe(
     Shared Check LoRAs / import probe process for every T2I model:
 
     1. Same prompt for baseline and with-LoRA (caller supplies trigger-aware text)
-    2. One cached no-LoRA baseline per (model, prompt, size, steps)
-    3. With-LoRA render
+    2. With-LoRA render first (fail fast before baseline when LoRA is incompatible)
+    3. One cached no-LoRA baseline per (model, prompt, size, steps)
     4. CNN/pixel compare — identical ⇒ fail (no effect)
 
     Probe PNGs get the same EXIF UserComment layout as normal generations
@@ -1395,6 +1395,12 @@ def _run_baseline_vs_lora_probe(
         generate(path, True)
 
     try:
+        if cancel_check():
+            return False
+        _report(f"Creating test image for {pair}")
+        _gen_with_lora(out_path)
+        if cancel_check():
+            return False
         baseline_path, generated_baseline = _ensure_probe_baseline(
             cache,
             model_key=model_key,
@@ -1407,10 +1413,6 @@ def _run_baseline_vs_lora_probe(
             activity_callback=activity_callback,
         )
         if baseline_path is None or cancel_check():
-            return False
-        _report(f"Creating test image for {pair}")
-        _gen_with_lora(out_path)
-        if cancel_check():
             return False
         _report(f"Creating similarity data for {pair}")
         has_effect = _lora_probe_has_effect(

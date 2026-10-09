@@ -553,9 +553,9 @@ class _ImportLoraWorker(QThread):
 
     def _probe_activity_callback(self, message: str) -> None:
         lower = message.lower()
-        if "base image" in lower:
+        if "test image" in lower:
             step = 2
-        elif "test image" in lower:
+        elif "base image" in lower:
             step = 3
         elif "similarity" in lower:
             step = 4
