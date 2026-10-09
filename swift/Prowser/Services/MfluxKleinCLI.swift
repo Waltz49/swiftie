@@ -53,7 +53,7 @@ enum MfluxKleinCLI {
         if let quantize = params.quantize {
             args += ["--quantize", "\(quantize)"]
         }
-        let steps = max(minSteps, min(50, intValue(payload["steps"], default: 4)))
+        let steps = intValue(payload["steps"], default: 4)
         let seed = resolvedSeed(payload)
         args += [
             "--steps", "\(steps)",
@@ -73,17 +73,8 @@ enum MfluxKleinCLI {
         if let dir = payload["stepwise_image_output_dir"] as? String, !dir.isEmpty {
             args += ["--stepwise-image-output-dir", dir]
         }
-        if let paths = payload["mflux_lora_paths"] as? [String], !paths.isEmpty {
-            args.append("--lora-paths")
-            args += paths.map { String($0) }
-            if let scales = payload["mflux_lora_scales"] as? [Double], !scales.isEmpty {
-                args.append("--lora-scales")
-                args += scales.map { String($0) }
-            } else if let scales = payload["mflux_lora_scales"] as? [NSNumber], !scales.isEmpty {
-                args.append("--lora-scales")
-                args += scales.map { $0.stringValue }
-            }
-        }
+        MfluxCLIPipeline.appendLoraCLIArgs(to: &args, payload: payload)
+        args.append("--no-bake-lora")
     }
 
     private static func baseModel(forHFModelID hf: String) -> String {
@@ -101,6 +92,12 @@ enum MfluxKleinCLI {
     }
 
     private static func resolvedSeed(_ payload: [String: Any]) -> Int {
+        if let seed = payload["resolved_seed"] as? Int {
+            return seed % 2_147_483_648
+        }
+        if let seed = payload["resolved_seed"] as? NSNumber {
+            return seed.intValue % 2_147_483_648
+        }
         if boolValue(payload["random_seed"], default: true) {
             return Int.random(in: 0...(2_147_483_647))
         }

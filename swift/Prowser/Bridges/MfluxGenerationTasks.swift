@@ -98,22 +98,23 @@ final class MfluxGenerationTasks {
             let finalOutputPath = (runPayload["_klein_expand_post"] as? [String: String])?["final_output"]
                 ?? userOutputPath
             let directCLIPath = runPayload["output_path"] as? String ?? userOutputPath
-            let stepwiseDir = (runPayload["stepwise_image_output_dir"] as? String)
-                ?? StepwisePaths.makeStepwiseDir(steps: steps)
-            runPayload["stepwise_image_output_dir"] = stepwiseDir
-            let progressive = runPayload["progressive_output_path"] as? String
+            let progressive = (runPayload["progressive_output_path"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? finalOutputPath
+            let progressHandler: ([String: Any]) -> Void = { [weak self] message in
+                self?.onProgress?(message)
+            }
 
-            stepwiseWatcher = StepwiseProgressWatcher(
-                stepwiseDir: stepwiseDir,
-                progressiveOutputPath: progressive,
-                expectedSteps: steps,
-                onProgress: { [weak self] message in
-                    Task { @MainActor in
-                        self?.onProgress?(message)
-                    }
-                }
-            )
-            stepwiseWatcher?.start()
+            if !usePythonWorker,
+               let stepwiseDir = runPayload["stepwise_image_output_dir"] as? String,
+               !stepwiseDir.isEmpty {
+                stepwiseWatcher = StepwiseProgressWatcher(
+                    stepwiseDir: stepwiseDir,
+                    progressiveOutputPath: progressive,
+                    expectedSteps: steps,
+                    onProgress: progressHandler
+                )
+                stepwiseWatcher?.start()
+            }
 
             if usePythonWorker {
                 guard let config,
@@ -126,12 +127,16 @@ final class MfluxGenerationTasks {
                 let workerRun = try await ImageGenPipelineWorkerRunner.run(
                     pipelineID: pipelineID,
                     payload: runPayload,
-                    environment: pyEnv
-                ) { [weak self] proc in
-                    self?.process = proc
-                }
-                stepwiseWatcher?.stop()
-                stepwiseWatcher = nil
+                    environment: pyEnv,
+                    onProcessStarted: { [weak self] proc in
+                        self?.process = proc
+                    },
+                    onProgress: { message in
+                        Task { @MainActor in
+                            progressHandler(message)
+                        }
+                    }
+                )
                 process = nil
                 if cancelled {
                     finishJob(success: false, outputPath: finalOutputPath, error: "Cancelled")
@@ -176,7 +181,7 @@ final class MfluxGenerationTasks {
                 let runResult = try await MfluxProcessRunner.run(request) { [weak self] proc in
                     self?.process = proc
                 }
-                stepwiseWatcher?.stop()
+                await stepwiseWatcher?.flushAndStop()
                 stepwiseWatcher = nil
                 process = nil
 

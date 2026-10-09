@@ -218,7 +218,14 @@ def _run_klein_edit_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             source_path,
             max_side=payload_max_generation_dimension(payload),
         )
-    stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
+    preset_stepwise = payload.get("stepwise_image_output_dir")
+    if preset_stepwise and steps > 1:
+        stepwise_dir = str(preset_stepwise)
+        progressive_output_path = str(
+            payload.get("progressive_output_path") or output_path
+        )
+    else:
+        stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
 
     if os.path.isfile(output_path):
         try:

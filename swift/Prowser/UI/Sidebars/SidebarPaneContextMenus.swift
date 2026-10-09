@@ -54,7 +54,7 @@ enum SidebarPaneContextMenus {
             menu,
             title: "Intermediate Images",
             checked: controller.showProgressiveImages,
-            enabled: controller.isEnabled,
+            enabled: controller.isEnabled && controller.progressiveImagesSupportedForWork(),
             action: #selector(PaneMenuActions.jobsIntermediate(_:))
         )
         addCheckable(

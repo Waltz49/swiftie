@@ -142,6 +142,27 @@ final class ImageGenController {
         return viewingPathIsActiveGenerationOutput(path)
     }
 
+    /// Port of Python ``_progressive_images_supported_for_work``.
+    func progressiveImagesSupportedForWork() -> Bool {
+        if pipelineSupportsProgressiveImages(pluginID: activePluginID) {
+            return true
+        }
+        for job in queue.jobs {
+            if pipelineSupportsProgressiveImages(pluginID: job.pluginID) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func pipelineSupportsProgressiveImages(pluginID: String) -> Bool {
+        guard !pluginID.isEmpty,
+              let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else {
+            return false
+        }
+        return ImageGenPipelineModes.mode(pipelineID: plugin.pipelineID)?.supportsProgressiveImages == true
+    }
+
     var isDialogBuildPaused: Bool { dialogBuildPauseCount > 0 }
 
     var onImageGenerated: ((String) -> Void)?
@@ -1321,9 +1342,9 @@ final class ImageGenController {
             }
             progressMessage = "Generating…"
             taskStatusHTML = progressMessage
-            if let steps = values["steps"] as? Int {
+            if let steps = payload["steps"] as? Int {
                 liveStepTotal = steps
-            } else if let steps = values["steps"] as? NSNumber {
+            } else if let steps = payload["steps"] as? NSNumber {
                 liveStepTotal = steps.intValue
             }
             generationStartTime = Date()

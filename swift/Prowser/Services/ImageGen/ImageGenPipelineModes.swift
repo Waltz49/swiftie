@@ -12,6 +12,7 @@ enum ImageGenPipelineModes {
     }
 
     private static let mfluxMinSteps = 4
+    private static let mfluxFlowMatchMinSteps = 2
 
     private static let modes: [String: Mode] = [
         "flux_schnell_mflux_play": Mode(stepsMin: 4, stepsMax: 30, stepsDefault: 4, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: true),
@@ -36,7 +37,9 @@ enum ImageGenPipelineModes {
         guard let mode = mode(pipelineID: pipelineID) else { return out }
         var steps = intValue(out["steps"]) ?? mode.stepsDefault
         steps = max(mode.stepsMin, min(mode.stepsMax, steps))
-        if pipelineID.hasPrefix("flux_schnell") || pipelineID.hasPrefix("mflux_") {
+        if pipelineID.hasPrefix("mflux_flux2_klein") {
+            steps = max(mfluxFlowMatchMinSteps, steps)
+        } else if pipelineID.hasPrefix("flux_schnell") || pipelineID.hasPrefix("mflux_") {
             steps = max(mfluxMinSteps, steps)
         }
         out["steps"] = steps

@@ -50,7 +50,6 @@ final class LoRASettingsViewModel {
     func reloadEntries() async {
         guard let bridge, !selectedModelKey.isEmpty else { return }
         do {
-            let slice = draftByModel[selectedModelKey] ?? LoRAModelDraftSlice(enabledIDs: [], deletedIDs: [])
             let result = try await bridge.settingsEntries(
                 modelKey: selectedModelKey,
                 hideUninstalled: hideUninstalled,

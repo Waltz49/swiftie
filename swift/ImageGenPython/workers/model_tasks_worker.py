@@ -1,6 +1,8 @@
 """Minimal worker helpers for vendored pipeline scripts (Swift ImageGenPython bundle)."""
 from __future__ import annotations
 
+import json
+import sys
 import time
 from typing import Any
 
@@ -9,8 +11,11 @@ def generation_cancel_requested() -> bool:
     return False
 
 
-def emit_worker_message(_msg: dict[str, Any]) -> None:
-    pass
+def emit_worker_message(msg: dict[str, Any]) -> None:
+    """Stream progress to stderr for ``ImageGenPipelineWorkerRunner`` (stdout stays final JSON)."""
+    if not msg or msg.get("type") != "progress":
+        return
+    print(json.dumps(msg, ensure_ascii=False), file=sys.stderr, flush=True)
 
 
 def perf_log_kv(event: str, **fields: Any) -> None:

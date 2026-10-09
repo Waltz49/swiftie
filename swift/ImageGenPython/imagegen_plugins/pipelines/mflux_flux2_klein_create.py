@@ -124,7 +124,14 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if lora_scales and not isinstance(lora_scales, list):
         lora_scales = [float(lora_scales)]
 
-    stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
+    preset_stepwise = payload.get("stepwise_image_output_dir")
+    if preset_stepwise and steps > 1:
+        stepwise_dir = str(preset_stepwise)
+        progressive_output_path = str(
+            payload.get("progressive_output_path") or output_path
+        )
+    else:
+        stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
 
     if os.path.isfile(output_path):
         try:

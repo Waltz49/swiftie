@@ -78,7 +78,7 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 
 ### Job Control pane
 
-- [x] Toolbar actions: intermediate images, hold queue, skip copy (`jobs_toolbar.py`)
+- [x] Toolbar actions: intermediate images, hold queue, skip copy (`jobs_toolbar.py`); MFLUX CLI stepwise dir + bundled Python worker stderr progress (`ImageGenPipelineWorkerRunner`, `StepwiseProgressWatcher`)
 - [x] Floating panel: “Always on Top” (when opened as panel)
 - [~] “Show Toolbar” toggle in context menu
 - [x] Job cards with structured status rows, drag reorder, edit/cancel, selection + action bar, active progress strip

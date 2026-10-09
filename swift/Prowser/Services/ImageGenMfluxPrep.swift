@@ -37,11 +37,7 @@ enum ImageGenMfluxPrep {
         var run = payload
 
         let pipelineID = run["pipeline_id"] as? String ?? ""
-        let steps = intValue(run["steps"], default: 4)
-        let outputPath = run["output_path"] as? String ?? ""
-        let (stepwiseDir, progressivePath) = stepwisePaths(steps: steps, outputPath: outputPath)
-        run["stepwise_image_output_dir"] = stepwiseDir
-        run["progressive_output_path"] = progressivePath
+        let userOutputPath = run["output_path"] as? String ?? ""
 
         if boolValue(run["random_seed"], default: true) {
             let seed = Int.random(in: 0...(2_147_483_647))
@@ -49,7 +45,9 @@ enum ImageGenMfluxPrep {
             run["seed"] = seed
             run["random_seed"] = false
         } else {
-            run["resolved_seed"] = intValue(run["seed"], default: 0)
+            let seed = intValue(run["seed"], default: 0) % 2_147_483_648
+            run["resolved_seed"] = seed
+            run["seed"] = seed
         }
 
         switch pipelineID {
@@ -65,6 +63,21 @@ enum ImageGenMfluxPrep {
             try applyKleinCreate(&run)
         default:
             break
+        }
+
+        let progressiveTarget = (run["_klein_expand_post"] as? [String: String])?["final_output"]
+            ?? userOutputPath
+        let steps = intValue(run["steps"], default: 4)
+        let (stepwiseDir, progressivePath) = stepwisePaths(steps: steps, outputPath: progressiveTarget)
+        if let stepwiseDir {
+            run["stepwise_image_output_dir"] = stepwiseDir
+        } else {
+            run.removeValue(forKey: "stepwise_image_output_dir")
+        }
+        if let progressivePath {
+            run["progressive_output_path"] = progressivePath
+        } else {
+            run.removeValue(forKey: "progressive_output_path")
         }
         return run
     }
@@ -225,9 +238,10 @@ enum ImageGenMfluxPrep {
         }
     }
 
-    private static func stepwisePaths(steps: Int, outputPath: String) -> (String, String) {
+    private static func stepwisePaths(steps: Int, outputPath: String) -> (String?, String?) {
+        guard steps > 1 else { return (nil, nil) }
         let dir = StepwisePaths.makeStepwiseDir(steps: steps)
-        let progressive = outputPath.isEmpty ? "" : outputPath
+        let progressive = outputPath.isEmpty ? nil : outputPath
         return (dir, progressive)
     }
 

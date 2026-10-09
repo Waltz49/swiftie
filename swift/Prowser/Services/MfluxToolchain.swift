@@ -159,11 +159,16 @@ enum MfluxCLIPipeline {
         if boolValue(payload["low_ram"], default: true) {
             args.append("--low-ram")
         }
+        appendMfluxProgressAndLoraFlags(to: &args, payload: payload)
+        return args
+    }
+
+    static func appendMfluxProgressAndLoraFlags(to args: inout [String], payload: [String: Any]) {
         if let dir = payload["stepwise_image_output_dir"] as? String, !dir.isEmpty {
             args += ["--stepwise-image-output-dir", dir]
         }
         appendLoraCLIArgs(to: &args, payload: payload)
-        return args
+        args.append("--no-bake-lora")
     }
 
     static func appendLoraCLIArgs(to args: inout [String], payload: [String: Any]) {
@@ -225,10 +230,7 @@ enum MfluxCLIPipeline {
         if boolValue(payload["low_ram"], default: true) {
             args.append("--low-ram")
         }
-        if let dir = payload["stepwise_image_output_dir"] as? String, !dir.isEmpty {
-            args += ["--stepwise-image-output-dir", dir]
-        }
-        appendLoraCLIArgs(to: &args, payload: payload)
+        appendMfluxProgressAndLoraFlags(to: &args, payload: payload)
         return args
     }
 
@@ -274,6 +276,12 @@ enum MfluxCLIPipeline {
     }
 
     private static func resolvedSeed(_ payload: [String: Any]) -> Int {
+        if let seed = payload["resolved_seed"] as? Int {
+            return seed % 2_147_483_648
+        }
+        if let seed = payload["resolved_seed"] as? NSNumber {
+            return seed.intValue % 2_147_483_648
+        }
         if boolValue(payload["random_seed"], default: true) {
             return Int.random(in: 0...(2_147_483_647))
         }

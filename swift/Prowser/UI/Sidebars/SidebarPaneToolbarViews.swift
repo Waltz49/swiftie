@@ -272,7 +272,7 @@ struct JobsToolbarView: View {
                     hoverName: "jobs_intermediate_hover",
                     tooltip: "Intermediate Images\nShow progressive images during generation",
                     selected: controller.showProgressiveImages,
-                    enabled: controller.isEnabled
+                    enabled: controller.isEnabled && controller.progressiveImagesSupportedForWork()
                 ) {
                     controller.setShowProgressiveImages(!controller.showProgressiveImages)
                 }

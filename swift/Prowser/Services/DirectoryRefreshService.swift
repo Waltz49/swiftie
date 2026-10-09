@@ -98,6 +98,7 @@ enum DirectoryRefreshService {
                 }
                 if appState.fileData.currentViewMode == .browse {
                     if let current = appState.fileData.currentImagePath,
+                       !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: current),
                        appState.metadataCache.fileChangedOnDisk(path: current) {
                         invalidateThumbnails(appState: appState, paths: [current])
                         appState.reloadBrowseImageIfCurrent(path: current)
@@ -282,6 +283,9 @@ enum DirectoryRefreshService {
     }
 
     static func invalidateThumbnails(appState: AppState, paths: [String]) {
+        let paths = paths.filter {
+            !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: $0)
+        }
         guard !paths.isEmpty else { return }
         for path in paths {
             appState.metadataCache.invalidate(path: path)
