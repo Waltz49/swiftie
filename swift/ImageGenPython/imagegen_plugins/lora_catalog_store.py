@@ -60,7 +60,20 @@ def load_lora_catalog_file() -> Dict[str, Any]:
         if path.is_file():
             data = _read_json(path)
             if data is not None:
+                from imagegen_plugins.lora_disk_first_migration import (
+                    migrate_disk_first_catalog_if_needed,
+                )
+
+                data, disk_changed = migrate_disk_first_catalog_if_needed(
+                    dict(data)
+                )
                 migrated = migrate_lora_catalog(data)
+                if disk_changed:
+                    _atomic_write_json(path, migrated)
+                    try:
+                        mtime = path.stat().st_mtime
+                    except OSError:
+                        mtime = None
                 _lora_catalog_cache_mtime = mtime
                 _lora_catalog_cache_data = migrated
                 return copy.deepcopy(migrated)

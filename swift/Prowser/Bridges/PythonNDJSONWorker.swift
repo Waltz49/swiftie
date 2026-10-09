@@ -4,6 +4,9 @@ import Foundation
 actor PythonNDJSONWorker {
     typealias ProgressHandler = @Sendable ([String: Any]) -> Void
 
+    /// First launch can block on Python imports before the ``ready`` line (e.g. LoRA bridge).
+    private static let startupReadyTimeout: TimeInterval = 90
+
     private let moduleName: String?
     private let scriptURL: URL?
     private var environment: PythonLocator.Environment?
@@ -32,13 +35,24 @@ actor PythonNDJSONWorker {
         self.scriptURL = scriptURL
     }
 
-    func bind(environment: PythonLocator.Environment?) {
-        if environment?.executable != self.environment?.executable
-            || environment?.bundleRoot != self.environment?.bundleRoot
-            || environment?.profilePath != self.environment?.profilePath {
-            Task { await shutdownInternal() }
+    func bind(environment: PythonLocator.Environment?) async {
+        if let environment {
+            if let current = self.environment,
+               current.executable == environment.executable,
+               current.bundleRoot == environment.bundleRoot,
+               current.profilePath == environment.profilePath {
+                return
+            }
+            if self.environment != nil {
+                await shutdownInternal()
+            }
+            self.environment = environment
+            return
         }
-        self.environment = environment
+        if self.environment != nil {
+            await shutdownInternal()
+        }
+        self.environment = nil
     }
 
     var running: Bool {
@@ -97,17 +111,25 @@ actor PythonNDJSONWorker {
         }
 
         try proc.run()
-        try await waitForReady()
+        try await ensureReady(timeout: Self.startupReadyTimeout)
     }
 
     private func waitForReady() async throws {
+        try await ensureReady(timeout: Self.startupReadyTimeout)
+    }
+
+    func ensureReady(timeout: TimeInterval) async throws {
         if isReady { return }
-        for _ in 0..<300 {
+        let attempts = max(1, Int((timeout * 10).rounded(.up)))
+        for _ in 0..<attempts {
             if isReady { return }
             if shuttingDown { throw BridgeError.notReady }
+            if let process, !process.isRunning, !isReady {
+                throw BridgeError.workerNotRunning
+            }
             try await Task.sleep(for: .milliseconds(100))
         }
-        throw BridgeError.notReady
+        if !isReady { throw BridgeError.notReady }
     }
 
     func send(

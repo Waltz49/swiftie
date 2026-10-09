@@ -211,7 +211,9 @@ class LoraCheckWorkerThread:
 def _lora_label(lora_id: str, *, display_label: str = "") -> str:
     if display_label:
         return display_label
-    entry = get_lora_entry(lora_id) or FLUX_LORA_CATALOG.get(lora_id)
+    from imagegen_plugins.lora_builtin_migration import legacy_lora_catalog
+
+    entry = get_lora_entry(lora_id) or legacy_lora_catalog().get(lora_id)
     return lora_choice_label(entry) if entry else lora_id
 
 
@@ -489,8 +491,15 @@ class CheckLorasOptionsDialog(QDialog):
 
         layout.addWidget(QLabel("<b>Probe prompt</b>"))
         self._probe_prompt_edit = QLineEdit()
-        self._probe_prompt_edit.setPlaceholderText("test")
-        self._probe_prompt_edit.setText(options.probe_prompt or "test")
+        from imagegen_plugins.lora_compatibility_checker import (
+            CHECK_LORAS_DEFAULT_PROBE_PROMPT,
+            normalize_check_loras_probe_prompt,
+        )
+
+        self._probe_prompt_edit.setPlaceholderText(CHECK_LORAS_DEFAULT_PROBE_PROMPT)
+        self._probe_prompt_edit.setText(
+            normalize_check_loras_probe_prompt(options.probe_prompt)
+        )
         layout.addWidget(self._probe_prompt_edit)
         probe_hint = QLabel(
             "Used for every probe render (baseline and each LoRA). "
@@ -657,7 +666,11 @@ class CheckLorasOptionsDialog(QDialog):
             if self._selected_models_radio.isChecked()
             else MODEL_SCOPE_ALL
         )
-        probe_prompt = self._probe_prompt_edit.text().strip() or "test"
+        from imagegen_plugins.lora_compatibility_checker import (
+            normalize_check_loras_probe_prompt,
+        )
+
+        probe_prompt = normalize_check_loras_probe_prompt(self._probe_prompt_edit.text())
         self._result_options = CheckLorasOptions(
             model_scope=scope,
             selected_model_keys=selected,
@@ -1050,7 +1063,11 @@ def _start_probe_run(
     probes_total = max(1, lora_check_work_total(plan_stats))
     start_time = time.monotonic()
     if not (plan_stats.probe_prompt or "").strip():
-        plan_stats.probe_prompt = (options.probe_prompt or "test").strip() or "test"
+        from imagegen_plugins.lora_compatibility_checker import (
+            normalize_check_loras_probe_prompt,
+        )
+
+        plan_stats.probe_prompt = normalize_check_loras_probe_prompt(options.probe_prompt)
     progress = _LoraCheckProgressDialog(parent, probes_total)
     progress.set_status_html(
         _format_progress_html("scan", "", "", plan_stats, elapsed=0.0),

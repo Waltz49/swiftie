@@ -24,6 +24,9 @@ _import_cancel_flag: List[bool] = [False]
 _check_loras_prepared = None
 _check_loras_cancel_flag: List[bool] = [False]
 _check_loras_running = False
+_check_loras_preparing = False
+_active_check_loras_thread: Optional[threading.Thread] = None
+_active_check_loras_prepare_thread: Optional[threading.Thread] = None
 
 
 def _entry_to_dict(entry, *, model_key: str = "") -> Dict[str, Any]:
@@ -74,6 +77,41 @@ def _entry_to_dict(entry, *, model_key: str = "") -> Dict[str, Any]:
         "lifecycle": lifecycle,
         "status_label": lora_status_label(entry.lora_id, model_key, settings),
         "has_recovery_source": bool(has_recovery_source(entry)),
+        "registered": True,
+    }
+
+
+def _discovered_disk_entry_dict(path) -> Dict[str, Any]:
+    from pathlib import Path
+
+    from imagegen_plugins.lora_user_entries import display_name_from_path
+
+    p = Path(path).expanduser()
+    try:
+        resolved = str(p.resolve())
+    except OSError:
+        resolved = str(p)
+    name = display_name_from_path(p)
+    return {
+        "lora_id": f"path:{resolved}",
+        "display_name": name,
+        "label": name,
+        "choice_label": name,
+        "host_id": "",
+        "scale": 1.0,
+        "best_guess": 1.0,
+        "trigger_word": "",
+        "comment": "",
+        "reference_prompt": "",
+        "repo_id": "",
+        "filename": p.name,
+        "local_path": resolved,
+        "source_path": resolved,
+        "installed": True,
+        "lifecycle": "discovered",
+        "status_label": "on disk (not registered)",
+        "has_recovery_source": False,
+        "registered": False,
     }
 
 
@@ -148,6 +186,23 @@ def _handle_settings_entries(cmd: Dict[str, Any]) -> Dict[str, Any]:
         if hide_uninstalled and lifecycle == LORA_LIFECYCLE_UNINSTALLED:
             continue
         entries.append(_entry_to_dict(entry, model_key=model_key))
+
+    from imagegen_plugins.lora_compatibility_checker import _path_is_registered
+    from imagegen_plugins.lora_disk_discovery import discover_lora_weight_paths
+
+    discovered_entries: List[Dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for weight_path in discover_lora_weight_paths(settings):
+        if _path_is_registered(weight_path, settings):
+            continue
+        row = _discovered_disk_entry_dict(weight_path)
+        key = row["local_path"]
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        discovered_entries.append(row)
+    discovered_entries.sort(key=lambda r: (r.get("display_name") or "").lower())
+
     return {
         "type": "result",
         "job_id": cmd.get("job_id", ""),
@@ -156,6 +211,7 @@ def _handle_settings_entries(cmd: Dict[str, Any]) -> Dict[str, Any]:
         "enabled_ids": list(slice_.get("enabled_ids") or []),
         "deleted_ids": list(slice_.get("deleted_ids") or slice_.get("hidden_ids") or []),
         "entries": entries,
+        "discovered_entries": discovered_entries,
     }
 
 
@@ -191,11 +247,11 @@ def _handle_save_catalog_state(cmd: Dict[str, Any]) -> Dict[str, Any]:
 def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
     from config import get_config
     from imagegen_plugins import plugin_by_id
-    from imagegen_plugins.image_gen_model_selector import plugin_supports_lora
     from imagegen_plugins.lora_catalog import (
         get_lora_entry,
         lora_choices_for_plugin,
         lora_run_dialog_empty_hint,
+        plugin_supports_lora,
     )
     from imagegen_plugins.lora_host_registry import HOST_SD15
     from imagegen_plugins.mflux_lora_presets import (
@@ -923,6 +979,7 @@ def _check_loras_options_from_dict(raw: Dict[str, Any]):
         MODEL_SCOPE_ALL,
         REGISTRATION_IGNORE_PREVIOUS,
         installed_probeable_models,
+        normalize_check_loras_probe_prompt,
     )
 
     installed = set(installed_probeable_models())
@@ -937,7 +994,7 @@ def _check_loras_options_from_dict(raw: Dict[str, Any]):
         lora_scope=lora_scope,
         selected_lora_keys=selected_lora,
         registration_mode=mode,
-        probe_prompt=str(raw.get("probe_prompt") or "test").strip() or "test",
+        probe_prompt=normalize_check_loras_probe_prompt(raw.get("probe_prompt")),
         skip_unchanged=bool(raw.get("skip_unchanged", True)),
         check_cross_families=bool(raw.get("check_cross_families", True)),
     )
@@ -1009,46 +1066,117 @@ def _handle_check_loras_prescan(cmd: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _handle_check_loras_prepare(cmd: Dict[str, Any]) -> Dict[str, Any]:
-    global _check_loras_prepared
+def _run_check_loras_prepare_worker(cmd: Dict[str, Any], job_id: str) -> None:
+    global _check_loras_prepared, _check_loras_preparing
     from dataclasses import asdict
 
     from config import get_config
     from imagegen_plugins.lora_compatibility_checker import (
         PreparedLoraProbePlan,
+        normalize_check_loras_probe_prompt,
         persist_check_loras_options,
         plan_disk_lora_probes,
     )
 
     options = _check_loras_options_from_dict(cmd.get("options") or {})
+    try:
+        persist_check_loras_options(options)
+        cfg = get_config().load_settings()
+        candidates, plan, plan_stats = plan_disk_lora_probes(
+            cfg, dedupe=True, options=options
+        )
+        if _check_loras_cancel_flag[0]:
+            emit_message(
+                {
+                    "type": "result",
+                    "job_id": job_id,
+                    "command": "check_loras_prepare",
+                    "success": False,
+                    "cancelled": True,
+                }
+            )
+            return
+        plan_stats.probe_prompt = normalize_check_loras_probe_prompt(options.probe_prompt)
+        prepared = PreparedLoraProbePlan(
+            candidates=candidates, plan=plan, stats=plan_stats
+        )
+        _check_loras_prepared = prepared
+        nothing = not plan or (
+            plan_stats.probes_total == 0
+            and plan_stats.skipped_unchanged_probes == 0
+            and plan_stats.skipped_unchanged == 0
+        )
+        payload: Dict[str, Any] = {
+            "type": "result",
+            "job_id": job_id,
+            "command": "check_loras_prepare",
+            "success": True,
+            "cancelled": False,
+            "stats": asdict(plan_stats),
+            "candidates_count": len(candidates),
+            "nothing_to_probe": nothing,
+        }
+        if nothing:
+            payload["message"] = _check_loras_nothing_to_probe_message(prepared, options)
+        emit_message(payload)
+    except Exception as exc:
+        emit_message(
+            {
+                "type": "result",
+                "job_id": job_id,
+                "command": "check_loras_prepare",
+                "success": False,
+                "cancelled": bool(_check_loras_cancel_flag[0]),
+                "message": str(exc),
+            }
+        )
+    finally:
+        _check_loras_preparing = False
+
+
+def _handle_check_loras_prepare(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    global _check_loras_cancel_flag, _active_check_loras_prepare_thread, _check_loras_preparing
+
+    if _check_loras_running:
+        raise RuntimeError("Check LoRAs is already running.")
+    if _check_loras_preparing:
+        raise RuntimeError("Check LoRAs prepare is already running.")
+    if _active_import_thread is not None and _active_import_thread.is_alive():
+        raise RuntimeError("A LoRA import is running. Wait for it to finish.")
+
+    job_id = str(cmd.get("job_id") or "")
+    _check_loras_cancel_flag[0] = False
+    _check_loras_preparing = True
+    thread = threading.Thread(
+        target=_run_check_loras_prepare_worker,
+        args=(cmd, job_id),
+        daemon=True,
+    )
+    _active_check_loras_prepare_thread = thread
+    thread.start()
+    return {
+        "type": "result",
+        "job_id": job_id,
+        "command": "check_loras_prepare",
+        "started": True,
+    }
+
+
+def _handle_check_loras_save_options(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    from imagegen_plugins.lora_compatibility_checker import persist_check_loras_options
+
+    options = _check_loras_options_from_dict(cmd.get("options") or {})
     persist_check_loras_options(options)
-    cfg = get_config().load_settings()
-    candidates, plan, plan_stats = plan_disk_lora_probes(cfg, dedupe=True, options=options)
-    _check_loras_prepared = PreparedLoraProbePlan(
-        candidates=candidates, plan=plan, stats=plan_stats
-    )
-    plan_stats.probe_prompt = (options.probe_prompt or "test").strip() or "test"
-    nothing = not plan or (
-        plan_stats.probes_total == 0
-        and plan_stats.skipped_unchanged_probes == 0
-        and plan_stats.skipped_unchanged == 0
-    )
-    payload: Dict[str, Any] = {
+    return {
         "type": "result",
         "job_id": cmd.get("job_id", ""),
-        "command": "check_loras_prepare",
+        "command": "check_loras_save_options",
         "success": True,
-        "stats": asdict(plan_stats),
-        "candidates_count": len(candidates),
-        "nothing_to_probe": nothing,
     }
-    if nothing:
-        payload["message"] = _check_loras_nothing_to_probe_message(_check_loras_prepared, options)
-    return payload
 
 
-def _handle_check_loras_run(cmd: Dict[str, Any]) -> None:
-    global _check_loras_cancel_flag, _check_loras_prepared, _check_loras_running
+def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
+    global _check_loras_prepared, _check_loras_running
     from dataclasses import asdict
 
     from config import get_config
@@ -1061,16 +1189,8 @@ def _handle_check_loras_run(cmd: Dict[str, Any]) -> None:
         run_lora_compatibility_check,
     )
 
-    if _check_loras_running:
-        raise RuntimeError("Check LoRAs is already running.")
-    if _active_import_thread is not None and _active_import_thread.is_alive():
-        raise RuntimeError("A LoRA import is running. Wait for it to finish.")
-
-    job_id = str(cmd.get("job_id") or "")
-    _check_loras_cancel_flag[0] = False
     options = _check_loras_options_from_dict(cmd.get("options") or {})
     settings = get_config().load_settings()
-    _check_loras_running = True
 
     def progress_callback(
         probe_index: int,
@@ -1145,8 +1265,45 @@ def _handle_check_loras_run(cmd: Dict[str, Any]) -> None:
                 "report_paths": report_paths,
             }
         )
+    except Exception as exc:
+        emit_message(
+            {
+                "type": "error",
+                "job_id": job_id,
+                "command": "check_loras_run",
+                "message": str(exc),
+            }
+        )
     finally:
         _check_loras_running = False
+
+
+def _handle_check_loras_run(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    global _check_loras_cancel_flag, _active_check_loras_thread, _check_loras_running
+
+    if _check_loras_preparing:
+        raise RuntimeError("Check LoRAs is still preparing. Wait for it to finish.")
+    if _check_loras_running:
+        raise RuntimeError("Check LoRAs is already running.")
+    if _active_import_thread is not None and _active_import_thread.is_alive():
+        raise RuntimeError("A LoRA import is running. Wait for it to finish.")
+
+    job_id = str(cmd.get("job_id") or "")
+    _check_loras_cancel_flag[0] = False
+    _check_loras_running = True
+    thread = threading.Thread(
+        target=_run_check_loras_worker,
+        args=(cmd, job_id),
+        daemon=True,
+    )
+    _active_check_loras_thread = thread
+    thread.start()
+    return {
+        "type": "result",
+        "job_id": job_id,
+        "command": "check_loras_run",
+        "started": True,
+    }
 
 
 def _handle_check_loras_cancel(cmd: Dict[str, Any]) -> Dict[str, Any]:
@@ -1225,6 +1382,7 @@ def _handle_command(cmd: Dict[str, Any]) -> Any:
         "match_exif": _handle_match_exif,
         "check_loras_prescan": _handle_check_loras_prescan,
         "check_loras_prepare": _handle_check_loras_prepare,
+        "check_loras_save_options": _handle_check_loras_save_options,
         "check_loras_run": _handle_check_loras_run,
         "check_loras_cancel": _handle_check_loras_cancel,
         "check_loras_clear_probe_history": _handle_check_loras_clear_probe_history,
@@ -1232,10 +1390,7 @@ def _handle_command(cmd: Dict[str, Any]) -> Any:
     handler = handlers.get(command)
     if handler is None:
         raise ValueError(f"Unknown command: {command}")
-    result = handler(cmd)
-    if command == "check_loras_run":
-        return None
-    return result
+    return handler(cmd)
 
 
 def main() -> None:

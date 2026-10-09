@@ -7,9 +7,9 @@ struct CheckLorasOptionsDialogHost: View {
     let prescan: CheckLorasPrescanResult
     @State private var options: CheckLorasOptions
 
-    init(prescan: CheckLorasPrescanResult) {
+    init(prescan: CheckLorasPrescanResult, appConfig: AppConfig) {
         self.prescan = prescan
-        _options = State(initialValue: prescan.savedOptions)
+        _options = State(initialValue: appConfig.checkLorasOptionsFromSettings())
     }
 
     var body: some View {
@@ -17,6 +17,7 @@ struct CheckLorasOptionsDialogHost: View {
             choices: prescan.choices,
             installedModels: prescan.installedModels,
             options: $options,
+            appConfig: appState.config,
             loraBridge: appState.workers.lora,
             onCancel: { closeDialog() },
             onRun: {

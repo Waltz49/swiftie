@@ -144,6 +144,35 @@ final class AppConfig {
         }
     }
 
+    /// Check LoRAs options dialog (`imagegen.check_loras` in settings.json).
+    func checkLorasOptionsFromSettings() -> CheckLorasOptions {
+        let imagegen = readSettings()["imagegen"] as? [String: Any] ?? [:]
+        let raw = imagegen["check_loras"] as? [String: Any] ?? [:]
+        return CheckLorasOptions.fromDictionary(raw)
+    }
+
+    /// Write Check LoRAs options immediately (same keys as Python ``persist_check_loras_options``).
+    func persistCheckLorasOptions(_ options: CheckLorasOptions) {
+        let blob = options.bridgeDictionary()
+        func merge(into storage: inout [String: Any]) {
+            var imagegen = storage["imagegen"] as? [String: Any] ?? [:]
+            imagegen["check_loras"] = blob
+            storage["imagegen"] = imagegen
+        }
+        merge(into: &settings)
+        if var draft = settingsDraft {
+            merge(into: &draft)
+            draft.removeValue(forKey: "debug_mode")
+            settingsDraft = draft
+        }
+        if var snap = settingsSnapshot {
+            merge(into: &snap)
+            snap.removeValue(forKey: "debug_mode")
+            settingsSnapshot = snap
+        }
+        saveSettings()
+    }
+
     /// Update last file/folder/view without changing the launch-restore toggle.
     func updateRestoreSnapshot(
         filePath: String?,

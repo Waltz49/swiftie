@@ -12,12 +12,6 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from imagegen_plugins.lora_entry import FluxLoraEntry
 
-from imagegen_plugins.lora_catalogs.flux1_fill import FLUX1_FILL_LORAS
-from imagegen_plugins.lora_catalogs.flux1_t2i import FLUX1_T2I_LORAS
-from imagegen_plugins.lora_catalogs.flux2_klein import FLUX2_KLEIN_LORAS
-from imagegen_plugins.lora_catalogs.sd15 import SD15_LORAS
-from imagegen_plugins.lora_catalogs.sdxl import SDXL_LORAS
-from imagegen_plugins.lora_catalogs.z_image_turbo import Z_IMAGE_TURBO_LORAS
 from imagegen_plugins.lora_entry import DEFAULT_ENABLED_LORA_IDS_BY_HOST
 from imagegen_plugins.lora_host_registry import LORA_HOST_ORDER
 from imagegen_plugins.lora_model_registry import (
@@ -27,15 +21,6 @@ from imagegen_plugins.lora_model_registry import (
 )
 
 from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, user_lora_entries_from_lc
-
-LORA_CATALOG = {
-    **FLUX1_T2I_LORAS,
-    **FLUX1_FILL_LORAS,
-    **FLUX2_KLEIN_LORAS,
-    **SD15_LORAS,
-    **SDXL_LORAS,
-    **Z_IMAGE_TURBO_LORAS,
-}
 
 _LEGACY_HIDDEN_KEY = "hidden_ids"
 _BY_HOST_KEY = "by_host"
@@ -110,16 +95,7 @@ def apply_entry_overrides(
 
 
 def default_enabled_lora_ids_by_model() -> Dict[str, Tuple[str, ...]]:
-    out: Dict[str, list[str]] = {k: [] for k in LORA_SETTINGS_MODEL_ORDER}
-    for host_id, ids in DEFAULT_ENABLED_LORA_IDS_BY_HOST.items():
-        for lid in ids:
-            entry = LORA_CATALOG.get(lid)
-            if entry is None:
-                continue
-            for mk in lora_models_for_entry(entry):
-                if lid not in out[mk]:
-                    out[mk].append(lid)
-    return {k: tuple(v) for k, v in out.items()}
+    return {k: () for k in LORA_SETTINGS_MODEL_ORDER}
 
 
 DEFAULT_ENABLED_LORA_IDS_BY_MODEL = default_enabled_lora_ids_by_model()
@@ -130,7 +106,7 @@ def default_by_host() -> Dict[str, Dict[str, List[str]]]:
     for host_id in LORA_HOST_ORDER:
         enabled = list(DEFAULT_ENABLED_LORA_IDS_BY_HOST.get(host_id, ()))
         out[host_id] = {
-            "enabled_ids": [x for x in enabled if x in LORA_CATALOG],
+            "enabled_ids": [],
             DELETED_IDS_KEY: [],
         }
     return out
@@ -141,16 +117,14 @@ def default_by_model() -> Dict[str, Dict[str, List[str]]]:
     for model_key in LORA_SETTINGS_MODEL_ORDER:
         enabled = list(DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ()))
         out[model_key] = {
-            "enabled_ids": [x for x in enabled if x in LORA_CATALOG],
+            "enabled_ids": [],
             DELETED_IDS_KEY: [],
         }
     return out
 
 
-def _catalog_for_lc(lc: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(LORA_CATALOG)
-    merged.update(user_lora_entries_from_lc(lc))
-    return merged
+def _catalog_for_lc(lc: Dict[str, Any]) -> Dict[str, FluxLoraEntry]:
+    return dict(user_lora_entries_from_lc(lc))
 
 
 def _normalize_host_slice(
@@ -198,21 +172,24 @@ def _normalize_model_slice(
     }
 
 
-def _by_model_from_by_host(by_host: Dict[str, Dict[str, List[str]]]) -> Dict[str, Dict[str, List[str]]]:
+def _by_model_from_by_host(
+    by_host: Dict[str, Dict[str, List[str]]],
+    catalog: Dict[str, FluxLoraEntry],
+) -> Dict[str, Dict[str, List[str]]]:
     """One-time migration: host enabled/hidden → per-target-model slices."""
     out = default_by_model()
     for host_id, slice_ in by_host.items():
         if not isinstance(slice_, dict):
             continue
         for lid in slice_.get("enabled_ids") or []:
-            entry = LORA_CATALOG.get(str(lid))
+            entry = catalog.get(str(lid))
             if entry is None:
                 continue
             for mk in lora_models_for_entry(entry):
                 if str(lid) not in out[mk]["enabled_ids"]:
                     out[mk]["enabled_ids"].append(str(lid))
         for lid in _slice_deleted_ids(slice_):
-            entry = LORA_CATALOG.get(str(lid))
+            entry = catalog.get(str(lid))
             if entry is None:
                 continue
             for mk in lora_models_for_entry(entry):
@@ -225,17 +202,13 @@ def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]
     catalog = _catalog_for_lc(lc)
     ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
     if _BY_MODEL_KEY not in lc:
-        lc[_BY_MODEL_KEY] = _by_model_from_by_host(by_host)
+        lc[_BY_MODEL_KEY] = _by_model_from_by_host(by_host, catalog)
     by_model = dict(lc.get(_BY_MODEL_KEY) or {})
     for model_key in LORA_SETTINGS_MODEL_ORDER:
         slice_ = by_model.get(model_key)
         if not isinstance(slice_, dict):
             by_model[model_key] = {
-                "enabled_ids": [
-                    str(x)
-                    for x in DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ())
-                    if str(x) in LORA_CATALOG
-                ],
+                "enabled_ids": [],
                 DELETED_IDS_KEY: [],
             }
         else:
@@ -304,6 +277,10 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure by_host + by_model exist with normalized slices."""
     if not isinstance(lc, dict):
         lc = {}
+
+    from imagegen_plugins.lora_disk_first_migration import migrate_disk_first_catalog_if_needed
+
+    lc, _disk_migrated = migrate_disk_first_catalog_if_needed(lc)
 
     had_by_host = _BY_HOST_KEY in lc and isinstance(lc.get(_BY_HOST_KEY), dict)
     if had_by_host:

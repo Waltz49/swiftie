@@ -1,5 +1,9 @@
 import Foundation
 
+private enum LoRABridgeTiming {
+    static let workerReadyTimeout: TimeInterval = 5
+}
+
 struct LoRAChoice: Identifiable, Equatable {
     var presetID: String
     var label: String
@@ -60,6 +64,7 @@ struct LoRACatalogEntry: Identifiable, Equatable {
     var lifecycle: String
     var statusLabel: String
     var hasRecoverySource: Bool
+    var registered: Bool
     var id: String { loraID }
 
     static func fromDictionary(_ dict: [String: Any]) -> LoRACatalogEntry? {
@@ -81,7 +86,8 @@ struct LoRACatalogEntry: Identifiable, Equatable {
             installed: dict["installed"] as? Bool ?? false,
             lifecycle: dict["lifecycle"] as? String ?? "",
             statusLabel: dict["status_label"] as? String ?? "",
-            hasRecoverySource: dict["has_recovery_source"] as? Bool ?? false
+            hasRecoverySource: dict["has_recovery_source"] as? Bool ?? false,
+            registered: dict["registered"] as? Bool ?? true
         )
     }
 }
@@ -116,6 +122,13 @@ struct CheckLorasProbeChoice: Equatable, Identifiable {
 }
 
 struct CheckLorasOptions: Equatable {
+    static let defaultProbePrompt = "A woman riding a bicycle on a path."
+
+    static func normalizedProbePrompt(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? defaultProbePrompt : trimmed
+    }
+
     static let modelScopeAll = "all"
     static let modelScopeSelected = "selected"
     static let loraScopeAll = "all"
@@ -140,7 +153,7 @@ struct CheckLorasOptions: Equatable {
             loraScope: dict["lora_scope"] as? String ?? loraScopeAll,
             selectedLoraKeys: dict["selected_lora_keys"] as? [String] ?? [],
             registrationMode: dict["registration_mode"] as? String ?? registrationIgnorePrevious,
-            probePrompt: dict["probe_prompt"] as? String ?? "test",
+            probePrompt: normalizedProbePrompt(dict["probe_prompt"] as? String ?? ""),
             skipUnchanged: dict["skip_unchanged"] as? Bool ?? true,
             checkCrossFamilies: dict["check_cross_families"] as? Bool ?? true
         )
@@ -153,9 +166,7 @@ struct CheckLorasOptions: Equatable {
             "lora_scope": loraScope,
             "selected_lora_keys": selectedLoraKeys,
             "registration_mode": registrationMode,
-            "probe_prompt": probePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "test"
-                : probePrompt.trimmingCharacters(in: .whitespacesAndNewlines),
+            "probe_prompt": Self.normalizedProbePrompt(probePrompt),
             "skip_unchanged": skipUnchanged,
             "check_cross_families": checkCrossFamilies,
         ]
@@ -170,6 +181,7 @@ struct CheckLorasPrescanResult: Equatable {
 
 struct CheckLorasPrepareResult: Equatable {
     var success: Bool
+    var cancelled: Bool
     var nothingToProbe: Bool
     var message: String?
 }
@@ -202,6 +214,28 @@ final class LoRABridge {
         return ImageGenPluginAvailability.venvPythonReady(config: config)
     }
 
+    /// Cold-start grace period before treating the LoRA worker / venv as unavailable.
+    static let workerReadyTimeout: TimeInterval = LoRABridgeTiming.workerReadyTimeout
+
+    /// Poll until the imagegen venv path is executable (first launch can lag briefly).
+    func waitUntilAvailable(timeout: TimeInterval = LoRABridgeTiming.workerReadyTimeout) async -> Bool {
+        if isAvailable { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            if isAvailable { return true }
+        }
+        return isAvailable
+    }
+
+    /// Wait for venv (up to ``timeout``) and bind; ``worker.send`` starts the process and waits for ready.
+    private func ensureWorkerReady(timeout: TimeInterval = LoRABridgeTiming.workerReadyTimeout) async throws {
+        guard await waitUntilAvailable(timeout: timeout) else {
+            throw BridgeError.pythonUnavailable
+        }
+        try await prepareWorker()
+    }
+
     func shutdown() {
         Task { await worker.shutdown() }
     }
@@ -219,8 +253,21 @@ final class LoRABridge {
         awaitFinalResult: Bool = false,
         onProgress: PythonNDJSONWorker.ProgressHandler? = nil
     ) async throws -> [String: Any] {
-        try await prepareWorker()
-        return try await worker.send(command, awaitFinalResult: awaitFinalResult, onProgress: onProgress)
+        try await ensureWorkerReady()
+        do {
+            return try await worker.send(command, awaitFinalResult: awaitFinalResult, onProgress: onProgress)
+        } catch let error as BridgeError where Self.isRecoverableWorkerStartupError(error) {
+            await worker.shutdown()
+            try await ensureWorkerReady()
+            return try await worker.send(command, awaitFinalResult: awaitFinalResult, onProgress: onProgress)
+        }
+    }
+
+    private static func isRecoverableWorkerStartupError(_ error: BridgeError) -> Bool {
+        switch error {
+        case .notReady, .workerNotRunning: return true
+        default: return false
+        }
     }
 
     func settingsModels() async throws -> [LoRASettingsModel] {
@@ -240,7 +287,12 @@ final class LoRABridge {
         modelKey: String,
         hideUninstalled: Bool,
         draftByModel: [String: LoRAModelDraftSlice]
-    ) async throws -> (entries: [LoRACatalogEntry], enabledIDs: [String], deletedIDs: [String]) {
+    ) async throws -> (
+        entries: [LoRACatalogEntry],
+        discoveredEntries: [LoRACatalogEntry],
+        enabledIDs: [String],
+        deletedIDs: [String]
+    ) {
         let drafts = draftByModel.mapValues { slice in
             [
                 "enabled_ids": slice.enabledIDs,
@@ -254,9 +306,11 @@ final class LoRABridge {
             "draft_by_model": drafts,
         ])
         let entries = (result["entries"] as? [[String: Any]] ?? []).compactMap(LoRACatalogEntry.fromDictionary)
+        let discovered = (result["discovered_entries"] as? [[String: Any]] ?? [])
+            .compactMap(LoRACatalogEntry.fromDictionary)
         let enabled = result["enabled_ids"] as? [String] ?? []
         let deleted = result["deleted_ids"] as? [String] ?? []
-        return (entries, enabled, deleted)
+        return (entries, discovered, enabled, deleted)
     }
 
     func saveCatalogState(modelKey: String, byModel: [String: LoRAModelDraftSlice]) async throws {
@@ -484,13 +538,24 @@ final class LoRABridge {
         return CheckLorasPrescanResult(choices: choices, installedModels: installed, savedOptions: saved)
     }
 
-    func checkLorasPrepare(options: CheckLorasOptions) async throws -> CheckLorasPrepareResult {
-        let result = try await request([
-            "command": "check_loras_prepare",
+    func checkLorasSaveOptions(options: CheckLorasOptions) async throws {
+        _ = try await request([
+            "command": "check_loras_save_options",
             "options": options.bridgeDictionary(),
         ])
+    }
+
+    func checkLorasPrepare(options: CheckLorasOptions) async throws -> CheckLorasPrepareResult {
+        let result = try await request(
+            [
+                "command": "check_loras_prepare",
+                "options": options.bridgeDictionary(),
+            ],
+            awaitFinalResult: true
+        )
         return CheckLorasPrepareResult(
             success: result["success"] as? Bool ?? false,
+            cancelled: result["cancelled"] as? Bool ?? false,
             nothingToProbe: result["nothing_to_probe"] as? Bool ?? false,
             message: result["message"] as? String
         )

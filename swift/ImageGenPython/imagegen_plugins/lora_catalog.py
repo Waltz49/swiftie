@@ -23,12 +23,6 @@ from imagegen_plugins.lora_model_registry import (
     lora_model_key_from_values,
     lora_models_for_entry,
 )
-from imagegen_plugins.lora_catalogs.flux1_fill import FLUX1_FILL_LORAS
-from imagegen_plugins.lora_catalogs.flux1_t2i import FLUX1_T2I_LORAS
-from imagegen_plugins.lora_catalogs.flux2_klein import FLUX2_KLEIN_LORAS
-from imagegen_plugins.lora_catalogs.sd15 import SD15_LORAS
-from imagegen_plugins.lora_catalogs.sdxl import SDXL_LORAS
-from imagegen_plugins.lora_catalogs.z_image_turbo import Z_IMAGE_TURBO_LORAS
 from imagegen_plugins.lora_entry import (
     DEFAULT_CACHE,
     DEFAULT_ENABLED_LORA_IDS,
@@ -63,14 +57,8 @@ from imagegen_plugins.lora_host_registry import (
 if TYPE_CHECKING:
     from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
-LORA_CATALOG: Dict[str, FluxLoraEntry] = {
-    **FLUX1_T2I_LORAS,
-    **FLUX1_FILL_LORAS,
-    **FLUX2_KLEIN_LORAS,
-    **SD15_LORAS,
-    **SDXL_LORAS,
-    **Z_IMAGE_TURBO_LORAS,
-}
+# Disk-first: no built-in entries at runtime (see lora_builtin_migration for legacy IDs).
+LORA_CATALOG: Dict[str, FluxLoraEntry] = {}
 
 # Back-compat alias used across the codebase.
 FLUX_LORA_CATALOG = LORA_CATALOG
@@ -103,22 +91,9 @@ def klein_lora_mismatch_message(entry: FluxLoraEntry, active_hf_model_id: str) -
 
 
 def merged_lora_catalog(settings: Optional[Dict[str, Any]] = None) -> Dict[str, FluxLoraEntry]:
-    from imagegen_plugins.lora_user_entries import (
-        is_user_lora_id,
-        user_lora_entries_from_settings,
-    )
+    from imagegen_plugins.lora_user_entries import user_lora_entries_from_settings
 
-    lc = lora_catalog_from_settings(settings)
-    overrides = entry_overrides_from_lc(lc)
-    merged = dict(LORA_CATALOG)
-    merged.update(user_lora_entries_from_settings(settings))
-    for lora_id, entry in merged.items():
-        if is_user_lora_id(lora_id):
-            continue
-        override = overrides.get(lora_id)
-        if override:
-            merged[lora_id] = apply_entry_overrides(entry, override)
-    return merged
+    return dict(user_lora_entries_from_settings(settings))
 
 
 def catalog_entries_sorted(

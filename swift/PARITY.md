@@ -157,7 +157,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [~] Models for Search — `ModelsSearchSettingsTab` (similarity metric/threshold; background CLIP toggles moved to Caches tab)
 - [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden; remove installed models + cache coordination)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
-- [~] LoRA — `LoRASettingsTab`, `LoRABridge`, run-dialog stack picker, Map LoRAs (Debug); Check LoRAs Swift UI + `lora_bridge` probes
+- [~] LoRA — disk-first library (user entries + on-disk discovery; no curated built-in catalog). `LoRASettingsTab` shows registered LoRAs and “On disk (not in library)”; `LoRABridge`, run-dialog stack picker, Map LoRAs (Debug); Check LoRAs Swift UI + `lora_bridge` probes
 - [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; face model artifacts excluded from generic cache clear when appropriate; idle CLIP/CNN indexing toggles when models installed)
 
 ## Menus — File

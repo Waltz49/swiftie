@@ -143,8 +143,41 @@ struct LoRASettingsTab: View {
                 ForEach(viewModel.entries) { entry in
                     entryRow(entry)
                 }
+                if !viewModel.discoveredEntries.isEmpty {
+                    Text("On disk (not in library)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                    ForEach(viewModel.discoveredEntries) { entry in
+                        discoveredEntryRow(entry)
+                    }
+                }
             }
         }
+    }
+
+    private func discoveredEntryRow(_ entry: LoRACatalogEntry) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Toggle("", isOn: .constant(false))
+                .labelsHidden()
+                .disabled(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.label)
+                    .fontWeight(.medium)
+                Text(entry.statusLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .help(entry.localPath)
+            Spacer()
+            Button("Add to library…") {
+                viewModel.pendingImportPath = entry.localPath
+                showAddSheet = true
+            }
+        }
+        .padding(6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.2))
+        .cornerRadius(6)
     }
 
     private func entryRow(_ entry: LoRACatalogEntry) -> some View {
@@ -171,12 +204,14 @@ struct LoRASettingsTab: View {
                     Task { await viewModel.install(loraID: entry.loraID) }
                 }
             }
-            Button(role: .destructive) {
-                Task { await viewModel.delete(loraID: entry.loraID) }
-            } label: {
-                Image(systemName: "trash")
+            if entry.registered {
+                Button(role: .destructive) {
+                    Task { await viewModel.delete(loraID: entry.loraID) }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
             }
-            .buttonStyle(.borderless)
         }
         .padding(6)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))

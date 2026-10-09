@@ -909,7 +909,6 @@ def update_lora_entry_metadata(
     ``scale`` / ``best_guess`` are left unchanged when omitted (None).
     ``reference_prompt`` is left unchanged when omitted (``_UNSET``); pass ``""`` to clear.
     """
-    from imagegen_plugins.lora_catalog import LORA_CATALOG
     from imagegen_plugins.lora_catalog_settings import (
         DELETED_IDS_KEY,
         ENTRY_OVERRIDES_KEY,
@@ -973,21 +972,7 @@ def update_lora_entry_metadata(
             raw[lid] = entry_dict
             lc[USER_ENTRIES_KEY] = raw
         else:
-            if lid not in LORA_CATALOG:
-                raise ValueError(f"LoRA {lid!r} was not found.")
-            overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
-            prev = dict(overrides.get(lid) or {})
-            prev["display_name"] = name
-            prev["trigger_word"] = trigger
-            if scale_val is not None:
-                prev["scale"] = scale_val
-            if best_guess_val is not None:
-                prev["best_guess"] = best_guess_val
-            prev["comment"] = note
-            if update_reference_prompt:
-                prev["reference_prompt"] = ref_prompt
-            overrides[lid] = prev
-            lc[ENTRY_OVERRIDES_KEY] = overrides
+            raise ValueError(f"LoRA {lid!r} was not found.")
         imagegen["lora_catalog"] = lc
 
     _mutate_imagegen_settings(mutate)
@@ -1115,74 +1100,13 @@ def uninstall_lora_weights(lora_id: str) -> None:
 
 
 def delete_lora_from_library(lora_id: str, *, model_key: str = "") -> None:
-    """Permanently remove a LoRA from the user's library (Deleted state)."""
-    from imagegen_plugins.lora_catalog import (
-        LORA_CATALOG,
-        get_lora_entry,
-        is_lora_installed,
-        model_keys_for_lora_entry,
-        remove_lora_weights_from_disk,
-    )
-    from imagegen_plugins.lora_catalog_settings import (
-        CROSS_FAMILY_MODELS_KEY,
-        DELETED_IDS_KEY,
-        ENTRY_OVERRIDES_KEY,
-        PROBE_HISTORY_KEY,
-        migrate_lora_catalog,
-        normalize_probe_history,
-    )
+    """Permanently remove a user LoRA from the library."""
     from imagegen_plugins.lora_user_entries import is_user_lora_id
 
     lid = str(lora_id or "").strip()
-    if not lid:
+    if not lid or not is_user_lora_id(lid):
         return
-    if is_user_lora_id(lid):
-        remove_user_lora(lid)
-        return
-
-    entry = get_lora_entry(lid)
-    if entry is None or lid not in LORA_CATALOG:
-        return
-    if is_lora_installed(lid):
-        remove_lora_weights_from_disk(entry)
-    remove_lora_enabled_everywhere(lid)
-
-    host_models = list(model_keys_for_lora_entry(entry)) if entry is not None else []
-    mk = (model_key or "").strip()
-    targets = [mk] if mk else host_models
-
-    def mutate(imagegen: dict) -> None:
-        lc = _imagegen_lora_catalog(imagegen)
-        bm = dict(lc.get("by_model") or {})
-        mark_models = list(targets) if targets else list(bm.keys())
-        for model in mark_models:
-            if not model:
-                continue
-            slice_ = dict(bm.get(model) or {"enabled_ids": [], DELETED_IDS_KEY: []})
-            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
-            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
-            if lid not in deleted:
-                deleted.append(lid)
-            bm[model] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
-        lc["by_model"] = bm
-        ms = dict(lc.get("model_support") or {})
-        ms.pop(lid, None)
-        lc["model_support"] = ms
-        cf = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
-        cf.pop(lid, None)
-        lc[CROSS_FAMILY_MODELS_KEY] = cf
-        overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
-        overrides.pop(lid, None)
-        lc[ENTRY_OVERRIDES_KEY] = overrides
-        prev_ph = normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
-        lc[PROBE_HISTORY_KEY] = {
-            key: slice_
-            for key, slice_ in prev_ph.items()
-            if key != lid and not str(key).startswith(f"{lid}:")
-        }
-        imagegen["lora_catalog"] = lc
-
-    _mutate_imagegen_settings(mutate)
+    remove_user_lora(lid)
 
 
 def save_lora_user_preset() -> None:

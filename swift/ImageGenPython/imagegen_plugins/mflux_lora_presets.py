@@ -30,10 +30,7 @@ FLUX_LORA_CATALOG = LORA_CATALOG
 
 _DIFFUSERS_LORA_HOSTS = frozenset({HOST_SD15, HOST_SDXL})
 
-MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),) + tuple(
-    (lora_choice_label(e), e.lora_id)
-    for e in sorted(LORA_CATALOG.values(), key=lambda x: x.display_name.lower())
-)
+MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),)
 
 # Shown (disabled) when the active model does not support LoRAs.
 LORA_UNSUPPORTED_PRESET_ID = "__lora_unsupported__"

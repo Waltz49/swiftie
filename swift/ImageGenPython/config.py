@@ -973,7 +973,7 @@ IMAGEGEN_DEFAULTS = {
             "model_scope": "all",
             "selected_model_keys": [],
             "registration_mode": "ignore_previous",
-            "probe_prompt": "test",
+            "probe_prompt": "A woman riding a bicycle on a path.",
             "skip_unchanged": True,
             "cnn_identical_min_cosine": 0.98,
         },

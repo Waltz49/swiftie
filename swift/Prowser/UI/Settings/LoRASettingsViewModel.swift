@@ -11,6 +11,7 @@ final class LoRASettingsViewModel {
     var models: [LoRASettingsModel] = []
     var selectedModelKey: String = ""
     var entries: [LoRACatalogEntry] = []
+    var discoveredEntries: [LoRACatalogEntry] = []
     var enabledIDs: Set<String> = []
     var hideUninstalled = true
     var isLoading = false
@@ -56,6 +57,7 @@ final class LoRASettingsViewModel {
                 draftByModel: draftByModel
             )
             entries = result.entries
+            discoveredEntries = result.discoveredEntries
             enabledIDs = Set(result.enabledIDs)
             draftByModel[selectedModelKey] = LoRAModelDraftSlice(
                 enabledIDs: result.enabledIDs,

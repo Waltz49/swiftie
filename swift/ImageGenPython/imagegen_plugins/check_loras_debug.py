@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_MFLUX_4BIT, lora_model_display_name
 from imagegen_plugins.lora_compatibility_checker import LoraCheckChange, LoraCheckResult
+from imagegen_plugins.lora_disk_discovery import lora_weights_search_roots_display
 
 LAST_REPORT_PATHS: List[str] = []
 
@@ -128,9 +129,9 @@ def format_results_text_sections(result: LoraCheckResult) -> List[str]:
             "",
             "Each on-disk LoRA is probed against every installed base model. Passing "
             "pairs are recorded and enabled in Settings → LoRA (unless previously Hidden).",
-            "Weights are discovered under ~/.cache/image_browser/mflux_loras, "
-            "~/.cache/mflux_loras (recursive), and top-level ~/Downloads "
-            "*.safetensors. Duplicate files (same md5) are probed once. "
+            "Weights are discovered under: "
+            + "; ".join(lora_weights_search_roots_display())
+            + ". Duplicate files (same md5) are probed once. "
             "Unchanged files reuse prior probe history.",
             "Re-run after downloading new LoRA weights. Use Hide in Settings to "
             "keep a LoRA out of the menus.",

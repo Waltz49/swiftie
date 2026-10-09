@@ -23,30 +23,16 @@ _ALT_CACHE = Path.home() / ".cache" / "mflux_loras"
 LORA_MIN_STEPS = 2
 
 DEFAULT_ENABLED_LORA_IDS_BY_HOST: dict[str, tuple[str, ...]] = {
-    "flux1_t2i": (
-        "mspaint1",
-        "super_realism",
-        "sldr_nsfw_v2",
-        "pola_photo_flux",
-        "paper_cutout",
-    ),
+    "flux1_t2i": (),
     "flux1_fill": (),
     "flux2_klein": (),
-    "z_image_turbo": (
-        "z_childrens_drawings",
-        "z_technically_color",
-    ),
-    "sd15": (
-        "sd15_anime_character",
-        "sd15_furry",
-    ),
-    "sdxl": (
-        "sdxl_werewolf",
-    ),
+    "z_image_turbo": (),
+    "sd15": (),
+    "sdxl": (),
 }
 
 # Back-compat alias for migration/tests.
-DEFAULT_ENABLED_LORA_IDS: tuple[str, ...] = DEFAULT_ENABLED_LORA_IDS_BY_HOST["flux1_t2i"]
+DEFAULT_ENABLED_LORA_IDS: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

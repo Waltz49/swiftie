@@ -128,11 +128,7 @@ def user_lora_entries_from_settings(
 def merged_lora_catalog(
     settings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, FluxLoraEntry]:
-    from imagegen_plugins.lora_catalog import LORA_CATALOG
-
-    merged = dict(LORA_CATALOG)
-    merged.update(user_lora_entries_from_settings(settings))
-    return merged
+    return dict(user_lora_entries_from_settings(settings))
 
 
 def display_name_from_path(path: Path) -> str:

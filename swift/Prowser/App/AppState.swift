@@ -1679,7 +1679,7 @@ final class AppState {
             }
         ) {
             if let prescan = checkLorasFlow.optionsPrescan {
-                CheckLorasOptionsDialogHost(prescan: prescan)
+                CheckLorasOptionsDialogHost(prescan: prescan, appConfig: config)
             }
         }
         syncDialog(

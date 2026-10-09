@@ -38,7 +38,6 @@ from imagegen_plugins.lora_catalog import (
     lora_weights_file_is_valid,
 )
 from imagegen_plugins.lora_catalog_settings import model_state
-from imagegen_plugins.lora_entry import DEFAULT_CACHE, _ALT_CACHE
 from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
 
 from imagegen_plugins.lora_model_registry import (
@@ -47,9 +46,11 @@ from imagegen_plugins.lora_model_registry import (
     lora_probe_default_steps,
     lora_probe_model_is_local,
 )
+from imagegen_plugins.lora_disk_discovery import (
+    discover_lora_weight_paths,
+    downloads_safetensors_paths,
+)
 from imagegen_plugins.lora_probe_effect import LoraProbeBaselineCache
-
-DOWNLOADS_LORA_DIR = Path.home() / "Downloads"
 _PENDING_DOWNLOAD_LORA_ID = "__pending_download__"
 # Check LoRAs always renders at this square size with each model's default steps.
 LORA_PROBE_SIZE = 384
@@ -62,6 +63,14 @@ REGISTRATION_IGNORE_PREVIOUS = "ignore_previous"
 REGISTRATION_SKIP_REGISTERED = "skip_registered"
 REGISTRATION_ONLY_REGISTERED = "only_registered"
 
+CHECK_LORAS_DEFAULT_PROBE_PROMPT = "A woman riding a bicycle on a path."
+
+
+def normalize_check_loras_probe_prompt(text: Any) -> str:
+    """Non-empty probe prompt for Check LoRAs (settings, UI, and renders)."""
+    prompt = str(text or "").strip()
+    return prompt or CHECK_LORAS_DEFAULT_PROBE_PROMPT
+
 
 @dataclass
 class CheckLorasOptions:
@@ -70,7 +79,7 @@ class CheckLorasOptions:
     lora_scope: str = LORA_SCOPE_ALL
     selected_lora_keys: List[str] = field(default_factory=list)
     registration_mode: str = REGISTRATION_IGNORE_PREVIOUS
-    probe_prompt: str = "test"
+    probe_prompt: str = CHECK_LORAS_DEFAULT_PROBE_PROMPT
     skip_unchanged: bool = True
     check_cross_families: bool = True
 
@@ -274,7 +283,7 @@ def check_loras_options_from_settings(
     ):
         mode = REGISTRATION_IGNORE_PREVIOUS
 
-    probe_prompt = str(raw.get("probe_prompt") or "test").strip() or "test"
+    probe_prompt = normalize_check_loras_probe_prompt(raw.get("probe_prompt"))
     skip_unchanged = bool(raw.get("skip_unchanged", True))
     check_cross_families = bool(raw.get("check_cross_families", True))
 
@@ -308,7 +317,7 @@ def persist_check_loras_options(options: CheckLorasOptions) -> None:
         "lora_scope": options.lora_scope,
         "selected_lora_keys": list(options.selected_lora_keys),
         "registration_mode": options.registration_mode,
-        "probe_prompt": options.probe_prompt,
+        "probe_prompt": normalize_check_loras_probe_prompt(options.probe_prompt),
         "skip_unchanged": bool(options.skip_unchanged),
         "check_cross_families": bool(options.check_cross_families),
     }
@@ -451,52 +460,8 @@ def _content_digest_for_path(
         return None
 
 
-def _downloads_safetensors_paths() -> List[Path]:
-    """Top-level ~/Downloads/*.safetensors only (not recursive)."""
-    root = DOWNLOADS_LORA_DIR.expanduser()
-    if not root.is_dir():
-        return []
-    paths: List[Path] = []
-    for child in sorted(root.iterdir()):
-        if not child.is_file() or child.suffix.lower() != ".safetensors":
-            continue
-        try:
-            paths.append(child.resolve())
-        except OSError:
-            paths.append(child)
-    return paths
-
-
-def _cache_safetensors_paths(root: Path) -> List[Path]:
-    expanded = root.expanduser()
-    if not expanded.is_dir():
-        return []
-    paths: List[Path] = []
-    for path in sorted(expanded.rglob("*.safetensors")):
-        if not path.is_file():
-            continue
-        try:
-            paths.append(path.resolve())
-        except OSError:
-            paths.append(path)
-    return paths
-
-
 def _discover_safetensors_paths() -> List[Path]:
-    paths: List[Path] = []
-    seen: Set[Path] = set()
-    for root in (DEFAULT_CACHE, _ALT_CACHE):
-        for path in _cache_safetensors_paths(root):
-            if path in seen:
-                continue
-            seen.add(path)
-            paths.append(path)
-    for path in _downloads_safetensors_paths():
-        if path in seen:
-            continue
-        seen.add(path)
-        paths.append(path)
-    return paths
+    return discover_lora_weight_paths()
 
 
 def _fingerprint_for_path(
@@ -695,7 +660,7 @@ def dedupe_downloads_loras(
     (size-first; MD5 only when sizes collide).
     Returns (scanned_count, deleted_count).
     """
-    paths = _downloads_safetensors_paths()
+    paths = downloads_safetensors_paths()
     if not paths:
         return 0, 0
     digest_cache: Dict[Path, str] = {}
@@ -798,12 +763,20 @@ def _probe_plan_item_selection_keys(item: LoraProbePlanItem) -> Set[str]:
     return keys
 
 
-def _selected_lora_key_set(options: CheckLorasOptions) -> Optional[Set[str]]:
-    """Return allowed LoRA option keys, or None when every discovered LoRA is in scope."""
-    if options.lora_scope != LORA_SCOPE_SELECTED or not options.selected_lora_keys:
-        return None
-    allowed = {str(k) for k in options.selected_lora_keys if str(k)}
-    return allowed or None
+def _discovered_lora_key_set(settings: Optional[Dict[str, Any]]) -> Set[str]:
+    return {c.key for c in discover_find_lora_choices(settings)}
+
+
+def _selected_lora_key_set(
+    options: CheckLorasOptions,
+    settings: Optional[Dict[str, Any]],
+) -> Set[str]:
+    """Allowed LoRA option keys: selected subset or all discovered weight files."""
+    if options.lora_scope == LORA_SCOPE_SELECTED and options.selected_lora_keys:
+        allowed = {str(k) for k in options.selected_lora_keys if str(k)}
+        if allowed:
+            return allowed
+    return _discovered_lora_key_set(settings)
 
 
 def _catalog_entry_selection_keys(
@@ -829,10 +802,9 @@ def _orphan_path_selection_keys(path: Path) -> Set[str]:
 def _filter_plan_by_lora_scope(
     plan: List[LoraProbePlanItem],
     options: CheckLorasOptions,
+    settings: Optional[Dict[str, Any]],
 ) -> List[LoraProbePlanItem]:
-    allowed = _selected_lora_key_set(options)
-    if allowed is None:
-        return plan
+    allowed = _selected_lora_key_set(options, settings)
     return [
         item
         for item in plan
@@ -960,7 +932,7 @@ def plan_disk_lora_probes(
     """
     stats = LoraCheckStats()
     opts = options or CheckLorasOptions()
-    allowed_loras = _selected_lora_key_set(opts)
+    allowed_loras = _selected_lora_key_set(opts, settings)
     digest_cache: Dict[Path, str] = {}
     discovered = _discover_safetensors_paths()
     stats.files_discovered = len(discovered)
@@ -973,11 +945,13 @@ def plan_disk_lora_probes(
             changes=dedupe_changes,
         )
     else:
-        stats.downloads_scanned = len(_downloads_safetensors_paths())
+        stats.downloads_scanned = len(downloads_safetensors_paths())
 
     candidates: List[FluxLoraEntry] = []
     for entry in catalog_entries_sorted(settings):
         if entry.mflux_compatible is False:
+            continue
+        if local_lora_weights_path(entry.lora_id, settings) is None:
             continue
         candidates.append(entry)
 
@@ -1000,10 +974,7 @@ def plan_disk_lora_probes(
     if local_models:
         for entry in candidates:
             path = local_lora_weights_path(entry.lora_id, settings)
-            if (
-                allowed_loras is not None
-                and not (_catalog_entry_selection_keys(entry, path) & allowed_loras)
-            ):
+            if not (_catalog_entry_selection_keys(entry, path) & allowed_loras):
                 continue
             if path is None:
                 stats.skipped_not_on_disk += 1
@@ -1144,7 +1115,7 @@ def plan_disk_lora_probes(
                 )
             )
 
-    plan = _filter_plan_by_lora_scope(plan, opts)
+    plan = _filter_plan_by_lora_scope(plan, opts, settings)
     plan = [item for item in plan if item.models]
 
     stats.loras_total = len(plan)
@@ -2480,7 +2451,7 @@ def run_lora_compatibility_check(
         plan = prepared.plan
         stats = prepared.stats
         result.stats = stats
-        stats.probe_prompt = (opts.probe_prompt or "test").strip() or "test"
+        stats.probe_prompt = normalize_check_loras_probe_prompt(opts.probe_prompt)
         progress_callback(
             0,
             max(1, lora_check_work_total(stats)),
@@ -2497,7 +2468,7 @@ def run_lora_compatibility_check(
             options=opts,
         )
         result.stats = stats
-        stats.probe_prompt = (opts.probe_prompt or "test").strip() or "test"
+        stats.probe_prompt = normalize_check_loras_probe_prompt(opts.probe_prompt)
 
     for plan_item in plan:
         for model_key in plan_item.models:
@@ -2507,20 +2478,6 @@ def run_lora_compatibility_check(
                 by_model_hidden[model_key] = list(
                     st.get("deleted_ids") or st.get("hidden_ids") or []
                 )
-
-    for lid, skipped_entry in (
-        (e.lora_id, e)
-        for e in _candidates
-        if local_lora_weights_path(e.lora_id, settings) is None
-        and e.mflux_compatible is not False
-    ):
-        result.changes.append(
-            LoraCheckChange(
-                kind="skipped_not_on_disk",
-                lora_id=lid,
-                lora_label=lora_choice_label(skipped_entry),
-            )
-        )
 
     if stats.downloads_deduped:
         progress_callback(0, max(1, lora_check_work_total(stats)), "downloads", "", "", stats)

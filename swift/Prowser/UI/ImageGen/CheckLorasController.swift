@@ -3,13 +3,6 @@ import SwiftUI
 @MainActor
 enum CheckLorasController {
     static func present(from appState: AppState) {
-        guard appState.workers.lora.isAvailable else {
-            StyledMessageDialog.showWarning(
-                title: "Check LoRAs",
-                message: "Image generation Python environment is not ready."
-            )
-            return
-        }
         if appState.workers.modelTasks.isBusy {
             StyledMessageDialog.showWarning(
                 title: "Check LoRAs",
@@ -22,6 +15,13 @@ enum CheckLorasController {
 
     private static func begin(from appState: AppState) async {
         let bridge = appState.workers.lora
+        guard await bridge.waitUntilAvailable() else {
+            StyledMessageDialog.showWarning(
+                title: "Check LoRAs",
+                message: "Image generation Python environment is not ready."
+            )
+            return
+        }
         do {
             let prescan = try await bridge.checkLorasPrescan()
             if prescan.installedModels.isEmpty {
@@ -58,10 +58,21 @@ enum CheckLorasController {
                 showsTimeRemainingEstimate: false,
                 throttleProgressUpdates: false
             )
+            preparing.onCancel = {
+                Task { try? await bridge.checkLorasCancel() }
+            }
             preparing.show()
 
             let prepareResult = try await bridge.checkLorasPrepare(options: options)
             preparing.close()
+
+            if prepareResult.cancelled || preparing.cancelRequested {
+                StyledMessageDialog.showInformation(
+                    title: "Check LoRAs — Cancelled",
+                    message: "Check LoRAs was cancelled.\n\nNo probes were completed."
+                )
+                return
+            }
 
             if prepareResult.nothingToProbe {
                 StyledMessageDialog.showInformation(
