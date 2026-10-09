@@ -3,8 +3,6 @@ import Foundation
 /// Efficient directory refresh on disk changes. Port of `refresh_manager.py`.
 @MainActor
 enum DirectoryRefreshService {
-    private static var checkRefreshGeneration = 0
-    private static var checkRefreshTask: Task<Void, Never>?
     static func shouldWatchDirectory(appState: AppState) -> Bool {
         if appState.specificFilesActive { return false }
         guard let directory = appState.fileData.currentDirectory else { return false }
@@ -76,10 +74,7 @@ enum DirectoryRefreshService {
 
         let extensions = appState.config.imageExtensions
         let filterPattern = appState.filterSettings.filterPattern
-        checkRefreshTask?.cancel()
-        checkRefreshGeneration += 1
-        let generation = checkRefreshGeneration
-        checkRefreshTask = Task { @MainActor in
+        Task { @MainActor in
             let scanned = await Task.detached(priority: .utility) {
                 DirectoryScanner.scanDirectory(
                     at: directory,
@@ -87,7 +82,6 @@ enum DirectoryRefreshService {
                     filterPattern: filterPattern
                 )
             }.value
-            guard !Task.isCancelled, generation == checkRefreshGeneration else { return }
             guard appState.fileData.currentDirectory == directory else { return }
 
             let displayed = appState.fileData.displayedImages
