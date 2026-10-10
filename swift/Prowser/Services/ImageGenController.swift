@@ -358,6 +358,8 @@ final class ImageGenController {
             steps: steps
         )
         job.jobNumber = ImageGenJobNumber.allocate(config: config)
+        job.thumbnailPaths = JobCardThumbnailPaths.paths(pluginID: pluginID, values: submitValues)
+        job.referencesInvalid = JobCardThumbnailPaths.referencesInvalid(pluginID: pluginID, values: submitValues)
         queue.jobs.append(job)
         let index = queue.jobs.count - 1
         await refreshQueuedJobStatus(at: index)

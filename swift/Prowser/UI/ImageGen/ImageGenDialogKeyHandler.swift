@@ -12,6 +12,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
     let onEscape: () -> Void
     let onOptionReturn: () -> Bool
     let onShiftOptionReturn: () -> Bool
+    var onOptionLeft: (() -> Bool)? = nil
+    var onOptionRight: (() -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -47,6 +49,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
         private var onEscape: (() -> Void)?
         private var onOptionReturn: (() -> Bool)?
         private var onShiftOptionReturn: (() -> Bool)?
+        private var onOptionLeft: (() -> Bool)?
+        private var onOptionRight: (() -> Bool)?
 
         func attach(to view: NSView, settings: ImageGenDialogKeyHandler) {
             guard let hostWindow = view.window else { return }
@@ -60,6 +64,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                 onEscape = settings.onEscape
                 onOptionReturn = settings.onOptionReturn
                 onShiftOptionReturn = settings.onShiftOptionReturn
+                onOptionLeft = settings.onOptionLeft
+                onOptionRight = settings.onOptionRight
                 return
             }
             detach()
@@ -72,6 +78,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
             onEscape = settings.onEscape
             onOptionReturn = settings.onOptionReturn
             onShiftOptionReturn = settings.onShiftOptionReturn
+            onOptionLeft = settings.onOptionLeft
+            onOptionRight = settings.onOptionRight
 
             let expectedID = settings.windowIdentifier
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -112,6 +120,15 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                     if event.keyCode == 124 {
                         self.onCommandRight?()
                         return nil
+                    }
+                }
+
+                if flags == .option {
+                    if event.keyCode == 123 {
+                        if self.onOptionLeft?() == true { return nil }
+                    }
+                    if event.keyCode == 124 {
+                        if self.onOptionRight?() == true { return nil }
                     }
                 }
                 return event

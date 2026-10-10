@@ -19,6 +19,12 @@ enum JobCardThumbnailPaths {
             paths.append(normalized)
         }
 
+        if let canonical = values["_canonical_source_image_paths"] as? [String] {
+            for src in canonical {
+                append(src)
+            }
+        }
+
         if ImageGenPipelineModeMetadata.jobUsesSourceImage(pipelineID: plugin.pipelineID, values: values) {
             for src in ImageGenExifReferences.resolveSourceImagePaths(values) {
                 append(src)
@@ -56,8 +62,14 @@ enum JobCardThumbnailPaths {
                 if missing.isEmpty { missing.append("(source image)") }
             }
         } else if function == "expand" {
-            let source = (values["source_image_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if source.isEmpty || !FileManager.default.isReadableFile(atPath: source) {
+            let resolved = ImageGenExifReferences.resolveSourceImagePaths(values)
+            let canonical = (values["_canonical_source_image_paths"] as? [String] ?? [])
+                .map { ($0 as NSString).standardizingPath }
+                .filter { !$0.isEmpty && FileManager.default.isReadableFile(atPath: $0) }
+            let hasReadable = resolved.contains { FileManager.default.isReadableFile(atPath: $0) }
+                || !canonical.isEmpty
+            if !hasReadable {
+                let source = (values["source_image_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 missing.append(source.isEmpty ? "(source image)" : source)
             }
         } else if function == "infill" {

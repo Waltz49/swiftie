@@ -10,6 +10,7 @@ struct ImageGenPanelShell: View {
     var sourcePath: String? = nil
     var onValuesChanged: (() -> Void)?
     var onEditSourcePathsChanged: (([String]) -> Void)?
+    var onSingleSourcePathChanged: ((String) -> Void)?
     var compactSliderTracks: Bool = false
 
     @State private var localSourcePath: String?
@@ -31,6 +32,10 @@ struct ImageGenPanelShell: View {
         ImageGenFieldLayoutFilter.layoutExcludingDimensionsAndPrompt(fieldLayout)
     }
 
+    private var pipelineID: String {
+        selectedPlugin?["pipeline_id"] as? String ?? ""
+    }
+
     /// Edit: the leftmost source image is the single source of truth for imports and
     /// ``source_image_path`` (Python ``_edit_first_source_path`` / ``job_values_snapshot``).
     private var effectiveSourcePath: String? {
@@ -49,14 +54,38 @@ struct ImageGenPanelShell: View {
 
     var body: some View {
         Group {
-            if function == "edit" {
+            switch function {
+            case "edit":
                 ImageGenPreviewSplitter {
                     editPreviewPane
                 } controls: {
                     editControlsColumn
                 }
                 .frame(minHeight: 420)
-            } else {
+            case "expand":
+                ImageGenPreviewSplitter {
+                    ImageGenExpandPreviewPane(
+                        values: $values,
+                        sourcePath: effectiveSourcePath,
+                        pipelineID: pipelineID,
+                        onSourcePathChanged: { adoptSingleSourcePath($0) },
+                        onValuesChanged: onValuesChanged
+                    )
+                } controls: {
+                    splitControlsColumn
+                }
+                .frame(minHeight: 420)
+            case "infill":
+                ImageGenPreviewSplitter {
+                    ImageGenInfillPreviewPane(
+                        sourcePath: effectiveSourcePath,
+                        onSourcePathChanged: { adoptSingleSourcePath($0) }
+                    )
+                } controls: {
+                    splitControlsColumn
+                }
+                .frame(minHeight: 420)
+            default:
                 standardPanelColumn
             }
         }
@@ -83,6 +112,14 @@ struct ImageGenPanelShell: View {
             panelIntro
             controlsContent(includeFunctionHeader: true)
         }
+    }
+
+    private var splitControlsColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            panelIntro
+            controlsContent(includeFunctionHeader: false)
+        }
+        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var editPreviewPane: some View {
@@ -142,7 +179,7 @@ struct ImageGenPanelShell: View {
             }
 
             if includeFunctionHeader {
-                functionSpecificHeader
+                EmptyView()
             }
 
             ImageGenPromptSection(
@@ -195,27 +232,8 @@ struct ImageGenPanelShell: View {
                 }
                 .padding(.top, 2)
             }
-            .frame(maxHeight: function == "edit" ? .infinity : .infinity)
+            .frame(maxHeight: .infinity)
         }
-    }
-
-    @ViewBuilder
-    private var functionSpecificHeader: some View {
-        switch function {
-        case "edit":
-            editHeader
-        case "expand":
-            expandHeader
-        case "infill":
-            infillHeader
-        default:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var editHeader: some View {
-        EmptyView()
     }
 
     private var editSourcePathsBinding: Binding<[String]> {
@@ -247,56 +265,18 @@ struct ImageGenPanelShell: View {
         syncEditSourceValues()
     }
 
-    @ViewBuilder
-    private var expandHeader: some View {
-        if let path = effectiveSourcePath {
-            ImageGenSourceNavBar(
-                currentPath: path,
-                onSelectPath: { newPath in
-                    localSourcePath = newPath
-                    values["source_image_path"] = newPath
-                    values["source_image_paths"] = [newPath]
-                    onValuesChanged?()
-                }
-            )
-            sourceThumbnail(path: path, size: 180)
-            Text("Placement canvas: drag handles in Python UI (preview only in Swift port).")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        } else {
-            Text("Expand requires an active source image.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var infillHeader: some View {
-        if let path = effectiveSourcePath {
-            sourceThumbnail(path: path, size: 180)
-            Text("Paint mask in Pixelmator or the Python paint canvas (preview only in Swift port).")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        } else {
-            Text("Infill requires an active source image.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+    private func adoptSingleSourcePath(_ path: String) {
+        let normalized = (path as NSString).standardizingPath
+        guard FileManager.default.fileExists(atPath: normalized) else { return }
+        localSourcePath = normalized
+        values["source_image_path"] = normalized
+        values["source_image_paths"] = [normalized]
+        onSingleSourcePathChanged?(normalized)
+        onValuesChanged?()
     }
 
     private var hasNegativePrompt: Bool {
         ImageGenFieldLayoutFilter.containsField(fieldLayout, key: "negative_prompt")
-    }
-
-    @ViewBuilder
-    private func sourceThumbnail(path: String, size: CGFloat) -> some View {
-        if let image = NSImage(contentsOfFile: path) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-        }
     }
 
     private func syncSources() {
@@ -310,7 +290,9 @@ struct ImageGenPanelShell: View {
             return
         }
 
-        localSourcePath = sourcePath
+        if localSourcePath == nil {
+            localSourcePath = sourcePath
+        }
         localSourcePaths = sourcePaths
         guard function == "expand" || function == "infill" else { return }
         if !effectiveSourcePaths.isEmpty {

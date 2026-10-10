@@ -63,7 +63,7 @@ enum ImageGenWorkerPayloadBuilder {
         if pipelineID == "mflux_flux2_klein_expand" {
             merged["prompt"] = kleinExpandPrompt(merged["prompt"] as? String ?? "")
             applyMfluxLoraStub(&merged)
-            attachSourcePaths(&merged)
+            attachSourcePaths(&merged, canonical: true)
         }
         if pipelineID == "mflux_flux2_klein_edit" {
             applyMfluxLoraStub(&merged)
@@ -72,7 +72,7 @@ enum ImageGenWorkerPayloadBuilder {
             merged.removeValue(forKey: "height")
         }
         if pipelineID == "mflux_fill_expand" {
-            attachSourcePaths(&merged)
+            attachSourcePaths(&merged, canonical: true)
         }
 
         merged.removeValue(forKey: "aspect_ratio_lock")

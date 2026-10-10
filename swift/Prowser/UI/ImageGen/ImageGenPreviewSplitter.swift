@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+/// NSSplitView divider metrics (preview | controls).
+enum ImageGenPreviewSplitterMetrics {
+    /// Visible width of the draggable split divider.
+    static let dividerThickness: CGFloat = 15
+}
+
 /// Horizontal preview | controls splitter (Python ``ImageGenPreviewSplitter``).
 struct ImageGenPreviewSplitter<Preview: View, Controls: View>: NSViewRepresentable {
     var maxLeftRatio: CGFloat = 0.7
@@ -20,7 +26,7 @@ struct ImageGenPreviewSplitter<Preview: View, Controls: View>: NSViewRepresentab
     func makeNSView(context: Context) -> NSSplitView {
         let splitView = ImageGenPreviewSplitView()
         splitView.isVertical = true
-        splitView.dividerStyle = .thin
+        splitView.dividerStyle = .paneSplitter
         splitView.autoresizesSubviews = true
         splitView.delegate = context.coordinator
 
@@ -90,6 +96,19 @@ struct ImageGenPreviewSplitter<Preview: View, Controls: View>: NSViewRepresentab
 
         func splitView(
             _ splitView: NSSplitView,
+            additionalEffectiveRectOfDividerAt dividerIndex: Int
+        ) -> NSRect {
+            let pad: CGFloat = 4
+            return NSRect(
+                x: -pad,
+                y: 0,
+                width: pad * 2,
+                height: splitView.bounds.height
+            )
+        }
+
+        func splitView(
+            _ splitView: NSSplitView,
             constrainMinCoordinate proposedMinimum: CGFloat,
             ofSubviewAt dividerIndex: Int
         ) -> CGFloat {
@@ -127,11 +146,50 @@ private final class ImageGenPreviewSplitView: NSSplitView {
     var onDidLayoutWithWidth: (() -> Void)?
     private var lastNotifiedWidth: CGFloat = 0
 
+    override var dividerThickness: CGFloat {
+        ImageGenPreviewSplitterMetrics.dividerThickness
+    }
+
     override func layout() {
         super.layout()
+        window?.invalidateCursorRects(for: self)
         let width = bounds.width
         guard width > 1, abs(width - lastNotifiedWidth) > 0.5 else { return }
         lastNotifiedWidth = width
         onDidLayoutWithWidth?()
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard isVertical, arrangedSubviews.count >= 2 else { return }
+        let leftWidth = arrangedSubviews[0].frame.width
+        let thickness = max(dividerThickness, 4)
+        let rect = NSRect(
+            x: leftWidth - thickness / 2,
+            y: 0,
+            width: thickness,
+            height: bounds.height
+        )
+        addCursorRect(rect, cursor: .resizeLeftRight)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if isVertical, arrangedSubviews.count >= 2, dividerCursorRect().contains(point) {
+            NSCursor.resizeLeftRight.set()
+            return
+        }
+        super.cursorUpdate(with: event)
+    }
+
+    private func dividerCursorRect() -> NSRect {
+        let leftWidth = arrangedSubviews[0].frame.width
+        let thickness = max(dividerThickness, 8)
+        return NSRect(
+            x: leftWidth - thickness / 2,
+            y: 0,
+            width: thickness,
+            height: bounds.height
+        )
     }
 }

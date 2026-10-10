@@ -326,7 +326,7 @@ private struct ImageGenStepsQuantRowGroup: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: compactSliderTracks ? .center : .top, spacing: 12) {
             if let stepsSpec = childSpecs.first(where: { $0["key"] as? String == "steps" }) {
                 ImageGenFieldSpecView(
                     spec: stepsSpec,
@@ -336,7 +336,11 @@ private struct ImageGenStepsQuantRowGroup: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let quantSpec = childSpecs.first(where: { $0["key"] as? String == "mflux_quantize" }) {
-                ImageGenFieldSpecView(spec: quantSpec, values: $values)
+                ImageGenFieldSpecView(
+                    spec: quantSpec,
+                    compactSliderTracks: compactSliderTracks,
+                    values: $values
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

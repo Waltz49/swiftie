@@ -225,7 +225,7 @@ enum MfluxCLIPipeline {
             args += ["--prompt", prompt]
         }
         if let mask = payload["mask_image_path"] as? String, !mask.isEmpty {
-            args += ["--mask-path", mask]
+            args += ["--masked-image-path", mask]
         }
         if boolValue(payload["low_ram"], default: true) {
             args.append("--low-ram")

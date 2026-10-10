@@ -28,6 +28,8 @@ struct ImageGenUnifiedDialog: View {
     @State private var loadGeneration = 0
     /// Frozen edit sources while the dialog is open (Python ``_edit_source_paths_override``).
     @State private var lockedEditSourcePaths: [String] = []
+    @State private var lockedExpandSourcePath: String?
+    @State private var lockedInfillSourcePath: String?
     private let functions = ["edit", "create", "expand", "infill"]
     private let session = ImageGenSessionState()
 
@@ -49,6 +51,9 @@ struct ImageGenUnifiedDialog: View {
                         lockedEditSourcePaths = paths
                         appState.imageGenDialogRequest.editSourcePaths = paths
                     } : nil,
+                    onSingleSourcePathChanged: { path in
+                        adoptLockedSingleSourcePath(path)
+                    },
                     compactSliderTracks: true
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -65,9 +70,11 @@ struct ImageGenUnifiedDialog: View {
             }
             footer
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(minWidth: 880, minHeight: 560)
+        .padding(.leading, 4)
+        .padding(.trailing, 4)
+        .padding(.top, 2)
+        .padding(.bottom, 4)
+        .frame(minWidth: 800, minHeight: 600)
         .background(
             ImageGenDialogKeyHandler(
                 windowIdentifier: Self.windowIdentifier,
@@ -77,15 +84,17 @@ struct ImageGenUnifiedDialog: View {
                 onCommandW: { performClose() },
                 onEscape: { performClose() },
                 onOptionReturn: { false },
-                onShiftOptionReturn: { false }
+                onShiftOptionReturn: { false },
+                onOptionLeft: { stepSourceImage(delta: -1) },
+                onOptionRight: { stepSourceImage(delta: 1) }
             )
         )
         .persistedDialogGeometry(
             DialogGeometryKey.imageGenDialog,
             defaultWidth: 880,
             defaultHeight: 560,
-            minWidth: 720,
-            minHeight: 420,
+            minWidth: 800,
+            minHeight: 600,
             nestedInImageGen: true,
             windowIdentifier: ImageGenUnifiedDialog.windowIdentifier,
             windowTitle: titleText
@@ -122,7 +131,10 @@ struct ImageGenUnifiedDialog: View {
             )
             .onChange(of: selectedFunction) { oldValue, newValue in
                 guard oldValue != newValue else { return }
-                Task { await switchFunction(from: oldValue, to: newValue) }
+                Task {
+                    let ok = await switchFunction(from: oldValue, to: newValue)
+                    if !ok { selectedFunction = oldValue }
+                }
             }
 
             Spacer()
@@ -221,6 +233,14 @@ struct ImageGenUnifiedDialog: View {
         if selectedFunction == "edit" {
             return values["source_image_path"] as? String ?? lockedEditSourcePaths.first
         }
+        if selectedFunction == "expand" {
+            return lockedExpandSourcePath
+                ?? ImageGenFunctionPrerequisites.normalizedExistingFile(values["source_image_path"] as? String)
+        }
+        if selectedFunction == "infill" {
+            return lockedInfillSourcePath
+                ?? ImageGenFunctionPrerequisites.normalizedExistingFile(values["source_image_path"] as? String)
+        }
         return activeImagePath
     }
 
@@ -293,6 +313,18 @@ struct ImageGenUnifiedDialog: View {
                     lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(paths)
                     appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
                 }
+                if selectedFunction == "expand",
+                   let path = ImageGenFunctionPrerequisites.normalizedExistingFile(
+                       job.values["source_image_path"] as? String
+                   ) {
+                    lockedExpandSourcePath = path
+                }
+                if selectedFunction == "infill",
+                   let path = ImageGenFunctionPrerequisites.normalizedExistingFile(
+                       job.values["source_image_path"] as? String
+                   ) {
+                    lockedInfillSourcePath = path
+                }
             } else {
                 // Each open request re-resolves edit sources (Python builds a fresh dialog per open):
                 // explicit paths from the caller, else the active image(s).
@@ -337,7 +369,20 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
-    private func switchFunction(from oldFunction: String, to newFunction: String) async {
+    @discardableResult
+    private func switchFunction(from oldFunction: String, to newFunction: String) async -> Bool {
+        let sessionValues = session.values(for: newFunction)
+        let persistedPath = sessionValues["source_image_path"] as? String
+            ?? values["source_image_path"] as? String
+        if !ImageGenFunctionPrerequisites.validate(
+            function: newFunction,
+            appState: appState,
+            editSourcePaths: lockedEditSourcePaths,
+            persistedSourcePath: persistedPath
+        ) {
+            return false
+        }
+
         if !oldFunction.isEmpty {
             persistCurrentFunction(oldFunction)
             session.setValues(values, for: oldFunction)
@@ -365,7 +410,6 @@ struct ImageGenUnifiedDialog: View {
         }
         pluginSwitchGuard = false
 
-        let sessionValues = session.values(for: newFunction)
         if !sessionValues.isEmpty {
             values = sessionValues
         } else {
@@ -394,8 +438,71 @@ struct ImageGenUnifiedDialog: View {
             values["source_image_path"] = values["source_image_path"] as? String ?? lockedEditSourcePaths[0]
         }
 
+        if newFunction == "expand" {
+            bootstrapSingleSourcePath(function: "expand", force: oldFunction.isEmpty)
+        } else if newFunction == "infill" {
+            bootstrapSingleSourcePath(function: "infill", force: oldFunction.isEmpty)
+        }
+
         baselineValues = values
         isDirty = false
+        return true
+    }
+
+    private func adoptLockedSingleSourcePath(_ path: String) {
+        let normalized = (path as NSString).standardizingPath
+        switch selectedFunction {
+        case "expand":
+            lockedExpandSourcePath = normalized
+        case "infill":
+            lockedInfillSourcePath = normalized
+        default:
+            return
+        }
+        values["source_image_path"] = normalized
+        values["source_image_paths"] = [normalized]
+        markDirtyIfNeeded()
+    }
+
+    private func bootstrapSingleSourcePath(function: String, force: Bool) {
+        let locked = function == "expand" ? lockedExpandSourcePath : lockedInfillSourcePath
+        if !force, let locked, FileManager.default.fileExists(atPath: locked) {
+            values["source_image_path"] = locked
+            values["source_image_paths"] = [locked]
+            return
+        }
+        if let persisted = ImageGenFunctionPrerequisites.normalizedExistingFile(
+            values["source_image_path"] as? String
+        ) {
+            if function == "expand" {
+                lockedExpandSourcePath = persisted
+            } else {
+                lockedInfillSourcePath = persisted
+            }
+            values["source_image_path"] = persisted
+            values["source_image_paths"] = [persisted]
+            return
+        }
+        if let active = ImageGenFunctionPrerequisites.activeImagePathForExpandOrInfill(appState: appState) {
+            if function == "expand" {
+                lockedExpandSourcePath = active
+            } else {
+                lockedInfillSourcePath = active
+            }
+            values["source_image_path"] = active
+            values["source_image_paths"] = [active]
+        }
+    }
+
+    private func stepSourceImage(delta: Int) -> Bool {
+        guard selectedFunction == "expand" || selectedFunction == "infill" else { return false }
+        guard let path = panelSourcePath else { return false }
+        let images = appState.fileData.displayedImages
+        guard let index = images.firstIndex(of: path) else { return false }
+        let next = index + delta
+        guard images.indices.contains(next) else { return false }
+        adoptLockedSingleSourcePath(images[next])
+        return true
     }
 
     private func switchPlugin(from oldPluginID: String, to newPluginID: String) {
@@ -480,8 +587,12 @@ struct ImageGenUnifiedDialog: View {
         guard let index = available.firstIndex(of: selectedFunction) else { return }
         let next = available[(index + delta + available.count) % available.count]
         let previous = selectedFunction
-        selectedFunction = next
-        Task { await switchFunction(from: previous, to: next) }
+        Task {
+            let ok = await switchFunction(from: previous, to: next)
+            if ok {
+                selectedFunction = next
+            }
+        }
     }
 
     private func markDirtyIfNeeded() {
@@ -529,6 +640,22 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
+    private func resolvedSubmitSourcePath(for function: String) -> String? {
+        let locked: String?
+        switch function {
+        case "expand":
+            locked = lockedExpandSourcePath
+        case "infill":
+            locked = lockedInfillSourcePath
+        default:
+            locked = nil
+        }
+        if let locked, let path = ImageGenFunctionPrerequisites.normalizedExistingFile(locked) {
+            return path
+        }
+        return ImageGenFunctionPrerequisites.normalizedExistingFile(values["source_image_path"] as? String)
+    }
+
     private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {
         var out = input
         if out["random_seed"] as? Bool ?? true {
@@ -543,6 +670,11 @@ struct ImageGenUnifiedDialog: View {
             out.removeValue(forKey: "use_custom_size")
         case "expand", "infill":
             out.removeValue(forKey: "use_custom_size")
+            if let path = resolvedSubmitSourcePath(for: selectedFunction) {
+                out["source_image_path"] = path
+                out["source_image_paths"] = [path]
+                out["_canonical_source_image_paths"] = [path]
+            }
         case "edit":
             // Python ``ImageGenEditDialog.collect_values``: the panel's source list is authoritative
             // (a plugin switch reloads that plugin's saved settings, which carry no sources).
@@ -586,7 +718,15 @@ struct ImageGenUnifiedDialog: View {
                     values: submitValues,
                     copies: copies
                 )
-                submitNotice = "Job submitted."
+                let notice = ImageGenSubmitNotice.text(for: selectedFunction)
+                submitNotice = notice
+                appState.status.show(notice)
+                appState.ensureJobsSurfaceVisible()
+                if !appState.imageGen.isProcessing,
+                   !appState.imageGen.queue.jobs.isEmpty,
+                   !appState.imageGen.lastError.isEmpty {
+                    errorMessage = appState.imageGen.lastError
+                }
             }
             session.setValues(submitValues, for: selectedFunction)
             session.setPluginID(selectedPluginID, for: selectedFunction)

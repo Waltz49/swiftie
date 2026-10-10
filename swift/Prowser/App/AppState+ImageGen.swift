@@ -189,7 +189,7 @@ extension AppState {
     }
 
     /// Show the last-used jobs surface when both the pane and the floating panel are hidden.
-    private func ensureJobsSurfaceVisible() {
+    func ensureJobsSurfaceVisible() {
         if showFloatingJobsPanel { return }
         let paneVisible = jobsDisplayMode == .pane
             && config.bool(forKey: "jobs_visible", default: true)
@@ -282,6 +282,14 @@ extension AppState {
         }
         let session = ImageGenSessionState()
         let resolvedFunction = function ?? session.lastFunction(config: config)
+        if replaceJobID == nil,
+           !ImageGenFunctionPrerequisites.validate(
+               function: resolvedFunction,
+               appState: self,
+               editSourcePaths: editSourcePaths
+           ) {
+            return
+        }
         let prompt = initialPrompt
         if autoImportEXIF, prompt == nil {
             Task {
