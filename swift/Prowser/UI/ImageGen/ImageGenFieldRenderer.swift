@@ -3,12 +3,17 @@ import SwiftUI
 @MainActor
 struct ImageGenFieldRenderer: View {
     let layout: [[String: Any]]
+    var compactSliderTracks: Bool = false
     @Binding var values: [String: Any]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(layout.indices, id: \.self) { index in
-                ImageGenFieldNodeView(node: layout[index], values: $values)
+                ImageGenFieldNodeView(
+                    node: layout[index],
+                    compactSliderTracks: compactSliderTracks,
+                    values: $values
+                )
             }
         }
     }
@@ -17,6 +22,7 @@ struct ImageGenFieldRenderer: View {
 @MainActor
 private struct ImageGenFieldNodeView: View {
     let node: [String: Any]
+    var compactSliderTracks: Bool = false
     @Binding var values: [String: Any]
 
     var body: some View {
@@ -24,25 +30,44 @@ private struct ImageGenFieldNodeView: View {
         if type == "group" {
             let layout = node["layout"] as? String ?? ""
             if layout == "seed_row" {
-                ImageGenSeedRowGroup(node: node, values: $values)
+                ImageGenSeedRowGroup(
+                    node: node,
+                    inlineLabel: compactSliderTracks,
+                    values: $values
+                )
             } else if layout == "steps_quant_row" {
-                ImageGenStepsQuantRowGroup(node: node, values: $values)
+                ImageGenStepsQuantRowGroup(
+                    node: node,
+                    compactSliderTracks: compactSliderTracks,
+                    values: $values
+                )
             } else if layout == "prompt_block" {
                 EmptyView()
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     if let label = node["label"] as? String, !label.isEmpty {
-                        Text(label).font(.caption).foregroundStyle(.secondary)
+                        Text(label)
+                            .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                            .foregroundStyle(.primary)
+                            .padding(.top, 4)
                     }
                     if let children = node["children"] as? [[String: Any]] {
                         ForEach(children.indices, id: \.self) { idx in
-                            ImageGenFieldNodeView(node: children[idx], values: $values)
+                            ImageGenFieldNodeView(
+                                node: children[idx],
+                                compactSliderTracks: compactSliderTracks,
+                                values: $values
+                            )
                         }
                     }
                 }
             }
         } else if let spec = node["spec"] as? [String: Any] {
-            ImageGenFieldSpecView(spec: spec, values: $values)
+            ImageGenFieldSpecView(
+                spec: spec,
+                compactSliderTracks: compactSliderTracks,
+                values: $values
+            )
         }
     }
 }
@@ -50,6 +75,7 @@ private struct ImageGenFieldNodeView: View {
 @MainActor
 private struct ImageGenFieldSpecView: View {
     let spec: [String: Any]
+    var compactSliderTracks: Bool = false
     @Binding var values: [String: Any]
 
     var body: some View {
@@ -69,6 +95,8 @@ private struct ImageGenFieldSpecView: View {
                 maxValue: spec["max_value"] as? Int ?? 100,
                 step: spec["step"] as? Int ?? 1,
                 resetDefault: spec["reset_default"],
+                compactTrack: compactSliderTracks,
+                inlineLabel: compactSliderTracks,
                 values: $values
             )
         case "float_slider":
@@ -79,10 +107,18 @@ private struct ImageGenFieldSpecView: View {
                 maxValue: doubleValue(spec["max_value"], default: 1),
                 step: doubleValue(spec["step"], default: 0.1),
                 resetDefault: spec["reset_default"],
+                compactTrack: compactSliderTracks,
+                inlineLabel: compactSliderTracks,
                 values: $values
             )
         case "choice":
-            ImageGenChoiceRow(label: label, key: key, spec: spec, values: $values)
+            ImageGenChoiceRow(
+                label: label,
+                key: key,
+                spec: spec,
+                inlineLabel: compactSliderTracks,
+                values: $values
+            )
         case "seed":
             ImageGenSeedRow(spec: spec, values: $values)
         default:
@@ -116,6 +152,8 @@ private struct ImageGenChoiceRow: View {
     let label: String
     let key: String
     let spec: [String: Any]
+    var inlineLabel: Bool = false
+    var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
 
     private var options: [(title: String, tag: String)] {
@@ -130,29 +168,47 @@ private struct ImageGenChoiceRow: View {
         return choices.map { ($0, $0) }
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Picker("", selection: selectionBinding) {
-                    ForEach(options, id: \.tag) { option in
-                        Text(option.title).tag(option.tag)
-                    }
+    private var controlRow: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: selectionBinding) {
+                ForEach(options, id: \.tag) { option in
+                    Text(option.title).tag(option.tag)
                 }
-                .labelsHidden()
-                .frame(minWidth: 140)
-                if spec["reset_default"] != nil {
-                    ImageGenFieldResetButton(
-                        isActive: !ImageGenFieldResetLogic.matchesDefault(
-                            current: values[key],
-                            resetDefault: spec["reset_default"],
-                            kind: "choice"
-                        ),
-                        tooltip: "Reset to default",
-                        action: resetToDefault
-                    )
+            }
+            .labelsHidden()
+            .frame(minWidth: 140)
+            if spec["reset_default"] != nil {
+                ImageGenFieldResetButton(
+                    isActive: !ImageGenFieldResetLogic.matchesDefault(
+                        current: values[key],
+                        resetDefault: spec["reset_default"],
+                        kind: "choice"
+                    ),
+                    tooltip: "Reset to default",
+                    action: resetToDefault
+                )
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if inlineLabel {
+                HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: inlineLabelWidth, alignment: .leading)
+                    controlRow
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                    controlRow
                 }
             }
         }
@@ -198,6 +254,8 @@ private struct ImageGenChoiceRow: View {
 @MainActor
 private struct ImageGenSeedRowGroup: View {
     let node: [String: Any]
+    var inlineLabel: Bool = false
+    var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
 
     private var childSpecs: [[String: Any]] {
@@ -209,25 +267,39 @@ private struct ImageGenSeedRowGroup: View {
     var body: some View {
         let seedSpec = childSpecs.first { $0["key"] as? String == "seed" }
         let randomSpec = childSpecs.first { $0["key"] as? String == "random_seed" }
-        VStack(alignment: .leading, spacing: 4) {
+        let seedLabel = seedSpec?["label"] as? String ?? "Seed"
+        let controls = HStack(alignment: .center, spacing: 10) {
             if let seedSpec {
-                Text(seedSpec["label"] as? String ?? "Seed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ImageGenSeedInput(spec: seedSpec, values: $values)
             }
-            HStack(alignment: .center, spacing: 10) {
-                if let seedSpec {
-                    ImageGenSeedInput(spec: seedSpec, values: $values)
+            if let randomSpec {
+                let label = randomSpec["bool_label_override"] as? String
+                    ?? randomSpec["label"] as? String
+                    ?? "Randomize"
+                Toggle(label, isOn: bindingBool(randomSpec, key: "random_seed", default: true))
+                    .help(
+                        "Use a new random number\n"
+                        + "each time you generate."
+                    )
+            }
+        }
+        Group {
+            if inlineLabel {
+                HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                    Text(seedLabel)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: inlineLabelWidth, alignment: .leading)
+                    controls
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let randomSpec {
-                    let label = randomSpec["bool_label_override"] as? String
-                        ?? randomSpec["label"] as? String
-                        ?? "Randomize"
-                    Toggle(label, isOn: bindingBool(randomSpec, key: "random_seed", default: true))
-                        .help(
-                            "Use a new random number\n"
-                            + "each time you generate."
-                        )
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(seedLabel)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                    controls
                 }
             }
         }
@@ -244,6 +316,7 @@ private struct ImageGenSeedRowGroup: View {
 @MainActor
 private struct ImageGenStepsQuantRowGroup: View {
     let node: [String: Any]
+    var compactSliderTracks: Bool = false
     @Binding var values: [String: Any]
 
     private var childSpecs: [[String: Any]] {
@@ -255,7 +328,11 @@ private struct ImageGenStepsQuantRowGroup: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             if let stepsSpec = childSpecs.first(where: { $0["key"] as? String == "steps" }) {
-                ImageGenFieldSpecView(spec: stepsSpec, values: $values)
+                ImageGenFieldSpecView(
+                    spec: stepsSpec,
+                    compactSliderTracks: compactSliderTracks,
+                    values: $values
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let quantSpec = childSpecs.first(where: { $0["key"] as? String == "mflux_quantize" }) {
@@ -274,8 +351,9 @@ private struct ImageGenSeedRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(spec["label"] as? String ?? "Seed")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                .foregroundStyle(.primary)
+                .padding(.top, 4)
             ImageGenSeedInput(spec: spec, values: $values)
         }
     }

@@ -13,6 +13,7 @@ struct ImageGenCustomSizeSection: View {
     let sourcePath: String?
     /// Edit uses optional ``use_custom_size`` (Python ``mount_edit_custom_size_section``); create/expand use collapse-for-visibility only.
     var usesOptionalCustomSize: Bool = false
+    var compactSliderTracks: Bool = false
     var onValuesChanged: (() -> Void)?
 
     @State private var isExpanded = true
@@ -31,28 +32,59 @@ struct ImageGenCustomSizeSection: View {
         ) {
             if isExpanded {
                 HStack(alignment: .top, spacing: 6) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        controlsRow
-                        ImageGenDimSliderRow(
-                            label: widthSpec["label"] as? String ?? "Width",
-                            key: "width",
-                            minValue: widthMin,
-                            maxValue: effectiveMaxSide,
-                            step: dimStep,
-                            resetDefault: widthSpec["reset_default"],
-                            values: $values,
-                            onValueChanged: { onDimValueChanged(changed: "width", value: $0) }
-                        )
-                        ImageGenDimSliderRow(
-                            label: heightSpec["label"] as? String ?? "Height",
-                            key: "height",
-                            minValue: heightMin,
-                            maxValue: effectiveMaxSide,
-                            step: dimStep,
-                            resetDefault: heightSpec["reset_default"],
-                            values: $values,
-                            onValueChanged: { onDimValueChanged(changed: "height", value: $0) }
-                        )
+                    VStack(alignment: .leading, spacing: compactSliderTracks ? 0 : 8) {
+                        if compactSliderTracks {
+                            ImageGenDimSliderRow(
+                                label: widthSpec["label"] as? String ?? "Width",
+                                key: "width",
+                                minValue: widthMin,
+                                maxValue: effectiveMaxSide,
+                                step: dimStep,
+                                resetDefault: widthSpec["reset_default"],
+                                compactTrack: true,
+                                inlineLabel: true,
+                                inlineLabelWidth: dimInlineLabelWidth,
+                                values: $values,
+                                onValueChanged: { onDimValueChanged(changed: "width", value: $0) }
+                            )
+                            ImageGenDimSliderRow(
+                                label: heightSpec["label"] as? String ?? "Height",
+                                key: "height",
+                                minValue: heightMin,
+                                maxValue: effectiveMaxSide,
+                                step: dimStep,
+                                resetDefault: heightSpec["reset_default"],
+                                compactTrack: true,
+                                inlineLabel: true,
+                                inlineLabelWidth: dimInlineLabelWidth,
+                                values: $values,
+                                onValueChanged: { onDimValueChanged(changed: "height", value: $0) }
+                            )
+                            controlsRow
+                                .padding(.top, 4)
+                        } else {
+                            ImageGenDimSliderRow(
+                                label: widthSpec["label"] as? String ?? "Width",
+                                key: "width",
+                                minValue: widthMin,
+                                maxValue: effectiveMaxSide,
+                                step: dimStep,
+                                resetDefault: widthSpec["reset_default"],
+                                values: $values,
+                                onValueChanged: { onDimValueChanged(changed: "width", value: $0) }
+                            )
+                            ImageGenDimSliderRow(
+                                label: heightSpec["label"] as? String ?? "Height",
+                                key: "height",
+                                minValue: heightMin,
+                                maxValue: effectiveMaxSide,
+                                step: dimStep,
+                                resetDefault: heightSpec["reset_default"],
+                                values: $values,
+                                onValueChanged: { onDimValueChanged(changed: "height", value: $0) }
+                            )
+                            controlsRow
+                        }
                     }
                     VStack(spacing: 4) {
                         ImageGenDimHelperIconButton(
@@ -106,6 +138,16 @@ struct ImageGenCustomSizeSection: View {
         max(1, widthSpec["step"] as? Int ?? 8)
     }
 
+    /// Align inline width/height labels (Python ``_custom_size_dim_label_width``).
+    private var dimInlineLabelWidth: CGFloat {
+        let widthLabel = widthSpec["label"] as? String ?? "Width"
+        let heightLabel = heightSpec["label"] as? String ?? "Height"
+        let font = NSFont.systemFont(ofSize: ImageGenInlineFieldLayout.customSizeDimLabelSize)
+        let w = (widthLabel as NSString).size(withAttributes: [.font: font]).width
+        let h = (heightLabel as NSString).size(withAttributes: [.font: font]).width
+        return ceil(max(w, h))
+    }
+
     private var widthMin: Int {
         widthSpec["min_value"] as? Int ?? 256
     }
@@ -131,7 +173,8 @@ struct ImageGenCustomSizeSection: View {
 
     private var controlsRow: some View {
         HStack(spacing: 8) {
-            Toggle("Lock aspect ratio", isOn: $aspectLock)
+            Toggle("Aspect Ratio Lock", isOn: $aspectLock)
+                .font(ImageGenInlineFieldLayout.customSizeDimLabelFont)
                 .help(ImageGenDimHelperTooltips.aspect)
                 .onChange(of: aspectLock) { _, locked in
                     values["aspect_ratio_lock"] = locked

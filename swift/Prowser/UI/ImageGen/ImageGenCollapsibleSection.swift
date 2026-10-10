@@ -6,19 +6,20 @@ struct ImageGenCollapsibleSection<Content: View>: View {
     let title: String
     @Binding var isExpanded: Bool
     var tooltip: String = ""
+    var contentLeadingPadding: CGFloat = ImageGenInlineFieldLayout.controlIndent
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Button {
                 isExpanded.toggle()
             } label: {
                 HStack(spacing: 4) {
                     Text(isExpanded ? "▼" : "▶")
-                        .font(.system(size: 13))
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.secondary)
                     Text(title)
-                        .font(.caption)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
                         .foregroundStyle(.primary)
                     Spacer(minLength: 0)
                 }
@@ -29,7 +30,7 @@ struct ImageGenCollapsibleSection<Content: View>: View {
 
             if isExpanded {
                 content()
-                    .padding(.leading, 18)
+                    .padding(.leading, contentLeadingPadding)
             }
         }
     }

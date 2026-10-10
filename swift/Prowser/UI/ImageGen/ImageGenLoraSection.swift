@@ -5,6 +5,7 @@ struct ImageGenLoraSection: View {
     @Environment(AppState.self) private var appState
     @Binding var values: [String: Any]
     let plugin: [String: Any]
+    let labelWidth: CGFloat
     var onValuesChanged: (() -> Void)?
 
     private var supportsLora: Bool {
@@ -31,35 +32,35 @@ struct ImageGenLoraSection: View {
 
     var body: some View {
         if supportsLora {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .top, spacing: 4) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(headingText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ImageGenLoraPicker(
-                            pluginID: pluginID,
-                            values: $values,
-                            selectionDetailLine: $loraSelectionDetail,
-                            onValuesChanged: onValuesChanged
-                        )
-                    }
-                    ImageGenSettingsGearButton(
-                        settingsTab: .lora,
-                        tooltip: "LoRA settings",
-                        loraModelKey: loraModelKeyForPlugin()
+            VStack(alignment: .leading, spacing: ImageGenInlineFieldLayout.blockSpacing) {
+                ImageGenInlineLabeledRow(label: headingText, labelWidth: labelWidth) {
+                    ImageGenLoraPicker(
+                        pluginID: pluginID,
+                        values: $values,
+                        selectionDetailLine: $loraSelectionDetail,
+                        onValuesChanged: onValuesChanged
                     )
-                    ImageGenLoraClearButton(isVisible: hasSelection) {
-                        clearLoras()
+                } accessories: {
+                    HStack(spacing: 4) {
+                        ImageGenSettingsGearButton(
+                            settingsTab: .lora,
+                            tooltip: "LoRA settings",
+                            loraModelKey: loraModelKeyForPlugin()
+                        )
+                        ImageGenLoraClearButton(isVisible: hasSelection) {
+                            clearLoras()
+                        }
                     }
                 }
-                Text(loraSelectionDetail.isEmpty ? " " : loraSelectionDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel(
-                        loraSelectionDetail.isEmpty ? "No LoRAs selected" : loraSelectionDetail
-                    )
+                if !loraSelectionDetail.isEmpty {
+                    ImageGenInlineInfoLine(labelWidth: labelWidth) {
+                        Text(loraSelectionDetail)
+                            .font(ImageGenInlineFieldLayout.infoLineFont)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel(loraSelectionDetail)
+                    }
+                }
             }
         }
     }

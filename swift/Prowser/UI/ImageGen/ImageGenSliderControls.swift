@@ -1,7 +1,56 @@
 import AppKit
 import SwiftUI
 
-/// Width/height slider with sparse NSSlider tick marks and floor-to-step snapping.
+/// Slider row metrics aligned with Python ``IMAGE_GEN_SLIDER_*`` (unified dialog uses ~half track width).
+enum ImageGenSliderLayout {
+    static let rowSpacing: CGFloat = 8
+    static let valueFieldWidth: CGFloat = 72
+    static let rowHeight: CGFloat = 28
+    /// Fraction of the row width left for the track after value/reset chrome (unified shell).
+    static let unifiedTrackFraction: CGFloat = 0.3
+
+    static func rowTrailingWidth(includesReset: Bool) -> CGFloat {
+        rowSpacing + valueFieldWidth + (includesReset ? rowSpacing + ImageGenChrome.fieldButtonSize : 0)
+    }
+
+    static func trackWidth(totalWidth: CGFloat, includesReset: Bool) -> CGFloat {
+        let available = max(0, totalWidth - rowTrailingWidth(includesReset: includesReset))
+        return max(80, available * unifiedTrackFraction)
+    }
+}
+
+@MainActor
+struct ImageGenSliderTrackRow<Slider: View, Trailing: View>: View {
+    var compactTrack: Bool
+    var includesReset: Bool
+    @ViewBuilder var slider: () -> Slider
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        if compactTrack {
+            GeometryReader { geo in
+                let track = ImageGenSliderLayout.trackWidth(
+                    totalWidth: geo.size.width,
+                    includesReset: includesReset
+                )
+                HStack(spacing: ImageGenSliderLayout.rowSpacing) {
+                    slider()
+                        .frame(width: track)
+                    trailing()
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(height: ImageGenSliderLayout.rowHeight)
+        } else {
+            HStack(spacing: ImageGenSliderLayout.rowSpacing) {
+                slider()
+                trailing()
+            }
+        }
+    }
+}
+
+/// Width/height NSSlider with floor-to-step snapping (no visible tick marks).
 @MainActor
 struct ImageGenDimSliderRow: View {
     let label: String
@@ -10,6 +59,9 @@ struct ImageGenDimSliderRow: View {
     let maxValue: Int
     let step: Int
     var resetDefault: Any? = nil
+    var compactTrack: Bool = false
+    var inlineLabel: Bool = false
+    var inlineLabelWidth: CGFloat = 44
     @Binding var values: [String: Any]
     var onValueChanged: ((Int) -> Void)?
 
@@ -20,38 +72,58 @@ struct ImageGenDimSliderRow: View {
         ImageGenDimMath.pageStep(minValue: minValue, maxValue: maxValue, dimStep: step)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                ImageGenDimNSSlider(
-                    value: sliderBinding,
-                    minValue: minValue,
-                    maxValue: maxValue,
-                    step: step,
-                    pageStep: pageStep
+    private var includesReset: Bool { resetDefault != nil }
+
+    private var sliderTrackRow: some View {
+        ImageGenSliderTrackRow(compactTrack: compactTrack, includesReset: includesReset) {
+            ImageGenDimNSSlider(
+                value: sliderBinding,
+                minValue: minValue,
+                maxValue: maxValue,
+                step: step,
+                pageStep: pageStep
+            )
+        } trailing: {
+            TextField("", text: $textValue)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: ImageGenSliderLayout.valueFieldWidth)
+                .multilineTextAlignment(.trailing)
+                .focused($isEditing)
+                .onSubmit { commitTextValue() }
+                .onChange(of: isEditing) { _, editing in
+                    if !editing { commitTextValue() }
+                }
+            if includesReset {
+                ImageGenFieldResetButton(
+                    isActive: !ImageGenFieldResetLogic.matchesDefault(
+                        current: values[key],
+                        resetDefault: resetDefault,
+                        kind: "int_slider"
+                    ),
+                    tooltip: "Reset to default",
+                    action: resetToDefault
                 )
-                TextField("", text: $textValue)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 72)
-                    .multilineTextAlignment(.trailing)
-                    .focused($isEditing)
-                    .onSubmit { commitTextValue() }
-                    .onChange(of: isEditing) { _, editing in
-                        if !editing { commitTextValue() }
-                    }
-                if resetDefault != nil {
-                    ImageGenFieldResetButton(
-                        isActive: !ImageGenFieldResetLogic.matchesDefault(
-                            current: values[key],
-                            resetDefault: resetDefault,
-                            kind: "int_slider"
-                        ),
-                        tooltip: "Reset to default",
-                        action: resetToDefault
-                    )
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if inlineLabel {
+                HStack(alignment: .center, spacing: 6) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.customSizeDimLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: inlineLabelWidth, alignment: .leading)
+                    sliderTrackRow
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                    sliderTrackRow
                 }
             }
         }
@@ -122,9 +194,9 @@ private struct ImageGenDimNSSlider: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSSlider {
         let slider = NSSlider(value: Double(value), minValue: Double(minValue), maxValue: Double(maxValue), target: nil, action: nil)
+        slider.controlSize = .mini
         slider.isContinuous = true
         slider.allowsTickMarkValuesOnly = false
-        slider.tickMarkPosition = .below
         applySteps(slider)
         slider.target = context.coordinator
         slider.action = #selector(Coordinator.changed(_:))
@@ -133,6 +205,7 @@ private struct ImageGenDimNSSlider: NSViewRepresentable {
 
     func updateNSView(_ slider: NSSlider, context: Context) {
         context.coordinator.parent = self
+        slider.controlSize = .mini
         slider.minValue = Double(minValue)
         slider.maxValue = Double(maxValue)
         applySteps(slider)
@@ -145,13 +218,7 @@ private struct ImageGenDimNSSlider: NSViewRepresentable {
 
     private func applySteps(_ slider: NSSlider) {
         slider.altIncrementValue = Double(pageStep)
-        let range = max(0, maxValue - minValue)
-        if range > 0 && pageStep > 0 {
-            let tickCount = max(2, range / pageStep + 1)
-            slider.numberOfTickMarks = tickCount
-        } else {
-            slider.numberOfTickMarks = 0
-        }
+        slider.numberOfTickMarks = 0
     }
 
     func makeCoordinator() -> Coordinator {
@@ -185,41 +252,65 @@ struct ImageGenIntSliderRow: View {
     let maxValue: Int
     let step: Int
     var resetDefault: Any? = nil
+    var compactTrack: Bool = false
+    var inlineLabel: Bool = false
+    var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
 
     @State private var textValue = ""
     @FocusState private var isEditing: Bool
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Slider(
-                    value: sliderBinding,
-                    in: Double(minValue)...Double(maxValue),
-                    step: Double(max(1, step))
+    private var includesReset: Bool { resetDefault != nil }
+
+    private var sliderTrackRow: some View {
+        ImageGenSliderTrackRow(compactTrack: compactTrack, includesReset: includesReset) {
+            Slider(
+                value: sliderBinding,
+                in: Double(minValue)...Double(maxValue),
+                step: Double(max(1, step))
+            )
+        } trailing: {
+            TextField("", text: $textValue)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: ImageGenSliderLayout.valueFieldWidth)
+                .multilineTextAlignment(.trailing)
+                .focused($isEditing)
+                .onSubmit { commitTextValue() }
+                .onChange(of: isEditing) { _, editing in
+                    if !editing { commitTextValue() }
+                }
+            if includesReset {
+                ImageGenFieldResetButton(
+                    isActive: !ImageGenFieldResetLogic.matchesDefault(
+                        current: values[key],
+                        resetDefault: resetDefault,
+                        kind: "int_slider"
+                    ),
+                    tooltip: "Reset to default",
+                    action: resetToDefault
                 )
-                TextField("", text: $textValue)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 72)
-                    .multilineTextAlignment(.trailing)
-                    .focused($isEditing)
-                    .onSubmit { commitTextValue() }
-                    .onChange(of: isEditing) { _, editing in
-                        if !editing { commitTextValue() }
-                    }
-                if resetDefault != nil {
-                    ImageGenFieldResetButton(
-                        isActive: !ImageGenFieldResetLogic.matchesDefault(
-                            current: values[key],
-                            resetDefault: resetDefault,
-                            kind: "int_slider"
-                        ),
-                        tooltip: "Reset to default",
-                        action: resetToDefault
-                    )
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if inlineLabel {
+                HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: inlineLabelWidth, alignment: .leading)
+                    sliderTrackRow
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                    sliderTrackRow
                 }
             }
         }
@@ -282,6 +373,9 @@ struct ImageGenFloatSliderRow: View {
     let maxValue: Double
     let step: Double
     var resetDefault: Any? = nil
+    var compactTrack: Bool = false
+    var inlineLabel: Bool = false
+    var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
 
     @State private var textValue = ""
@@ -291,37 +385,58 @@ struct ImageGenFloatSliderRow: View {
         step < 0.1 ? 2 : 1
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Slider(
-                    value: sliderBinding,
-                    in: minValue...maxValue,
-                    step: max(step, 0.01)
+    private var includesReset: Bool { resetDefault != nil }
+
+    private var sliderTrackRow: some View {
+        ImageGenSliderTrackRow(compactTrack: compactTrack, includesReset: includesReset) {
+            Slider(
+                value: sliderBinding,
+                in: minValue...maxValue,
+                step: max(step, 0.01)
+            )
+        } trailing: {
+            TextField("", text: $textValue)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: ImageGenSliderLayout.valueFieldWidth)
+                .multilineTextAlignment(.trailing)
+                .focused($isEditing)
+                .onSubmit { commitTextValue() }
+                .onChange(of: isEditing) { _, editing in
+                    if !editing { commitTextValue() }
+                }
+            if includesReset {
+                ImageGenFieldResetButton(
+                    isActive: !ImageGenFieldResetLogic.matchesDefault(
+                        current: values[key],
+                        resetDefault: resetDefault,
+                        kind: "float_slider",
+                        step: step
+                    ),
+                    tooltip: "Reset to default",
+                    action: resetToDefault
                 )
-                TextField("", text: $textValue)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 72)
-                    .multilineTextAlignment(.trailing)
-                    .focused($isEditing)
-                    .onSubmit { commitTextValue() }
-                    .onChange(of: isEditing) { _, editing in
-                        if !editing { commitTextValue() }
-                    }
-                if resetDefault != nil {
-                    ImageGenFieldResetButton(
-                        isActive: !ImageGenFieldResetLogic.matchesDefault(
-                            current: values[key],
-                            resetDefault: resetDefault,
-                            kind: "float_slider",
-                            step: step
-                        ),
-                        tooltip: "Reset to default",
-                        action: resetToDefault
-                    )
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if inlineLabel {
+                HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: inlineLabelWidth, alignment: .leading)
+                    sliderTrackRow
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                    sliderTrackRow
                 }
             }
         }

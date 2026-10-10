@@ -12,6 +12,7 @@ struct ImageGenPromptSection: View {
     let sourcePath: String?
     var existingSourcePaths: [String] = []
     var showNegativePrompt: Bool = false
+    var promptLabel: String = "Image Prompt"
     var onValuesChanged: (() -> Void)?
     var onSourcePathsImported: (([String]) -> Void)?
 
@@ -20,9 +21,10 @@ struct ImageGenPromptSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Prompt")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(promptLabel)
+                    .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                    .foregroundStyle(.primary)
+                    .padding(.top, 4)
                 Spacer(minLength: 0)
                 ImageGenPromptActionButtons(
                     text: promptText,

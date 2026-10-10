@@ -10,6 +10,7 @@ struct ImageGenPanelShell: View {
     var sourcePath: String? = nil
     var onValuesChanged: (() -> Void)?
     var onEditSourcePathsChanged: (([String]) -> Void)?
+    var compactSliderTracks: Bool = false
 
     @State private var localSourcePath: String?
     @State private var localSourcePaths: [String] = []
@@ -73,8 +74,12 @@ struct ImageGenPanelShell: View {
         }
     }
 
+    private var inlineFieldLabelWidth: CGFloat {
+        ImageGenInlineFieldLayout.labelColumnWidth()
+    }
+
     private var standardPanelColumn: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             panelIntro
             controlsContent(includeFunctionHeader: true)
         }
@@ -99,7 +104,7 @@ struct ImageGenPanelShell: View {
     }
 
     private var editControlsColumn: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             panelIntro
             controlsContent(includeFunctionHeader: false)
         }
@@ -110,64 +115,66 @@ struct ImageGenPanelShell: View {
     private var panelIntro: some View {
         if let intro = introText(for: function), !intro.isEmpty {
             Text(intro)
-                .font(.caption)
+                .font(ImageGenInlineFieldLayout.introFont)
                 .foregroundStyle(.secondary)
-            Divider()
+                .fixedSize(horizontal: false, vertical: true)
+            ImageGenUnifiedIntroRule()
         }
     }
 
     @ViewBuilder
     private func controlsContent(includeFunctionHeader: Bool) -> some View {
-        ImageGenModelSelector(plugins: plugins, selectedPluginID: $selectedPluginID)
-            .onChange(of: selectedPluginID) { _, _ in onValuesChanged?() }
+        VStack(alignment: .leading, spacing: ImageGenInlineFieldLayout.blockSpacing) {
+            ImageGenModelSection(
+                plugins: plugins,
+                selectedPluginID: $selectedPluginID,
+                labelWidth: inlineFieldLabelWidth,
+                onSelectionChanged: onValuesChanged
+            )
 
-        if let plugin = selectedPlugin {
-            ImageGenLoraSection(
+            if let plugin = selectedPlugin {
+                ImageGenLoraSection(
+                    values: $values,
+                    plugin: plugin,
+                    labelWidth: inlineFieldLabelWidth,
+                    onValuesChanged: onValuesChanged
+                )
+            }
+
+            if includeFunctionHeader {
+                functionSpecificHeader
+            }
+
+            ImageGenPromptSection(
+                function: function,
                 values: $values,
-                plugin: plugin,
+                selectedPluginID: $selectedPluginID,
+                plugins: plugins,
+                sourcePath: effectiveSourcePath,
+                existingSourcePaths: effectiveSourcePaths,
+                showNegativePrompt: hasNegativePrompt,
+                promptLabel: "Image Prompt",
+                onValuesChanged: onValuesChanged,
+                onSourcePathsImported: function == "edit" ? { paths in
+                    let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)
+                    guard !normalized.isEmpty else { return }
+                    localSourcePaths = normalized
+                    syncEditSourceValues()
+                } : nil
+            )
+            .padding(.top, 8)
+
+            ImageGenFluxPromptSection(
+                values: $values,
+                function: function,
+                sourcePaths: effectiveSourcePaths,
                 onValuesChanged: onValuesChanged
             )
-        }
 
-        let loraHostID = selectedPlugin?["lora_host_id"] as? String ?? ""
-        if loraHostID.isEmpty,
-           let comment = selectedPlugin?["model_comment"] as? String,
-           !comment.isEmpty {
-            Text(comment).font(.caption).foregroundStyle(.secondary)
-        }
-
-        if includeFunctionHeader {
-            functionSpecificHeader
-        }
-
-        ImageGenPromptSection(
-            function: function,
-            values: $values,
-            selectedPluginID: $selectedPluginID,
-            plugins: plugins,
-            sourcePath: effectiveSourcePath,
-            existingSourcePaths: effectiveSourcePaths,
-            showNegativePrompt: hasNegativePrompt,
-            onValuesChanged: onValuesChanged,
-            onSourcePathsImported: function == "edit" ? { paths in
-                let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)
-                guard !normalized.isEmpty else { return }
-                localSourcePaths = normalized
-                syncEditSourceValues()
-            } : nil
-        )
-
-        ImageGenFluxPromptSection(
-            values: $values,
-            function: function,
-            sourcePaths: effectiveSourcePaths,
-            onValuesChanged: onValuesChanged
-        )
-
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
-                   let plugin = selectedPlugin {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
+                       let plugin = selectedPlugin {
                         ImageGenCustomSizeSection(
                             values: $values,
                             widthSpec: width,
@@ -176,14 +183,20 @@ struct ImageGenPanelShell: View {
                             pluginMaxDimension: plugin["max_generation_dimension"] as? Int ?? 2048,
                             sourcePath: effectiveSourcePath,
                             usesOptionalCustomSize: function == "edit",
+                            compactSliderTracks: compactSliderTracks,
                             onValuesChanged: onValuesChanged
                         )
+                    }
+                    ImageGenFieldRenderer(
+                        layout: filteredLayout,
+                        compactSliderTracks: compactSliderTracks,
+                        values: $values
+                    )
                 }
-                ImageGenFieldRenderer(layout: filteredLayout, values: $values)
+                .padding(.top, 2)
             }
-            .padding(.vertical, 2)
+            .frame(maxHeight: function == "edit" ? .infinity : .infinity)
         }
-        .frame(maxHeight: function == "edit" ? .infinity : 360)
     }
 
     @ViewBuilder

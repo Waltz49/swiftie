@@ -32,8 +32,7 @@ struct ImageGenUnifiedDialog: View {
     private let session = ImageGenSessionState()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        VStack(alignment: .leading, spacing: 8) {
             if isLoading {
                 ProgressView("Loading models…")
                     .frame(maxWidth: .infinity, minHeight: 220)
@@ -49,8 +48,10 @@ struct ImageGenUnifiedDialog: View {
                     onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
                         lockedEditSourcePaths = paths
                         appState.imageGenDialogRequest.editSourcePaths = paths
-                    } : nil
+                    } : nil,
+                    compactSliderTracks: true
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .onChange(of: selectedPluginID) { oldValue, newValue in
                     guard !pluginSwitchGuard, !isLoading, !oldValue.isEmpty, oldValue != newValue else { return }
                     switchPlugin(from: oldValue, to: newValue)
@@ -64,7 +65,8 @@ struct ImageGenUnifiedDialog: View {
             }
             footer
         }
-        .padding(16)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(minWidth: 880, minHeight: 560)
         .background(
             ImageGenDialogKeyHandler(
@@ -99,14 +101,6 @@ struct ImageGenUnifiedDialog: View {
             SceneWindowLifecycleBridge(windowIdentifier: Self.windowIdentifier) {
                 appState.closeImageGenUnifiedDialog()
             }
-        }
-    }
-
-    private var header: some View {
-        HStack {
-            Text(titleText)
-                .font(.headline)
-            Spacer()
         }
     }
 
