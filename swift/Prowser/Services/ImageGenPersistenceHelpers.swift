@@ -78,6 +78,66 @@ enum ImageGenPersistence {
         return dialogs[persistFunctionKey(function)] as? [String: Any] ?? [:]
     }
 
+    /// FLUX/mflux/Klein/SDXL use multi-LoRA stacks; SD15 keeps single ``mflux_lora``.
+    static func pluginUsesLoraStack(pluginID: String) -> Bool {
+        let host = ImageGenCatalogSnapshot.pluginDictionary(pluginID: pluginID)?["lora_host_id"] as? String ?? ""
+        return !host.isEmpty && host != "sd15"
+    }
+
+    private static func coerceLoraPresetID(_ raw: Any?) -> String {
+        let text = (raw as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty || text == "none" { return "none" }
+        return text
+    }
+
+    private static func coerceLoraStackList(_ raw: Any?) -> [String] {
+        let items: [Any]
+        if let stack = raw as? [Any] {
+            items = stack
+        } else if let stack = raw as? [String] {
+            items = stack
+        } else {
+            return []
+        }
+        var out: [String] = []
+        for item in items {
+            let pid = coerceLoraPresetID(item)
+            if pid != "none", !out.contains(pid) {
+                out.append(pid)
+            }
+        }
+        return out
+    }
+
+    private static func loadLoraStackForPlugin(
+        function: String,
+        pluginID: String,
+        config: AppConfig
+    ) -> [String] {
+        let fnEntry = functionDialogEntry(function: function, config: config)
+        let stacks = fnEntry[loraStacksKey] as? [String: Any] ?? [:]
+        return coerceLoraStackList(stacks[pluginID])
+    }
+
+    private static func applyLoraFieldsForPlugin(pluginID: String, to values: inout [String: Any]) {
+        let stack = coerceLoraStackList(values["mflux_lora_stack"])
+        if pluginUsesLoraStack(pluginID: pluginID) {
+            values["mflux_lora_stack"] = stack
+            values.removeValue(forKey: "mflux_lora")
+            return
+        }
+        var preset = coerceLoraPresetID(values["mflux_lora"])
+        if preset == "none", let first = stack.first {
+            preset = first
+        }
+        if preset == "none" {
+            values.removeValue(forKey: "mflux_lora")
+        } else {
+            values["mflux_lora"] = preset
+        }
+        values.removeValue(forKey: "mflux_lora_stack")
+    }
+
     static func loadDialogSettings(function: String, config: AppConfig) -> [String: Any] {
         sharedDialogValues(from: functionDialogEntry(function: function, config: config))
     }
@@ -103,9 +163,21 @@ enum ImageGenPersistence {
         if let prompt = mergedPrompt(shared: shared, perPlugin: perPlugin) {
             out["prompt"] = prompt
         }
-        if let stacks = fnEntry[loraStacksKey] as? [String: Any],
-           let stack = stacks[pluginID] as? [String] {
+        let stack = loadLoraStackForPlugin(function: function, pluginID: pluginID, config: config)
+        if pluginUsesLoraStack(pluginID: pluginID) {
             out["mflux_lora_stack"] = stack
+            out.removeValue(forKey: "mflux_lora")
+        } else {
+            var preset = coerceLoraPresetID(out["mflux_lora"])
+            if preset == "none", let first = stack.first {
+                preset = first
+            }
+            if preset == "none" {
+                out.removeValue(forKey: "mflux_lora")
+            } else {
+                out["mflux_lora"] = preset
+            }
+            out.removeValue(forKey: "mflux_lora_stack")
         }
         return sanitizeDialogValues(out)
     }
@@ -132,7 +204,16 @@ enum ImageGenPersistence {
     ) {
         let key = persistFunctionKey(function)
         var sanitized = sanitizeDialogValues(values)
-        let stack = sanitized.removeValue(forKey: "mflux_lora_stack")
+        var stack = coerceLoraStackList(sanitized.removeValue(forKey: "mflux_lora_stack"))
+        let persistStack = pluginUsesLoraStack(pluginID: pluginID)
+        if !persistStack {
+            sanitized.removeValue(forKey: "mflux_lora_stack")
+            let preset = coerceLoraPresetID(sanitized["mflux_lora"])
+            if preset == "none", let first = stack.first {
+                sanitized["mflux_lora"] = first
+            }
+            stack = []
+        }
 
         mutateImagegen(config: config) { imagegen in
             var dialogs = imagegen[dialogsKey] as? [String: Any] ?? [:]
@@ -143,14 +224,20 @@ enum ImageGenPersistence {
             }
 
             var pluginSettings = fnEntry[pluginSettingsKey] as? [String: Any] ?? [:]
-            pluginSettings[pluginID] = perPluginDialogValues(from: sanitized)
+            var perPlugin = perPluginDialogValues(from: sanitized)
+            if persistStack {
+                perPlugin.removeValue(forKey: "mflux_lora")
+            }
+            pluginSettings[pluginID] = perPlugin
             fnEntry[pluginSettingsKey] = pluginSettings
 
-            if let stack {
-                var stacks = fnEntry[loraStacksKey] as? [String: Any] ?? [:]
+            var stacks = fnEntry[loraStacksKey] as? [String: Any] ?? [:]
+            if persistStack {
                 stacks[pluginID] = stack
-                fnEntry[loraStacksKey] = stacks
+            } else {
+                stacks.removeValue(forKey: pluginID)
             }
+            fnEntry[loraStacksKey] = stacks
 
             dialogs[key] = fnEntry
             imagegen[dialogsKey] = dialogs
@@ -205,6 +292,7 @@ enum ImageGenPersistence {
             config: config
         )
         incoming["prompt"] = preservedPrompt
+        applyLoraFieldsForPlugin(pluginID: incomingPluginID, to: &incoming)
         for key in preserveOnPluginSwitchKeys {
             if let value = outgoingValues[key] {
                 incoming[key] = value

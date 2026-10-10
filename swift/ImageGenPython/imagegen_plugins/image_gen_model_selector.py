@@ -688,7 +688,18 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
             )
         # Keep the live widget stack across catalog refreshes, but never when
         # restoring a snapshotted job — those values are the source of truth.
-        if lora_field.is_stack_mode() and not job_values_snapshotted(values):
+        # Also skip when the widget still reflects a different model plugin.
+        field_plugin = getattr(lora_field, "_plugin", None)
+        same_plugin = (
+            field_plugin is not None
+            and plugin is not None
+            and field_plugin.plugin_id == plugin.plugin_id
+        )
+        if (
+            lora_field.is_stack_mode()
+            and not job_values_snapshotted(values)
+            and same_plugin
+        ):
             live_stack = lora_field.selected_ids()
             if live_stack:
                 stack = live_stack

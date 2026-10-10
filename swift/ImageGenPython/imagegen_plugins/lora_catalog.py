@@ -599,14 +599,25 @@ def dedupe_settings_entries_by_weights(
     settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[FluxLoraEntry, ...]:
     """One settings row per on-disk weights file."""
-    from imagegen_plugins.lora_user_entries import entry_weights_identity_key
+    from imagegen_plugins.lora_compatibility_checker import _size_conflict_set
+    from imagegen_plugins.lora_user_entries import (
+        _entry_path_candidates,
+        entry_weights_identity_key,
+    )
 
     entries_list = list(entries)
+    compare_paths = []
+    for entry in entries_list:
+        compare_paths.extend(_entry_path_candidates(entry))
+    hash_sizes = _size_conflict_set(compare_paths)
+    digest_cache: Dict[Path, str] = {}
+
     order: List[str] = []
     best: Dict[str, FluxLoraEntry] = {}
     for entry in entries_list:
-        # Size-only fingerprints: settings list must stay fast (no full-file MD5).
-        key = entry_weights_identity_key(entry, hash_sizes=set())
+        key = entry_weights_identity_key(
+            entry, digest_cache=digest_cache, hash_sizes=hash_sizes
+        )
         if key in best:
             best[key] = _prefer_settings_catalog_entry(best[key], entry, settings)
         else:

@@ -31,7 +31,22 @@ struct ImageGenLoraPicker: View {
                 singlePicker
             }
         }
-        .task(id: pluginID) { await refresh() }
+        .task(id: pluginID) {
+            choices = LoRAPluginChoices(
+                unsupported: false,
+                unsupportedLabel: "",
+                stackMode: true,
+                popupMode: false,
+                choices: [],
+                selectedIDs: [],
+                scalesByID: [:],
+                emptySelectionHint: nil
+            )
+            summaryText = "None"
+            draftSelected = []
+            draftScales = [:]
+            await refresh()
+        }
         .task(id: loraValuesFingerprint) { await refreshSummaryOnly() }
         .onReceive(NotificationCenter.default.publisher(for: .prowserLoraCatalogChanged)) { _ in
             Task { await refresh() }
@@ -247,7 +262,7 @@ struct ImageGenLoraPicker: View {
         if let single = values["mflux_lora"] as? String, single != "none", !single.isEmpty {
             return [single]
         }
-        return choices.selectedIDs
+        return []
     }
 
     private func mergedScalesByID() -> [String: Double] {
