@@ -345,8 +345,8 @@ final class LoRABridge {
             "command": "choices_for_plugin",
             "plugin_id": pluginID,
         ]
-        if let stack = values["mflux_lora_stack"] as? [Any] {
-            cmd["current_stack"] = stack
+        if values.keys.contains("mflux_lora_stack") {
+            cmd["current_stack"] = Self.mfluxLoraStackPayload(from: values["mflux_lora_stack"])
         } else if let single = values["mflux_lora"] {
             cmd["current_preset_id"] = single
         }
@@ -621,5 +621,19 @@ final class LoRABridge {
     func checkLorasClearProbeHistory() async throws -> Int {
         let result = try await request(["command": "check_loras_clear_probe_history"])
         return (result["removed"] as? NSNumber)?.intValue ?? 0
+    }
+
+    /// JSON-safe stack payload for ``choices_for_plugin`` (explicit empty stack must not fall back to legacy preset).
+    private static func mfluxLoraStackPayload(from raw: Any?) -> [Any] {
+        if let stack = raw as? [String] {
+            return stack
+        }
+        if let stack = raw as? [Any] {
+            return stack
+        }
+        if let single = raw as? String {
+            return [single]
+        }
+        return []
     }
 }

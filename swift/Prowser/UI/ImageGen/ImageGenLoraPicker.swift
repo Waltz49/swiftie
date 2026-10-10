@@ -39,6 +39,11 @@ struct ImageGenLoraPicker: View {
         .sheet(isPresented: $showStackSheet) {
             loraStackSheet
         }
+        .onChange(of: showStackSheet) { _, isPresented in
+            if isPresented {
+                syncDraftFromCurrentValues()
+            }
+        }
     }
 
     private var stackPicker: some View {
@@ -181,24 +186,30 @@ struct ImageGenLoraPicker: View {
 
     private func applyStack() {
         let ids = choices.selectableChoices.map(\.presetID).filter { draftSelected.contains($0) }
-        values.removeValue(forKey: "mflux_lora")
-        values["mflux_lora_stack"] = ids
         var scales: [String: Any] = [:]
+        var scalesForCatalog: [String: Double] = [:]
         for id in ids {
-            scales[id] = draftScales[id] ?? 1
+            let scale = draftScales[id] ?? 1
+            scales[id] = scale
+            scalesForCatalog[id] = scale
         }
-        values["mflux_lora_scales_by_id"] = scales
+        var next = values
+        next.removeValue(forKey: "mflux_lora")
+        next["mflux_lora_stack"] = ids
+        next["mflux_lora_scales_by_id"] = scales
+        values = next
         showStackSheet = false
+        onValuesChanged?()
+        let plugin = pluginID
         Task {
             if appState.workers.lora.isAvailable {
                 try? await appState.workers.lora.updateEntryScales(
-                    pluginID: pluginID,
-                    scalesByID: draftScales
+                    pluginID: plugin,
+                    scalesByID: scalesForCatalog
                 )
             }
             await refreshSummaryOnly()
         }
-        onValuesChanged?()
     }
 
     private var loraValuesFingerprint: String {
@@ -231,13 +242,7 @@ struct ImageGenLoraPicker: View {
 
     private func currentStackIDs() -> [String] {
         if values.keys.contains("mflux_lora_stack") {
-            if let stack = values["mflux_lora_stack"] as? [String] {
-                return stack.filter { !$0.isEmpty && $0 != "none" }
-            }
-            if let stack = values["mflux_lora_stack"] as? [Any] {
-                return stack.compactMap { $0 as? String }.filter { !$0.isEmpty && $0 != "none" }
-            }
-            return []
+            return mfluxLoraStackIDs(from: values["mflux_lora_stack"])
         }
         if let single = values["mflux_lora"] as? String, single != "none", !single.isEmpty {
             return [single]
@@ -299,6 +304,16 @@ struct ImageGenLoraPicker: View {
             let scale = scales[id] ?? 1
             return "\(label) [\(formatLoraScale(scale))]"
         }.joined(separator: ", ")
+    }
+
+    private func mfluxLoraStackIDs(from raw: Any?) -> [String] {
+        if let stack = raw as? [String] {
+            return stack.filter { !$0.isEmpty && $0 != "none" }
+        }
+        if let stack = raw as? [Any] {
+            return stack.compactMap { $0 as? String }.filter { !$0.isEmpty && $0 != "none" }
+        }
+        return []
     }
 
     private func formatLoraScale(_ value: Double) -> String {

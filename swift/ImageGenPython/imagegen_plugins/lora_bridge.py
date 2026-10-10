@@ -327,7 +327,7 @@ def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
     current_stack = cmd.get("current_stack")
     current_preset = coerce_lora_preset_id(cmd.get("current_preset_id", "none"))
     selected_ids: List[str] = []
-    if isinstance(current_stack, list) and current_stack:
+    if "current_stack" in cmd and isinstance(current_stack, list):
         for raw in current_stack:
             pid = coerce_lora_preset_id(raw)
             if pid and pid != "none":
