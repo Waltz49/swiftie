@@ -53,6 +53,20 @@ enum MenuBarTitles {
         }
     }
 
+    /// SwiftUI registers ``ProwserImageCommands`` after ``ProwserCommands`` (Tools lives there).
+    /// Python ``menu_manager.setup_actions`` adds Image before Tools when imagegen UI is enabled.
+    @MainActor
+    static func placeImageMenuBeforeTools() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+        let canonicalTitles = mainMenu.items.map { canonicalMenuTitle($0.title) }
+        guard let imageIndex = canonicalTitles.firstIndex(of: "Image") else { return }
+        guard let toolsIndex = canonicalTitles.firstIndex(of: "Tools") else { return }
+        guard imageIndex > toolsIndex else { return }
+        let item = mainMenu.items[imageIndex]
+        mainMenu.removeItem(at: imageIndex)
+        mainMenu.insertItem(item, at: toolsIndex)
+    }
+
     /// Prefer Prowser's custom File/Edit/View menus over SwiftUI's empty system copies.
     private static func preferredStandardMenuScore(_ item: NSMenuItem) -> Int {
         let count = item.submenu?.items.count ?? 0

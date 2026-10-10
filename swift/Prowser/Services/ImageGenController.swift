@@ -65,6 +65,9 @@ final class ImageGenController {
     private var cooldownBeforeNextJob = false
     /// Last cooldown second shown in the strip (skip redundant 500ms timer polls).
     private var lastCooldownUISecond: Int?
+    /// Visibility + row structure last pushed to the jobs pane. Live progress keeps this key.
+    private var lastStripPublishKey = ""
+    private var stripLiveSinks: [ObjectIdentifier: @MainActor (ActiveJobStripStatusView) -> Void] = [:]
     private var liveStatusTask: Task<Void, Never>?
     private var activeStatusView: QueueJobStatusView?
     private var quitAfterCurrentWorker = false
@@ -170,6 +173,18 @@ final class ImageGenController {
     /// Second argument is true when browse should be entered (first preview or final step).
     var onProgressivePreview: ((String, Bool) -> Void)?
     var onQueueChanged: (() -> Void)?
+
+    /// In-place progress-strip updates (fill, elapsed, cooldown count). Does not refresh job cards.
+    func setStripLiveSink(
+        _ id: ObjectIdentifier,
+        _ sink: (@MainActor (ActiveJobStripStatusView) -> Void)?
+    ) {
+        if let sink {
+            stripLiveSinks[id] = sink
+        } else {
+            stripLiveSinks.removeValue(forKey: id)
+        }
+    }
 
     init(
         config: AppConfig,
@@ -2107,7 +2122,27 @@ final class ImageGenController {
 
     /// Always refresh job-pane / strip SwiftUI (not blocked by dialog build pause).
     private func bumpStripUI() {
+        lastStripPublishKey = stripPublishKey()
         onQueueChanged?()
+    }
+
+    /// Progress ticks redraw the bars in place. Show, hide, or a row-structure change
+    /// refreshes the jobs pane so its height can follow the strip.
+    private func publishActiveStrip(preferLiveFields: Bool) {
+        let key = stripPublishKey()
+        if preferLiveFields, key == lastStripPublishKey {
+            let strip = activeStripView
+            for sink in stripLiveSinks.values {
+                sink(strip)
+            }
+            return
+        }
+        bumpStripUI()
+    }
+
+    private func stripPublishKey() -> String {
+        let visible = isProcessing || cooldownSecondsRemaining > 0
+        return "\(visible)|\(activeStripView.structureKey())"
     }
 
     /// Port of ``ImageGenController.task_status_display_needs_refresh``.
@@ -2152,7 +2187,7 @@ final class ImageGenController {
                 self.taskStatusHTML = self.progressMessage
                 Task { await self.beginGenerationProgressTracking(values: self.pendingValues) }
                 self.rebuildActiveStripViewLocally()
-                self.bumpStripUI()
+                self.publishActiveStrip(preferLiveFields: true)
             }
         }
         modelTasks.onProgress = { [weak self] message in
@@ -2184,7 +2219,7 @@ final class ImageGenController {
             }
             _ = self.snapshotLiveTiming(inCooldown: self.cooldownSecondsRemaining > 0)
             self.rebuildActiveStripViewLocally()
-            self.bumpStripUI()
+            self.publishActiveStrip(preferLiveFields: true)
         }
         modelTasks.onGenerateFinished = { [weak self] success, outputPath, error in
             self?.handleGenerateFinished(success: success, outputPath: outputPath, error: error)
@@ -2257,7 +2292,7 @@ final class ImageGenController {
         historicalAvgTotalSeconds = timing.averageSeconds
         _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
         rebuildActiveStripViewLocally()
-        bumpStripUI()
+        publishActiveStrip(preferLiveFields: true)
     }
 
     private func updateLiveStepProgress(step: Int, stepTotal: Any?) {
@@ -2787,7 +2822,6 @@ final class ImageGenController {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 guard let self, self.isProcessing || self.cooldownSecondsRemaining > 0 else { break }
-                await self.refreshActiveJobStatusView()
                 await self.refreshActiveStripView()
             }
         }
@@ -3310,7 +3344,7 @@ final class ImageGenController {
         guard isEnabled, isProcessing || cooldownSecondsRemaining > 0 else {
             activeStripView = ActiveJobStripStatusView()
             lastCooldownUISecond = nil
-            bumpStripUI()
+            publishActiveStrip(preferLiveFields: true)
             return
         }
         if !force, !stripDisplayNeedsRefresh() {
@@ -3318,7 +3352,7 @@ final class ImageGenController {
         }
         rebuildActiveStripViewLocally(includeQueueJobsRow: includeQueueJobsRow)
         markStripDisplayRefreshed()
-        bumpStripUI()
+        publishActiveStrip(preferLiveFields: true)
     }
 }
 

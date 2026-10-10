@@ -46,6 +46,7 @@ final class ActiveJobStripNSView: NSView {
     private var barHandles: [BarHandle] = []
     private(set) var cachedContentHeight: CGFloat = 0
     private var contentHeightReportScheduled = false
+    private var lastLayoutWidth: CGFloat = 0
     var onContentHeightChanged: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
@@ -113,7 +114,12 @@ final class ActiveJobStripNSView: NSView {
 
     override func layout() {
         super.layout()
-        refreshCachedContentHeight(forWidth: bounds.width)
+        // Live progress only changes bar fill and labels. Remeasure when the width
+        // changes so a narrow sidebar does not refit the pane on every tick.
+        let width = bounds.width
+        guard abs(width - lastLayoutWidth) > 0.5 else { return }
+        lastLayoutWidth = width
+        refreshCachedContentHeight(forWidth: width)
     }
 
     private func measuredContentHeight() -> CGFloat {
@@ -191,8 +197,12 @@ final class ActiveJobStripNSView: NSView {
             guard case .bar(_, let prefix, let postfix, let fillPercent, let slotText, let showPendingStart) = row else {
                 continue
             }
-            handle.prefix.stringValue = prefix
-            handle.postfix.stringValue = postfix
+            if handle.prefix.stringValue != prefix {
+                handle.prefix.stringValue = prefix
+            }
+            if handle.postfix.stringValue != postfix {
+                handle.postfix.stringValue = postfix
+            }
             handle.bar.setValues(
                 fillPercent: fillPercent,
                 slotText: slotText,
@@ -361,25 +371,33 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         return CGSize(width: width, height: height)
     }
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> ActiveJobStripNSView {
         let view = ActiveJobStripNSView()
         view.onCancel = { appState.confirmCancelGeneration() }
         view.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
-        view.onContentHeightChanged = { [weak view] in
-            guard let view else { return }
-            reportMeasuredHeight(nsView: view, appState: appState)
-        }
-        appState.jobsQueueStripMeasureRefresh = { [weak view] in
-            guard let view else { return }
-            let width = max(view.bounds.width, 280)
-            view.refreshCachedContentHeight(forWidth: width)
-            reportMeasuredHeight(nsView: view, appState: appState)
-        }
+        installCallbacks(on: view, context: context)
         return view
     }
 
     func updateNSView(_ nsView: ActiveJobStripNSView, context: Context) {
-        let colors = appState.theme.colors
+        installCallbacks(on: nsView, context: context)
+        // Read the controller so a deferred SwiftUI pass cannot paint a stale bar
+        // over an in-place progress tick.
+        nsView.update(stripView: appState.imageGen.activeStripView, colors: appState.theme.colors)
+    }
+
+    static func dismantleNSView(_ nsView: ActiveJobStripNSView, coordinator: Coordinator) {
+        if let id = coordinator.sinkID {
+            coordinator.controller?.setStripLiveSink(id, nil)
+        }
+        coordinator.sinkID = nil
+        coordinator.controller = nil
+    }
+
+    @MainActor
+    private func installCallbacks(on nsView: ActiveJobStripNSView, context: Context) {
         nsView.onContentHeightChanged = { [weak nsView] in
             guard let nsView else { return }
             reportMeasuredHeight(nsView: nsView, appState: appState)
@@ -390,7 +408,22 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
             nsView.refreshCachedContentHeight(forWidth: width)
             reportMeasuredHeight(nsView: nsView, appState: appState)
         }
-        nsView.update(stripView: stripView, colors: colors)
+        let id = ObjectIdentifier(nsView)
+        context.coordinator.sinkID = id
+        context.coordinator.controller = appState.imageGen
+        appState.imageGen.setStripLiveSink(id) { [weak nsView, weak appState] strip in
+            guard let nsView, let appState else { return }
+            let before = nsView.cachedContentHeight
+            nsView.update(stripView: strip, colors: appState.theme.colors)
+            guard abs(nsView.cachedContentHeight - before) > 1 else { return }
+            let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: strip)
+            appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, estimated, 28))
+        }
+    }
+
+    final class Coordinator {
+        var sinkID: ObjectIdentifier?
+        weak var controller: ImageGenController?
     }
 
     private func resolvedLayoutWidth(

@@ -227,8 +227,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 scrollWidth: scrollWidth,
                 selected: isSelected,
                 colors: themeColors,
-                // Fingerprint covers status rows + copiesTotal; queued rows skip CoreText relayout when unchanged.
-                skipUnchanged: !row.isActive
+                // Fingerprint covers status rows + copiesTotal. Progress ticks do not
+                // reach this path; skip CoreText relayout when the card is unchanged.
+                skipUnchanged: true
             )
             if isSelected { selectedCard = card }
         }
@@ -1289,9 +1290,6 @@ final class JobCardNSView: NSView {
         lastSelected = selected
         lastActive = running
         applyJobNumberBadgeLayout()
-        if lastScrollWidth > 0, !lastViewFingerprint.isEmpty {
-            syncCardHeight(inlineRefs: lastInlineRefs, hasBelowRefs: lastHasBelowRefs)
-        }
     }
 
     private static func infoContentWidth(viewportWidth: CGFloat) -> CGFloat {
@@ -1326,11 +1324,6 @@ final class JobCardNSView: NSView {
         let estimatedContentH = inlineRefs ? max(statusH, refsH) + 2 : statusH + refsH + 2
         let contentH = max(ceil(column.fittingSize.height), estimatedContentH, 1)
 
-        contentHeightConstraint?.isActive = false
-        contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: contentH)
-        contentHeightConstraint?.priority = .defaultHigh
-        contentHeightConstraint?.isActive = true
-
         let actionBarBlock: CGFloat
         if embeddedActionBar != nil, embeddedActionBar?.isHidden == false {
             actionBarBlock = JobQueueLayout.cardInnerSpacing + JobQueueLayout.actionBarHeight
@@ -1340,7 +1333,19 @@ final class JobCardNSView: NSView {
         // Must match content top/bottom + optional action bar. Extra border height
         // conflicts with those constraints and collapses the card.
         let frameH = JobQueueLayout.cardOuterMargin * 2 + contentH + actionBarBlock
-        layoutHeight = max(frameH, 40)
+        let newHeight = max(frameH, 40)
+        if abs(newHeight - layoutHeight) < 0.5,
+           abs((contentHeightConstraint?.constant ?? 0) - contentH) < 0.5,
+           cardHeightConstraint?.isActive == true {
+            return
+        }
+
+        contentHeightConstraint?.isActive = false
+        contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: contentH)
+        contentHeightConstraint?.priority = .defaultHigh
+        contentHeightConstraint?.isActive = true
+
+        layoutHeight = newHeight
         cardHeightConstraint?.isActive = false
         cardHeightConstraint = heightAnchor.constraint(equalToConstant: layoutHeight)
         cardHeightConstraint?.priority = .required

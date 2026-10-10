@@ -248,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func scheduleMenuBarDeduplication() {
         DispatchQueue.main.async { [weak self] in
             MenuBarTitles.removeDuplicateStandardMenus()
+            MenuBarTitles.placeImageMenuBeforeTools()
             self?.rewireStandardAboutMenuItems()
         }
     }
