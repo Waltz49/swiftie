@@ -17,5 +17,6 @@ struct ImageGenModelSelector: View {
             }
         }
         .pickerStyle(.menu)
+        .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -18,6 +18,10 @@ struct LoRAPluginChoices: Equatable {
     var choices: [LoRAChoice]
     var selectedIDs: [String]
     var scalesByID: [String: Double]
+    /// Catalog ``entry.scale`` per preset (popup default weight).
+    var catalogScalesByID: [String: Double]
+    /// Catalog ``entry.best_guess`` per preset (weight reset target).
+    var bestGuessByID: [String: Double]
     /// When no LoRAs are selectable in the run dialog (only implicit none).
     var emptySelectionHint: String?
 
@@ -34,6 +38,8 @@ struct LoRAPluginChoices: Equatable {
             choices: [],
             selectedIDs: [],
             scalesByID: [:],
+            catalogScalesByID: [:],
+            bestGuessByID: [:],
             emptySelectionHint: nil
         )
     }
@@ -363,16 +369,9 @@ final class LoRABridge {
             guard let id = dict["preset_id"] as? String else { return nil }
             return LoRAChoice(presetID: id, label: dict["label"] as? String ?? id)
         }
-        var scales: [String: Double] = [:]
-        if let raw = result["scales_by_id"] as? [String: Any] {
-            for (key, value) in raw {
-                if let n = value as? NSNumber {
-                    scales[key] = n.doubleValue
-                } else if let d = value as? Double {
-                    scales[key] = d
-                }
-            }
-        }
+        let scales = Self.doubleMap(from: result["scales_by_id"])
+        let catalogScales = Self.doubleMap(from: result["catalog_scales_by_id"])
+        let bestGuess = Self.doubleMap(from: result["best_guess_by_id"])
         let selectable = choices.filter { $0.presetID != "none" }
         let emptyHint = result["empty_selection_hint"] as? String
         return LoRAPluginChoices(
@@ -383,6 +382,8 @@ final class LoRABridge {
             choices: choices,
             selectedIDs: result["selected_ids"] as? [String] ?? [],
             scalesByID: scales,
+            catalogScalesByID: catalogScales,
+            bestGuessByID: bestGuess,
             emptySelectionHint: emptyHint
                 ?? (selectable.isEmpty
                     ? "No LoRAs in the Create menu. Add LoRA files and run Test LoRAs in Settings → LoRA."
@@ -621,6 +622,19 @@ final class LoRABridge {
     func checkLorasClearProbeHistory() async throws -> Int {
         let result = try await request(["command": "check_loras_clear_probe_history"])
         return (result["removed"] as? NSNumber)?.intValue ?? 0
+    }
+
+    private static func doubleMap(from raw: Any?) -> [String: Double] {
+        guard let dict = raw as? [String: Any] else { return [:] }
+        var out: [String: Double] = [:]
+        for (key, value) in dict {
+            if let n = value as? NSNumber {
+                out[key] = n.doubleValue
+            } else if let d = value as? Double {
+                out[key] = d
+            }
+        }
+        return out
     }
 
     /// JSON-safe stack payload for ``choices_for_plugin`` (explicit empty stack must not fall back to legacy preset).

@@ -357,6 +357,19 @@ def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 pass
         entry = get_lora_entry(pid)
         scales_by_id[pid] = float(entry.scale) if entry is not None else 1.0
+    catalog_scales_by_id: Dict[str, float] = {}
+    best_guess_by_id: Dict[str, float] = {}
+    for item in choice_list:
+        pid = str(item.get("preset_id") or "").strip()
+        if not pid or pid == "none":
+            continue
+        entry = get_lora_entry(pid)
+        if entry is not None:
+            catalog_scales_by_id[pid] = float(entry.scale)
+            best_guess_by_id[pid] = float(entry.best_guess)
+        else:
+            catalog_scales_by_id[pid] = 1.0
+            best_guess_by_id[pid] = 1.0
     selectable = [c for c in choice_list if c.get("preset_id") != "none"]
     empty_hint = (
         lora_run_dialog_empty_hint(plugin, settings)
@@ -373,6 +386,8 @@ def _handle_choices_for_plugin(cmd: Dict[str, Any]) -> Dict[str, Any]:
         "choices": choice_list,
         "selected_ids": selected_ids,
         "scales_by_id": scales_by_id,
+        "catalog_scales_by_id": catalog_scales_by_id,
+        "best_guess_by_id": best_guess_by_id,
         "empty_selection_hint": empty_hint,
     }
 

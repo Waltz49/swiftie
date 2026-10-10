@@ -7,6 +7,10 @@ extension Notification.Name {
 
 @MainActor
 struct ImageGenLoraPicker: View {
+    private static let scaleMin = 0.0
+    private static let scaleMax = 2.0
+    private static let weightColumnWidth: CGFloat = 68
+
     @Environment(AppState.self) private var appState
     let pluginID: String
     @Binding var values: [String: Any]
@@ -14,8 +18,10 @@ struct ImageGenLoraPicker: View {
     var onValuesChanged: (() -> Void)?
 
     @State private var choices = LoRAPluginChoices.unsupported()
-    @State private var showStackSheet = false
+    @State private var showLoraPopup = false
+    @State private var loraPopupCommitted = true
     @State private var draftSelected: Set<String> = []
+    @State private var draftSingleID = "none"
     @State private var draftScales: [String: Double] = [:]
     @State private var summaryText = "None"
 
@@ -25,8 +31,8 @@ struct ImageGenLoraPicker: View {
                 Text(choices.unsupportedLabel)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else if choices.stackMode {
-                stackPicker
+            } else if choices.popupMode {
+                popupSummaryPicker
             } else {
                 singlePicker
             }
@@ -40,10 +46,13 @@ struct ImageGenLoraPicker: View {
                 choices: [],
                 selectedIDs: [],
                 scalesByID: [:],
+                catalogScalesByID: [:],
+                bestGuessByID: [:],
                 emptySelectionHint: nil
             )
             summaryText = "None"
             draftSelected = []
+            draftSingleID = "none"
             draftScales = [:]
             await refresh()
         }
@@ -51,23 +60,134 @@ struct ImageGenLoraPicker: View {
         .onReceive(NotificationCenter.default.publisher(for: .prowserLoraCatalogChanged)) { _ in
             Task { await refresh() }
         }
-        .sheet(isPresented: $showStackSheet) {
-            loraStackSheet
+    }
+
+    private var popupSummaryPicker: some View {
+        ImageGenSummaryComboButton(title: summaryText) {
+            syncDraftFromCurrentValues()
+            loraPopupCommitted = true
+            showLoraPopup = true
         }
-        .onChange(of: showStackSheet) { _, isPresented in
-            if isPresented {
-                syncDraftFromCurrentValues()
+        .popover(isPresented: $showLoraPopup, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            loraSelectionPopup
+                .onExitCommand {
+                    loraPopupCommitted = false
+                    showLoraPopup = false
+                }
+        }
+        .onChange(of: showLoraPopup) { wasOpen, isOpen in
+            if wasOpen, !isOpen, loraPopupCommitted {
+                commitPopupSelection()
             }
         }
     }
 
-    private var stackPicker: some View {
-        Button(summaryText) {
-            syncDraftFromCurrentValues()
-            showStackSheet = true
+    private var loraSelectionPopup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if popupChoices.isEmpty {
+                loraEmptySelectionView
+                    .padding(8)
+            } else {
+                popupHeaderRow
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(popupChoices) { choice in
+                            loraPopupRow(choice: choice)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(maxHeight: popupMaxHeight)
+            }
         }
-        .buttonStyle(.bordered)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 280)
+    }
+
+    private var popupHeaderRow: some View {
+        HStack(spacing: 8) {
+            Text("LoRA")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("Wt")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: Self.weightColumnWidth, alignment: .trailing)
+            Color.clear
+                .frame(width: ImageGenChrome.fieldButtonSize, height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func loraPopupRow(choice: LoRAChoice) -> some View {
+        let presetID = choice.presetID
+        let isActive = rowIsSelected(presetID)
+        HStack(spacing: 8) {
+            if choices.stackMode {
+                Toggle("", isOn: Binding(
+                    get: { draftSelected.contains(presetID) },
+                    set: { on in
+                        if on { draftSelected.insert(presetID) }
+                        else { draftSelected.remove(presetID) }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.checkbox)
+            } else {
+                Button {
+                    draftSingleID = presetID
+                } label: {
+                    Image(systemName: draftSingleID == presetID ? "largecircle.fill.circle" : "circle")
+                        .imageScale(.small)
+                        .foregroundStyle(draftSingleID == presetID ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(choice.label)
+                .accessibilityAddTraits(draftSingleID == presetID ? .isSelected : [])
+            }
+            Text(choice.label)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            TextField("", text: scaleBinding(for: presetID))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: Self.weightColumnWidth)
+                .disabled(!isActive || presetID == "none")
+            ImageGenFieldResetButton(
+                isActive: isWeightResetActive(presetID: presetID, isActive: isActive),
+                tooltip: "Reset weight to catalog best guess",
+                action: { resetWeight(for: presetID) }
+            )
+            .allowsHitTesting(isActive && presetID != "none")
+        }
+    }
+
+    private var popupChoices: [LoRAChoice] {
+        if choices.stackMode {
+            return choices.selectableChoices
+        }
+        var list = choices.choices
+        if !list.contains(where: { $0.presetID == "none" }) {
+            list.insert(LoRAChoice(presetID: "none", label: "None"), at: 0)
+        }
+        return list
+    }
+
+    private var popupMaxHeight: CGFloat {
+        let rowHeight: CGFloat = 28
+        let headerHeight: CGFloat = 22
+        let padding: CGFloat = 16
+        let visibleRows = min(popupChoices.count, 10)
+        return headerHeight + CGFloat(visibleRows) * rowHeight + padding
+    }
+
+    private func rowIsSelected(_ presetID: String) -> Bool {
+        if choices.stackMode {
+            return draftSelected.contains(presetID)
+        }
+        return draftSingleID == presetID
     }
 
     private var singlePicker: some View {
@@ -81,8 +201,9 @@ struct ImageGenLoraPicker: View {
                         Text(choice.label).tag(choice.presetID)
                     }
                 }
+                .pickerStyle(.menu)
                 .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
                 .onChange(of: singleBinding.wrappedValue) { _, _ in
                     onValuesChanged?()
                     Task { await refreshSummaryOnly() }
@@ -93,14 +214,17 @@ struct ImageGenLoraPicker: View {
 
     private var loraEmptySelectionView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("None", isOn: .constant(true))
-                .disabled(true)
-            if let hint = choices.emptySelectionHint, !hint.isEmpty {
-                Text(hint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if !choices.popupMode {
+                Toggle("None", isOn: .constant(true))
+                    .disabled(true)
             }
+            Text(
+                choices.emptySelectionHint
+                    ?? "No LoRAs available. Enable and download in Settings → LoRA."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
             if appState.workers.lora.isAvailable {
                 Button("Open LoRA settings…") {
                     openLoRASettings()
@@ -148,76 +272,88 @@ struct ImageGenLoraPicker: View {
         )
     }
 
-    private var loraStackSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("LoRAs").font(.headline)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    if choices.selectableChoices.isEmpty {
-                        loraEmptySelectionView
-                    } else {
-                        ForEach(choices.selectableChoices) { choice in
-                            HStack {
-                                Toggle(choice.label, isOn: Binding(
-                                    get: { draftSelected.contains(choice.presetID) },
-                                    set: { on in
-                                        if on { draftSelected.insert(choice.presetID) }
-                                        else { draftSelected.remove(choice.presetID) }
-                                    }
-                                ))
-                                TextField(
-                                    "wt",
-                                    text: scaleBinding(for: choice.presetID)
-                                )
-                                .frame(width: 48)
-                                .disabled(!draftSelected.contains(choice.presetID))
-                            }
-                        }
-                    }
-                }
-            }
-            DialogButtonRow([
-                DialogButton("Cancel", isCancel: true) { showStackSheet = false },
-                DialogButton("Apply", isDefault: true) { applyStack() },
-            ])
-        }
-        .padding()
-        .frame(width: 420, height: 360)
-    }
-
     private func scaleBinding(for presetID: String) -> Binding<String> {
         Binding(
             get: {
-                let v = draftScales[presetID] ?? 1
-                return String(v)
+                let v = draftScales[presetID] ?? catalogScale(for: presetID)
+                return formatEditableScale(v)
             },
             set: { text in
                 if let d = Double(text) {
-                    draftScales[presetID] = min(2, max(0.1, d))
+                    draftScales[presetID] = min(Self.scaleMax, max(Self.scaleMin, d))
                 }
             }
         )
     }
 
-    private func applyStack() {
-        let ids = choices.selectableChoices.map(\.presetID).filter { draftSelected.contains($0) }
+    private func formatEditableScale(_ value: Double) -> String {
+        let clamped = min(Self.scaleMax, max(Self.scaleMin, value))
+        var text = String(format: "%.2f", clamped)
+        while text.last == "0" { text.removeLast() }
+        if text.last == "." { text.removeLast() }
+        return text
+    }
+
+    private func catalogScale(for presetID: String) -> Double {
+        choices.catalogScalesByID[presetID] ?? choices.scalesByID[presetID] ?? 1
+    }
+
+    private func bestGuessScale(for presetID: String) -> Double {
+        choices.bestGuessByID[presetID] ?? catalogScale(for: presetID)
+    }
+
+    private func isWeightResetActive(presetID: String, isActive: Bool) -> Bool {
+        guard isActive, presetID != "none" else { return false }
+        let current = draftScales[presetID] ?? catalogScale(for: presetID)
+        let target = bestGuessScale(for: presetID)
+        return abs(current - target) > 1e-6
+    }
+
+    private func resetWeight(for presetID: String) {
+        draftScales[presetID] = bestGuessScale(for: presetID)
+    }
+
+    private func commitPopupSelection() {
+        if choices.stackMode {
+            let ids = choices.selectableChoices.map(\.presetID).filter { draftSelected.contains($0) }
+            applyCommittedSelection(ids: ids)
+        } else {
+            if draftSingleID.isEmpty || draftSingleID == "none" {
+                applyCommittedSelection(ids: [])
+            } else {
+                applyCommittedSelection(ids: [draftSingleID])
+            }
+        }
+    }
+
+    private func applyCommittedSelection(ids: [String]) {
         var scales: [String: Any] = [:]
         var scalesForCatalog: [String: Double] = [:]
         for id in ids {
-            let scale = draftScales[id] ?? 1
+            let scale = draftScales[id] ?? catalogScale(for: id)
             scales[id] = scale
             scalesForCatalog[id] = scale
         }
         var next = values
         next.removeValue(forKey: "mflux_lora")
-        next["mflux_lora_stack"] = ids
-        next["mflux_lora_scales_by_id"] = scales
+        if choices.stackMode {
+            next["mflux_lora_stack"] = ids
+            next["mflux_lora_scales_by_id"] = scales
+        } else if let single = ids.first {
+            next["mflux_lora"] = single
+            next.removeValue(forKey: "mflux_lora_stack")
+            if !scales.isEmpty {
+                next["mflux_lora_scales_by_id"] = scales
+            }
+        } else {
+            next["mflux_lora_stack"] = []
+            next.removeValue(forKey: "mflux_lora_scales_by_id")
+        }
         values = next
-        showStackSheet = false
         onValuesChanged?()
         let plugin = pluginID
         Task {
-            if appState.workers.lora.isAvailable {
+            if appState.workers.lora.isAvailable, !scalesForCatalog.isEmpty {
                 try? await appState.workers.lora.updateEntryScales(
                     pluginID: plugin,
                     scalesByID: scalesForCatalog
@@ -251,8 +387,18 @@ struct ImageGenLoraPicker: View {
     }
 
     private func syncDraftFromCurrentValues() {
-        draftSelected = Set(currentStackIDs())
+        if choices.stackMode {
+            draftSelected = Set(currentStackIDs())
+        } else {
+            draftSingleID = currentStackIDs().first ?? "none"
+        }
         draftScales = mergedScalesByID()
+        for choice in popupChoices where choice.presetID != "none" {
+            if draftScales[choice.presetID] == nil {
+                draftScales[choice.presetID] = mergedScalesByID()[choice.presetID]
+                    ?? catalogScale(for: choice.presetID)
+            }
+        }
     }
 
     private func currentStackIDs() -> [String] {
@@ -281,13 +427,13 @@ struct ImageGenLoraPicker: View {
         let scales = mergedScalesByID()
         rebuildSelectionDetailLine(ids: ids, scales: scales)
 
-        guard !choices.unsupported, choices.stackMode else { return }
+        guard !choices.unsupported, choices.popupMode else { return }
         if ids.isEmpty {
             summaryText = "None"
             return
         }
-        if ids.count == 1, let label = choices.selectableChoices.first(where: { $0.presetID == ids[0] })?.label {
-            summaryText = label
+        if ids.count == 1, let label = labelForPresetID(ids[0]) {
+            summaryText = truncatedSummary(label)
             return
         }
         if ids.count > 1 {
@@ -303,6 +449,16 @@ struct ImageGenLoraPicker: View {
         }
     }
 
+    private func labelForPresetID(_ presetID: String) -> String? {
+        choices.selectableChoices.first(where: { $0.presetID == presetID })?.label
+            ?? choices.choices.first(where: { $0.presetID == presetID })?.label
+    }
+
+    private func truncatedSummary(_ label: String, maxChars: Int = 48) -> String {
+        if label.count <= maxChars { return label }
+        return String(label.prefix(maxChars - 1)) + "…"
+    }
+
     private func rebuildSelectionDetailLine(ids: [String], scales: [String: Double]) {
         guard !choices.unsupported else {
             selectionDetailLine = ""
@@ -313,9 +469,7 @@ struct ImageGenLoraPicker: View {
             return
         }
         selectionDetailLine = ids.map { id in
-            let label = choices.selectableChoices.first(where: { $0.presetID == id })?.label
-                ?? choices.choices.first(where: { $0.presetID == id })?.label
-                ?? id
+            let label = labelForPresetID(id) ?? id
             let scale = scales[id] ?? 1
             return "\(label) [\(formatLoraScale(scale))]"
         }.joined(separator: ", ")
