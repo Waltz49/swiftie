@@ -184,6 +184,11 @@ extension AppState {
     var rightSidebarPaneActive: Bool {
         if config.bool(forKey: "shortcuts_sidebar_visible", default: true) { return true }
         if config.bool(forKey: "information_sidebar_visible", default: true) { return true }
+        if BundleCapabilities.imageGenUIEnabled,
+           jobsDisplayMode == .pane,
+           config.bool(forKey: "jobs_visible", default: true) {
+            return true
+        }
         return false
     }
 

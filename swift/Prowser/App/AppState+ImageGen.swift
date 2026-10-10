@@ -124,7 +124,8 @@ extension AppState {
     func toggleJobsPane() {
         guard BundleCapabilities.imageGenUIEnabled else { return }
         if jobsDisplayMode == .pane,
-           config.bool(forKey: "jobs_visible", default: true) {
+           config.bool(forKey: "jobs_visible", default: true),
+           rightSidebarColumnVisible {
             config.updateSetting("jobs_visible", value: false)
             noteSidebarLayoutChanged()
             return
@@ -134,6 +135,7 @@ extension AppState {
 
     func showJobsPane() {
         guard BundleCapabilities.imageGenUIEnabled else { return }
+        clearChromeSuppression()
         showFloatingJobsPanel = false
         jobsDisplayMode = .pane
         config.updateSetting("jobs_display_mode", value: JobsDisplayMode.pane.rawValue)

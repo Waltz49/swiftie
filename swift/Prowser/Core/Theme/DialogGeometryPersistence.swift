@@ -22,6 +22,7 @@ enum DialogGeometryKey {
     static let generationTiming = "generation_timing_dialog_geometry"
     static let checkLorasOptions = "check_loras_options_dialog_geometry"
     static let checkLorasResults = "check_loras_results_dialog_geometry"
+    static let loraMap = "lora_map_dialog_geometry"
 
     static let imageGenDialog = "dialog_geometry"
     static let jobQueue = "job_queue_geometry"
