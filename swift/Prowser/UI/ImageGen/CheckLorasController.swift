@@ -15,7 +15,7 @@ enum CheckLorasController {
 
     private static func begin(from appState: AppState) async {
         let bridge = appState.workers.lora
-        guard await bridge.waitUntilAvailable() else {
+        guard bridge.pythonOpsAvailable else {
             StyledMessageDialog.showWarning(
                 title: "Test LoRAs",
                 message: "Image generation Python environment is not ready."

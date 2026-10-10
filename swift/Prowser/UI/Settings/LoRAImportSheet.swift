@@ -2,6 +2,10 @@ import SwiftUI
 
 @MainActor
 struct LoRAImportSheet: View {
+    private static let weightRange = 0.1...2.0
+    private static let weightStep = 0.05
+    private static let weightControlWidth: CGFloat = 68
+
     enum Mode {
         case add
         case edit(loraID: String)
@@ -17,7 +21,7 @@ struct LoRAImportSheet: View {
     @State private var sourcePath = ""
     @State private var displayName = ""
     @State private var triggerWord = ""
-    @State private var bestGuess = "1"
+    @State private var bestGuess = 1.0
     @State private var comment = ""
     @State private var referencePrompt = ""
     @State private var reuseLoraID: String?
@@ -35,7 +39,16 @@ struct LoRAImportSheet: View {
                 TextField("Safetensors path", text: $sourcePath)
                 TextField("Display name", text: $displayName)
                 TextField("Trigger word", text: $triggerWord)
-                TextField("Default weight", text: $bestGuess)
+                LabeledContent("Default weight") {
+                    AppNumericSpinBox(
+                        value: $bestGuess,
+                        in: Self.weightRange,
+                        step: Self.weightStep,
+                        decimalPlaces: 2,
+                        controlWidth: Self.weightControlWidth
+                    )
+                    .frame(width: Self.weightControlWidth)
+                }
                 TextField("Comment", text: $comment)
                 TextField("Reference prompt (compatibility test)", text: $referencePrompt)
             }
@@ -114,7 +127,7 @@ struct LoRAImportSheet: View {
             if let entry = try await appState.workers.lora.getEntry(loraID: loraID, modelKey: modelKey) {
                 displayName = entry.displayName
                 triggerWord = entry.triggerWord
-                bestGuess = String(entry.bestGuess)
+                bestGuess = min(Self.weightRange.upperBound, max(Self.weightRange.lowerBound, entry.bestGuess))
                 comment = entry.comment
                 let fromEntry = entry.referencePrompt
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -175,7 +188,7 @@ struct LoRAImportSheet: View {
                     loraID: loraID,
                     displayName: displayName,
                     triggerWord: triggerWord,
-                    bestGuess: Double(bestGuess) ?? 1,
+                    bestGuess: bestGuess,
                     comment: comment,
                     referencePrompt: referencePrompt,
                     repoID: "",
@@ -196,7 +209,7 @@ struct LoRAImportSheet: View {
             "source_path": path,
             "display_name": displayName,
             "trigger_word": triggerWord,
-            "best_guess": Double(bestGuess) ?? 1,
+            "best_guess": bestGuess,
             "comment": comment,
             "reference_prompt": referencePrompt,
         ]

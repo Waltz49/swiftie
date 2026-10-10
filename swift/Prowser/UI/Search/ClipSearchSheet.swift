@@ -28,7 +28,7 @@ struct ClipSearchSheet: View {
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Text("Minimum similarity")
-                Slider(value: $threshold, in: 0 ... 1)
+                AppMiniSlider(value: $threshold, in: 0 ... 1)
                 Text(String(format: "%.2f", threshold))
                     .monospacedDigit()
                     .frame(width: 44, alignment: .trailing)

@@ -28,10 +28,10 @@ enum SidebarPaneContextMenus {
     ) {
         let menu = buildMenu(kind: kind, appState: appState)
         PaneMenuActions.shared.appState = appState
-        guard let window = anchor.window, let content = window.contentView else { return }
-        let anchorInContent = anchor.convert(anchor.bounds, to: content)
-        let point = NSPoint(x: anchorInContent.minX, y: anchorInContent.minY)
-        menu.popUp(positioning: nil, at: point, in: content)
+        guard anchor.window != nil else { return }
+        let belowY = anchor.isFlipped ? anchor.bounds.maxY : anchor.bounds.minY
+        let point = NSPoint(x: anchor.bounds.minX, y: belowY-7)
+        menu.popUp(positioning: nil, at: point, in: anchor)
     }
 
     static func buildMenu(kind: SidebarPaneContextMenuKind, appState: AppState) -> NSMenu {

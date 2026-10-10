@@ -35,7 +35,7 @@ struct ImageGenerationSettingsSection: View {
 
             HStack {
                 Text("Max generation dimension")
-                Slider(
+                AppMiniSlider(
                     value: dimensionSliderBinding,
                     in: 0...Double(ImageGenDimLimits.sliderMaxIndex),
                     step: 1
@@ -253,7 +253,7 @@ struct ImageGenerationSettingsSection: View {
     private func cooldownSlider(title: String, key: String, defaultValue: Int) -> some View {
         HStack {
             Text(title)
-            Slider(
+            AppMiniSlider(
                 value: Binding(
                     get: { Double(appState.config.int(forKey: key, default: defaultValue)) },
                     set: { newValue in

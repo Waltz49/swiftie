@@ -32,35 +32,27 @@ struct ImageGenLoraSection: View {
 
     var body: some View {
         if supportsLora {
-            VStack(alignment: .leading, spacing: ImageGenInlineFieldLayout.blockSpacing) {
-                ImageGenInlineLabeledRow(label: headingText, labelWidth: labelWidth) {
-                    ImageGenLoraPicker(
-                        pluginID: pluginID,
-                        values: $values,
-                        selectionDetailLine: $loraSelectionDetail,
-                        onValuesChanged: onValuesChanged
+            HStack(alignment: .top, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                ImageGenInlineFieldLabel(text: headingText, width: labelWidth)
+                    .frame(height: 28)
+                ImageGenLoraPicker(
+                    pluginID: pluginID,
+                    values: $values,
+                    selectionDetailLine: $loraSelectionDetail,
+                    onValuesChanged: onValuesChanged
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
+                    ImageGenSettingsGearButton(
+                        settingsTab: .lora,
+                        tooltip: "LoRA settings",
+                        loraModelKey: loraModelKeyForPlugin()
                     )
-                } accessories: {
-                    HStack(spacing: 4) {
-                        ImageGenSettingsGearButton(
-                            settingsTab: .lora,
-                            tooltip: "LoRA settings",
-                            loraModelKey: loraModelKeyForPlugin()
-                        )
-                        ImageGenLoraClearButton(isVisible: hasSelection) {
-                            clearLoras()
-                        }
+                    ImageGenLoraClearButton(isVisible: hasSelection) {
+                        clearLoras()
                     }
                 }
-                if !loraSelectionDetail.isEmpty {
-                    ImageGenInlineInfoLine(labelWidth: labelWidth) {
-                        Text(loraSelectionDetail)
-                            .font(ImageGenInlineFieldLayout.infoLineFont)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel(loraSelectionDetail)
-                    }
-                }
+                .frame(height: 28)
             }
         }
     }

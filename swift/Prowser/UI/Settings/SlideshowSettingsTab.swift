@@ -52,7 +52,7 @@ struct SlideshowSettingsTab: View {
 
                     HStack {
                         Text("Overlap %")
-                        Slider(
+                        AppMiniSlider(
                             value: Binding(
                                 get: { Double(overlapPercent) },
                                 set: { newValue in
@@ -196,7 +196,7 @@ struct SlideshowSettingsTab: View {
     ) -> some View {
         HStack {
             Text(title)
-            Slider(
+            AppMiniSlider(
                 value: Binding(
                     get: { Double(appState.config.int(forKey: key, default: defaultValue)) },
                     set: { newValue in

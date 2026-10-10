@@ -6,94 +6,15 @@ import UniformTypeIdentifiers
 @MainActor
 enum LoraMapService {
     static func fetchRows(config: AppConfig) async throws -> [LoraMapRow] {
-        let venvPython = config.imagegenVenvPythonPath()
-        guard FileManager.default.isExecutableFile(atPath: venvPython) else {
-            throw BridgeError.workerMessage(
-                "Image generation Python was not found at \(venvPython)."
+        let store = LoRACatalogStore(paths: config.profilePaths)
+        let lc = store.load()
+        return LoRAMapRows.rows(lc: lc).map { row in
+            LoraMapRow(
+                loraID: row.loraID,
+                loraLabel: row.loraLabel,
+                models: row.models.map { LoraMapModel(label: $0.label, crossFamily: $0.crossFamily) }
             )
         }
-        guard let located = PythonLocator.resolve(profilePath: nil, config: config) else {
-            throw BridgeError.pythonUnavailable
-        }
-        let environment = PythonLocator.Environment(
-            executable: venvPython,
-            bundleRoot: located.bundleRoot,
-            profilePath: located.profilePath
-        )
-        let script = scriptURL(bundleRoot: environment.bundleRoot)
-        guard FileManager.default.isReadableFile(atPath: script.path) else {
-            throw BridgeError.workerMessage("LoRA map script was not found at \(script.path).")
-        }
-        return try await Task.detached(priority: .userInitiated) {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: environment.executable)
-            proc.arguments = ["-u", script.path]
-            proc.currentDirectoryURL = environment.bundleRoot
-            proc.environment = PythonLocator.processEnvironment(for: environment)
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            proc.standardOutput = stdoutPipe
-            proc.standardError = stderrPipe
-            let stdout = CollectedPipe()
-            let stderr = CollectedPipe()
-            stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                } else {
-                    stdout.append(chunk)
-                }
-            }
-            stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                } else {
-                    stderr.append(chunk)
-                }
-            }
-            try proc.run()
-            proc.waitUntilExit()
-            stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            stderrPipe.fileHandleForReading.readabilityHandler = nil
-            stdout.append(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
-            stderr.append(stderrPipe.fileHandleForReading.readDataToEndOfFile())
-            let data = stdout.data()
-            guard proc.terminationStatus == 0,
-                  let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-                let detail = String(data: stderr.data(), encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                throw BridgeError.workerMessage(detail.isEmpty ? "Could not load LoRA map." : detail)
-            }
-            return raw.compactMap(LoraMapRow.fromDictionary)
-        }.value
-    }
-
-    private static func scriptURL(bundleRoot: URL) -> URL {
-        let candidates = [
-            Bundle.main.resourceURL?.appendingPathComponent("run_lora_map.py"),
-            bundleRoot.appendingPathComponent("run_lora_map.py"),
-            // Dev tree: ImageGenPython's sibling Scripts/ (swift/Scripts, not the repo root).
-            bundleRoot
-                .deletingLastPathComponent()
-                .appendingPathComponent("Scripts/run_lora_map.py"),
-            sourceTreeScriptURL(),
-        ]
-        for candidate in candidates {
-            guard let candidate, FileManager.default.isReadableFile(atPath: candidate.path) else { continue }
-            return candidate
-        }
-        return sourceTreeScriptURL()
-    }
-
-    /// `Prowser/UI/ImageGen/…swift` → `swift/Scripts/run_lora_map.py`.
-    private static func sourceTreeScriptURL() -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Scripts/run_lora_map.py")
     }
 }
 

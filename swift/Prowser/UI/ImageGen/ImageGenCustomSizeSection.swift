@@ -86,6 +86,7 @@ struct ImageGenCustomSizeSection: View {
                             controlsRow
                         }
                     }
+                    .fixedSize(horizontal: compactSliderTracks, vertical: false)
                     VStack(spacing: 4) {
                         ImageGenDimHelperIconButton(
                             normalName: "sizeX2",

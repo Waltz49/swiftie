@@ -176,7 +176,9 @@ private struct ImageGenChoiceRow: View {
                 }
             }
             .labelsHidden()
-            .frame(minWidth: 140)
+            .pickerStyle(.menu)
+            .frame(width: isQuantizationChoice ? 64 : nil)
+            .frame(minWidth: isQuantizationChoice ? nil : 140)
             if spec["reset_default"] != nil {
                 ImageGenFieldResetButton(
                     isActive: !ImageGenFieldResetLogic.matchesDefault(
@@ -200,7 +202,6 @@ private struct ImageGenChoiceRow: View {
                         .foregroundStyle(.primary)
                         .frame(width: inlineLabelWidth, alignment: .leading)
                     controlRow
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 4) {
@@ -212,6 +213,10 @@ private struct ImageGenChoiceRow: View {
                 }
             }
         }
+    }
+
+    private var isQuantizationChoice: Bool {
+        key == "mflux_quantize" || label.caseInsensitiveCompare("Quantization") == .orderedSame
     }
 
     private var selectionBinding: Binding<String> {
@@ -291,7 +296,6 @@ private struct ImageGenSeedRowGroup: View {
                         .foregroundStyle(.primary)
                         .frame(width: inlineLabelWidth, alignment: .leading)
                     controls
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 4) {
@@ -333,7 +337,7 @@ private struct ImageGenStepsQuantRowGroup: View {
                     compactSliderTracks: compactSliderTracks,
                     values: $values
                 )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: compactSliderTracks, vertical: false)
             }
             if let quantSpec = childSpecs.first(where: { $0["key"] as? String == "mflux_quantize" }) {
                 ImageGenFieldSpecView(
@@ -341,7 +345,7 @@ private struct ImageGenStepsQuantRowGroup: View {
                     compactSliderTracks: compactSliderTracks,
                     values: $values
                 )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: compactSliderTracks, vertical: false)
             }
         }
     }

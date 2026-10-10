@@ -138,7 +138,7 @@ struct GeneralSettingsTab: View {
                             tooltip: "After this time, the current image is added to Image History that you can see by pressing F3."
                         ) {
                             HStack {
-                                Slider(
+                                AppMiniSlider(
                                     value: Binding(
                                         get: { Double(historySliderIndex) },
                                         set: { newValue in

@@ -27,9 +27,16 @@ copy_file() {
 echo "Syncing imagegen bundle: $REPO_ROOT -> $DEST"
 
 copy_dir imagegen_plugins
-copy_dir chat_plugins
+
+# Swift app does not bundle chat UI; set SYNC_IMAGEGEN_MINIMAL=1 to omit chat_plugins/theme.
+if [[ "${SYNC_IMAGEGEN_MINIMAL:-0}" != "1" ]]; then
+  copy_dir chat_plugins
+  copy_dir theme
+else
+  echo "SYNC_IMAGEGEN_MINIMAL=1: skipping chat_plugins and theme"
+fi
+
 copy_dir exif
-copy_dir theme
 
 for f in \
   config.py \

@@ -711,6 +711,10 @@ final class AppConfig {
         saveSettings()
     }
 
+    func setImagegenLoraModelKey(_ modelKey: String) {
+        mutateSettings { $0["imagegen_lora_model_key"] = modelKey }
+    }
+
     private static func deepCopySettings(_ source: [String: Any]) -> [String: Any] {
         guard JSONSerialization.isValidJSONObject(source),
               let data = try? JSONSerialization.data(withJSONObject: source),

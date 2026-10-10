@@ -10,6 +10,7 @@ struct ImageGenLoraPicker: View {
     private static let scaleMin = 0.0
     private static let scaleMax = 2.0
     private static let weightColumnWidth: CGFloat = 68
+    private static let popupWidth: CGFloat = 504
 
     @Environment(AppState.self) private var appState
     let pluginID: String
@@ -26,15 +27,41 @@ struct ImageGenLoraPicker: View {
     @State private var summaryText = "None"
 
     var body: some View {
-        Group {
-            if choices.unsupported {
-                Text(choices.unsupportedLabel)
+        VStack(alignment: .leading, spacing: ImageGenInlineFieldLayout.blockSpacing) {
+            Group {
+                if choices.unsupported {
+                    Text(choices.unsupportedLabel)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if choices.popupMode {
+                    popupSummaryPicker
+                } else {
+                    singlePicker
+                }
+            }
+            if !selectionDetailLine.isEmpty {
+                Text(selectionDetailLine)
+                    .font(ImageGenInlineFieldLayout.infoLineFont)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if choices.popupMode {
-                popupSummaryPicker
-            } else {
-                singlePicker
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(selectionDetailLine)
+            }
+        }
+        .background(alignment: .bottomLeading) {
+            if choices.popupMode {
+                AppAnchoredPopup(isPresented: $showLoraPopup, width: Self.popupWidth) {
+                    loraSelectionPopup
+                        .background(Color(nsColor: .windowBackgroundColor))
+                        .overlay {
+                            Rectangle()
+                                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                        }
+                        .onExitCommand {
+                            loraPopupCommitted = false
+                            showLoraPopup = false
+                        }
+                        .environment(appState)
+                }
             }
         }
         .task(id: pluginID) {
@@ -68,13 +95,6 @@ struct ImageGenLoraPicker: View {
             loraPopupCommitted = true
             showLoraPopup = true
         }
-        .popover(isPresented: $showLoraPopup, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-            loraSelectionPopup
-                .onExitCommand {
-                    loraPopupCommitted = false
-                    showLoraPopup = false
-                }
-        }
         .onChange(of: showLoraPopup) { wasOpen, isOpen in
             if wasOpen, !isOpen, loraPopupCommitted {
                 commitPopupSelection()
@@ -102,7 +122,7 @@ struct ImageGenLoraPicker: View {
                 .frame(maxHeight: popupMaxHeight)
             }
         }
-        .frame(minWidth: 280)
+        .frame(width: Self.popupWidth)
     }
 
     private var popupHeaderRow: some View {
@@ -150,9 +170,13 @@ struct ImageGenLoraPicker: View {
             Text(choice.label)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            TextField("", text: scaleBinding(for: presetID))
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
+            AppNumericSpinBox(
+                value: scaleBinding(for: presetID),
+                in: Self.scaleMin...Self.scaleMax,
+                step: 0.05,
+                decimalPlaces: 2,
+                controlWidth: Self.weightColumnWidth
+            )
                 .frame(width: Self.weightColumnWidth)
                 .disabled(!isActive || presetID == "none")
             ImageGenFieldResetButton(
@@ -272,26 +296,13 @@ struct ImageGenLoraPicker: View {
         )
     }
 
-    private func scaleBinding(for presetID: String) -> Binding<String> {
+    private func scaleBinding(for presetID: String) -> Binding<Double> {
         Binding(
-            get: {
-                let v = draftScales[presetID] ?? catalogScale(for: presetID)
-                return formatEditableScale(v)
-            },
-            set: { text in
-                if let d = Double(text) {
-                    draftScales[presetID] = min(Self.scaleMax, max(Self.scaleMin, d))
-                }
+            get: { draftScales[presetID] ?? catalogScale(for: presetID) },
+            set: { value in
+                draftScales[presetID] = min(Self.scaleMax, max(Self.scaleMin, value))
             }
         )
-    }
-
-    private func formatEditableScale(_ value: Double) -> String {
-        let clamped = min(Self.scaleMax, max(Self.scaleMin, value))
-        var text = String(format: "%.2f", clamped)
-        while text.last == "0" { text.removeLast() }
-        if text.last == "." { text.removeLast() }
-        return text
     }
 
     private func catalogScale(for presetID: String) -> Double {

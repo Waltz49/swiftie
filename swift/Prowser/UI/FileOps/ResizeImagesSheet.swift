@@ -136,7 +136,7 @@ struct ResizeImagesSheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Slider(
+                    AppMiniSlider(
                         value: Binding(
                             get: { Double(percentScale) },
                             set: { onPercentChanged(Int($0.rounded())) }

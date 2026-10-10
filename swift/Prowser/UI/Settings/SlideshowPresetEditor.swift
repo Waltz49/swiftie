@@ -54,7 +54,7 @@ struct SlideshowPresetEditor: View {
     private func slideshowIntSlider(title: String, value: Binding<Int>, range: ClosedRange<Int>, step: Int) -> some View {
         HStack {
             Text(title)
-            Slider(
+            AppMiniSlider(
                 value: Binding(
                     get: { Double(value.wrappedValue) },
                     set: { value.wrappedValue = Int($0) }

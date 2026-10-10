@@ -55,7 +55,7 @@ struct ThemeColorSwatchRow: View {
 
             if let width, let onWidthChange {
                 HStack(spacing: 8) {
-                    Slider(
+                    AppMiniSlider(
                         value: Binding(
                             get: { Double(width) },
                             set: { onWidthChange(Int($0.rounded())) }
@@ -93,7 +93,7 @@ struct ThemeMutedBlendRow: View {
                 .fill(Color(hex: previewHex) ?? .gray)
                 .frame(width: 28, height: 28)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.4)))
-            Slider(
+            AppMiniSlider(
                 value: Binding(
                     get: { Double(percent) },
                     set: { onChange(Int($0.rounded())) }
@@ -121,7 +121,7 @@ struct ThemeBorderWidthRow: View {
             Text(label)
                 .frame(minWidth: 200, alignment: .leading)
             Spacer(minLength: 8)
-            Slider(
+            AppMiniSlider(
                 value: Binding(
                     get: { Double(width) },
                     set: { onChange(Int($0.rounded())) }

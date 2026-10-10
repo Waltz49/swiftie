@@ -28,6 +28,8 @@ struct ProfilePaths: Sendable {
     }
 
     var settingsFile: URL { dataDirectory.appendingPathComponent("settings.json") }
+    /// User LoRA registry (`lora_catalog.json`), separate from settings.json.
+    var loraCatalogFile: URL { dataDirectory.appendingPathComponent("lora_catalog.json") }
     var knownFacesFile: URL { dataDirectory.appendingPathComponent("known_faces.json") }
     /// Cross-process marker while a foreground face scan runs (Python `face_gathering_coordinator`).
     var foregroundFaceScanActiveMarker: URL { dataDirectory.appendingPathComponent("foreground_face_scan_active") }

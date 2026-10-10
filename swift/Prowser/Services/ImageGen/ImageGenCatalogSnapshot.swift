@@ -1,7 +1,8 @@
 import Foundation
 
-/// Frozen plugin dialog metadata (field layouts + merged defaults). Regenerate via
-/// `swift/Scripts/generate_imagegen_catalog_snapshot.sh` when Python plugins change.
+/// Frozen plugin dialog metadata (field layouts + merged defaults). Runtime source of truth
+/// for dialog fields; regenerate via `Scripts/generate_imagegen_catalog_snapshot.sh` when the
+/// Python reference plugins change (build/dev only — the app does not call Python at runtime).
 enum ImageGenCatalogSnapshot {
     private static let resourceName = "ImageGenPluginCatalogSnapshot"
 

@@ -27,15 +27,13 @@ enum ImageGenJobValuesSnapshot {
     ) async throws -> [String: Any] {
         var out = values
         stripDialogLeakedJobQueueFlags(&out)
-        if PythonLocator.resolve(profilePath: nil, config: config) != nil {
-            out = try await LoRAJobValuesSnapshot.snapshot(
-                pluginID: plugin.pluginID,
-                values: out,
-                config: config
-            )
-        } else {
-            snapshotLoraFallback(&out, pipelineID: plugin.pipelineID)
-        }
+        let lc = LoRACatalogStore(paths: config.profilePaths).load()
+        try await LoRAJobSnapshot.snapshotLoraForJob(
+            values: &out,
+            pipelineID: plugin.pipelineID,
+            lc: lc,
+            config: config
+        )
         let pluginMax = ImageGenPluginMetadata.maxGenerationDimension(pluginID: plugin.pluginID)
         let effectiveMax = ImageGenDimLimits.effectiveMaxGenerationDimension(
             pluginMax: pluginMax,
@@ -44,21 +42,6 @@ enum ImageGenJobValuesSnapshot {
         out["max_generation_dimension"] = effectiveMax
         out[snapshottedKey] = true
         return out
-    }
-
-    /// When Python snapshot is unavailable, keep dialog keys in a consistent shape.
-    private static func snapshotLoraFallback(_ values: inout [String: Any], pipelineID: String) {
-        if pipelineID == "sd15_diffusers" || pipelineID == "sdxl_diffusers" {
-            values.removeValue(forKey: "mflux_lora_stack")
-            values["mflux_lora_stack"] = values["mflux_lora_stack"] ?? []
-            return
-        }
-        if ImageGenPipelineRouting.registeredPipelineIDs.contains(pipelineID) {
-            if values["mflux_lora_stack"] == nil {
-                values["mflux_lora_stack"] = []
-            }
-            values.removeValue(forKey: "mflux_lora")
-        }
     }
 
     static func normalizeValues(

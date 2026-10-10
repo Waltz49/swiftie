@@ -206,6 +206,11 @@ final class ImageGenController {
         self.loraBridge = loraBridge
     }
 
+    private func snapshotSubmitValues(pluginID: String, values: [String: Any]) async throws -> [String: Any] {
+        try await loraBridge?.ensureCatalogMigrated()
+        return try await registry.normalizeValues(pluginID: pluginID, values: values, mode: "snapshot")
+    }
+
     func beginImageGenDialogBuild() {
         dialogBuildPauseCount += 1
     }
@@ -344,7 +349,7 @@ final class ImageGenController {
         let normalizedCopies = JobStepQueue.normalizeCopies(copies ?? values["copies"] ?? 1)
         var submitValues = values
         submitValues["copies"] = normalizedCopies
-        submitValues = try await registry.normalizeValues(pluginID: pluginID, values: submitValues, mode: "snapshot")
+        submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: normalizedCopies)
         let prompt = submitValues["prompt"] as? String ?? ""
         steps = JobStepQueue.ensureStepsHavePrompt(steps, prompt: prompt, jobValues: submitValues)
@@ -479,7 +484,7 @@ final class ImageGenController {
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
         var submitValues = values
         submitValues["copies"] = copies
-        submitValues = try await registry.normalizeValues(pluginID: pluginID, values: submitValues, mode: "snapshot")
+        submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         let steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: copies)
         queue.jobs[index].pluginID = pluginID
         queue.jobs[index].function = function
@@ -571,7 +576,7 @@ final class ImageGenController {
         let copies = copiesDone + remaining
         var submitValues = values
         submitValues["copies"] = copies
-        submitValues = try await registry.normalizeValues(pluginID: pluginID, values: submitValues, mode: "snapshot")
+        submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         copiesTotal = copies
         copyBatchActive = copies > 1 || copiesDone > 0
         activePluginID = pluginID
