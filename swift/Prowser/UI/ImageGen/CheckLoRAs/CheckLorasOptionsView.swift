@@ -83,12 +83,12 @@ struct CheckLorasOptionsView: View {
                     probePromptSection
                     Toggle("Re-probe changed files only (skip unchanged weights)", isOn: $skipUnchanged)
                     Toggle(
-                        "Check cross families (probe LoRAs on other host families too)",
+                        "Test on other base model families",
                         isOn: $checkCrossFamilies
                     )
                     .help(
                         "When checked, each LoRA is also tested on installed base models "
-                            + "outside its catalog host family. Cross-family passes are marked with * in Map LoRAs."
+                            + "outside its usual family. Cross-family passes are marked with * in Map LoRAs."
                     )
                 }
                 .padding(.horizontal, 4)
@@ -128,11 +128,11 @@ struct CheckLorasOptionsView: View {
             Text(
                 "Delete \(clearHistoryCount) cached probe result"
                     + (clearHistoryCount == 1 ? "" : "s")
-                    + "? The next Check LoRAs run will re-render all selected LoRAs "
+                    + "? The next Test LoRAs run will re-render all selected LoRAs "
                     + "(unless you skip unchanged weights and files match a new entry)."
             )
         }
-        .alert("Check LoRAs", isPresented: Binding(
+        .alert("Test LoRAs", isPresented: Binding(
             get: { clearHistoryAlert != nil },
             set: { if !$0 { clearHistoryAlert = nil } }
         )) {

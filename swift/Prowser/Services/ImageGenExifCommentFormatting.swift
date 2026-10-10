@@ -17,6 +17,7 @@ enum ImageGenExifCommentFormatting {
         "stablediffusionapi/anythingfurry": "Anything Furry",
         "stabilityai/stable-diffusion-xl-base-1.0": "SDXL 1.0 Base",
         "Disty0/Z-Image-Turbo-SDNQ-int8": "Z-Image Turbo",
+        "Tongyi-MAI/Z-Image-Turbo": "Z-Image Turbo",
         "filipstrand/Z-Image-Turbo-mflux-4bit": "Z-Image Turbo",
     ]
 

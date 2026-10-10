@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Z-Image Turbo (MFLUX 4-bit) LoRA catalog."""
+"""Z-Image Turbo (MFLUX) LoRA catalog."""
 
 from __future__ import annotations
 

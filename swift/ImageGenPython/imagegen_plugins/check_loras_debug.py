@@ -7,9 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_MFLUX_4BIT, lora_model_display_name
+from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO, lora_model_display_name
 from imagegen_plugins.lora_compatibility_checker import LoraCheckChange, LoraCheckResult
-from imagegen_plugins.lora_disk_discovery import lora_weights_search_roots_display
 
 LAST_REPORT_PATHS: List[str] = []
 
@@ -34,13 +33,13 @@ def _changes_of(result: LoraCheckResult, kind: str) -> List[LoraCheckChange]:
 
 
 def format_results_text_sections(result: LoraCheckResult) -> List[str]:
-    """User-facing results summary (Tools → Debug → Check LoRAs)."""
+    """User-facing results summary (Test LoRAs results dialog)."""
     st = result.stats
     lines = [
         (
-            "Check LoRAs cancelled (partial results saved)."
+            "Test LoRAs cancelled (partial results saved)."
             if result.cancelled
-            else "Check LoRAs finished."
+            else "Test LoRAs finished."
         ),
         "",
         "Summary",
@@ -68,8 +67,8 @@ def format_results_text_sections(result: LoraCheckResult) -> List[str]:
     if st.downloads_scanned:
         lines.append(f"  Downloads scanned: {st.downloads_scanned}")
         lines.append(f"  Downloads duplicates removed: {st.downloads_deduped}")
-        lines.append(f"  Downloads registered: {st.downloads_registered}")
-        lines.append(f"  Downloads with no passing model: {st.downloads_failed}")
+        lines.append(f"  New LoRAs added: {st.downloads_registered}")
+        lines.append(f"  LoRA files with no passing model: {st.downloads_failed}")
     if st.skipped_model_probes:
         lines.append(
             f"  Base models not installed (not probed): {st.skipped_model_probes}"
@@ -115,13 +114,13 @@ def format_results_text_sections(result: LoraCheckResult) -> List[str]:
 
     add_section("Passed probes", passed)
     add_section("Newly enabled", newly_enabled)
-    add_section("Downloads registered", downloads_registered)
+    add_section("New LoRAs added", downloads_registered)
     add_section("Newly compatible (not newly enabled)", compat_only)
     add_section("Failed probes", failed)
     add_section("Lost prior compatibility", lost)
     add_section("Passed but hidden (left disabled)", hidden)
     add_section("Downloads duplicates removed", downloads_deduped, with_model=False)
-    add_section("Downloads with no passing model", downloads_failed, with_model=False)
+    add_section("LoRA files with no passing model", downloads_failed, with_model=False)
     add_section("Skipped — weights not on disk", not_disk, with_model=False, limit=80)
 
     lines.extend(
@@ -129,9 +128,9 @@ def format_results_text_sections(result: LoraCheckResult) -> List[str]:
             "",
             "Each on-disk LoRA is probed against every installed base model. Passing "
             "pairs are recorded and enabled in Settings → LoRA (unless previously Hidden).",
-            "Weights are discovered under: "
-            + "; ".join(lora_weights_search_roots_display())
-            + ". Duplicate files (same md5) are probed once. "
+            "Weights are discovered under ~/.cache/image_browser/mflux_loras, "
+            "~/.cache/mflux_loras (recursive), and top-level ~/Downloads "
+            "*.safetensors. Duplicate files (same md5) are probed once. "
             "Unchanged files reuse prior probe history.",
             "Re-run after downloading new LoRA weights. Use Hide in Settings to "
             "keep a LoRA out of the menus.",
@@ -239,14 +238,14 @@ def audit_settings_visibility(
     ms = lora_model_support(settings)
     audits: Dict[str, Any] = {}
     models_to_audit = _models_with_passes(result)
-    if Z_IMAGE_TURBO_MFLUX_4BIT not in models_to_audit:
+    if Z_IMAGE_TURBO not in models_to_audit:
         z_passes = [
             lid
             for lid, models in (result.model_support or {}).items()
-            if Z_IMAGE_TURBO_MFLUX_4BIT in (models or [])
+            if Z_IMAGE_TURBO in (models or [])
         ]
         if z_passes:
-            models_to_audit[Z_IMAGE_TURBO_MFLUX_4BIT] = set(z_passes)
+            models_to_audit[Z_IMAGE_TURBO] = set(z_passes)
 
     for model_key, lora_ids in sorted(models_to_audit.items()):
         grid_ids = {e.lora_id for e in catalog_entries_for_model(settings, model_key)}

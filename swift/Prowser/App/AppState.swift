@@ -1654,7 +1654,7 @@ final class AppState {
         syncDialog(
             id: DialogID.checkLorasOptions,
             show: checkLorasFlow.optionsPrescan != nil,
-            title: "Check LoRAs — Options",
+            title: "Test LoRAs — Options",
             defaultSize: NSSize(width: 520, height: 620),
             minSize: NSSize(width: 480, height: 400),
             onClose: { [weak self] in
@@ -1679,7 +1679,7 @@ final class AppState {
         syncDialog(
             id: DialogID.checkLorasResults,
             show: checkLorasFlow.results != nil,
-            title: "Check LoRAs — Results",
+            title: "Test LoRAs — Results",
             defaultSize: NSSize(width: 640, height: 520),
             minSize: NSSize(width: 520, height: 400),
             onClose: { [weak self] in

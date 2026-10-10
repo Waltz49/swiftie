@@ -65,6 +65,8 @@ struct LoRACatalogEntry: Identifiable, Equatable {
     var statusLabel: String
     var hasRecoverySource: Bool
     var registered: Bool
+    /// `pass`, `fail`, or `unknown` for the selected base model (settings grid).
+    var probeStateForModel: String
     var id: String { loraID }
 
     static func fromDictionary(_ dict: [String: Any]) -> LoRACatalogEntry? {
@@ -87,7 +89,8 @@ struct LoRACatalogEntry: Identifiable, Equatable {
             lifecycle: dict["lifecycle"] as? String ?? "",
             statusLabel: dict["status_label"] as? String ?? "",
             hasRecoverySource: dict["has_recovery_source"] as? Bool ?? false,
-            registered: dict["registered"] as? Bool ?? true
+            registered: dict["registered"] as? Bool ?? true,
+            probeStateForModel: dict["probe_state_for_model"] as? String ?? "unknown"
         )
     }
 }
@@ -95,6 +98,16 @@ struct LoRACatalogEntry: Identifiable, Equatable {
 struct LoRAModelDraftSlice: Equatable {
     var enabledIDs: [String]
     var deletedIDs: [String]
+}
+
+struct LoRARemovalInfo: Equatable {
+    var displayName: String
+    var sharedModelLabels: [String]
+}
+
+enum LoRADeleteMode: String {
+    case unregister
+    case deleteWeights = "delete_weights"
 }
 
 struct CheckLorasInstalledModel: Equatable, Identifiable {
@@ -372,7 +385,7 @@ final class LoRABridge {
             scalesByID: scales,
             emptySelectionHint: emptyHint
                 ?? (selectable.isEmpty
-                    ? "No LoRAs available. Enable and download in Settings → LoRA."
+                    ? "No LoRAs in the Create menu. Add LoRA files and run Test LoRAs in Settings → LoRA."
                     : nil)
         )
     }
@@ -489,11 +502,23 @@ final class LoRABridge {
         ])
     }
 
-    func delete(loraID: String, modelKey: String) async throws {
+    func loraRemovalInfo(loraID: String) async throws -> LoRARemovalInfo {
+        let result = try await request([
+            "command": "lora_removal_info",
+            "lora_id": loraID,
+        ])
+        return LoRARemovalInfo(
+            displayName: result["display_name"] as? String ?? loraID,
+            sharedModelLabels: result["shared_model_labels"] as? [String] ?? []
+        )
+    }
+
+    func delete(loraID: String, modelKey: String, mode: LoRADeleteMode) async throws {
         _ = try await request([
             "command": "delete",
             "lora_id": loraID,
             "model_key": modelKey,
+            "mode": mode.rawValue,
         ])
     }
 
@@ -551,7 +576,7 @@ final class LoRABridge {
                 "command": "check_loras_prepare",
                 "options": options.bridgeDictionary(),
             ],
-            awaitFinalResult: true
+            awaitFinalResult: false
         )
         return CheckLorasPrepareResult(
             success: result["success"] as? Bool ?? false,

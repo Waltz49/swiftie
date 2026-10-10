@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""In-process Z-Image Turbo (MFLUX 4-bit) with model retention."""
+"""In-process Z-Image Turbo (MFLUX, runtime quantize) with model retention."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ _z_image_loaded_key: tuple[Any, ...] | None = None
 
 def compute_z_image_model_key(
     model_path: str,
+    quantize: int,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
     *,
@@ -24,7 +25,7 @@ def compute_z_image_model_key(
 ) -> tuple[Any, ...]:
     paths = tuple(os.path.abspath(str(p)) for p in (lora_paths or ()))
     scales = tuple(float(s) for s in (lora_scales or ()))
-    return (model_path, paths, scales, bool(bake_lora))
+    return (model_path, int(quantize), paths, scales, bool(bake_lora))
 
 
 def resolve_z_image_bake_lora(
@@ -92,6 +93,7 @@ def _register_run_callbacks(
 def get_z_image(
     *,
     model_path: str,
+    quantize: int,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
     bake_lora: bool = True,
@@ -103,6 +105,7 @@ def get_z_image(
     lora_scales_arg = scales if scales else None
     key = compute_z_image_model_key(
         model_path,
+        int(quantize),
         lora_paths_arg,
         lora_scales_arg,
         bake_lora=bake_lora,
@@ -127,6 +130,7 @@ def get_z_image(
 
     t0 = time.perf_counter()
     _z_image_model = ZImage(
+        quantize=int(quantize),
         model_config=ModelConfig.z_image_turbo(),
         model_path=model_path,
         lora_paths=lora_paths_arg,
@@ -208,6 +212,7 @@ def run_z_image_on_model(
 def generate_z_image(
     *,
     model_path: str,
+    quantize: int,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
     prompt: str,
@@ -232,6 +237,7 @@ def generate_z_image(
     with PerfTimer("z_image_generate", seed=seed, steps=steps, width=width, height=height):
         model = get_z_image(
             model_path=model_path,
+            quantize=int(quantize),
             lora_paths=lora_paths_arg,
             lora_scales=lora_scales_arg,
             bake_lora=bake_lora,

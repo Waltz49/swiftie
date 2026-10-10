@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MFLUX Z-Image-Turbo 4-bit worker (pre-quantized weights + LoRA support).
+MFLUX Z-Image-Turbo worker (runtime quantize + LoRA support).
 
 Reads generation parameters from JSON payload on stdin when run standalone,
 or via run_from_payload from model_tasks_worker.
@@ -16,8 +16,10 @@ import time
 from typing import Any, Dict, Optional
 
 from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
-from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_MFLUX_4BIT
+from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
+from imagegen_plugins.image_gen_pipeline_modes import MFLUX_QUANT_CHOICES
+from imagegen_plugins.pipelines.mflux_schnell import _MFLUX_ALLOWED_QUANT
 from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
 from prowser_temp_files import prowser_mkstemp_path
 from workers.model_tasks_worker import PerfTimer
@@ -29,13 +31,22 @@ from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     stepwise_dirs_for_run,
 )
 
-_DEFAULT_HF_MODEL_ID = Z_IMAGE_TURBO_MFLUX_4BIT
+_DEFAULT_HF_MODEL_ID = Z_IMAGE_TURBO
 
 
 def mflux_is_installed() -> bool:
     from pyinstaller_frozen_support import mflux_is_installed as _installed
 
     return _installed()
+
+
+def _resolve_mflux_quantize(payload: Dict[str, Any]) -> int:
+    q = int(payload.get("mflux_quantize", 8))
+    if q not in _MFLUX_ALLOWED_QUANT:
+        raise ValueError(
+            f"mflux_quantize must be one of {sorted(MFLUX_QUANT_CHOICES)}, got {q}"
+        )
+    return q
 
 
 def run_mflux_z_image_generate(
@@ -46,6 +57,7 @@ def run_mflux_z_image_generate(
     steps: int,
     seed: int,
     model: str,
+    quantize: int,
     mflux_output_path: str,
     low_ram: bool = False,
     stepwise_image_output_dir: str | None = None,
@@ -75,6 +87,7 @@ def run_mflux_z_image_generate(
 
         image = generate_z_image(
             model_path=str(model),
+            quantize=int(quantize),
             lora_paths=lora_paths,
             lora_scales=lora_scales,
             prompt=prompt,
@@ -114,7 +127,7 @@ def run_mflux_z_image_generate(
 def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not mflux_is_installed():
         raise RuntimeError(
-            "Z-Image Turbo (4-bit) requires mflux. Install with: pip install mflux"
+            "Z-Image Turbo requires mflux. Install with: pip install mflux"
         )
 
     prompt = (payload.get("prompt") or "").strip()
@@ -122,6 +135,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("prompt is required")
 
     hf_model_id = str(payload.get("hf_model_id") or _DEFAULT_HF_MODEL_ID)
+    quantize = _resolve_mflux_quantize(payload)
     w, h = align_z_image_dims(
         int(payload["width"]),
         int(payload["height"]),
@@ -163,6 +177,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             steps=steps,
             seed=seed,
             model=hf_model_id,
+            quantize=quantize,
             mflux_output_path=mflux_output_path,
             low_ram=low_ram,
             stepwise_image_output_dir=stepwise_dir,

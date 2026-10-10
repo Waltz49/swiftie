@@ -38,12 +38,6 @@ def _check_sdxl_available() -> bool:
     return sdxl_diffusers_pipeline_is_installed()
 
 
-def _check_z_image_sdnq_available() -> bool:
-    from imagegen_plugins.pipelines.z_image_turbo import z_image_turbo_is_installed
-
-    return z_image_turbo_is_installed()
-
-
 def _check_mflux_z_image_available() -> bool:
     from imagegen_plugins.pipelines.mflux_z_image_turbo import mflux_is_installed
 
@@ -51,7 +45,7 @@ def _check_mflux_z_image_available() -> bool:
 
 
 def _check_mflux_fill_available() -> bool:
-    from pyinstaller_frozen_support import mflux_is_installed
+    from imagegen_plugins.pipelines.mflux_fill_expand import mflux_is_installed
 
     return mflux_is_installed()
 
@@ -127,7 +121,6 @@ _PIPELINE_AVAILABILITY_CHECKERS: Dict[str, AvailabilityChecker] = {
     "sana_sprint_600m": _check_sana_available,
     "sd15_diffusers": _check_sd15_available,
     "sdxl_diffusers": _check_sdxl_available,
-    "z_image_turbo_sdnq": _check_z_image_sdnq_available,
     "mflux_z_image_turbo": _check_mflux_z_image_available,
     "mflux_fill_expand": _check_mflux_fill_available,
     "mflux_fill_infill": _check_mflux_fill_available,
@@ -144,7 +137,6 @@ _PIPELINE_MODEL_LOCAL_CHECKERS: Dict[str, ModelLocalChecker] = {
     "mflux_flux2_klein_create": _check_klein_local,
     "mflux_flux2_klein_expand": _check_klein_local,
     "sana_sprint_600m": _check_sana_local,
-    "z_image_turbo_sdnq": _check_z_image_local,
     "mflux_z_image_turbo": _check_z_image_local,
     "sd15_diffusers": _check_sd15_local,
     "sdxl_diffusers": _check_sdxl_local,

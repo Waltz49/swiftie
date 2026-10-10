@@ -24,7 +24,7 @@ _PLUGIN_REGISTRATIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("imagegen_plugins.flux_schnell_mflux", ("FLUX_SCHNELL_MFLUX_PLUGIN",)),
     ("imagegen_plugins.flux_sldr_nsfw_v2_lora", ("FLUX_SLDR_NSFW_V2_LORA_PLUGIN",)),
     ("imagegen_plugins.sana_sprint_600m", ("SANA_SPRINT_600M_PLUGIN",)),
-    ("imagegen_plugins.z_image_turbo_mflux_4bit", ("Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN",)),
+    ("imagegen_plugins.z_image_turbo_mflux_4bit", ("Z_IMAGE_TURBO_PLUGIN",)),
     ("imagegen_plugins.realistic_vision_v4_sd15", ("REALISTIC_VISION_V4_SD15_PLUGIN",)),
     ("imagegen_plugins.anything_furry_sd15", ("ANYTHING_FURRY_SD15_PLUGIN",)),
     ("imagegen_plugins.sdxl_base_plugin", ("SDXL_BASE_1_0_PLUGIN",)),
@@ -141,10 +141,12 @@ def discover_plugins() -> List[ImageGenModelPlugin]:
 
 def plugin_by_id(plugin_id: str) -> ImageGenModelPlugin | None:
     """Lookup a registered plugin by id (empty when discovery has not run)."""
+    from imagegen_plugins.hf_model_ids import migrate_legacy_z_image_plugin_id
+
     discover_plugins()
     if _plugins_by_id is None:
         return None
-    return _plugins_by_id.get(plugin_id)
+    return _plugins_by_id.get(migrate_legacy_z_image_plugin_id(plugin_id))
 
 
 def plugins_by_hf_model_id(hf_model_id: str) -> List[ImageGenModelPlugin]:

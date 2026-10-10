@@ -20,7 +20,7 @@ from imagegen_plugins.hf_model_ids import (
     SDXL_LORA_MODEL_KEYS,
     ANYTHING_FURRY,
     REALISTIC_VISION_V4_NOVAE,
-    Z_IMAGE_TURBO_MFLUX_4BIT,
+    Z_IMAGE_TURBO,
 )
 from imagegen_plugins.lora_entry import FluxLoraEntry
 from imagegen_plugins.lora_host_registry import (
@@ -117,9 +117,9 @@ LORA_SETTINGS_MODELS: Tuple[LoraSettingsModel, ...] = (
         ("create",),
     ),
     LoraSettingsModel(
-        Z_IMAGE_TURBO_MFLUX_4BIT,
-        Z_IMAGE_TURBO_MFLUX_4BIT,
-        "Create image dialog when Z-Image Turbo (4-bit) is selected",
+        Z_IMAGE_TURBO,
+        Z_IMAGE_TURBO,
+        "Create image dialog when Z-Image Turbo is selected",
         ("create",),
     ),
 )
@@ -214,7 +214,7 @@ def lora_models_for_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
             SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
         )
     if entry.host_id == HOST_Z_IMAGE_TURBO:
-        return (Z_IMAGE_TURBO_MFLUX_4BIT,)
+        return (Z_IMAGE_TURBO,)
     return ()
 
 
@@ -236,7 +236,7 @@ def lora_probe_pipeline_id(model_key: str) -> Optional[str]:
         return "sd15_diffusers"
     if mk in SDXL_LORA_MODEL_KEYS:
         return "sdxl_diffusers"
-    if mk == Z_IMAGE_TURBO_MFLUX_4BIT:
+    if mk == Z_IMAGE_TURBO:
         return "mflux_z_image_turbo"
     return None
 
@@ -399,6 +399,6 @@ def host_id_for_lora_model(model_key: str) -> Optional[str]:
         return HOST_SD15
     if model_key in SDXL_LORA_MODEL_KEYS:
         return HOST_SDXL
-    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
+    if model_key == Z_IMAGE_TURBO:
         return HOST_Z_IMAGE_TURBO
     return None

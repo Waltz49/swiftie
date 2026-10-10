@@ -57,8 +57,6 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
         if hf_model_id and "/" in hf_model_id:
             return hf_model_id.split("/")[-1].replace("_", " ")
         return "SANA Sprint 0.6B 1024px"
-    if pipeline_id == "z_image_turbo_sdnq":
-        return "Z-Image Turbo (8-bit)"
     if pipeline_id == "mflux_z_image_turbo":
         return "Z-Image Turbo"
     if pipeline_id == "sd15_diffusers":

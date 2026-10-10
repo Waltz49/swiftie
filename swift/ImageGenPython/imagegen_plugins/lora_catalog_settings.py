@@ -273,6 +273,91 @@ def probe_history_from_lc(lc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
 
 
+def _merge_model_catalog_slices(into: Dict[str, Any], from_: Dict[str, Any]) -> None:
+    for key in ("enabled_ids", DELETED_IDS_KEY):
+        merged: List[str] = []
+        seen: set[str] = set()
+        for x in list(into.get(key) or []) + list(from_.get(key) or []):
+            xs = str(x)
+            if xs not in seen:
+                seen.add(xs)
+                merged.append(xs)
+        into[key] = merged
+
+
+def _remap_legacy_z_image_model_id(model_id: str, *, canonical: str, legacy_ids: FrozenSet[str]) -> str:
+    mid = str(model_id or "").strip()
+    return canonical if mid in legacy_ids else mid
+
+
+def _remap_legacy_z_image_model_list(
+    models: List[str], *, canonical: str, legacy_ids: FrozenSet[str]
+) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for m in models:
+        mid = _remap_legacy_z_image_model_id(str(m), canonical=canonical, legacy_ids=legacy_ids)
+        if mid not in seen:
+            seen.add(mid)
+            out.append(mid)
+    return out
+
+
+def _migrate_legacy_z_image_lora_catalog(lc: Dict[str, Any]) -> None:
+    """Merge per-model LoRA state from removed Z-Image HF repos into Tongyi-MAI/Z-Image-Turbo."""
+    from imagegen_plugins.hf_model_ids import LEGACY_Z_IMAGE_MFLUX_HF_IDS, Z_IMAGE_TURBO
+
+    legacy = frozenset(LEGACY_Z_IMAGE_MFLUX_HF_IDS)
+
+    by_model = lc.get(_BY_MODEL_KEY)
+    if isinstance(by_model, dict):
+        target = by_model.get(Z_IMAGE_TURBO)
+        if not isinstance(target, dict):
+            target = _empty_slice()
+            by_model[Z_IMAGE_TURBO] = target
+        for legacy_key in legacy:
+            if legacy_key == Z_IMAGE_TURBO:
+                continue
+            slice_ = by_model.pop(legacy_key, None)
+            if isinstance(slice_, dict):
+                _merge_model_catalog_slices(target, slice_)
+        lc[_BY_MODEL_KEY] = by_model
+
+    raw_ms = lc.get("model_support")
+    if isinstance(raw_ms, dict):
+        for lid, models in list(raw_ms.items()):
+            if isinstance(models, list):
+                raw_ms[lid] = _remap_legacy_z_image_model_list(
+                    [str(m) for m in models],
+                    canonical=Z_IMAGE_TURBO,
+                    legacy_ids=legacy,
+                )
+
+    cfm = lc.get(CROSS_FAMILY_MODELS_KEY)
+    if isinstance(cfm, dict):
+        for lid, models in list(cfm.items()):
+            if isinstance(models, list):
+                cfm[lid] = _remap_legacy_z_image_model_list(
+                    [str(m) for m in models],
+                    canonical=Z_IMAGE_TURBO,
+                    legacy_ids=legacy,
+                )
+
+    ph = lc.get(PROBE_HISTORY_KEY)
+    if isinstance(ph, dict):
+        for entry in ph.values():
+            if not isinstance(entry, dict):
+                continue
+            for key in ("model_support", "models_probed"):
+                raw = entry.get(key)
+                if isinstance(raw, list):
+                    entry[key] = _remap_legacy_z_image_model_list(
+                        [str(m) for m in raw],
+                        canonical=Z_IMAGE_TURBO,
+                        legacy_ids=legacy,
+                    )
+
+
 def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure by_host + by_model exist with normalized slices."""
     if not isinstance(lc, dict):
@@ -296,6 +381,7 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
             by_host[host_id] = _normalize_host_slice(host_id, slice_, _catalog_for_lc(lc))
 
     lc[_BY_HOST_KEY] = by_host
+    _migrate_legacy_z_image_lora_catalog(lc)
     _ensure_by_model(lc, by_host)
     if USER_ENTRIES_KEY not in lc:
         lc[USER_ENTRIES_KEY] = {}

@@ -7,7 +7,7 @@ Planning reference only. Python reference: `~/dev/testchat/image_browser`. Each 
 | **`--min`**: no **Image** menu or **Job Control** pane; **Face Recognition** tab hidden in Preferences | **`--min`**: hides image-generation-related UI (frozen bundle / launch flag) |
 | **Image** generation via **bundled ImageGenPython** + profile venv + **MFLUX CLI** / pipeline workers (no long-lived registry; no external repo root) | In-process / worker-based generation with full Python Qt app |
 | **Job Control**: shared action bar pinned below the queue list when a job is selected (keeps the bar inside the SwiftUI-sized pane so its buttons stay clickable) | Action bar embedded at the bottom of the selected job card |
-| Swift LoRA UI does not label curated vs user entries (all treated as library rows); sample install pack deferred | Python distinguishes curated catalog vs user imports in places |
+| Swift LoRA Settings use simplified labels (LoRA file, works with model, in Create menu, Test LoRAs); sample install pack deferred | Python Qt app uses older library/catalog wording in places |
 | Flux-prompt **AI queue steps** skipped when AI bridge unavailable | LM Studio / flux-prompt steps run in queue |
 | No **Chat** pane | **Chat** pane in full Python app |
 | **Preferences…** under the application menu (⌘,) | **Settings…** under **File** (⌘,); both use window title **Prowser Preferences** |

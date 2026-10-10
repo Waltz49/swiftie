@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 from imagegen_plugins.lora_catalog_settings import (
     apply_entry_overrides,
@@ -17,7 +17,10 @@ from imagegen_plugins.lora_catalog_settings import (
     migrate_lora_catalog,
 )
 from imagegen_plugins.lora_model_registry import (
+    _probe_supported_on_model,
+    _raw_model_support_dict,
     entry_matches_lora_model,
+    host_id_for_lora_model,
     klein_lora_model_aliases,
     lora_model_key_for_plugin,
     lora_model_key_from_values,
@@ -503,6 +506,139 @@ def catalog_entries_for_model(
     )
 
 
+def entry_visible_in_lora_settings(
+    entry: FluxLoraEntry,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    model_support: Optional[Dict[str, Any]] = None,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Settings grid: saved LoRAs for this base model (including not yet probe-passed)."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    if entry.mflux_compatible is False:
+        return False
+    deleted = deleted_lora_ids_for_model(
+        model_key, settings, draft_by_model=draft_by_model
+    )
+    if is_user_lora_id(entry.lora_id):
+        if entry.lora_id in deleted:
+            return False
+    elif entry.lora_id in deleted:
+        return False
+
+    ms = _raw_model_support_dict(model_support=model_support, settings=settings)
+    if ms and _probe_supported_on_model(entry, model_key, ms):
+        return True
+    if lora_model_is_cross_family(
+        entry.lora_id, model_key, settings, entry=entry
+    ):
+        return True
+
+    if is_user_lora_id(entry.lora_id):
+        expected_host = host_id_for_lora_model(model_key)
+        if expected_host and entry.host_id == expected_host:
+            return True
+        return False
+
+    entry_models = lora_models_for_entry(entry)
+    return any(m in entry_models for m in klein_lora_model_aliases(model_key))
+
+
+def lora_probe_state_for_model(
+    lora_id: str,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    entry: Optional[FluxLoraEntry] = None,
+    model_support: Optional[Dict[str, Any]] = None,
+) -> str:
+    """pass | fail | unknown — compatibility with model_key for Settings UI."""
+    resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
+    if resolved is None or resolved.mflux_compatible is False:
+        return "fail"
+    if resolved.mflux_compatible is True:
+        return "pass"
+    if lora_probe_passed_for_model(
+        lora_id,
+        model_key,
+        settings,
+        entry=resolved,
+        model_support=model_support,
+    ):
+        return "pass"
+    ms = _raw_model_support_dict(model_support=model_support, settings=settings)
+    if not ms or lora_id not in ms:
+        return "unknown"
+    return "fail"
+
+
+def _prefer_settings_catalog_entry(
+    left: FluxLoraEntry,
+    right: FluxLoraEntry,
+    settings: Optional[Dict[str, Any]] = None,
+) -> FluxLoraEntry:
+    """Pick one row when two entries share the same weights file."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    support = lora_model_support(settings)
+
+    def _score(entry: FluxLoraEntry) -> tuple:
+        models = support.get(entry.lora_id) or ()
+        installed = is_lora_installed(entry.lora_id, settings, entry=entry)
+        slug = entry.lora_id
+        suffix_penalty = 1 if is_user_lora_id(slug) and re.search(r"_\d+$", slug) else 0
+        return (len(models), installed, -suffix_penalty, entry.lora_id)
+
+    return left if _score(left) >= _score(right) else right
+
+
+def dedupe_settings_entries_by_weights(
+    entries: Iterable[FluxLoraEntry],
+    settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[FluxLoraEntry, ...]:
+    """One settings row per on-disk weights file."""
+    from imagegen_plugins.lora_user_entries import entry_weights_identity_key
+
+    entries_list = list(entries)
+    order: List[str] = []
+    best: Dict[str, FluxLoraEntry] = {}
+    for entry in entries_list:
+        # Size-only fingerprints: settings list must stay fast (no full-file MD5).
+        key = entry_weights_identity_key(entry, hash_sizes=set())
+        if key in best:
+            best[key] = _prefer_settings_catalog_entry(best[key], entry, settings)
+        else:
+            best[key] = entry
+            order.append(key)
+    return tuple(best[k] for k in order)
+
+
+def catalog_settings_entries_for_model(
+    settings: Optional[Dict[str, Any]] = None,
+    model_key: str = "",
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> Tuple[FluxLoraEntry, ...]:
+    """Settings grid superset: host-matched saved LoRAs, not only probe-passed."""
+    lc = lora_catalog_from_settings(settings)
+    raw = lc.get("model_support")
+    support = raw if isinstance(raw, dict) else None
+    visible = [
+        e
+        for e in catalog_entries_sorted(settings)
+        if entry_visible_in_lora_settings(
+            e,
+            model_key,
+            settings,
+            model_support=support,
+            draft_by_model=draft_by_model,
+        )
+    ]
+    return dedupe_settings_entries_by_weights(visible, settings)
+
+
 def lora_visible_for_run(
     lora_id: str,
     entry: FluxLoraEntry,
@@ -617,7 +753,10 @@ def lora_run_dialog_empty_hint(
     host_id = getattr(plugin, "lora_host_id", None)
     model_key = lora_model_key_for_plugin(plugin)
     if not host_id or not model_key:
-        return "No LoRAs available. Enable and download in Settings → LoRA."
+        return (
+            "No LoRAs for this model yet. Add LoRA files in Settings → LoRA, "
+            "then run Test LoRAs."
+        )
 
     settings, enabled, support, entries = _lora_choice_context(settings, model_key)
     for entry in entries:
@@ -632,9 +771,35 @@ def lora_run_dialog_empty_hint(
         ):
             return None
 
+    saved_for_model = catalog_settings_entries_for_model(settings, model_key)
+    if not saved_for_model:
+        return (
+            "No saved LoRAs for this model. Add LoRA files in Settings → LoRA, "
+            "then run Test LoRAs."
+        )
+
     if not enabled:
-        return "No LoRAs are enabled for this model. Enable them in Settings → LoRA."
-    return "No LoRAs available. Enable and download in Settings → LoRA."
+        return (
+            "No LoRAs are in the Create menu for this model. Turn on “In Create menu” "
+            "in Settings → LoRA for LoRAs that work with this model."
+        )
+
+    compatible_ids = {
+        e.lora_id
+        for e in saved_for_model
+        if lora_probe_passed_for_model(
+            e.lora_id, model_key, settings, entry=e, model_support=support
+        )
+    }
+    if not compatible_ids:
+        return (
+            "No LoRAs work with this model yet. Run Test LoRAs in Settings → LoRA "
+            "to check compatibility."
+        )
+    return (
+        "LoRAs work with this model but none are in the Create menu. Enable them "
+        "in Settings → LoRA."
+    )
 
 
 _EXIF_LORA_TRIGGER_SUFFIX_RE = re.compile(

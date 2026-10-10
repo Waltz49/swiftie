@@ -163,7 +163,7 @@ enum LoraMapFormatting {
         let unused = rows.filter { $0.models.isEmpty }
         var lines = [summary(for: rows)]
         if rows.isEmpty {
-            lines.append("(No LoRA model-support map yet. Run Check LoRAs first.)")
+            lines.append("(No LoRA model-support map yet. Run Test LoRAs first.)")
         }
         for row in used {
             lines.append("")
@@ -175,7 +175,7 @@ enum LoraMapFormatting {
         if !unused.isEmpty {
             lines.append("")
             lines.append("Unused LoRAs")
-            lines.append("No associated models (host or Check LoRAs probe).")
+            lines.append("No associated models (host or Test LoRAs probe).")
             for row in unused {
                 lines.append("")
                 lines.append(row.loraLabel)
@@ -183,8 +183,8 @@ enum LoraMapFormatting {
         }
         lines.append("")
         lines.append(
-            "* cross-family — Check LoRAs found this LoRA "
-                + "working on a base model outside its catalog host family."
+            "* cross-family — Test LoRAs found this LoRA "
+                + "working on a base model outside its usual family."
         )
         lines.append("")
         return lines.joined(separator: "\n")
@@ -434,7 +434,7 @@ private struct LoraMapContent: View {
                 .padding(.bottom, 12)
 
             if rows.isEmpty {
-                Text("(No LoRA model-support map yet. Run Check LoRAs first.)")
+                Text("(No LoRA model-support map yet. Run Test LoRAs first.)")
                     .font(.system(size: 12))
             }
 
@@ -464,7 +464,7 @@ private struct LoraMapContent: View {
                 .padding(.top, 8)
                 .padding(.bottom, 8)
 
-                Text("No associated models (host or Check LoRAs probe).")
+                Text("No associated models (host or Test LoRAs probe).")
                     .font(.system(size: 12))
                     .foregroundStyle(colors.dialogMutedText)
                     .padding(.bottom, 8)
@@ -477,8 +477,8 @@ private struct LoraMapContent: View {
             }
 
             Text(
-                "* cross-family — Check LoRAs found this LoRA "
-                    + "working on a base model outside its catalog host family."
+                "* cross-family — Test LoRAs found this LoRA "
+                    + "working on a base model outside its usual family."
             )
             .font(.system(size: 11))
             .foregroundStyle(colors.dialogMutedText)

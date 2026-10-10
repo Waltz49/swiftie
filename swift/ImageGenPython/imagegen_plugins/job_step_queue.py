@@ -469,6 +469,9 @@ def queued_job_from_step_doc(
         values: Dict[str, Any] = {}
     else:
         values = merge_step_into_values(steps[0])
+    from imagegen_plugins.hf_model_ids import migrate_legacy_z_image_job_values
+
+    values = migrate_legacy_z_image_job_values(values)
     copies_total = len(steps) if isinstance(steps, list) else 1
     display = job_doc.get("display")
     thumbs: List[str] = []

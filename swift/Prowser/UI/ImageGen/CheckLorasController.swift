@@ -5,7 +5,7 @@ enum CheckLorasController {
     static func present(from appState: AppState) {
         if appState.workers.modelTasks.isBusy {
             StyledMessageDialog.showWarning(
-                title: "Check LoRAs",
+                title: "Test LoRAs",
                 message: "Wait for the current generation job to finish."
             )
             return
@@ -17,7 +17,7 @@ enum CheckLorasController {
         let bridge = appState.workers.lora
         guard await bridge.waitUntilAvailable() else {
             StyledMessageDialog.showWarning(
-                title: "Check LoRAs",
+                title: "Test LoRAs",
                 message: "Image generation Python environment is not ready."
             )
             return
@@ -26,10 +26,10 @@ enum CheckLorasController {
             let prescan = try await bridge.checkLorasPrescan()
             if prescan.installedModels.isEmpty {
                 StyledMessageDialog.showWarning(
-                    title: "Check LoRAs",
+                    title: "Test LoRAs",
                     message:
                         "No installed base models were found to probe LoRAs against.\n\n"
-                        + "Install at least one image-generation base model, then run Check LoRAs again."
+                        + "Install at least one image-generation base model, then run Test LoRAs again."
                 )
                 return
             }
@@ -37,7 +37,7 @@ enum CheckLorasController {
             appState.syncAuxiliaryDialogs()
         } catch {
             StyledMessageDialog.showWarning(
-                title: "Check LoRAs",
+                title: "Test LoRAs",
                 message: error.localizedDescription
             )
         }
@@ -51,7 +51,7 @@ enum CheckLorasController {
         let bridge = appState.workers.lora
         do {
             let preparing = CancellableProgressPanelController(
-                title: "Check LoRAs — Preparing",
+                title: "Test LoRAs — Preparing",
                 labelText: "Building probe plan…",
                 maximum: 1,
                 indeterminate: true,
@@ -68,15 +68,15 @@ enum CheckLorasController {
 
             if prepareResult.cancelled || preparing.cancelRequested {
                 StyledMessageDialog.showInformation(
-                    title: "Check LoRAs — Cancelled",
-                    message: "Check LoRAs was cancelled.\n\nNo probes were completed."
+                    title: "Test LoRAs — Cancelled",
+                    message: "Test LoRAs was cancelled.\n\nNo probes were completed."
                 )
                 return
             }
 
             if prepareResult.nothingToProbe {
                 StyledMessageDialog.showInformation(
-                    title: "Check LoRAs",
+                    title: "Test LoRAs",
                     message: prepareResult.message
                         ?? "Nothing to probe with the current options."
                 )
@@ -84,7 +84,7 @@ enum CheckLorasController {
             }
 
             let progress = CancellableProgressPanelController(
-                title: "Check LoRAs",
+                title: "Test LoRAs",
                 labelText: "Starting…",
                 maximum: 100,
                 showsTimeRemainingEstimate: true,
@@ -123,12 +123,12 @@ enum CheckLorasController {
             if runResult.cancelled {
                 if runResult.probesDone == 0 {
                     StyledMessageDialog.showInformation(
-                        title: "Check LoRAs — Cancelled",
-                        message: "Check LoRAs was cancelled.\n\nNo probes were completed."
+                        title: "Test LoRAs — Cancelled",
+                        message: "Test LoRAs was cancelled.\n\nNo probes were completed."
                     )
                     return
                 }
-                banner = "Check LoRAs was cancelled. Partial results from completed probes were saved."
+                banner = "Test LoRAs was cancelled. Partial results from completed probes were saved."
             }
 
             appState.checkLorasFlow.results = CheckLorasFlowState.ResultsPresentation(
@@ -138,7 +138,7 @@ enum CheckLorasController {
             appState.syncAuxiliaryDialogs()
         } catch {
             StyledMessageDialog.showWarning(
-                title: "Check LoRAs",
+                title: "Test LoRAs",
                 message: error.localizedDescription
             )
         }

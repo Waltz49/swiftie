@@ -67,7 +67,7 @@ enum ImageGenPluginCatalog {
             pipelineID: "mflux_z_image_turbo",
             function: "create",
             displayName: "Z-Image Turbo",
-            hfModelID: "filipstrand/Z-Image-Turbo-mflux-4bit",
+            hfModelID: "Tongyi-MAI/Z-Image-Turbo",
             loraHostID: "z_image_turbo"
         ),
         .init(

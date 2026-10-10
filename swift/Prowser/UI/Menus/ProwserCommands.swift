@@ -469,7 +469,7 @@ struct ProwserCommands: Commands {
                     .keyboardShortcut("i", modifiers: [.command, .shift])
 
                     if BundleCapabilities.imageGenUIEnabled {
-                        Button("Check LoRAs") {
+                        Button("Test LoRAs") {
                             Task { @MainActor in CheckLorasController.present(from: appState) }
                         }
                         Button("Map LoRAs") {

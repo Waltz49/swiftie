@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from imagegen_plugins.hf_model_ids import ANYTHING_FURRY, FLUX1_DEV, FLUX1_FILL_DEV, SDXL_BASE_1_0, Z_IMAGE_TURBO_MFLUX_4BIT
+from imagegen_plugins.hf_model_ids import ANYTHING_FURRY, FLUX1_DEV, FLUX1_FILL_DEV, SDXL_BASE_1_0, Z_IMAGE_TURBO
 from imagegen_plugins.lora_entry import FluxLoraEntry, LORA_MIN_STEPS
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX1_FILL,
@@ -148,7 +148,7 @@ def z_image_turbo_entry(
         display_name,
         repo_id,
         filename,
-        base_hf_model_id=Z_IMAGE_TURBO_MFLUX_4BIT,
+        base_hf_model_id=Z_IMAGE_TURBO,
         mflux_compatible=True,
         **kwargs,
     )

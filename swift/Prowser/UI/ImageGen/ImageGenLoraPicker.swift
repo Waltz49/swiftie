@@ -81,8 +81,24 @@ struct ImageGenLoraPicker: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if appState.workers.lora.isAvailable {
+                Button("Open LoRA settings…") {
+                    openLoRASettings()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func openLoRASettings() {
+        var userInfo: [String: Any] = [:]
+        if let hfModelID = ImageGenPluginCatalog.plugin(pluginID: pluginID)?.hfModelID,
+           !hfModelID.isEmpty {
+            userInfo["lora_model_key"] = hfModelID
+        }
+        appState.openSettingsWindow(tab: .lora, userInfo: userInfo)
     }
 
     private var singleBinding: Binding<String> {

@@ -55,9 +55,12 @@ def load_active_plugin_id_for_function(
     if not plugins:
         return None
     known = _plugins_by_id(plugins)
+    from imagegen_plugins.hf_model_ids import migrate_legacy_z_image_plugin_id
+
     by_fn = _active_by_function_raw(_imagegen_settings())
     plugin_id = by_fn.get(function)
     if isinstance(plugin_id, str):
+        plugin_id = migrate_legacy_z_image_plugin_id(plugin_id)
         plugin = known.get(plugin_id)
         if plugin is not None and plugin.is_available():
             return plugin_id

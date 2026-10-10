@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -6,6 +7,7 @@ struct LoRASettingsTab: View {
     @State private var viewModel = LoRASettingsViewModel()
     @State private var showAddSheet = false
     @State private var editTarget: LoRAEditTarget?
+    @State private var showAdvanced = false
 
     var body: some View {
         Group {
@@ -77,13 +79,16 @@ struct LoRASettingsTab: View {
                 if let note = viewModel.selectedModel?.availableInLabel, !note.isEmpty {
                     Text(note).font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Drag a .safetensors file here or use + to add LoRAs.")
+                Text(lorasForModelTitle)
+                    .font(.headline)
+                Text("LoRA files are found automatically from your profile and Downloads.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("LoRA library for this base model:")
+                Text("Drag a .safetensors file here or use + to add a LoRA file.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 toolbar
+                listFilterPicker
                 if viewModel.isLoading {
                     ProgressView()
                 } else {
@@ -92,9 +97,15 @@ struct LoRASettingsTab: View {
                 if let error = viewModel.errorMessage {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
+                advancedSection
             }
             .padding()
         }
+    }
+
+    private var lorasForModelTitle: String {
+        let name = viewModel.selectedModel?.displayName ?? "this model"
+        return "LoRAs for \(name)"
     }
 
     private var modelPicker: some View {
@@ -113,64 +124,88 @@ struct LoRASettingsTab: View {
         .disabled(viewModel.models.isEmpty)
     }
 
+    private var listFilterPicker: some View {
+        Picker("Filter", selection: $viewModel.listFilter) {
+            ForEach(LoRASettingsListFilter.allCases) { filter in
+                Text(filter.rawValue).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
     private var toolbar: some View {
         HStack(spacing: 8) {
             Toggle("Hide uninstalled", isOn: $viewModel.hideUninstalled)
                 .toggleStyle(.checkbox)
+            Button("Test LoRAs…") {
+                CheckLorasController.present(from: appState)
+            }
             Button {
                 showAddSheet = true
             } label: {
                 Image(systemName: "plus")
             }
-            .help("Add LoRA")
-            Button("Save my setup") {
-                Task { await viewModel.saveUserPreset() }
-            }
-            Button("Apply my setup") {
-                Task { await viewModel.applyUserPreset() }
-            }
+            .help("Add LoRA file…")
             Spacer()
+        }
+    }
+
+    private var advancedSection: some View {
+        DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+            HStack(spacing: 8) {
+                Button("Save my setup") {
+                    Task { await viewModel.saveUserPreset() }
+                }
+                Button("Apply my setup") {
+                    Task { await viewModel.applyUserPreset() }
+                }
+                Spacer()
+            }
+            .padding(.top, 4)
         }
     }
 
     private var entriesList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if viewModel.entries.isEmpty {
-                    Text("No LoRAs for this model yet.")
+                if viewModel.filteredRows.isEmpty {
+                    Text("No LoRAs match this filter.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(viewModel.entries) { entry in
-                    entryRow(entry)
-                }
-                if !viewModel.discoveredEntries.isEmpty {
-                    Text("On disk (not in library)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                    ForEach(viewModel.discoveredEntries) { entry in
-                        discoveredEntryRow(entry)
-                    }
+                ForEach(viewModel.filteredRows) { row in
+                    settingsRow(row)
                 }
             }
         }
     }
 
-    private func discoveredEntryRow(_ entry: LoRACatalogEntry) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+    @ViewBuilder
+    private func settingsRow(_ row: LoRASettingsRow) -> some View {
+        switch row.kind {
+        case .needsSetup:
+            discoveredEntryRow(row)
+        case .saved:
+            entryRow(row)
+        }
+    }
+
+    private func discoveredEntryRow(_ row: LoRASettingsRow) -> some View {
+        let entry = row.entry
+        return HStack(alignment: .top, spacing: 8) {
             Toggle("", isOn: .constant(false))
                 .labelsHidden()
                 .disabled(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.label)
                     .fontWeight(.medium)
-                Text(entry.statusLabel)
+                Text(viewModel.compatibilitySubtitle(for: row))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             .help(entry.localPath)
             Spacer()
-            Button("Add to library…") {
+            Button("Set up…") {
                 viewModel.pendingImportPath = entry.localPath
                 showAddSheet = true
             }
@@ -180,8 +215,10 @@ struct LoRASettingsTab: View {
         .cornerRadius(6)
     }
 
-    private func entryRow(_ entry: LoRACatalogEntry) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+    private func entryRow(_ row: LoRASettingsRow) -> some View {
+        let entry = row.entry
+        let canEnable = row.compatibility == .works
+        return HStack(alignment: .top, spacing: 8) {
             Toggle(
                 "",
                 isOn: Binding(
@@ -190,11 +227,13 @@ struct LoRASettingsTab: View {
                 )
             )
             .labelsHidden()
+            .disabled(!canEnable)
+            .help(canEnable ? "In Create menu" : "Works with this model before enabling")
             VStack(alignment: .leading, spacing: 2) {
                 Button(entry.label) { editTarget = LoRAEditTarget(loraID: entry.loraID) }
                     .buttonStyle(.plain)
                     .fontWeight(.medium)
-                Text(entry.statusLabel)
+                Text(viewModel.compatibilitySubtitle(for: row))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -206,11 +245,17 @@ struct LoRASettingsTab: View {
             }
             if entry.registered {
                 Button(role: .destructive) {
-                    Task { await viewModel.delete(loraID: entry.loraID) }
+                    Task {
+                        await viewModel.removeSavedLoRA(
+                            loraID: entry.loraID,
+                            parentWindow: preferencesWindow
+                        )
+                    }
                 } label: {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
+                .help("Remove LoRA…")
             }
         }
         .padding(6)
@@ -222,4 +267,10 @@ struct LoRASettingsTab: View {
 struct LoRAEditTarget: Identifiable {
     let loraID: String
     var id: String { loraID }
+}
+
+private extension LoRASettingsTab {
+    var preferencesWindow: NSWindow? {
+        NSApp.windows.first { $0.title.localizedCaseInsensitiveContains("Preferences") }
+    }
 }

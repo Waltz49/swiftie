@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -29,7 +30,12 @@ _active_check_loras_thread: Optional[threading.Thread] = None
 _active_check_loras_prepare_thread: Optional[threading.Thread] = None
 
 
-def _entry_to_dict(entry, *, model_key: str = "") -> Dict[str, Any]:
+def _entry_to_dict(
+    entry,
+    *,
+    model_key: str = "",
+    model_support: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     from imagegen_plugins.lora_catalog import (
         has_recovery_source,
         is_lora_installed,
@@ -37,6 +43,7 @@ def _entry_to_dict(entry, *, model_key: str = "") -> Dict[str, Any]:
         lora_choice_label,
         lora_lifecycle_state,
         lora_model_is_cross_family,
+        lora_probe_state_for_model,
         lora_status_label,
     )
 
@@ -78,6 +85,17 @@ def _entry_to_dict(entry, *, model_key: str = "") -> Dict[str, Any]:
         "status_label": lora_status_label(entry.lora_id, model_key, settings),
         "has_recovery_source": bool(has_recovery_source(entry)),
         "registered": True,
+        "probe_state_for_model": (
+            lora_probe_state_for_model(
+                entry.lora_id,
+                model_key,
+                settings,
+                entry=entry,
+                model_support=model_support,
+            )
+            if model_key
+            else "unknown"
+        ),
     }
 
 
@@ -109,7 +127,8 @@ def _discovered_disk_entry_dict(path) -> Dict[str, Any]:
         "source_path": resolved,
         "installed": True,
         "lifecycle": "discovered",
-        "status_label": "on disk (not registered)",
+        "status_label": "Needs setup",
+        "probe_state_for_model": "unknown",
         "has_recovery_source": False,
         "registered": False,
     }
@@ -164,11 +183,11 @@ def _overlay_drafts(settings: dict, draft_by_model: Optional[dict]) -> dict:
 def _handle_settings_entries(cmd: Dict[str, Any]) -> Dict[str, Any]:
     from config import get_config
     from imagegen_plugins.lora_catalog import (
-        catalog_entries_for_model,
+        catalog_settings_entries_for_model,
         LORA_LIFECYCLE_UNINSTALLED,
         lora_lifecycle_state,
     )
-    from imagegen_plugins.lora_catalog_settings import model_state
+    from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings, model_state
 
     model_key = str(cmd.get("model_key") or "").strip()
     hide_uninstalled = bool(cmd.get("hide_uninstalled"))
@@ -178,27 +197,52 @@ def _handle_settings_entries(cmd: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(draft_by_model, dict):
         drafts = draft_by_model
     slice_ = model_state(settings, model_key) if model_key else {"enabled_ids": [], "deleted_ids": []}
+    lc = lora_catalog_from_settings(settings)
+    raw_support = lc.get("model_support")
+    model_support = raw_support if isinstance(raw_support, dict) else None
     entries = []
-    for entry in catalog_entries_for_model(settings, model_key, draft_by_model=drafts):
+    for entry in catalog_settings_entries_for_model(
+        settings, model_key, draft_by_model=drafts
+    ):
         lifecycle = lora_lifecycle_state(
             entry.lora_id, model_key, settings, draft_by_model=drafts
         )
         if hide_uninstalled and lifecycle == LORA_LIFECYCLE_UNINSTALLED:
             continue
-        entries.append(_entry_to_dict(entry, model_key=model_key))
+        entries.append(
+            _entry_to_dict(
+                entry,
+                model_key=model_key,
+                model_support=model_support,
+            )
+        )
 
-    from imagegen_plugins.lora_compatibility_checker import _path_is_registered
     from imagegen_plugins.lora_disk_discovery import discover_lora_weight_paths
+    from imagegen_plugins.lora_user_entries import same_lora_file, user_lora_weight_paths
+
+    weight_paths = discover_lora_weight_paths(settings)
+    saved_weight_paths = user_lora_weight_paths(settings)
 
     discovered_entries: List[Dict[str, Any]] = []
     seen_paths: set[str] = set()
-    for weight_path in discover_lora_weight_paths(settings):
-        if _path_is_registered(weight_path, settings):
+    seen_name_size: set[tuple[str, int]] = set()
+    for weight_path in weight_paths:
+        if any(same_lora_file(weight_path, saved) for saved in saved_weight_paths):
             continue
         row = _discovered_disk_entry_dict(weight_path)
         key = row["local_path"]
         if key in seen_paths:
             continue
+        name = (row.get("display_name") or "").strip().lower()
+        if name:
+            try:
+                name_size = (name, int(weight_path.stat().st_size))
+            except OSError:
+                name_size = None
+            if name_size is not None:
+                if name_size in seen_name_size:
+                    continue
+                seen_name_size.add(name_size)
         seen_paths.add(key)
         discovered_entries.append(row)
     discovered_entries.sort(key=lambda r: (r.get("display_name") or "").lower())
@@ -437,26 +481,52 @@ def _handle_install(cmd: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _handle_lora_removal_info(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    from imagegen_plugins.lora_catalog import get_lora_entry, lora_shared_model_labels
+
+    lora_id = str(cmd.get("lora_id") or "").strip()
+    if not lora_id:
+        raise ValueError("lora_id is required")
+    entry = get_lora_entry(lora_id)
+    if entry is None:
+        raise ValueError(f"LoRA {lora_id!r} was not found.")
+    shared = lora_shared_model_labels(entry)
+    return {
+        "type": "result",
+        "job_id": cmd.get("job_id", ""),
+        "command": "lora_removal_info",
+        "display_name": entry.display_name,
+        "shared_model_labels": list(shared),
+    }
+
+
 def _handle_delete(cmd: Dict[str, Any]) -> Dict[str, Any]:
     from imagegen_plugins.image_gen_persistence import (
-        delete_lora_from_library,
+        remove_user_lora,
+        unregister_user_lora,
         uninstall_lora_weights,
     )
 
     lora_id = str(cmd.get("lora_id") or "").strip()
     model_key = str(cmd.get("model_key") or "").strip()
+    mode = str(cmd.get("mode") or "").strip().lower()
     do_uninstall = bool(cmd.get("do_uninstall"))
     if not lora_id:
         raise ValueError("lora_id is required")
     if do_uninstall:
         uninstall_lora_weights(lora_id)
+    elif mode == "unregister":
+        unregister_user_lora(lora_id)
+    elif mode in ("delete_weights", "delete", ""):
+        remove_user_lora(lora_id)
     else:
-        delete_lora_from_library(lora_id, model_key=model_key)
+        raise ValueError(f"Unknown delete mode: {mode!r}")
     return {
         "type": "result",
         "job_id": cmd.get("job_id", ""),
         "command": "delete",
         "success": True,
+        "model_key": model_key,
     }
 
 
@@ -633,6 +703,17 @@ def _probe_fallback_prompt(reference_prompt: str) -> str:
     return (reference_prompt or "test").strip() or "test"
 
 
+def _rollback_new_import_entry(entry, created_new: bool) -> None:
+    if not created_new or entry is None:
+        return
+    try:
+        from imagegen_plugins.lora_user_entries import remove_user_lora_files
+
+        remove_user_lora_files(entry)
+    except Exception:
+        pass
+
+
 def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
     global _import_cancel_flag
     entry = None
@@ -685,6 +766,7 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
         repo_id = str(cmd.get("repo_id") or "").strip()
         filename = str(cmd.get("filename") or "").strip()
         recovery_source_path = str(cmd.get("recovery_source_path") or "").strip()
+        skip_probe = bool(cmd.get("skip_compatibility_probe"))
 
         if cancelled():
             emit_message(
@@ -776,10 +858,16 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
         already_supported = any(m in support for m in aliases)
         progress_max = (
             _IMPORT_PROGRESS_SKIP_PROBE_STEPS
-            if already_supported
+            if skip_probe or already_supported
             else _IMPORT_PROGRESS_PROBE_STEPS
         )
-        if not already_supported:
+        if skip_probe:
+            emit_progress(
+                f"Saving (assuming compatibility with {lora_model_display_name(model_key)})…",
+                2,
+                progress_max,
+            )
+        elif not already_supported:
             emit_progress(
                 f"Testing compatibility on {lora_model_display_name(model_key)}…",
                 1,
@@ -804,6 +892,7 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                 activity_callback=activity_callback,
             )
             if cancelled():
+                _rollback_new_import_entry(entry, created_new)
                 emit_message(
                     {
                         "type": "result",
@@ -816,6 +905,7 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                 )
                 return
             if not ok:
+                _rollback_new_import_entry(entry, created_new)
                 emit_message(
                     {
                         "type": "result",
@@ -831,13 +921,13 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                     }
                 )
                 return
-        else:
+        elif already_supported:
             emit_progress(
                 "LoRA already tested for this model; skipping probe…",
                 2,
                 progress_max,
             )
-        emit_progress("Adding to library…", progress_max - 1, progress_max)
+        emit_progress("Saving LoRA…", progress_max - 1, progress_max)
         register_user_lora(
             entry,
             model_key=model_key,
@@ -861,13 +951,7 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
             }
         )
     except Exception as exc:
-        if entry is not None and created_new:
-            try:
-                from imagegen_plugins.lora_user_entries import remove_user_lora_files
-
-                remove_user_lora_files(entry)
-            except Exception:
-                pass
+        _rollback_new_import_entry(entry, created_new)
         emit_message(
             {
                 "type": "result",
@@ -883,7 +967,7 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
 def _handle_import_lora(cmd: Dict[str, Any]) -> Dict[str, Any]:
     global _active_import_thread, _import_cancel_flag
     if _check_loras_running:
-        raise RuntimeError("Check LoRAs is running. Wait for it to finish.")
+        raise RuntimeError("Test LoRAs is running. Wait for it to finish.")
     if _active_import_thread is not None and _active_import_thread.is_alive():
         raise RuntimeError("Another LoRA import is already running.")
     job_id = str(cmd.get("job_id") or "")
@@ -1066,8 +1150,9 @@ def _handle_check_loras_prescan(cmd: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _run_check_loras_prepare_worker(cmd: Dict[str, Any], job_id: str) -> None:
-    global _check_loras_prepared, _check_loras_preparing
+def _execute_check_loras_prepare(cmd: Dict[str, Any], job_id: str) -> Dict[str, Any]:
+    """Build probe plan on the IPC thread (Swift worker cannot rely on daemon thread progress)."""
+    global _check_loras_prepared
     from dataclasses import asdict
 
     from config import get_config
@@ -1086,16 +1171,13 @@ def _run_check_loras_prepare_worker(cmd: Dict[str, Any], job_id: str) -> None:
             cfg, dedupe=True, options=options
         )
         if _check_loras_cancel_flag[0]:
-            emit_message(
-                {
-                    "type": "result",
-                    "job_id": job_id,
-                    "command": "check_loras_prepare",
-                    "success": False,
-                    "cancelled": True,
-                }
-            )
-            return
+            return {
+                "type": "result",
+                "job_id": job_id,
+                "command": "check_loras_prepare",
+                "success": False,
+                "cancelled": True,
+            }
         plan_stats.probe_prompt = normalize_check_loras_probe_prompt(options.probe_prompt)
         prepared = PreparedLoraProbePlan(
             candidates=candidates, plan=plan, stats=plan_stats
@@ -1118,48 +1200,36 @@ def _run_check_loras_prepare_worker(cmd: Dict[str, Any], job_id: str) -> None:
         }
         if nothing:
             payload["message"] = _check_loras_nothing_to_probe_message(prepared, options)
-        emit_message(payload)
+        return payload
     except Exception as exc:
-        emit_message(
-            {
-                "type": "result",
-                "job_id": job_id,
-                "command": "check_loras_prepare",
-                "success": False,
-                "cancelled": bool(_check_loras_cancel_flag[0]),
-                "message": str(exc),
-            }
-        )
-    finally:
-        _check_loras_preparing = False
+        return {
+            "type": "result",
+            "job_id": job_id,
+            "command": "check_loras_prepare",
+            "success": False,
+            "cancelled": bool(_check_loras_cancel_flag[0]),
+            "message": str(exc),
+        }
 
 
 def _handle_check_loras_prepare(cmd: Dict[str, Any]) -> Dict[str, Any]:
     global _check_loras_cancel_flag, _active_check_loras_prepare_thread, _check_loras_preparing
 
     if _check_loras_running:
-        raise RuntimeError("Check LoRAs is already running.")
+        raise RuntimeError("Test LoRAs is already running.")
     if _check_loras_preparing:
-        raise RuntimeError("Check LoRAs prepare is already running.")
+        raise RuntimeError("Test LoRAs prepare is already running.")
     if _active_import_thread is not None and _active_import_thread.is_alive():
         raise RuntimeError("A LoRA import is running. Wait for it to finish.")
 
     job_id = str(cmd.get("job_id") or "")
     _check_loras_cancel_flag[0] = False
     _check_loras_preparing = True
-    thread = threading.Thread(
-        target=_run_check_loras_prepare_worker,
-        args=(cmd, job_id),
-        daemon=True,
-    )
-    _active_check_loras_prepare_thread = thread
-    thread.start()
-    return {
-        "type": "result",
-        "job_id": job_id,
-        "command": "check_loras_prepare",
-        "started": True,
-    }
+    _active_check_loras_prepare_thread = None
+    try:
+        return _execute_check_loras_prepare(cmd, job_id)
+    finally:
+        _check_loras_preparing = False
 
 
 def _handle_check_loras_save_options(cmd: Dict[str, Any]) -> Dict[str, Any]:
@@ -1231,7 +1301,7 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
         results_text = ""
         if result.cancelled and result.stats.probes_done == 0:
             results_text = (
-                "Check LoRAs was cancelled.\n\nNo probes were completed."
+                "Test LoRAs was cancelled.\n\nNo probes were completed."
             )
         else:
             report_paths = apply_lora_check_result(result)
@@ -1278,32 +1348,26 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
         _check_loras_running = False
 
 
-def _handle_check_loras_run(cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_check_loras_run(cmd: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Run probes on the IPC thread; worker emits progress + final result on stdout."""
     global _check_loras_cancel_flag, _active_check_loras_thread, _check_loras_running
 
     if _check_loras_preparing:
-        raise RuntimeError("Check LoRAs is still preparing. Wait for it to finish.")
+        raise RuntimeError("Test LoRAs is still preparing. Wait for it to finish.")
     if _check_loras_running:
-        raise RuntimeError("Check LoRAs is already running.")
+        raise RuntimeError("Test LoRAs is already running.")
     if _active_import_thread is not None and _active_import_thread.is_alive():
         raise RuntimeError("A LoRA import is running. Wait for it to finish.")
 
     job_id = str(cmd.get("job_id") or "")
     _check_loras_cancel_flag[0] = False
     _check_loras_running = True
-    thread = threading.Thread(
-        target=_run_check_loras_worker,
-        args=(cmd, job_id),
-        daemon=True,
-    )
-    _active_check_loras_thread = thread
-    thread.start()
-    return {
-        "type": "result",
-        "job_id": job_id,
-        "command": "check_loras_run",
-        "started": True,
-    }
+    _active_check_loras_thread = None
+    try:
+        _run_check_loras_worker(cmd, job_id)
+    finally:
+        _check_loras_running = False
+    return None
 
 
 def _handle_check_loras_cancel(cmd: Dict[str, Any]) -> Dict[str, Any]:
@@ -1369,6 +1433,7 @@ def _handle_command(cmd: Dict[str, Any]) -> Any:
         "update_entry_scales": _handle_update_entry_scales,
         "install": _handle_install,
         "delete": _handle_delete,
+        "lora_removal_info": _handle_lora_removal_info,
         "save_user_preset": _handle_save_user_preset,
         "apply_user_preset": _handle_apply_user_preset,
         "restore_recommendations": _handle_restore_recommendations,

@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from imagegen_plugins.lora_entry import DEFAULT_CACHE, FluxLoraEntry, LORA_MIN_STEPS
 from imagegen_plugins.lora_model_registry import host_id_for_lora_model
@@ -180,13 +180,115 @@ def _entry_path_candidates(entry: FluxLoraEntry) -> list[Path]:
     return paths
 
 
+def lora_weights_content_digest(
+    path: Path,
+    *,
+    digest_cache: Optional[Dict[Path, str]] = None,
+    hash_sizes: Optional[Set[int]] = None,
+) -> Optional[str]:
+    """Stable digest for deduplicating the same .safetensors on disk.
+
+    By default only byte size is used (fast). Pass ``hash_sizes`` from
+    ``_size_conflict_set`` to MD5 files that share a size with another candidate.
+    """
+    from imagegen_plugins.lora_catalog import lora_weights_file_is_valid
+
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        resolved = path.expanduser()
+    if not lora_weights_file_is_valid(resolved):
+        return None
+    try:
+        from imagegen_plugins.lora_compatibility_checker import _content_digest_for_path
+
+        cache = digest_cache if digest_cache is not None else {}
+        effective_sizes = hash_sizes if hash_sizes is not None else set()
+        digest = _content_digest_for_path(
+            resolved, cache, hash_sizes=effective_sizes
+        )
+    except Exception:
+        return None
+    if not digest:
+        return None
+    if digest.startswith("size:"):
+        return digest
+    return f"md5:{digest}"
+
+
+def entry_weights_identity_key(
+    entry: FluxLoraEntry,
+    *,
+    digest_cache: Optional[Dict[Path, str]] = None,
+    hash_sizes: Optional[Set[int]] = None,
+) -> str:
+    """Dedup key for catalog rows (content hash when weights exist, else lora id)."""
+    for candidate in _entry_path_candidates(entry):
+        digest = lora_weights_content_digest(
+            candidate, digest_cache=digest_cache, hash_sizes=hash_sizes
+        )
+        if digest:
+            return digest
+    return f"id:{entry.lora_id}"
+
+
+def user_lora_weight_paths(
+    settings: Optional[Dict[str, Any]] = None,
+) -> list[Path]:
+    paths: list[Path] = []
+    for entry in user_lora_entries_from_settings(settings).values():
+        for candidate in _entry_path_candidates(entry):
+            paths.append(candidate)
+    return paths
+
+
+def discovered_path_matches_saved_user_lora(
+    weight_path: Path,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    digest_cache: Optional[Dict[Path, str]] = None,
+) -> bool:
+    """True when a disk-discovered file is already a saved user LoRA (path or same bytes)."""
+    cache = digest_cache if digest_cache is not None else {}
+    same_size: list[Path] = []
+    try:
+        weight_size = int(weight_path.stat().st_size)
+    except OSError:
+        weight_size = None
+    for entry in user_lora_entries_from_settings(settings).values():
+        for candidate in _entry_path_candidates(entry):
+            if same_lora_file(weight_path, candidate):
+                return True
+            if weight_size is not None:
+                try:
+                    if int(candidate.stat().st_size) == weight_size:
+                        same_size.append(candidate)
+                except OSError:
+                    continue
+    if not same_size:
+        return False
+    hash_sizes = {weight_size} if weight_size is not None else set()
+    weight_digest = lora_weights_content_digest(
+        weight_path, digest_cache=cache, hash_sizes=hash_sizes
+    )
+    if not weight_digest:
+        return False
+    for candidate in same_size:
+        other = lora_weights_content_digest(
+            candidate, digest_cache=cache, hash_sizes=hash_sizes
+        )
+        if other and other == weight_digest:
+            return True
+    return False
+
+
 def find_user_lora_for_source(
     path: Path,
     *,
     host_id: str,
     settings: Optional[Dict[str, Any]] = None,
 ) -> Optional[FluxLoraEntry]:
-    """Return an existing user LoRA entry that refers to the same source file."""
+    """Return an existing user LoRA entry that refers to the same weights file."""
     host = str(host_id or "").strip()
     if not host:
         return None
@@ -196,12 +298,31 @@ def find_user_lora_for_source(
         source = path.expanduser()
     if not source.is_file():
         return None
+    from imagegen_plugins.lora_compatibility_checker import _size_conflict_set
+
+    compare_paths = [source]
+    for entry in user_lora_entries_from_settings(settings).values():
+        if entry.host_id != host:
+            continue
+        compare_paths.extend(_entry_path_candidates(entry))
+    hash_sizes = _size_conflict_set(compare_paths)
+    digest_cache: Dict[Path, str] = {}
+    source_digest = lora_weights_content_digest(
+        source, digest_cache=digest_cache, hash_sizes=hash_sizes
+    )
     for entry in user_lora_entries_from_settings(settings).values():
         if entry.host_id != host:
             continue
         for candidate in _entry_path_candidates(entry):
             if same_lora_file(source, candidate):
                 return entry
+        if source_digest:
+            for candidate in _entry_path_candidates(entry):
+                other = lora_weights_content_digest(
+                    candidate, digest_cache=digest_cache, hash_sizes=hash_sizes
+                )
+                if other and other == source_digest:
+                    return entry
     return None
 
 

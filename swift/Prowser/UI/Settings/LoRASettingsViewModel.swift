@@ -5,6 +5,34 @@ extension Notification.Name {
     static let prowserSettingsWillCommit = Notification.Name("prowser.settingsWillCommit")
 }
 
+enum LoRASettingsListFilter: String, CaseIterable, Identifiable {
+    case all = "All LoRA files"
+    case worksWithModel = "Works with this model"
+    case inCreateMenu = "In Create menu"
+
+    var id: String { rawValue }
+}
+
+enum LoRASettingsRowKind: Equatable {
+    case saved
+    case needsSetup
+}
+
+enum LoRASettingsCompatibility: Equatable {
+    case works
+    case doesNotWork
+    case notTested
+}
+
+struct LoRASettingsRow: Identifiable, Equatable {
+    var entry: LoRACatalogEntry
+    var kind: LoRASettingsRowKind
+    var compatibility: LoRASettingsCompatibility?
+    var inCreateMenu: Bool
+
+    var id: String { entry.loraID }
+}
+
 @MainActor
 @Observable
 final class LoRASettingsViewModel {
@@ -12,12 +40,13 @@ final class LoRASettingsViewModel {
     var selectedModelKey: String = ""
     var entries: [LoRACatalogEntry] = []
     var discoveredEntries: [LoRACatalogEntry] = []
+    var rows: [LoRASettingsRow] = []
+    var listFilter: LoRASettingsListFilter = .all
     var enabledIDs: Set<String> = []
-    var hideUninstalled = true
+    var hideUninstalled = false
     var isLoading = false
     var errorMessage: String?
     var draftByModel: [String: LoRAModelDraftSlice] = [:]
-    private var baselineDrafts: [String: LoRAModelDraftSlice] = [:]
     var pendingImportPath: String?
 
     private weak var bridge: LoRABridge?
@@ -30,6 +59,19 @@ final class LoRASettingsViewModel {
         models.first { $0.modelKey == selectedModelKey }
     }
 
+    var filteredRows: [LoRASettingsRow] {
+        switch listFilter {
+        case .all:
+            return rows
+        case .worksWithModel:
+            return rows.filter { row in
+                row.kind == .saved && row.compatibility == .works
+            }
+        case .inCreateMenu:
+            return rows.filter { $0.inCreateMenu }
+        }
+    }
+
     func loadInitial() async {
         guard let bridge, bridge.isAvailable else { return }
         isLoading = true
@@ -40,7 +82,6 @@ final class LoRASettingsViewModel {
                 selectedModelKey = models.first?.modelKey ?? ""
             }
             await reloadEntries()
-            baselineDrafts = draftByModel
         } catch {
             errorMessage = error.localizedDescription
             models = []
@@ -62,8 +103,109 @@ final class LoRASettingsViewModel {
                 enabledIDs: result.enabledIDs,
                 deletedIDs: result.deletedIDs
             )
+            rebuildRows()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func rebuildRows() {
+        var built: [LoRASettingsRow] = entries.map { entry in
+            let compatibility = compatibility(for: entry)
+            let works = compatibility == .works
+            return LoRASettingsRow(
+                entry: entry,
+                kind: .saved,
+                compatibility: compatibility,
+                inCreateMenu: works && enabledIDs.contains(entry.loraID)
+            )
+        }
+        let discovered = discoveredEntries.map { entry in
+            LoRASettingsRow(
+                entry: entry,
+                kind: .needsSetup,
+                compatibility: nil,
+                inCreateMenu: false
+            )
+        }
+        built.append(contentsOf: discovered)
+        built = dedupeRows(built)
+        built.sort { lhs, rhs in
+            if lhs.kind != rhs.kind {
+                return lhs.kind == .saved
+            }
+            return lhs.entry.label.localizedCaseInsensitiveCompare(rhs.entry.label) == .orderedAscending
+        }
+        rows = built
+    }
+
+    private func dedupeRows(_ rows: [LoRASettingsRow]) -> [LoRASettingsRow] {
+        var seenIDs: Set<String> = []
+        var seenWeightKeys: Set<String> = []
+        var seenNameSizeKeys: Set<String> = []
+        var out: [LoRASettingsRow] = []
+        for row in rows {
+            if seenIDs.contains(row.entry.loraID) {
+                continue
+            }
+            let path = row.entry.localPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty {
+                let key = (path as NSString).standardizingPath
+                if seenWeightKeys.contains(key) {
+                    continue
+                }
+                seenWeightKeys.insert(key)
+                if let nameSizeKey = weightsDedupeKey(standardizedPath: key, label: row.entry.label) {
+                    if seenNameSizeKeys.contains(nameSizeKey) {
+                        continue
+                    }
+                    seenNameSizeKeys.insert(nameSizeKey)
+                }
+            }
+            seenIDs.insert(row.entry.loraID)
+            out.append(row)
+        }
+        return out
+    }
+
+    /// Same weights copied to cache, Downloads, and a `_2` folder share name + byte size.
+    private func weightsDedupeKey(standardizedPath: String, label: String) -> String? {
+        let name = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !name.isEmpty else { return nil }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: standardizedPath),
+              let size = attrs[.size] as? UInt64,
+              size > 0
+        else { return nil }
+        return "name:\(name)|\(size)"
+    }
+
+    private func compatibility(for entry: LoRACatalogEntry) -> LoRASettingsCompatibility {
+        switch entry.probeStateForModel {
+        case "pass":
+            return .works
+        case "fail":
+            return .doesNotWork
+        default:
+            return .notTested
+        }
+    }
+
+    func compatibilitySubtitle(for row: LoRASettingsRow) -> String {
+        let modelLabel = selectedModel?.displayName ?? "this model"
+        switch row.kind {
+        case .needsSetup:
+            return row.entry.statusLabel.isEmpty ? "Needs setup" : row.entry.statusLabel
+        case .saved:
+            switch row.compatibility {
+            case .works:
+                return "Works with \(modelLabel)"
+            case .doesNotWork:
+                return "Doesn't work with \(modelLabel)"
+            case .notTested:
+                return "Not tested yet — run Test LoRAs"
+            case .none:
+                return row.entry.statusLabel
+            }
         }
     }
 
@@ -80,6 +222,7 @@ final class LoRASettingsViewModel {
             enabledIDs.remove(loraID)
         }
         persistCurrentModelDraft()
+        rebuildRows()
     }
 
     func persistCurrentModelDraft() {
@@ -95,7 +238,6 @@ final class LoRASettingsViewModel {
         guard let bridge else { return }
         persistCurrentModelDraft()
         try await bridge.saveCatalogState(modelKey: selectedModelKey, byModel: draftByModel)
-        baselineDrafts = draftByModel
         NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
     }
 
@@ -110,10 +252,30 @@ final class LoRASettingsViewModel {
         }
     }
 
-    func delete(loraID: String) async {
+    func removeSavedLoRA(
+        loraID: String,
+        parentWindow: NSWindow?
+    ) async {
         guard let bridge else { return }
         do {
-            try await bridge.delete(loraID: loraID, modelKey: selectedModelKey)
+            let info = try await bridge.loraRemovalInfo(loraID: loraID)
+            let outcome = LoRARemovalFlow.run(info: info, parentWindow: parentWindow)
+            switch outcome {
+            case .cancelled:
+                return
+            case .removedCompatibilityState:
+                try await bridge.delete(
+                    loraID: loraID,
+                    modelKey: selectedModelKey,
+                    mode: .unregister
+                )
+            case .deletedWeights:
+                try await bridge.delete(
+                    loraID: loraID,
+                    modelKey: selectedModelKey,
+                    mode: .deleteWeights
+                )
+            }
             enabledIDs.remove(loraID)
             persistCurrentModelDraft()
             await reloadEntries()

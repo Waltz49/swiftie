@@ -30,7 +30,10 @@ FLUX_LORA_CATALOG = LORA_CATALOG
 
 _DIFFUSERS_LORA_HOSTS = frozenset({HOST_SD15, HOST_SDXL})
 
-MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),)
+MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),) + tuple(
+    (lora_choice_label(e), e.lora_id)
+    for e in sorted(LORA_CATALOG.values(), key=lambda x: x.display_name.lower())
+)
 
 # Shown (disabled) when the active model does not support LoRAs.
 LORA_UNSUPPORTED_PRESET_ID = "__lora_unsupported__"
@@ -114,7 +117,7 @@ def assert_lora_compatible_for_model(
         SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
         SD15_LORA_MODEL_KEYS,
         SDXL_BASE_1_0,
-        Z_IMAGE_TURBO_MFLUX_4BIT,
+        Z_IMAGE_TURBO,
     )
 
     if model_key in SD15_LORA_MODEL_KEYS or model_key == SDXL_BASE_1_0:
@@ -126,7 +129,7 @@ def assert_lora_compatible_for_model(
         SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     ):
         return
-    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT and catalog_host_id == HOST_Z_IMAGE_TURBO:
+    if model_key == Z_IMAGE_TURBO and catalog_host_id == HOST_Z_IMAGE_TURBO:
         return
     if model_key in (FLUX1_SCHNELL, FLUX1_DEV, FLUX1_FILL_DEV):
         _scan_mflux_lora_keys(path)
@@ -613,7 +616,7 @@ def apply_lora_to_mflux_payload(
         return
 
     from config import get_config
-    from imagegen_plugins.hf_model_ids import FLUX1_DEV, FLUX1_FILL_DEV, Z_IMAGE_TURBO_MFLUX_4BIT
+    from imagegen_plugins.hf_model_ids import FLUX1_DEV, FLUX1_FILL_DEV, Z_IMAGE_TURBO
     from imagegen_plugins.lora_catalog import (
         klein_lora_mismatch_message,
         lora_model_key_from_values,
@@ -622,7 +625,7 @@ def apply_lora_to_mflux_payload(
 
     model_key = lora_model_key_from_values(dict(merged))
     if for_z_image:
-        model_key = model_key or Z_IMAGE_TURBO_MFLUX_4BIT
+        model_key = model_key or Z_IMAGE_TURBO
     elif for_fill:
         model_key = model_key or FLUX1_FILL_DEV
     elif not model_key:
@@ -647,20 +650,20 @@ def apply_lora_to_mflux_payload(
             if not lora_probe_passed_for_model(preset_id, model_key, settings):
                 raise ValueError(
                     f"LoRA «{entry.display_name}» is not for Z-Image Turbo. "
-                    "Run Check LoRAs on Z-Image Turbo first, or pick a Z-Image LoRA."
+                    "Run Test LoRAs on Z-Image Turbo first, or pick a Z-Image LoRA."
                 )
         if not for_z_image and entry.host_id == HOST_Z_IMAGE_TURBO:
             raise ValueError(
                 f"LoRA «{entry.display_name}» is for Z-Image Turbo only. "
-                "Select Z-Image Turbo (4-bit) in Create, or pick a FLUX/Klein LoRA."
+                "Select Z-Image Turbo in Create, or pick a FLUX/Klein LoRA."
             )
 
         if model_key and not lora_probe_passed_for_model(
             preset_id, model_key, settings
         ):
             raise ValueError(
-                f"LoRA «{entry.display_name}» did not pass Check LoRAs for this base model. "
-                "Run Tools → Debug → Check LoRAs, or enable a passing LoRA in Settings → LoRA."
+                f"LoRA «{entry.display_name}» does not work with this base model. "
+                "Run Test LoRAs in Settings → LoRA, or pick a compatible LoRA."
             )
 
         if for_klein and entry.base_hf_model_id:

@@ -627,7 +627,7 @@
         }
       ],
       "function": "create",
-      "hf_model_id": "filipstrand/Z-Image-Turbo-mflux-4bit",
+      "hf_model_id": "Tongyi-MAI/Z-Image-Turbo",
       "lora_host_id": "z_image_turbo",
       "max_generation_dimension": 1440,
       "merged_defaults": {
@@ -635,7 +635,7 @@
         "copies": 1,
         "guidance_scale": 0.0,
         "height": 1024,
-        "hf_model_id": "filipstrand/Z-Image-Turbo-mflux-4bit",
+        "hf_model_id": "Tongyi-MAI/Z-Image-Turbo",
         "mflux_lora_stack": [],
         "mflux_quantize": 4,
         "negative_prompt": "",

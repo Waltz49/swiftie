@@ -47,11 +47,7 @@ struct LoRAImportSheet: View {
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
-            DialogButtonRow([
-                DialogButton("Cancel", isCancel: true) { dismiss() },
-                DialogButton("Find…") { showFindSheet = true },
-                DialogButton(testAddTitle, isDefault: true) { Task { await testAndAdd() } },
-            ])
+            DialogButtonRow(addModeButtons)
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 360)
@@ -76,15 +72,35 @@ struct LoRAImportSheet: View {
 
     private var modeTitle: String {
         switch mode {
-        case .add: return "Add LoRA"
+        case .add: return "Add LoRA file"
         case .edit: return "Edit LoRA"
         }
     }
 
-    private var testAddTitle: String {
+    private var addModeButtons: [DialogButton] {
         switch mode {
-        case .add: return "Test & Add"
-        case .edit: return "Save"
+        case .add:
+            return [
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("Find…") { showFindSheet = true },
+                DialogButton(
+                    "Save",
+                    help: "Save without a GPU test; compatibility with this base model is assumed."
+                ) {
+                    Task { await importAdd(skipCompatibilityProbe: true) }
+                },
+                DialogButton("Test & Save", isDefault: true) {
+                    Task { await importAdd(skipCompatibilityProbe: false) }
+                },
+            ]
+        case .edit:
+            return [
+                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("Find…") { showFindSheet = true },
+                DialogButton("Save", isDefault: true) {
+                    Task { await importAdd(skipCompatibilityProbe: false) }
+                },
+            ]
         }
     }
 
@@ -134,7 +150,8 @@ struct LoRAImportSheet: View {
         }
     }
 
-    private func testAndAdd() async {
+    private func importAdd(skipCompatibilityProbe: Bool) async {
+        guard !isImporting else { return }
         errorMessage = nil
         let path = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
@@ -184,6 +201,9 @@ struct LoRAImportSheet: View {
             "reference_prompt": referencePrompt,
         ]
         if let reuseLoraID { payload["reuse_lora_id"] = reuseLoraID }
+        if skipCompatibilityProbe {
+            payload["skip_compatibility_probe"] = true
+        }
         do {
             let result = try await appState.workers.lora.importLora(payload: payload) { activity, step, maximum in
                 Task { @MainActor in

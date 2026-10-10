@@ -16,6 +16,6 @@ enum CheckLorasResultsDialog {
         if !reportPaths.isEmpty {
             return "Report file(s):\n" + reportPaths.map { "  \($0)" }.joined(separator: "\n")
         }
-        return "Check LoRAs finished, but no results summary was returned."
+        return "Test LoRAs finished, but no results summary was returned."
     }
 }

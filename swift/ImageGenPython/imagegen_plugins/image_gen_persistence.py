@@ -7,6 +7,7 @@ LoRA catalog user state is stored separately in ~/.prowser/data/lora_catalog.jso
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config import get_config
@@ -22,6 +23,9 @@ def _ensure_imagegen_dict(settings: dict) -> dict:
     if not isinstance(imagegen, dict):
         imagegen = {}
         settings["imagegen"] = imagegen
+    from imagegen_plugins.hf_model_ids import migrate_legacy_imagegen_block
+
+    migrate_legacy_imagegen_block(imagegen)
     return imagegen
 
 
@@ -184,11 +188,12 @@ def _plugin_uses_lora_stack(plugin_id: str) -> bool:
 
 def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
     """Per-function, per-plugin LoRA stack (preset ids). Migrates legacy ``mflux_lora``."""
+    from imagegen_plugins.hf_model_ids import migrate_legacy_z_image_plugin_id
     from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
 
-    plugin_id = str(plugin_id)
+    plugin_id = migrate_legacy_z_image_plugin_id(str(plugin_id))
     settings = get_config().load_settings()
-    imagegen = settings.get("imagegen") or {}
+    imagegen = _ensure_imagegen_dict(settings)
     dialogs = imagegen.get(_DIALOGS_KEY) or {}
     fn_entry = dialogs.get(function) or {}
     stacks = fn_entry.get(_LORA_STACKS_KEY) or {}
@@ -202,9 +207,11 @@ def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
 
 
 def _load_per_plugin_settings(function: str, plugin_id: str) -> Dict[str, Any]:
-    plugin_id = str(plugin_id)
+    from imagegen_plugins.hf_model_ids import migrate_legacy_z_image_plugin_id
+
+    plugin_id = migrate_legacy_z_image_plugin_id(str(plugin_id))
     settings = get_config().load_settings()
-    imagegen = settings.get("imagegen") or {}
+    imagegen = _ensure_imagegen_dict(settings)
     dialogs = imagegen.get(_DIALOGS_KEY) or {}
     fn_entry = dialogs.get(function) or {}
     plugin_settings = fn_entry.get(_PLUGIN_SETTINGS_KEY) or {}
@@ -979,11 +986,240 @@ def update_lora_entry_metadata(
 
 
 
-def remove_user_lora(lora_id: str) -> None:
-    from imagegen_plugins.lora_catalog import get_lora_entry
-    from imagegen_plugins.lora_catalog_settings import DELETED_IDS_KEY, migrate_lora_catalog
+def _purge_user_lora_settings(lora_id: str) -> None:
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        PROBE_HISTORY_KEY,
+        probe_history_from_lc,
+    )
+    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY
+
+    lid = str(lora_id or "").strip()
+    if not lid:
+        return
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+        raw.pop(lid, None)
+        lc[USER_ENTRIES_KEY] = raw
+        ms = dict(lc.get("model_support") or {})
+        ms.pop(lid, None)
+        lc["model_support"] = ms
+        cfm = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
+        cfm.pop(lid, None)
+        lc[CROSS_FAMILY_MODELS_KEY] = cfm
+        ph = dict(probe_history_from_lc(lc))
+        ph.pop(lid, None)
+        lc[PROBE_HISTORY_KEY] = ph
+        bm = dict(lc.get("by_model") or {})
+        for mk, slice_ in list(bm.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
+            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+            bm[mk] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+        lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def prune_duplicate_user_lora_entries() -> bool:
+    """
+    Collapse duplicate user LoRAs that share the same weights file (e.g. after
+    repeated add/delete). Keeps the best catalog id and merges model_support /
+    enabled lists; removes extra cache copies.
+    """
+    import re
+
+    from imagegen_plugins.lora_catalog import lora_model_support
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        PROBE_HISTORY_KEY,
+        probe_history_from_lc,
+    )
     from imagegen_plugins.lora_user_entries import (
         USER_ENTRIES_KEY,
+        entry_weights_identity_key,
+        is_user_lora_id,
+        remove_user_lora_files,
+        user_lora_entries_from_settings,
+    )
+
+    entries = user_lora_entries_from_settings()
+    groups: Dict[str, List[str]] = {}
+    for lid, entry in entries.items():
+        if not is_user_lora_id(lid):
+            continue
+        key = entry_weights_identity_key(entry, hash_sizes=set())
+        groups.setdefault(key, []).append(lid)
+
+    size_dup = {k: lids for k, lids in groups.items() if len(lids) > 1}
+    dup_groups: Dict[str, List[str]] = {}
+    if size_dup:
+        from imagegen_plugins.lora_compatibility_checker import _size_conflict_set
+        from imagegen_plugins.lora_user_entries import _entry_path_candidates
+
+        refine_paths = []
+        for lids in size_dup.values():
+            for lid in lids:
+                entry = entries.get(lid)
+                if entry is not None:
+                    refine_paths.extend(_entry_path_candidates(entry))
+        hash_sizes = _size_conflict_set(refine_paths)
+        digest_cache: Dict[Path, str] = {}
+        refined: Dict[str, List[str]] = {}
+        for lids in size_dup.values():
+            for lid in lids:
+                entry = entries.get(lid)
+                if entry is None:
+                    continue
+                key = entry_weights_identity_key(
+                    entry, digest_cache=digest_cache, hash_sizes=hash_sizes
+                )
+                refined.setdefault(key, []).append(lid)
+        dup_groups = {k: lids for k, lids in refined.items() if len(lids) > 1}
+    else:
+        dup_groups = {}
+    if not dup_groups:
+        return False
+
+    def _pick_keep(lids: List[str]) -> str:
+        support = lora_model_support()
+
+        def score(lid: str) -> tuple:
+            models = support.get(lid) or ()
+            suffix_penalty = 1 if re.search(r"_\d+$", lid) else 0
+            return (len(models), -suffix_penalty, lid)
+
+        return sorted(lids, key=score, reverse=True)[0]
+
+    to_remove: List[str] = []
+    to_remove_set: set[str] = set()
+    merge_into: Dict[str, List[str]] = {}
+    for lids in dup_groups.values():
+        keep = _pick_keep(lids)
+        drop = [lid for lid in lids if lid != keep]
+        if drop:
+            merge_into.setdefault(keep, []).extend(drop)
+            for lid in drop:
+                if lid not in to_remove_set:
+                    to_remove_set.add(lid)
+                    to_remove.append(lid)
+
+    from imagegen_plugins.lora_catalog import local_lora_weights_path
+
+    by_name: Dict[Tuple[str, str], List[str]] = {}
+    for lid, entry in entries.items():
+        if not is_user_lora_id(lid) or lid in to_remove_set:
+            continue
+        name = (entry.display_name or "").strip().lower()
+        if not name:
+            continue
+        by_name.setdefault((entry.host_id, name), []).append(lid)
+
+    for lids in by_name.values():
+        if len(lids) <= 1:
+            continue
+        with_file = [
+            lid
+            for lid in lids
+            if local_lora_weights_path(lid, entry=entries.get(lid)) is not None
+        ]
+        if len(with_file) != 1:
+            continue
+        keep = with_file[0]
+        for lid in lids:
+            if lid == keep or lid in to_remove_set:
+                continue
+            merge_into.setdefault(keep, []).append(lid)
+            to_remove_set.add(lid)
+            to_remove.append(lid)
+
+    if not to_remove:
+        return False
+
+    for keep, drop in merge_into.items():
+        for lid in drop:
+            entry = entries.get(lid)
+            if entry is not None:
+                remove_user_lora_files(entry)
+
+    def mutate(imagegen: dict) -> None:
+        lc = _imagegen_lora_catalog(imagegen)
+        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+        ms = dict(lc.get("model_support") or {})
+        cf = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
+        ph = dict(probe_history_from_lc(lc))
+        bm = dict(lc.get("by_model") or {})
+
+        for keep, drop in merge_into.items():
+            merged_models: List[str] = []
+            for lid in (keep, *drop):
+                prev = ms.get(lid) or []
+                if isinstance(prev, list):
+                    merged_models.extend(str(m) for m in prev)
+            if merged_models:
+                ms[keep] = list(dict.fromkeys(merged_models))
+            for lid in drop:
+                ms.pop(lid, None)
+                cf.pop(lid, None)
+                ph.pop(lid, None)
+                raw.pop(lid, None)
+
+            for mk, slice_ in list(bm.items()):
+                if not isinstance(slice_, dict):
+                    continue
+                enabled = list(slice_.get("enabled_ids") or [])
+                new_enabled: List[str] = []
+                for eid in enabled:
+                    if eid in drop:
+                        if keep not in new_enabled:
+                            new_enabled.append(keep)
+                    elif eid not in new_enabled:
+                        new_enabled.append(eid)
+                deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+                bm[mk] = {"enabled_ids": new_enabled, DELETED_IDS_KEY: deleted}
+
+        user_ids = set(raw.keys())
+        for mk, slice_ in list(bm.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [
+                x
+                for x in (slice_.get("enabled_ids") or [])
+                if str(x) in user_ids
+            ]
+            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
+            bm[mk] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
+
+        lc[USER_ENTRIES_KEY] = raw
+        lc["model_support"] = ms
+        lc[CROSS_FAMILY_MODELS_KEY] = cf
+        lc[PROBE_HISTORY_KEY] = ph
+        lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+    return True
+
+
+def unregister_user_lora(lora_id: str) -> None:
+    """Drop saved LoRA metadata and compatibility state; keep weight files on disk."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    lid = str(lora_id or "").strip()
+    if not lid or not is_user_lora_id(lid):
+        return
+    _purge_user_lora_settings(lid)
+
+
+def remove_user_lora(lora_id: str) -> None:
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_user_entries import (
         is_user_lora_id,
         remove_user_lora_files,
     )
@@ -993,26 +1229,7 @@ def remove_user_lora(lora_id: str) -> None:
     entry = get_lora_entry(lora_id)
     if entry is not None:
         remove_user_lora_files(entry)
-
-    def mutate(imagegen: dict) -> None:
-        lc = _imagegen_lora_catalog(imagegen)
-        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
-        raw.pop(lora_id, None)
-        lc[USER_ENTRIES_KEY] = raw
-        ms = dict(lc.get("model_support") or {})
-        ms.pop(lora_id, None)
-        lc["model_support"] = ms
-        bm = dict(lc.get("by_model") or {})
-        for mk, slice_ in list(bm.items()):
-            if not isinstance(slice_, dict):
-                continue
-            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lora_id]
-            deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
-            bm[mk] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
-        lc["by_model"] = bm
-        imagegen["lora_catalog"] = lc
-
-    _mutate_imagegen_settings(mutate)
+    _purge_user_lora_settings(lora_id)
 
 
 def remove_lora_enabled_everywhere(lora_id: str) -> None:

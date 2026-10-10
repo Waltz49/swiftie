@@ -74,8 +74,6 @@ class PipelineMode:
     supports_optional_source_image: bool = False
     includes_output_dimensions: bool = True
     supports_low_ram: bool = False
-    # More than one entry shows a quantization selector; a single entry is applied with no control.
-    quant_choices: tuple[int, ...] = ()
 
 
 PIPELINE_MODES: Dict[str, PipelineMode] = {
@@ -105,22 +103,6 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         supports_negative_prompt=False,
         supports_progressive_images=False,
     ),
-    "z_image_turbo_sdnq": PipelineMode(
-        pipeline_id="z_image_turbo_sdnq",
-        worker_script="z_image_turbo.py",
-        steps_default=9,
-        steps_max=20,
-        guidance_min=0.0,
-        guidance_max=0.0,
-        guidance_default=0.0,
-        width_min=256,
-        width_max=1024,
-        height_min=256,
-        height_max=1024,
-        dim_step=16,
-        supports_negative_prompt=False,
-        supports_progressive_images=False,
-    ),
     "mflux_z_image_turbo": PipelineMode(
         pipeline_id="mflux_z_image_turbo",
         worker_script="mflux_z_image_turbo.py",
@@ -137,7 +119,6 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         supports_negative_prompt=False,
         supports_progressive_images=True,
         supports_low_ram=True,
-        quant_choices=(3, 4, 5, 6, 8),
     ),
     "sd15_diffusers": PipelineMode(
         pipeline_id="sd15_diffusers",
@@ -372,7 +353,7 @@ def align_dims_for_pipeline(
         from imagegen_plugins.pipelines.sdxl_diffusers import align_sdxl_dims
 
         return align_sdxl_dims(w, h, max_side=max_side)
-    if pipeline_id in ("z_image_turbo_sdnq", "mflux_z_image_turbo"):
+    if pipeline_id == "mflux_z_image_turbo":
         from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
 
         return align_z_image_dims(w, h, max_side=max_side)

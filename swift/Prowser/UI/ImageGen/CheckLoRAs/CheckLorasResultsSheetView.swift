@@ -7,7 +7,7 @@ struct CheckLorasResultsSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Changes from this Check LoRAs run:")
+            Text("Changes from this Test LoRAs run:")
                 .foregroundStyle(.secondary)
             if let cancelledBanner, !cancelledBanner.isEmpty {
                 Text(cancelledBanner)

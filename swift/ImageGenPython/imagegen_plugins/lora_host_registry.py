@@ -16,7 +16,7 @@ from imagegen_plugins.hf_model_ids import (
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     SD15_LORA_MODEL_KEYS,
     SDXL_LORA_MODEL_KEYS,
-    Z_IMAGE_TURBO_MFLUX_4BIT,
+    Z_IMAGE_TURBO,
 )
 
 HOST_FLUX1_T2I = "flux1_t2i"
@@ -79,7 +79,7 @@ LORA_HOSTS: Dict[str, LoraHost] = {
         host_id=HOST_Z_IMAGE_TURBO,
         display_name="Z-Image Turbo (Create)",
         pipeline_ids=("mflux_z_image_turbo",),
-        probe_targets=(Z_IMAGE_TURBO_MFLUX_4BIT,),
+        probe_targets=(Z_IMAGE_TURBO,),
     ),
 }
 
