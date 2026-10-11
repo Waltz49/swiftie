@@ -440,11 +440,27 @@ final class LoRAService {
     func exifLabelFromValues(pluginID: String, values: [String: Any]) async throws -> String? {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return nil }
         let ids = LoRAJobSnapshot.effectiveLoraIDs(from: values, pipelineID: plugin.pipelineID)
-        if ids.isEmpty { return nil }
+        if ids.isEmpty {
+            return ImageGenExifCommentFormatting.loraNameForExifFromValues(
+                values: values,
+                pipelineID: plugin.pipelineID,
+                loraHostID: plugin.loraHostID
+            )
+        }
         let lc = try await loadCatalog()
-        let names = ids.compactMap { LoRACatalog.getEntry(loraID: $0, lc: lc)?.displayName }
-        let text = names.joined(separator: " + ")
-        return text.isEmpty ? nil : text
+        var labels: [String] = []
+        for (index, loraID) in ids.enumerated() {
+            let name = LoRACatalog.getEntry(loraID: loraID, lc: lc)?.displayName ?? loraID
+            let scale = ImageGenExifCommentFormatting.loraScaleForExif(
+                values: values,
+                presetID: loraID,
+                index: index
+            )
+            labels.append("\(name) [\(ImageGenExifCommentFormatting.formatExifLoraWeight(scale))]")
+        }
+        if labels.isEmpty { return nil }
+        if labels.count == 1 { return labels[0] }
+        return labels.joined(separator: " + ")
     }
 
     func matchExif(pluginID: String, exifLoraName: String) async throws -> [String: Any]? {

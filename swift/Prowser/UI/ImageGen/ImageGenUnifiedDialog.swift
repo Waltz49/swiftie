@@ -26,6 +26,8 @@ struct ImageGenUnifiedDialog: View {
     @State private var pluginSwitchGuard = false
     @State private var suppressCloseOnGeneratePersist = false
     @State private var loadGeneration = 0
+    /// Prevents duplicate persist/close when the user closes via the window button after ⌘W/Close.
+    @State private var dismissing = false
     /// Frozen edit sources while the dialog is open (Python ``_edit_source_paths_override``).
     @State private var lockedEditSourcePaths: [String] = []
     @State private var lockedExpandSourcePath: String?
@@ -108,7 +110,7 @@ struct ImageGenUnifiedDialog: View {
         }
         .background {
             SceneWindowLifecycleBridge(windowIdentifier: Self.windowIdentifier) {
-                appState.closeImageGenUnifiedDialog()
+                performClose()
             }
         }
     }
@@ -276,6 +278,7 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private func loadDialog() async {
+        dismissing = false
         loadGeneration += 1
         let generation = loadGeneration
         let pendingAutoGenerate = request.autoGenerate
@@ -600,15 +603,19 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private func performClose() {
+        guard !dismissing else { return }
         if replaceJobID != nil {
             performCancel()
             return
         }
+        dismissing = true
         persistVisitedFunctions()
         closeDialog()
     }
 
     private func performCancel() {
+        guard !dismissing else { return }
+        dismissing = true
         if isDirty {
             session.setValues(baselineValues, for: selectedFunction)
             persistVisitedFunctions(excluding: selectedFunction)
@@ -740,6 +747,7 @@ struct ImageGenUnifiedDialog: View {
             baselineValues = submitValues
             isDirty = false
             if closeOnGenerate {
+                dismissing = true
                 persistVisitedFunctions()
                 closeDialog()
             }

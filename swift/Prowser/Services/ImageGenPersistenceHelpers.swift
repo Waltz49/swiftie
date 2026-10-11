@@ -182,6 +182,14 @@ enum ImageGenPersistence {
         return sanitizeDialogValues(out)
     }
 
+    private static func activePluginLookupKeys(for function: String) -> [String] {
+        let key = persistFunctionKey(function)
+        if key == "infill" {
+            return ["infill", "infill_paint"]
+        }
+        return [key]
+    }
+
     static func loadActivePluginID(
         function: String,
         availablePluginIDs: [String],
@@ -189,9 +197,11 @@ enum ImageGenPersistence {
     ) -> String? {
         let imagegen = imagegenBlock(config: config)
         let byFunction = imagegen[activePluginByFunctionKey] as? [String: Any] ?? [:]
-        if let pluginID = byFunction[persistFunctionKey(function)] as? String,
-           availablePluginIDs.contains(pluginID) {
-            return pluginID
+        for lookupKey in activePluginLookupKeys(for: function) {
+            if let pluginID = byFunction[lookupKey] as? String,
+               availablePluginIDs.contains(pluginID) {
+                return pluginID
+            }
         }
         return nil
     }
