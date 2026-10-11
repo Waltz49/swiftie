@@ -25,16 +25,17 @@ struct ImageGenSourceNavRow<Center: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(alignment: .center, spacing: 4) {
             if navigationVisible {
                 navButton(delta: -1, symbol: "chevron.left", help: "Previous source image")
             }
             center()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             if navigationVisible {
                 navButton(delta: 1, symbol: "chevron.right", help: "Next source image")
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     @ViewBuilder

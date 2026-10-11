@@ -11,29 +11,34 @@ struct ImageGenEditSourcePreview: View {
     var onPathsChanged: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 6) {
+        Group {
             if sourcePaths.count == 1, let path = sourcePaths.first {
-                ImageGenSourceNavBar(
-                    currentPath: path,
-                    onSelectPath: { newPath in
-                        applyPaths([newPath])
-                    }
-                )
-            }
-            ImageGenEditSourcePreviewRepresentable(
-                sourcePaths: sourcePaths,
-                imageExtensions: appState.config.imageExtensions,
-                themeColors: themeColors,
-                onPathsChanged: { paths in
-                    applyPaths(paths)
-                },
-                onOpenInBrowse: { path in
-                    appState.openImageInBrowse(path: path)
+                ImageGenSourceNavRow(currentPath: path, onSelectPath: { newPath in
+                    applyPaths([newPath])
+                }) {
+                    previewCanvas
                 }
-            )
-            .frame(minWidth: 160, minHeight: 120)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                previewCanvas
+            }
         }
+    }
+
+    private var previewCanvas: some View {
+        ImageGenEditSourcePreviewRepresentable(
+            sourcePaths: sourcePaths,
+            imageExtensions: appState.config.imageExtensions,
+            themeColors: themeColors,
+            onPathsChanged: { paths in
+                applyPaths(paths)
+            },
+            onOpenInBrowse: { path in
+                appState.openImageInBrowse(path: path)
+            }
+        )
+        .frame(minWidth: 160, minHeight: 120)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func applyPaths(_ paths: [String]) {

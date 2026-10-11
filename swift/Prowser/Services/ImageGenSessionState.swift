@@ -47,7 +47,7 @@ final class ImageGenSessionState {
     }
 }
 
-struct ImageGenDialogRequest {
+struct ImageGenDialogRequest: Equatable {
     var function: String
     var replaceJobID: String?
     var initialPrompt: String?

@@ -42,4 +42,34 @@ enum ImageGenMfluxPluginFilter {
             return copy
         }
     }
+
+    /// Optimistic availability for dialog first paint (no subprocess / HF cache walks).
+    static func applyingMfluxAvailabilityFast(
+        _ plugins: [[String: Any]],
+        config: AppConfig? = nil
+    ) -> [[String: Any]] {
+        plugins.map { plugin in
+            var copy = plugin
+            let pipeline = plugin["pipeline_id"] as? String ?? ""
+            let registryOK = plugin["available"] as? Bool ?? true
+            let hfModel = plugin["hf_model_id"] as? String ?? ""
+            let kind = ImageGenPipelineRouting.executionKind(pipelineID: pipeline, hfModelID: hfModel)
+            let runtimeOK: Bool
+            switch kind {
+            case .mfluxCLI:
+                runtimeOK = MfluxToolchain.shared.isPipelineInstalled(pipeline)
+            case .bundledPythonWorker, .sceneWorksPythonWorker:
+                if let config {
+                    runtimeOK = ImageGenPluginAvailability.venvPythonReady(config: config)
+                } else {
+                    runtimeOK = false
+                }
+            case nil:
+                runtimeOK = false
+            }
+            copy["available"] = registryOK && runtimeOK
+            copy.removeValue(forKey: "unavailable_reason")
+            return copy
+        }
+    }
 }

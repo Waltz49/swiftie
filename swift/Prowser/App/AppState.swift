@@ -49,6 +49,7 @@ final class AppState {
     var showImageGenCreateSheet = false
     var showImageGenUnifiedDialog = false
     var imageGenDialogReloadToken = 0
+    var imageGenDialogApplyToken = 0
     var imageGenUIRevision = 0
     /// Refreshes the AppKit job queue panel when queue rows change (copies, status, etc.).
     var jobsQueuePanelSync: (@MainActor () -> Void)?

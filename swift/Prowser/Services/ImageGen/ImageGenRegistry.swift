@@ -7,7 +7,11 @@ protocol ImageGenRegistry: AnyObject {
     var lastError: String { get }
     func shutdown()
 
-    func listPlugins(function: String?, savedValues: [String: Any]?) async throws -> [[String: Any]]
+    func listPlugins(
+        function: String?,
+        savedValues: [String: Any]?,
+        availability: ImageGenPluginListAvailability
+    ) async throws -> [[String: Any]]
     func buildPayload(
         pluginID: String,
         values: [String: Any],
@@ -20,11 +24,15 @@ protocol ImageGenRegistry: AnyObject {
 
 extension ImageGenRegistry {
     func listPlugins() async throws -> [[String: Any]] {
-        try await listPlugins(function: nil, savedValues: nil)
+        try await listPlugins(function: nil, savedValues: nil, availability: .full)
     }
 
     func listPlugins(function: String?) async throws -> [[String: Any]] {
-        try await listPlugins(function: function, savedValues: nil)
+        try await listPlugins(function: function, savedValues: nil, availability: .full)
+    }
+
+    func listPlugins(function: String?, savedValues: [String: Any]?) async throws -> [[String: Any]] {
+        try await listPlugins(function: function, savedValues: savedValues, availability: .full)
     }
 
     func buildPayload(

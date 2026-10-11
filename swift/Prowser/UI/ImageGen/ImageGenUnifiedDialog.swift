@@ -26,6 +26,7 @@ struct ImageGenUnifiedDialog: View {
     @State private var pluginSwitchGuard = false
     @State private var suppressCloseOnGeneratePersist = false
     @State private var loadGeneration = 0
+    @State private var postOpenWorkGeneration = 0
     /// Prevents duplicate persist/close when the user closes via the window button after ⌘W/Close.
     @State private var dismissing = false
     /// Frozen edit sources while the dialog is open (Python ``_edit_source_paths_override``).
@@ -38,7 +39,7 @@ struct ImageGenUnifiedDialog: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if isLoading {
-                ProgressView("Loading models…")
+                ProgressView("Loading…")
                     .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 ImageGenPanelShell(
@@ -101,9 +102,11 @@ struct ImageGenUnifiedDialog: View {
             windowIdentifier: ImageGenUnifiedDialog.windowIdentifier,
             windowTitle: titleText
         )
-        .task { await loadDialog() }
-        .onChange(of: appState.imageGenDialogReloadToken) { _, _ in
-            Task { await loadDialog() }
+        .task(id: appState.imageGenDialogReloadToken) {
+            await loadDialog()
+        }
+        .onChange(of: appState.imageGenDialogApplyToken) { _, _ in
+            Task { await applyOpenRequest() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserRaiseImageGenDialog)) { _ in
             raiseWindow()
@@ -280,32 +283,24 @@ struct ImageGenUnifiedDialog: View {
     private func loadDialog() async {
         dismissing = false
         loadGeneration += 1
+        postOpenWorkGeneration += 1
         let generation = loadGeneration
-        let pendingAutoGenerate = request.autoGenerate
         let pendingRequest = request
-        appState.imageGen.beginImageGenDialogBuild()
-        defer { appState.imageGen.endImageGenDialogBuild() }
+        let pendingAutoGenerate = pendingRequest.autoGenerate
         closeOnGenerate = ImageGenPersistence.closeDialogOnGenerate(config: appState.config)
-        selectedFunction = pendingRequest.function.isEmpty ? session.lastFunction(config: appState.config) : pendingRequest.function
+        selectedFunction = pendingRequest.function.isEmpty
+            ? session.lastFunction(config: appState.config)
+            : pendingRequest.function
         if pendingRequest.replaceJobID == nil {
             session.reset()
         }
         isLoading = true
         errorMessage = ""
+        appState.imageGen.beginImageGenDialogBuild()
         do {
-            for function in functions {
-                let saved = ImageGenPersistence.loadDialogSettings(
-                    function: function,
-                    config: appState.config
-                )
-                let plugins = try await appState.workers.imageGenRegistry.listPlugins(
-                    function: function,
-                    savedValues: saved.isEmpty ? nil : saved
-                )
-                pluginsByFunction[function] = plugins
-            }
             if let replaceJobID = pendingRequest.replaceJobID,
                let job = appState.imageGen.queue.jobs.first(where: { $0.jobID == replaceJobID }) {
+                try await ensurePluginsLoaded(function: job.function, availability: .fast)
                 selectedFunction = job.function
                 selectedPluginID = job.pluginID
                 values = job.values
@@ -329,28 +324,149 @@ struct ImageGenUnifiedDialog: View {
                     lockedInfillSourcePath = path
                 }
             } else {
-                // Each open request re-resolves edit sources (Python builds a fresh dialog per open):
-                // explicit paths from the caller, else the active image(s).
+                let targetFunction = selectedFunction
+                try await ensurePluginsLoaded(function: targetFunction, availability: .fast)
                 lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
-                await switchFunction(from: "", to: selectedFunction)
+                await switchFunction(from: "", to: targetFunction)
                 bootstrapEditSourcePaths(from: pendingRequest, force: true)
                 if let prompt = pendingRequest.initialPrompt {
-                    // Python ``_dialog_initial_prompt_from_user_comment``: an empty comment clears the prompt.
-                    values["prompt"] = prompt.isEmpty ? "" : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
-                }
-                if pendingRequest.autoImportEXIF {
-                    await applyAutoImportEXIF()
+                    values["prompt"] = prompt.isEmpty
+                        ? ""
+                        : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
                 }
             }
             isDirty = false
         } catch {
             errorMessage = error.localizedDescription
         }
+        appState.imageGen.endImageGenDialogBuild()
         isLoading = false
         guard generation == loadGeneration else { return }
-        if pendingAutoGenerate, errorMessage.isEmpty, replaceJobID == nil {
-            appState.imageGenDialogRequest.autoGenerate = false
-            scheduleAutoGenerate()
+        schedulePostOpenWork(
+            generation: generation,
+            pendingRequest: pendingRequest,
+            pendingAutoGenerate: pendingAutoGenerate
+        )
+    }
+
+    private func applyOpenRequest() async {
+        let pendingRequest = request
+        if pendingRequest.replaceJobID != nil {
+            await loadDialog()
+            return
+        }
+        let targetFunction = pendingRequest.function.isEmpty
+            ? session.lastFunction(config: appState.config)
+            : pendingRequest.function
+        do {
+            try await ensurePluginsLoaded(function: targetFunction, availability: .fast)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
+        if targetFunction != selectedFunction {
+            let previous = selectedFunction
+            guard await switchFunction(from: previous, to: targetFunction) else { return }
+            bootstrapEditSourcePaths(from: pendingRequest, force: true)
+            if let prompt = pendingRequest.initialPrompt {
+                values["prompt"] = prompt.isEmpty
+                    ? ""
+                    : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
+            }
+        } else {
+            bootstrapEditSourcePaths(from: pendingRequest, force: true)
+            if let prompt = pendingRequest.initialPrompt {
+                values["prompt"] = prompt.isEmpty
+                    ? ""
+                    : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
+            }
+        }
+        let generation = loadGeneration
+        schedulePostOpenWork(
+            generation: generation,
+            pendingRequest: pendingRequest,
+            pendingAutoGenerate: pendingRequest.autoGenerate
+        )
+    }
+
+    private func savedDialogValues(function: String) -> [String: Any]? {
+        let saved = ImageGenPersistence.loadDialogSettings(function: function, config: appState.config)
+        return saved.isEmpty ? nil : saved
+    }
+
+    private func ensurePluginsLoaded(
+        function: String,
+        availability: ImageGenPluginListAvailability
+    ) async throws {
+        if availability == .fast,
+           let existing = pluginsByFunction[function], !existing.isEmpty {
+            return
+        }
+        let plugins = try await appState.workers.imageGenRegistry.listPlugins(
+            function: function,
+            savedValues: savedDialogValues(function: function),
+            availability: availability
+        )
+        pluginsByFunction[function] = plugins
+    }
+
+    private func refreshAllPluginsFullAvailability(generation: Int) async {
+        guard generation == loadGeneration else { return }
+        var savedByFunction: [String: [String: Any]] = [:]
+        for function in functions {
+            if let saved = savedDialogValues(function: function) {
+                savedByFunction[function] = saved
+            }
+        }
+        do {
+            let grouped = try await appState.workers.imageGenRegistry.listPluginsGrouped(
+                functions: functions,
+                savedByFunction: savedByFunction,
+                availability: .full
+            )
+            guard generation == loadGeneration else { return }
+            for function in functions {
+                if let plugins = grouped[function] {
+                    pluginsByFunction[function] = plugins
+                }
+            }
+        } catch {
+            // Keep fast availability lists if full probes fail.
+        }
+    }
+
+    private func schedulePostOpenWork(
+        generation: Int,
+        pendingRequest: ImageGenDialogRequest,
+        pendingAutoGenerate: Bool
+    ) {
+        postOpenWorkGeneration += 1
+        let workToken = postOpenWorkGeneration
+        let targetFunction = pendingRequest.function.isEmpty
+            ? session.lastFunction(config: appState.config)
+            : pendingRequest.function
+        Task { @MainActor in
+            await Task.yield()
+            guard workToken == postOpenWorkGeneration else { return }
+            guard generation == loadGeneration else { return }
+            if pendingRequest.autoImportEXIF, pendingRequest.replaceJobID == nil {
+                await applyAutoImportEXIF()
+            }
+            guard workToken == postOpenWorkGeneration, generation == loadGeneration else { return }
+            if pendingAutoGenerate, errorMessage.isEmpty, pendingRequest.replaceJobID == nil {
+                appState.imageGenDialogRequest.autoGenerate = false
+                scheduleAutoGenerate()
+            }
+            let unloaded = functions.filter { function in
+                function != targetFunction && (pluginsByFunction[function] ?? []).isEmpty
+            }
+            for function in unloaded {
+                guard workToken == postOpenWorkGeneration, generation == loadGeneration else { return }
+                try? await ensurePluginsLoaded(function: function, availability: .fast)
+            }
+            guard workToken == postOpenWorkGeneration else { return }
+            await refreshAllPluginsFullAvailability(generation: generation)
         }
     }
 
@@ -374,6 +490,14 @@ struct ImageGenUnifiedDialog: View {
 
     @discardableResult
     private func switchFunction(from oldFunction: String, to newFunction: String) async -> Bool {
+        if pluginsByFunction[newFunction]?.isEmpty != false {
+            do {
+                try await ensurePluginsLoaded(function: newFunction, availability: .fast)
+            } catch {
+                errorMessage = error.localizedDescription
+                return false
+            }
+        }
         let sessionValues = session.values(for: newFunction)
         let persistedPath = sessionValues["source_image_path"] as? String
             ?? values["source_image_path"] as? String
@@ -697,6 +821,16 @@ struct ImageGenUnifiedDialog: View {
 
     private func submit(replace: Bool) async {
         errorMessage = ""
+        if let plugin = (pluginsByFunction[selectedFunction] ?? []).first(where: {
+            ($0["plugin_id"] as? String) == selectedPluginID
+        }),
+           plugin["available"] as? Bool == false {
+            let reason = (plugin["unavailable_reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            errorMessage = reason?.isEmpty == false
+                ? reason!
+                : "The selected model is not available."
+            return
+        }
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
         var submitValues = prepareSubmitValues(values)
         submitValues["copies"] = copies

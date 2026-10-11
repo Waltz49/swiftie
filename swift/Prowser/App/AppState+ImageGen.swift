@@ -290,36 +290,27 @@ extension AppState {
            ) {
             return
         }
-        let prompt = initialPrompt
-        if autoImportEXIF, prompt == nil {
-            Task {
-                let imported = await importPromptForActiveImageAsync()
-                openImageGenDialog(
-                    function: resolvedFunction,
-                    replaceJobID: replaceJobID,
-                    initialPrompt: imported,
-                    autoImportEXIF: true,
-                    autoGenerate: autoGenerate,
-                    editSourcePaths: editSourcePaths
-                )
-            }
-            return
-        }
-        imageGenDialogRequest = ImageGenDialogRequest(
+        let newRequest = ImageGenDialogRequest(
             function: resolvedFunction,
             replaceJobID: replaceJobID,
-            initialPrompt: prompt,
+            initialPrompt: initialPrompt,
             autoImportEXIF: autoImportEXIF,
             autoGenerate: autoGenerate,
             editSourcePaths: editSourcePaths
         )
         let wasAlreadyOpen = showImageGenUnifiedDialog
+        let requestUnchanged = newRequest == imageGenDialogRequest
+        imageGenDialogRequest = newRequest
         if wasAlreadyOpen {
             NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
-        } else {
-            showImageGenUnifiedDialog = true
+            if requestUnchanged {
+                return
+            }
+            imageGenDialogApplyToken += 1
+            return
         }
-        // Always bump so a closed-then-reopened dialog reloads (SwiftUI Window view may persist).
+        showImageGenUnifiedDialog = true
+        // Closed-then-reopened (or first open): full load (SwiftUI Window view may persist).
         imageGenDialogReloadToken += 1
     }
 
@@ -329,13 +320,10 @@ extension AppState {
 
     func openFastImageGenDialog() {
         let action = config.string(forKey: "imagegen_fast_open_action", default: "from_text")
-        Task {
-            let prompt = await importPromptForActiveImageAsync()
-            if action == "edit_image" {
-                openImageGenDialog(function: "edit", initialPrompt: prompt, autoImportEXIF: true)
-            } else {
-                openImageGenDialog(function: "create", initialPrompt: prompt, autoImportEXIF: true)
-            }
+        if action == "edit_image" {
+            openImageGenDialog(function: "edit", autoImportEXIF: true)
+        } else {
+            openImageGenDialog(function: "create", autoImportEXIF: true)
         }
     }
 
