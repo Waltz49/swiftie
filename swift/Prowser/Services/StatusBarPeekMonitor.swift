@@ -28,7 +28,12 @@ final class StatusBarPeekMonitor {
     }
 
     private func handleMouseMoved(_ event: NSEvent) {
-        guard let appState, event.window != nil else { return }
+        guard let appState, let window = event.window else { return }
+        // Python `StatusBarPeekFilter`: only map cursor against the main window, not dialogs.
+        guard BrowserWindowIdentity.isTaggedMainBrowserWindow(window) else {
+            appState.updateStatusBarPeek(nearBottom: false)
+            return
+        }
         let nearBottom = event.locationInWindow.y <= peekZoneHeight
         appState.updateStatusBarPeek(nearBottom: nearBottom)
     }
