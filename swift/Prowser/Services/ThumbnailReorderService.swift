@@ -8,43 +8,72 @@ enum ThumbnailReorderService {
         insertionIndex: Int,
         appState: AppState
     ) async -> Bool {
-        if PrsortIO.isFileLocked(imagePath) {
-            appState.status.show("Cannot reorder locked files")
-            return false
+        await reorderMultiple(imagePaths: [imagePath], insertionIndex: insertionIndex, appState: appState)
+    }
+
+    /// Port of `thumbnail_canvas.handle_multiple_thumbnail_reorder`.
+    static func reorderMultiple(
+        imagePaths: [String],
+        insertionIndex: Int,
+        appState: AppState
+    ) async -> Bool {
+        guard !imagePaths.isEmpty else { return false }
+
+        for path in imagePaths {
+            if PrsortIO.isFileLocked(path) {
+                appState.status.show("Cannot reorder locked files")
+                return false
+            }
         }
 
         var images = appState.fileData.displayedImages
         guard !images.isEmpty else { return false }
 
-        guard let currentIndex = images.firstIndex(of: imagePath) else { return false }
+        var validPaths: [String] = []
+        var originalIndices: [Int] = []
+        for path in imagePaths {
+            guard let idx = images.firstIndex(of: path) else { continue }
+            validPaths.append(path)
+            originalIndices.append(idx)
+        }
+        guard !validPaths.isEmpty else { return false }
 
-        var targetIndex = insertionIndex
-        if currentIndex < targetIndex {
-            targetIndex -= 1
+        let sortedIndices = originalIndices.sorted(by: >)
+        var adjustedInsertion = insertionIndex
+        for idx in sortedIndices where idx < adjustedInsertion {
+            adjustedInsertion -= 1
         }
-        guard targetIndex != currentIndex, targetIndex >= 0, targetIndex <= images.count else {
-            return false
+
+        guard adjustedInsertion >= 0, adjustedInsertion <= images.count else { return false }
+
+        var reordered = images
+        for idx in sortedIndices {
+            reordered.remove(at: idx)
         }
+        for (offset, path) in validPaths.enumerated() {
+            let insertPos = adjustedInsertion + offset
+            guard insertPos <= reordered.count else { return false }
+            reordered.insert(path, at: insertPos)
+        }
+        guard reordered != images else { return false }
 
         let selectedBefore = appState.selection.selectedFiles
-        let directory = (imagePath as NSString).deletingLastPathComponent
+        let directory = (validPaths[0] as NSString).deletingLastPathComponent
 
         let sortMode = appState.config.rawSettings()["sort_mode"] as? String ?? "date"
         let autoDateChange = appState.config.bool(forKey: "drag_drop_auto_date_change", default: false)
-        let isLocked = PrsortIO.isFileLocked(imagePath)
-        let shouldUpdateDates = sortMode == "date" && autoDateChange && !isLocked
+        let shouldUpdateDates = sortMode == "date" && autoDateChange
         let switchingToCustom = sortMode != SortMode.custom.rawValue && !shouldUpdateDates
 
-        images.remove(at: currentIndex)
-        images.insert(imagePath, at: targetIndex)
+        images = reordered
 
         var datesWereUpdated = false
         if shouldUpdateDates {
             let isReversed = appState.config.bool(forKey: "sort_reversed", default: false)
-            guard updateMtimeForReorder(
-                imagePath: imagePath,
+            guard updateMtimesForMultipleReorder(
+                movedPaths: validPaths,
                 images: images,
-                insertionIndex: targetIndex,
+                insertionIndex: adjustedInsertion,
                 isReversed: isReversed,
                 appState: appState
             ) else {
@@ -83,18 +112,31 @@ enum ThumbnailReorderService {
 
         appState.fileData.setDisplayedImages(images)
         appState.selection.selectedFiles = selectedBefore
-        if let index = images.firstIndex(of: imagePath) {
+
+        let currentPath = validPaths.last ?? validPaths[0]
+        if let index = images.firstIndex(of: currentPath) {
             appState.fileData.setCurrentIndex(index)
-            appState.fileData.setCurrentImagePath(imagePath)
+            appState.fileData.setCurrentImagePath(currentPath)
             appState.selection.emitSelectionChanged(highlightIndex: index)
         }
 
+        let count = validPaths.count
         if datesWereUpdated {
-            appState.status.show("Thumbnail reordered (dates updated)")
+            if count == 1 {
+                appState.status.show("Thumbnail reordered (dates updated)")
+            } else {
+                appState.status.show("\(count) thumbnails reordered (dates updated)")
+            }
         } else if switchingToCustom {
-            appState.status.show("Thumbnail reordered (switched to custom sort)")
-        } else {
+            if count == 1 {
+                appState.status.show("Thumbnail reordered (switched to custom sort)")
+            } else {
+                appState.status.show("\(count) thumbnails reordered (switched to custom sort)")
+            }
+        } else if count == 1 {
             appState.status.show("Thumbnail reordered")
+        } else {
+            appState.status.show("\(count) thumbnails reordered")
         }
         return true
     }
@@ -115,6 +157,115 @@ enum ThumbnailReorderService {
         }
 
         return itemCount
+    }
+
+    private static func updateMtimesForMultipleReorder(
+        movedPaths: [String],
+        images: [String],
+        insertionIndex: Int,
+        isReversed: Bool,
+        appState: AppState
+    ) -> Bool {
+        let directories = Set(movedPaths.map { ($0 as NSString).deletingLastPathComponent })
+        for dir in directories where !FileManager.default.isWritableFile(atPath: dir) {
+            appState.status.show("Unable to reorder: directory is not writable")
+            return false
+        }
+
+        var prevTime: TimeInterval?
+        var nextTime: TimeInterval?
+        if insertionIndex > 0 {
+            prevTime = mtime(for: images[insertionIndex - 1])
+        }
+        let afterBlock = insertionIndex + movedPaths.count
+        if afterBlock < images.count {
+            nextTime = mtime(for: images[afterBlock])
+        }
+
+        let count = movedPaths.count
+        let baseTime: TimeInterval
+        let timeSpacing: TimeInterval
+
+        if prevTime == nil && nextTime == nil {
+            baseTime = Date().timeIntervalSince1970
+            timeSpacing = 1
+        } else if prevTime == nil {
+            baseTime = Date().timeIntervalSince1970
+            timeSpacing = 1
+        } else if let prevTime, nextTime == nil {
+            if isReversed {
+                baseTime = prevTime + 1
+            } else {
+                baseTime = prevTime - Double(count) - 1
+            }
+            timeSpacing = 1
+        } else if let prevTime, let nextTime {
+            if isReversed {
+                let gap = nextTime - prevTime
+                if gap >= Double(count) + 2 {
+                    timeSpacing = gap / Double(count + 1)
+                    baseTime = prevTime + timeSpacing
+                } else {
+                    baseTime = prevTime + 1
+                    timeSpacing = 1
+                }
+            } else {
+                let gap = prevTime - nextTime
+                if gap >= Double(count) + 2 {
+                    timeSpacing = gap / Double(count + 1)
+                    baseTime = prevTime - timeSpacing
+                } else {
+                    baseTime = prevTime - Double(count) - 1
+                    timeSpacing = 1
+                }
+            }
+        } else {
+            baseTime = Date().timeIntervalSince1970
+            timeSpacing = 1
+        }
+
+        var lastAssigned = baseTime
+        for (offset, path) in movedPaths.enumerated() {
+            let newTime = isReversed
+                ? baseTime + Double(offset) * timeSpacing
+                : baseTime - Double(offset) * timeSpacing
+            guard testAndSetMtime(path: path, newTime: newTime, appState: appState) else {
+                appState.status.show("Unable to reorder: permission to change file dates denied")
+                return false
+            }
+            lastAssigned = newTime
+        }
+
+        for index in (insertionIndex + movedPaths.count)..<images.count {
+            let path = images[index]
+            guard let current = mtime(for: path) else { continue }
+            let dir = (path as NSString).deletingLastPathComponent
+            guard FileManager.default.isWritableFile(atPath: dir) else { continue }
+
+            var adjusted = current
+            var needsShift = false
+            if isReversed {
+                if current <= lastAssigned {
+                    adjusted = lastAssigned + 1
+                    needsShift = true
+                }
+            } else if current >= lastAssigned {
+                adjusted = lastAssigned - 1
+                needsShift = true
+            }
+
+            if needsShift {
+                if setMtime(path: path, time: adjusted, appState: appState) {
+                    lastAssigned = adjusted
+                } else if let actual = mtime(for: path) {
+                    lastAssigned = actual
+                }
+            } else {
+                break
+            }
+        }
+
+        return true
     }
 
     private static func updateMtimeForReorder(

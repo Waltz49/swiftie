@@ -486,10 +486,10 @@ struct ThumbnailGridView: NSViewRepresentable {
             )
         }
 
-        func thumbnailGridDidReorder(path: String, insertionIndex: Int) {
+        func thumbnailGridDidReorder(paths: [String], insertionIndex: Int) {
             Task { @MainActor in
-                _ = await ThumbnailReorderService.reorder(
-                    imagePath: path,
+                _ = await ThumbnailReorderService.reorderMultiple(
+                    imagePaths: paths,
                     insertionIndex: insertionIndex,
                     appState: appState
                 )

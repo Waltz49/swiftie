@@ -16,7 +16,7 @@ protocol ThumbnailGridDelegate: AnyObject {
     func thumbnailGridDidOpenBrowse(path: String)
     /// Single-click browse activation (preview hidden). Fired on mouse up when the press was not a drag.
     func thumbnailGridDidActivateBrowse(path: String)
-    func thumbnailGridDidReorder(path: String, insertionIndex: Int)
+    func thumbnailGridDidReorder(paths: [String], insertionIndex: Int)
     func thumbnailGridNeedsThumbnail(
         path: String,
         size: Int,
@@ -1201,20 +1201,25 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let paths = localFilePaths(from: sender)
+        let paths = pathsInDisplayOrderForReorder(localFilePaths(from: sender))
         guard let insertion = dropInsertionIndex else { return false }
         let known = Set(imagePaths)
-        guard paths.allSatisfy({ known.contains($0) }) else { return false }
+        guard !paths.isEmpty, paths.allSatisfy({ known.contains($0) }) else { return false }
         defer { resetDragState() }
-        guard let path = paths.first else { return false }
-        if paths.count == 1 {
-            gridDelegate?.thumbnailGridDidReorder(path: path, insertionIndex: insertion)
-            return true
-        }
-        for draggedPath in paths {
-            gridDelegate?.thumbnailGridDidReorder(path: draggedPath, insertionIndex: insertion)
-        }
+        gridDelegate?.thumbnailGridDidReorder(paths: paths, insertionIndex: insertion)
         return true
+    }
+
+    /// Preserve grid order for multi-select drags (pasteboard URL order is not reliable).
+    private func pathsInDisplayOrderForReorder(_ paths: [String]) -> [String] {
+        let pathSet = Set(paths)
+        if !draggingPaths.isEmpty {
+            return draggingPaths.filter { pathSet.contains($0) }
+        }
+        if let source = appState?.thumbnailDragSourcePaths, !source.isEmpty {
+            return source.filter { pathSet.contains($0) }
+        }
+        return imagePaths.filter { pathSet.contains($0) }
     }
 
     override func keyDown(with event: NSEvent) {
