@@ -54,6 +54,50 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
         XCTAssertEqual(args[args.firstIndex(of: "--height")! + 1], "256")
     }
 
+    func testAvailableMfluxCLIsDoNotReceiveUnsupportedNoBakeLoraFlag() throws {
+        let payloads: [[String: Any]] = [
+            [
+                "pipeline_id": "flux_schnell_mflux_play",
+                "prompt": "test",
+                "output_path": "/tmp/output.png",
+            ],
+            [
+                "pipeline_id": "mflux_z_image_turbo",
+                "prompt": "test",
+                "output_path": "/tmp/output.png",
+            ],
+            [
+                "pipeline_id": "mflux_fill_expand",
+                "prompt": "test",
+                "output_path": "/tmp/output.png",
+                "source_image_path": "/tmp/source.png",
+            ],
+            [
+                "pipeline_id": "mflux_flux2_klein_create",
+                "prompt": "test",
+                "output_path": "/tmp/output.png",
+                "hf_model_id": "black-forest-labs/FLUX.2-klein-4B",
+            ],
+            [
+                "pipeline_id": "mflux_flux2_klein_edit",
+                "prompt": "test",
+                "output_path": "/tmp/output.png",
+                "source_image_path": "/tmp/source.png",
+                "hf_model_id": "black-forest-labs/FLUX.2-klein-4B",
+            ],
+        ]
+
+        for payload in payloads {
+            var withLora = payload
+            withLora["mflux_lora_paths"] = ["/tmp/test.safetensors"]
+
+            XCTAssertFalse(try MfluxCLIPipeline.buildArguments(payload: payload).contains("--no-bake-lora"))
+            let loraArgs = try MfluxCLIPipeline.buildArguments(payload: withLora)
+            XCTAssertFalse(loraArgs.contains("--no-bake-lora"))
+            XCTAssertTrue(loraArgs.contains("--lora-paths"))
+        }
+    }
+
     func testSceneWorksUsesPythonWorkerDespiteKleinPipeline() {
         let repo = ImageGenSceneWorksKlein.repoID
         XCTAssertTrue(

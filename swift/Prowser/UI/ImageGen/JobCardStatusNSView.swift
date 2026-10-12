@@ -46,6 +46,10 @@ final class JobCardStatusNSView: NSView {
         relayoutExistingRows()
     }
 
+    func discardRenderedFingerprint() {
+        lastFingerprint = ""
+    }
+
     func setStatusView(_ view: QueueJobStatusView?, contentWidth width: CGFloat) {
         let w = max(80, width)
         contentWidth = w

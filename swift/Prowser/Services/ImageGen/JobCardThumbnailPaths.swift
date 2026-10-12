@@ -19,15 +19,8 @@ enum JobCardThumbnailPaths {
             paths.append(normalized)
         }
 
-        // Python ``thumbnail_paths_for_values`` does not use canonical paths; infill cards
-        // must show ``pixelmator_doc_path`` only (not a stale canonical from a prior job).
-        if plugin.pipelineID != "mflux_fill_infill",
-           let canonical = values["_canonical_source_image_paths"] as? [String] {
-            for src in canonical {
-                append(src)
-            }
-        }
-
+        // Match Python ``thumbnail_paths_for_values``: canonical paths are EXIF metadata,
+        // not an additional set of card references.
         if ImageGenPipelineModeMetadata.jobUsesSourceImage(pipelineID: plugin.pipelineID, values: values) {
             for src in ImageGenExifReferences.resolveSourceImagePaths(values) {
                 append(src)

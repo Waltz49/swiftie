@@ -262,6 +262,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var suppressBrowseActivation = false
     private var draggingPaths: [String] = []
     private let dragThreshold: CGFloat = 6
+    private var dragAutoScrollTimer: Timer?
 
     override var isFlipped: Bool { true }
 
@@ -269,13 +270,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         super.init(frame: frameRect)
         wantsLayer = true
         registerForDraggedTypes([.fileURL])
+        ThumbnailDragAutoScrollAppKit.suppressBuiltInDragAutoScroll(on: ThumbnailGridNSView.self)
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
         registerForDraggedTypes([.fileURL])
+        ThumbnailDragAutoScrollAppKit.suppressBuiltInDragAutoScroll(on: ThumbnailGridNSView.self)
     }
+
+    override func autoscroll(with event: NSEvent) -> Bool { false }
 
     func applyTheme(_ colors: ThemeColors) {
         themeColors = colors
@@ -1080,6 +1085,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
         session.animatesToStartingPositionsOnCancelOrFail = true
+        startDragAutoScroll()
     }
 
     func draggingSession(_ session: NSDraggingSession, ignoreModifierKeysFor context: NSDraggingContext) -> Bool {
@@ -1127,6 +1133,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func resetDragState() {
+        stopDragAutoScroll()
         dragSourcePath = nil
         dragStartPoint = nil
         deferredThumbnailClick = nil
@@ -1174,6 +1181,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard !isReferenceGraphMode else { return [] }
         let paths = localFilePaths(from: sender)
         guard !paths.isEmpty else { return [] }
+        startDragAutoScroll()
         return internalReorderDropOperation(for: paths)
     }
 
@@ -1182,6 +1190,27 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let paths = localFilePaths(from: sender)
         guard !paths.isEmpty else { return [] }
         let point = convert(sender.draggingLocation, from: nil)
+        updateDropIndicator(at: point)
+        startDragAutoScroll()
+        return internalReorderDropOperation(for: paths)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard !pointerIsInsideThumbnailViewport else { return }
+        stopDragAutoScroll()
+        dropInsertionIndex = nil
+        dropIndicatorRect = nil
+        needsDisplay = true
+    }
+
+    private var pointerIsInsideThumbnailViewport: Bool {
+        guard let scrollView = enclosingScrollView, let window else { return false }
+        let clip = scrollView.contentView
+        let inClip = clip.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return clip.bounds.contains(inClip)
+    }
+
+    private func updateDropIndicator(at point: NSPoint) {
         let insertion = insertionIndex(at: point)
         dropInsertionIndex = insertion
         let indicator = dropIndicatorRect(for: insertion)
@@ -1191,13 +1220,56 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             setNeedsDisplay(indicator)
         }
         dropIndicatorRect = indicator
-        return internalReorderDropOperation(for: paths)
     }
 
-    override func draggingExited(_ sender: NSDraggingInfo?) {
-        dropInsertionIndex = nil
-        dropIndicatorRect = nil
-        needsDisplay = true
+    private func startDragAutoScroll() {
+        guard !isReferenceGraphMode, dragAutoScrollTimer == nil else { return }
+        let timer = Timer(timeInterval: ThumbnailDragAutoScroll.tickInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.dragAutoScrollTick()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dragAutoScrollTimer = timer
+    }
+
+    private func stopDragAutoScroll() {
+        dragAutoScrollTimer?.invalidate()
+        dragAutoScrollTimer = nil
+    }
+
+    /// Python `_update_auto_scroll` + `_handle_auto_scroll` (16 ms, percent of viewport height).
+    private func dragAutoScrollTick() {
+        guard let scrollView = enclosingScrollView, let window else {
+            stopDragAutoScroll()
+            return
+        }
+        let clip = scrollView.contentView
+        let mouse = window.mouseLocationOutsideOfEventStream
+        let inClip = clip.convert(mouse, from: nil)
+        let viewportHeight = clip.bounds.height
+        let viewportWidth = clip.bounds.width
+        // Band is inside the viewport. Pointers outside belong to drag-leave, not max speed.
+        guard inClip.x >= 0, inClip.x <= viewportWidth, inClip.y >= 0, inClip.y <= viewportHeight else {
+            return
+        }
+        let yFromTop = clip.isFlipped ? inClip.y : viewportHeight - inClip.y
+        let delta = ThumbnailDragAutoScroll.scrollStep(
+            xInViewport: inClip.x,
+            yInViewport: yFromTop,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight
+        )
+        guard delta != 0 else { return }
+        let visible = scrollView.documentVisibleRect
+        let documentHeight = scrollView.documentView?.frame.height ?? bounds.height
+        let maxOriginY = max(0, documentHeight - visible.height)
+        if delta < 0, visible.origin.y <= 0 { return }
+        if delta > 0, visible.origin.y >= maxOriginY - 0.5 { return }
+        let newY = min(max(0, visible.origin.y + delta), maxOriginY)
+        clip.scroll(to: NSPoint(x: visible.origin.x, y: newY))
+        scrollView.reflectScrolledClipView(clip)
+        updateDropIndicator(at: convert(mouse, from: nil))
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {

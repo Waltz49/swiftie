@@ -168,7 +168,6 @@ enum MfluxCLIPipeline {
             args += ["--stepwise-image-output-dir", dir]
         }
         appendLoraCLIArgs(to: &args, payload: payload)
-        args.append("--no-bake-lora")
     }
 
     static func appendLoraCLIArgs(to args: inout [String], payload: [String: Any]) {

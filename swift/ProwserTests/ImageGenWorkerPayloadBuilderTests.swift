@@ -94,6 +94,40 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testEditSnapshotReplacesStaleCanonicalSourcePaths() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("edit-snapshot-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let intended = dir.appendingPathComponent("intended.png").path
+        let stale = dir.appendingPathComponent("stale.png").path
+        XCTAssertTrue(fm.createFile(atPath: intended, contents: Data([0x00])))
+        XCTAssertTrue(fm.createFile(atPath: stale, contents: Data([0x00])))
+
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "sceneworks_klein_9b_kv_mlx_edit") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let config = AppConfig(dataDirectory: dir)
+        let snapshot = try await ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
+            plugin: plugin,
+            values: [
+                "source_image_path": intended,
+                "source_image_paths": [intended],
+                "_canonical_source_image_paths": [stale],
+            ],
+            config: config
+        )
+
+        XCTAssertEqual(snapshot["source_image_paths"] as? [String], [intended])
+        XCTAssertEqual(snapshot["_canonical_source_image_paths"] as? [String], [intended])
+        XCTAssertEqual(
+            JobCardThumbnailPaths.paths(pluginID: plugin.pluginID, values: snapshot),
+            [intended]
+        )
+    }
+
     private func assertPayloadSubset(
         _ payload: [String: Any],
         matches golden: [String: Any],

@@ -1189,7 +1189,6 @@ final class ImageGenController {
             return
         }
         activeJobID = job.jobID
-        bumpQueueRevision()
         activePluginID = job.pluginID
         activeFunction = job.function
         pendingValues = job.values
@@ -1210,6 +1209,9 @@ final class ImageGenController {
             thumbnailPaths: job.thumbnailPaths,
             held: job.held
         )
+        // Publish only after status, thumbs, and prompt are installed. An earlier bump
+        // painted this job id with the previous active card.
+        bumpQueueRevision()
         persistQueue()
         await promoteAndRunNextStep()
     }
@@ -2536,9 +2538,14 @@ final class ImageGenController {
             job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
             job.fullPrompt = built.fullPrompt
             job.referencesInvalid = built.referencesInvalid
-            guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+            guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
+                publishQueuedStatusOntoActiveJobIfNeeded(job)
+                bumpStripUI()
+                return
+            }
             queue.jobs[writeIndex] = job
             applyQueuedJobErrorBanner(at: writeIndex)
+            publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
             bumpStripUI()
             return
         }
@@ -2599,10 +2606,24 @@ final class ImageGenController {
         job.statusView = built.statusView
         job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
         job.referencesInvalid = built.referencesInvalid
-        guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
+            publishQueuedStatusOntoActiveJobIfNeeded(job)
+            bumpStripUI()
+            return
+        }
         queue.jobs[writeIndex] = job
         applyQueuedJobErrorBanner(at: writeIndex)
+        publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
         bumpStripUI()
+    }
+
+    /// The visible active row reads ``activeStatusView``, not the queued copy.
+    private func publishQueuedStatusOntoActiveJobIfNeeded(_ job: ImageGenQueuedJob) {
+        guard activeJobID == job.jobID else { return }
+        activeStatusView = job.statusView
+        let paths = cardThumbnailPaths(job.thumbnailPaths)
+        activeThumbnailPaths = paths
+        activeJobCardThumbnailPathsCache = paths
     }
 
     private func applyQueuedJobErrorBanner(at index: Int) {

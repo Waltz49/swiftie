@@ -227,9 +227,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 scrollWidth: scrollWidth,
                 selected: isSelected,
                 colors: themeColors,
-                // Fingerprint covers status rows + copiesTotal. Progress ticks do not
-                // reach this path; skip CoreText relayout when the card is unchanged.
-                skipUnchanged: true
+                // Python skips unchanged inactive rows only. The active card must
+                // repaint when a newly submitted job becomes current.
+                skipUnchanged: !row.isActive
             )
             if isSelected { selectedCard = card }
         }
@@ -1135,6 +1135,11 @@ final class JobCardNSView: NSView {
         let identityChanged = !boundJobID.isEmpty && boundJobID != row.jobID
         boundJobID = row.jobID
         self.colors = colors
+        if identityChanged {
+            // Reused cards keep the previous job's rendered status and thumbs.
+            statusWidget.discardRenderedFingerprint()
+            refsView.discardRenderedPaths()
+        }
 
         if skipUnchanged, !identityChanged, rowContentUnchanged(row: row, scrollWidth: scrollWidth, selected: selected) {
             updateChrome(selected: selected, running: row.isActive)

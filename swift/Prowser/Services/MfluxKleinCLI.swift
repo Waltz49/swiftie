@@ -74,7 +74,6 @@ enum MfluxKleinCLI {
             args += ["--stepwise-image-output-dir", dir]
         }
         MfluxCLIPipeline.appendLoraCLIArgs(to: &args, payload: payload)
-        args.append("--no-bake-lora")
     }
 
     private static func baseModel(forHFModelID hf: String) -> String {

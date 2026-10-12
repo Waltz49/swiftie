@@ -1,5 +1,29 @@
 import AppKit
+import ObjectiveC
 import SwiftUI
+
+/// Replaces AppKit's ~50pt drag-autoscroll ramp. The grid applies `ThumbnailDragAutoScroll` itself.
+final class ThumbnailClipView: NSClipView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        ThumbnailDragAutoScrollAppKit.suppressBuiltInDragAutoScroll(on: ThumbnailClipView.self)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        ThumbnailDragAutoScrollAppKit.suppressBuiltInDragAutoScroll(on: ThumbnailClipView.self)
+    }
+
+    override func autoscroll(with event: NSEvent) -> Bool { false }
+}
+
+enum ThumbnailDragAutoScrollAppKit {
+    static func suppressBuiltInDragAutoScroll(on viewClass: AnyClass) {
+        let selector = NSSelectorFromString("_autoscrollForDraggingInfo:timeDelta:")
+        let block: @convention(block) (AnyObject, AnyObject, TimeInterval) -> Void = { _, _, _ in }
+        _ = class_addMethod(viewClass, selector, imp_implementationWithBlock(block), "v@:@d")
+    }
+}
 
 /// Match Python ``apply_thumbnail_scroll_area_chrome`` (grid-colored viewport, not shell ``background``).
 enum ThumbnailScrollAreaChrome {
@@ -22,6 +46,7 @@ struct ThumbnailGridView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
+        scrollView.contentView = ThumbnailClipView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true

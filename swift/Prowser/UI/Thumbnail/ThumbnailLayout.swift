@@ -267,3 +267,70 @@ enum ThumbnailLayout {
         return result
     }
 }
+
+/// Drag auto-scroll for the thumbnail grid. Port of `DRAG_AUTO_SCROLL_SPEEDS` and
+/// `_calculate_scroll_speed` / `_handle_auto_scroll` in `thumbnail_canvas.py`.
+enum ThumbnailDragAutoScroll {
+    /// `(distance from top or bottom edge in points, percent of viewport height per second)`.
+    /// Ordered from largest distance to smallest so interpolation matches Python.
+    static let speeds: [(distance: CGFloat, percentPerSecond: CGFloat)] = [
+        (100, 25.6),
+        (90, 51.2),
+        (80, 76.8),
+        (70, 102.4),
+        (60, 128.0),
+        (50, 153.6),
+        (40, 179.2),
+        (30, 204.8),
+        (20, 230.4),
+        (10, 256.0),
+    ]
+
+    /// Python `QTimer.start(16)` and the `16/1000` factor in `_handle_auto_scroll`.
+    static let tickMilliseconds: CGFloat = 16
+    static var tickInterval: TimeInterval { TimeInterval(tickMilliseconds) / 1000 }
+
+    static func percentPerSecond(distanceFromEdge: CGFloat) -> CGFloat {
+        guard !speeds.isEmpty else { return 0 }
+        for index in speeds.indices {
+            let (distance, speed) = speeds[index]
+            if distanceFromEdge >= distance {
+                if index == 0 { return speed }
+                let (previousDistance, previousSpeed) = speeds[index - 1]
+                if previousDistance == distance { return speed }
+                let ratio = (distanceFromEdge - distance) / (previousDistance - distance)
+                return speed + ratio * (previousSpeed - speed)
+            }
+        }
+        return speeds[speeds.count - 1].percentPerSecond
+    }
+
+    /// Signed points to scroll this tick. Negative moves toward the top of a flipped grid.
+    /// Zero when the pointer is outside the horizontal viewport or outside the edge band.
+    static func scrollStep(
+        xInViewport: CGFloat,
+        yInViewport: CGFloat,
+        viewportWidth: CGFloat,
+        viewportHeight: CGFloat
+    ) -> CGFloat {
+        guard viewportWidth > 0, viewportHeight > 0, let band = speeds.first?.distance else { return 0 }
+        if xInViewport < 0 || xInViewport > viewportWidth { return 0 }
+        let distanceFromTop = max(0, yInViewport)
+        let distanceFromBottom = max(0, viewportHeight - yInViewport)
+        let direction: CGFloat
+        let distance: CGFloat
+        if distanceFromTop < distanceFromBottom {
+            guard distanceFromTop < band else { return 0 }
+            direction = -1
+            distance = distanceFromTop
+        } else {
+            guard distanceFromBottom < band else { return 0 }
+            direction = 1
+            distance = distanceFromBottom
+        }
+        let speed = percentPerSecond(distanceFromEdge: distance)
+        guard speed > 0 else { return 0 }
+        let amount = (speed * viewportHeight / 100.0) * (tickMilliseconds / 1000.0)
+        return direction * amount
+    }
+}

@@ -27,6 +27,7 @@ enum ImageGenJobValuesSnapshot {
     ) async throws -> [String: Any] {
         var out = values
         stripDialogLeakedJobQueueFlags(&out)
+        normalizeEditSourcePaths(plugin: plugin, values: &out)
         let lc = LoRACatalogStore(paths: config.profilePaths).load()
         try await LoRAJobSnapshot.snapshotLoraForJob(
             values: &out,
@@ -42,6 +43,25 @@ enum ImageGenJobValuesSnapshot {
         out["max_generation_dimension"] = effectiveMax
         out[snapshottedKey] = true
         return out
+    }
+
+    /// Python ``_normalize_job_source_paths``: the submitted edit source list is
+    /// authoritative; canonical paths must not leak from saved dialog settings.
+    private static func normalizeEditSourcePaths(
+        plugin: ImageGenPluginDescriptor,
+        values: inout [String: Any]
+    ) {
+        guard plugin.function == "edit" else { return }
+        let paths = ImageGenExifReferences.resolveSourceImagePaths(values)
+        guard !paths.isEmpty else {
+            values.removeValue(forKey: "source_image_path")
+            values.removeValue(forKey: "source_image_paths")
+            values.removeValue(forKey: "_canonical_source_image_paths")
+            return
+        }
+        values["source_image_path"] = paths[0]
+        values["source_image_paths"] = paths
+        values["_canonical_source_image_paths"] = paths
     }
 
     static func normalizeValues(

@@ -51,6 +51,13 @@ final class JobReferenceThumbsNSView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func discardRenderedPaths() {
+        paths = []
+        referencesInvalid = false
+        cells.forEach { $0.removeFromSuperview() }
+        cells = []
+    }
+
     func configure(paths: [String], referencesInvalid: Bool, colors: ThemeColors) {
         let valid = referencesInvalid ? [] : Self.validPreviewPaths(paths)
         if valid == self.paths, referencesInvalid == self.referencesInvalid, !cells.isEmpty || valid.isEmpty {
