@@ -11,6 +11,7 @@ struct SettingsWindowView: View {
     private let onClose: (SettingsWindowDismissOutcome) -> Void
     @State private var selectedTab: SettingsTab = .general
     @State private var dismissAction: SettingsDismissAction?
+    @FocusState private var isTabSelectorFocused: Bool
 
     init(onClose: @escaping (SettingsWindowDismissOutcome) -> Void = { _ in }) {
         self.onClose = onClose
@@ -23,7 +24,7 @@ struct SettingsWindowView: View {
                     Label(tab.title, systemImage: tab.systemImage)
                         .tag(tab)
                 }
-                .focusable(false)
+                .focused($isTabSelectorFocused)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
             } detail: {
                 settingsDetail(for: selectedTab)
@@ -62,10 +63,12 @@ struct SettingsWindowView: View {
         .onAppear {
             selectedTab = appState.requestedSettingsTab
             startSettingsSessionIfNeeded()
+            focusTabSelector()
         }
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             selectedTab = appState.requestedSettingsTab
             startSettingsSessionIfNeeded()
+            focusTabSelector()
         }
         .onDisappear {
             ThemeColorPanelController.shared.closeIfOpen()
@@ -95,6 +98,12 @@ struct SettingsWindowView: View {
         dismissAction = nil
         appState.config.beginSettingsSession()
         appState.theme.beginSettingsSession()
+    }
+
+    private func focusTabSelector() {
+        DispatchQueue.main.async {
+            isTabSelectorFocused = true
+        }
     }
 
     private func rememberSettingsTab() {

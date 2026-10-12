@@ -8,7 +8,7 @@
 #   ./Scripts/build_app.sh -o ~/Desktop/Prowser.app
 #   ./Scripts/build_app.sh --debug
 #   ./Scripts/build_app.sh --dmg
-#   ./Scripts/build_app.sh --dmg /tmp/Prowser.dmg
+#   ./Scripts/build_app.sh --dmg /tmp/Prowser-swift-<version>.dmg
 #     (--dmg needs Finder + SetFile for background/layout; see Scripts/create_styled_dmg.sh)
 #   ./Scripts/build_app.sh --nerb          # embed -p /tmp/nerb (PROWSER_PROFILE)
 #   ./Scripts/build_app.sh --reg           # default opener for jpg/jpeg/png/webp
@@ -21,13 +21,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SWIFT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INFO_PLIST_SRC="$SWIFT_ROOT/Prowser/Resources/Info.plist"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST_SRC")"
 
 OUTPUT="${HOME}/tmp/prowser_swift.app"
 CONFIG=release
 SKIP_BUILD=0
 SKIP_DLIB=0
 CREATE_DMG=0
-DMG_OUTPUT="/tmp/Prowser-swift.dmg"
+DMG_OUTPUT="/tmp/Prowser-swift-${APP_VERSION}.dmg"
 NERB_PROFILE=0
 NERB_PROFILE_PATH="/tmp/nerb"
 REGISTER_DEFAULTS=0
@@ -129,7 +131,7 @@ Options:
   --debug                 Build debug configuration instead of release
   --skip-build            Package existing .build artifacts (no swift build)
   --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
-  --dmg [PATH]            Also create styled LZMA (ULMO) installer DMG (default: /tmp/Prowser-swift.dmg)
+  --dmg [PATH]            Also create styled LZMA (ULMO) installer DMG (default: /tmp/Prowser-swift-${APP_VERSION}.dmg)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
   --fda                   After build: reset TCC + open FDA Settings (no clipboard/dialog)
   --install PATH          Copy signed .app to PATH (e.g. /Applications/swift-prowser.app) for a stable FDA target
@@ -211,7 +213,6 @@ fi
 BUILD_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 BINARY="$BUILD_DIR/Prowser"
 RESOURCE_BUNDLE="$BUILD_DIR/Prowser_Prowser.bundle"
-INFO_PLIST_SRC="$SWIFT_ROOT/Prowser/Resources/Info.plist"
 
 if [[ ! -f "$BINARY" ]]; then
     echo "error: binary not found at $BINARY" >&2

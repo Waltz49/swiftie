@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SWIFT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VOLUME_NAME="${VOLUME_NAME:-swift-prowser}"
+VOLUME_NAME_OVERRIDE="${VOLUME_NAME:-}"
 DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-$SCRIPT_DIR/DmgAssets}"
 SOURCE_PREBLESSED="${SOURCE_PREBLESSED:-$SCRIPT_DIR/source_preblessed}"
 VOL_ICON_ICNS="${VOL_ICON_ICNS:-$SWIFT_ROOT/Prowser/Resources/Assets/Prowser.icns}"
@@ -34,6 +34,9 @@ if [[ ! -d "$APP_PATH" ]]; then
     echo "error: app not found: $APP_PATH" >&2
     exit 1
 fi
+APP_PLIST="$APP_PATH/Contents/Info.plist"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST" 2>/dev/null || echo "0.0")"
+VOLUME_NAME="${VOLUME_NAME_OVERRIDE:-swift-prowser-${APP_VERSION}}"
 if [[ ! -f "$BG_IMAGE" ]]; then
     echo "error: background image not found: $BG_IMAGE" >&2
     exit 1

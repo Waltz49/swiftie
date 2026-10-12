@@ -371,14 +371,27 @@ extension AppState {
         showImageGenUnifiedDialog = false
     }
 
+    /// Open a persisted Image Generation screen, primed from the active image.
+    /// EXIF Import Rest intentionally preserves the dialog's stored size controls.
+    func openImageGenDialogFromActiveImage(function: String? = nil) {
+        let resolvedFunction = function ?? ImageGenSessionState().lastFunction(config: config)
+        Task { @MainActor in
+            let prompt = await importPromptForActiveImageAsync()
+            openImageGenDialog(
+                function: resolvedFunction,
+                initialPrompt: prompt,
+                autoImportEXIF: true
+            )
+        }
+    }
+
     func openFastImageGenDialog() {
-        openImageGenDialog(function: "create", autoImportEXIF: true)
+        openImageGenDialogFromActiveImage()
     }
 
     func editActiveQueueJob() {
-        let rows = imageGen.queueSnapshot()
-        guard let active = rows.first(where: { $0.isActive }) ?? rows.first else { return }
-        openImageGenDialogFromQueueJob(jobID: active.jobID)
+        guard let activeJobID = imageGen.activeJobID else { return }
+        openImageGenDialogFromQueueJob(jobID: activeJobID)
     }
 
     func openGeneratedImageInBrowse(path: String) {

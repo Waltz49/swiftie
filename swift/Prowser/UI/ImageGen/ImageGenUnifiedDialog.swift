@@ -777,7 +777,7 @@ struct ImageGenUnifiedDialog: View {
     private func applyAutoImportEXIF() async {
         guard let result = await ImageGenExifImport.applyImportRest(
             function: selectedFunction,
-            sourcePath: lockedEditSourcePaths.first,
+            sourcePath: panelSourcePath,
             values: values,
             selectedPluginID: selectedPluginID,
             plugins: pluginsByFunction[selectedFunction] ?? [],

@@ -106,6 +106,7 @@ struct FileTreeToolbarView: View {
 @MainActor
 struct InformationActionBarView: View {
     @Environment(AppState.self) private var appState
+    @State private var speakHighlighted = false
 
     var body: some View {
         let hasComment = appState.informationHasUserComment
@@ -117,6 +118,28 @@ struct InformationActionBarView: View {
                 hover: "copy_hover",
                 tooltip: "Copy prompt to clipboard.\n⌥+click to copy full user comment.",
                 enabled: hasComment
+            )
+            assetActionButton(
+                "speak",
+                normal: "bullhorn",
+                hover: "bullhorn_hover",
+                tooltip: "Read prompt aloud (click again to stop).\n⌥+click to read the full user comment.",
+                enabled: hasComment,
+                highlighted: speakHighlighted
+            )
+            assetActionButton(
+                "create",
+                normal: "fromText",
+                hover: "fromText_hover",
+                tooltip: "Create image from this prompt",
+                enabled: hasComment && imageGenerationEnabled
+            )
+            assetActionButton(
+                "editai",
+                normal: "editAI",
+                hover: "editAI_hover",
+                tooltip: "Edit this image with AI",
+                enabled: appState.fileData.currentImagePath != nil && imageGenerationEnabled
             )
             Spacer(minLength: 0)
             assetActionButton(
@@ -152,12 +175,39 @@ struct InformationActionBarView: View {
                 appState.copyInformationComment(full: NSEvent.modifierFlags.contains(.option))
                 return
             }
+            if action == "speak" {
+                readAloud()
+                return
+            }
+            if action == "create" {
+                appState.openImageGenDialogFromActiveImage(function: "create")
+                return
+            }
+            if action == "editai" {
+                appState.openImageGenDialogFromActiveImage(function: "edit")
+                return
+            }
             NotificationCenter.default.post(
                 name: .prowserInformationAction,
                 object: nil,
                 userInfo: ["action": action]
             )
         }
+    }
+
+    private func readAloud() {
+        guard let comment = appState.userCommentForActiveImage() else { return }
+        let formatted = ImageGenExifCommentFormatting.formatUserCommentTextForDisplay(comment)
+        let text = NSEvent.modifierFlags.contains(.option)
+            ? formatted
+            : ExifService.truncateUserCommentBeforePrompt(formatted)
+        SpeechReader.speakOrStop(text) {
+            speakHighlighted = SpeechReader.isSpeaking
+        }
+    }
+
+    private var imageGenerationEnabled: Bool {
+        BundleCapabilities.imageGenUIEnabled && appState.imageGen.isEnabled
     }
 }
 
