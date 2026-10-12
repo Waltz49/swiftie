@@ -80,6 +80,8 @@ final class ImageGenController {
     private var copyBatchCancelled = false
     private var pendingCancelJobID = ""
     private var suppressTaskFailureUI = false
+    /// Set when the user confirms quit during an active worker so a second ``applicationShouldTerminate`` can finish (Python ``_api_quit_in_progress``).
+    private var terminateQuitConfirmed = false
     private let deferredQuitDialog = DeferredQuitDialog()
 
     var onDeferredQuitComplete: (() -> Void)?
@@ -496,6 +498,14 @@ final class ImageGenController {
         queue.jobs[index].pluginUnavailable = false
         queue.jobs[index].inError = false
         queue.jobs[index].errorMessage = ""
+        queue.jobs[index].thumbnailPaths = JobCardThumbnailPaths.paths(
+            pluginID: pluginID,
+            values: submitValues
+        )
+        queue.jobs[index].referencesInvalid = JobCardThumbnailPaths.referencesInvalid(
+            pluginID: pluginID,
+            values: submitValues
+        )
         await refreshQueuedJobStatus(at: index)
         clearQueueErrorDisplay()
         if activeJobID == jobID {
@@ -2699,8 +2709,8 @@ final class ImageGenController {
 
     /// Python ``_cleanup_infill_batch_assets``.
     private func cleanupInfillBatchAssets() {
-        guard activeFunction == "infill"
-            || ((pendingValues["_pixelmator_batch_dir"] as? String)?.isEmpty == false) else { return }
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: activePluginID),
+              plugin.pipelineID == "mflux_fill_infill" else { return }
         InfillExportService.removePersistedBatch(values: pendingValues)
     }
 
@@ -2857,7 +2867,21 @@ final class ImageGenController {
     }
 
     func quitInterruptsActiveWorker() -> Bool {
-        modelTasks.isBusy || foregroundTasks.isBusy
+        if modelTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
+            return true
+        }
+        // Expand/create prep (``buildPayload`` / placement) runs before ``modelTasks`` is busy.
+        if isProcessing, activeJobID != nil {
+            return true
+        }
+        if copyBatchActive, !copyBatchCancelled {
+            return true
+        }
+        return false
+    }
+
+    func resetTerminateQuitConfirmation() {
+        terminateQuitConfirmed = false
     }
 
     func hasPendingWork() -> Bool {
@@ -2866,6 +2890,9 @@ final class ImageGenController {
 
     /// Return true when terminate may proceed without showing a dialog.
     func quitGateAllowsImmediateTerminate() -> Bool {
+        if terminateQuitConfirmed {
+            return true
+        }
         if quitAfterCurrentWorker {
             if quitInterruptsActiveWorker() {
                 return false
@@ -2879,6 +2906,7 @@ final class ImageGenController {
     }
 
     func prepareForShutdown() {
+        terminateQuitConfirmed = true
         quitAfterCurrentWorker = false
         deferredQuitWaitAllJobs = false
         dismissDeferredQuitDialog()
@@ -3174,7 +3202,11 @@ final class ImageGenController {
         cooldownTask?.cancel()
         cooldownDisplayTask?.cancel()
         cooldownSecondsRemaining = 0
-        modelTasks.cancel()
+        if jobAIStageActive {
+            foregroundTasks.cancel()
+            jobAIStageActive = false
+        }
+        modelTasks.shutdown()
         clearActiveGenerationState()
     }
 

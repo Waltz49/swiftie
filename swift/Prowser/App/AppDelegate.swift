@@ -127,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WindowFullscreen.noteApplicationTerminating()
             return .terminateNow
         }
+        appState.clearQuitTerminateCancellationState()
         return .terminateCancel
     }
 

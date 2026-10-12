@@ -646,6 +646,9 @@ struct ImageGenUnifiedDialog: View {
         case "expand":
             lockedExpandSourcePath = normalized
         case "infill":
+            if lockedInfillSourcePath != normalized {
+                clearInfillDialogWorkingExportState()
+            }
             lockedInfillSourcePath = normalized
         default:
             return
@@ -653,6 +656,17 @@ struct ImageGenUnifiedDialog: View {
         values["source_image_path"] = normalized
         values["source_image_paths"] = [normalized]
         markDirtyIfNeeded()
+    }
+
+    /// Drop paint/Pixelmator export paths tied to a previous infill source (dialog-only batch dirs).
+    private func clearInfillDialogWorkingExportState() {
+        InfillExportService.removePersistedBatch(values: values)
+        values.removeValue(forKey: "pixelmator_base_path")
+        values.removeValue(forKey: "pixelmator_mask_path")
+        values.removeValue(forKey: "pixelmator_doc_path")
+        values.removeValue(forKey: "pixelmator_doc_name")
+        values.removeValue(forKey: "_pixelmator_batch_dir")
+        session.setInfillPixelmatorDocPath(nil)
     }
 
     private func adoptInfillPixelmatorExportMeta(_ meta: [String: Any]) {
@@ -919,18 +933,18 @@ struct ImageGenUnifiedDialog: View {
 
     /// Original library path for EXIF/thumbnails — not Pixelmator/MFLUX temp exports.
     private func infillCanonicalSourcePathForSubmit(values: [String: Any], tempRoot: String) -> String? {
+        if let path = resolvedSubmitSourcePath(for: "infill"),
+           let normalized = ImageGenFunctionPrerequisites.normalizedExistingFile(path) {
+            let ap = URL(fileURLWithPath: normalized).standardizedFileURL.path
+            if !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
+                return ap
+            }
+        }
         let doc = (values["pixelmator_doc_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !doc.isEmpty {
             let ap = URL(fileURLWithPath: doc).standardizedFileURL.path
             if FileManager.default.isReadableFile(atPath: ap),
                !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
-                return ap
-            }
-        }
-        if let locked = lockedInfillSourcePath,
-           let path = ImageGenFunctionPrerequisites.normalizedExistingFile(locked) {
-            let ap = URL(fileURLWithPath: path).standardizedFileURL.path
-            if !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
                 return ap
             }
         }
@@ -955,16 +969,23 @@ struct ImageGenUnifiedDialog: View {
             pluginMax: pluginMax,
             settings: appState.config.rawSettings()
         )
+        InfillExportService.removePersistedBatch(values: submitValues)
         var exportMeta = try InfillExportService.persistPaintInfillExports(
             sourcePath: source,
             mask: mask,
             maxSide: maxSide,
             tempRoot: appState.config.temporaryFilesDirectory
         )
-        if let doc = session.infillPixelmatorDocPath() ?? values["pixelmator_doc_path"] as? String,
+        if let doc = session.infillPixelmatorDocPath()?.trimmingCharacters(in: .whitespacesAndNewlines),
            !doc.isEmpty {
-            exportMeta["pixelmator_doc_path"] = doc
-            exportMeta["pixelmator_doc_name"] = (doc as NSString).lastPathComponent
+            let exportSource = URL(
+                fileURLWithPath: exportMeta["pixelmator_doc_path"] as? String ?? ""
+            ).standardizedFileURL.path
+            let normalizedDoc = URL(fileURLWithPath: doc).standardizedFileURL.path
+            if normalizedDoc != exportSource {
+                exportMeta["pixelmator_doc_path"] = normalizedDoc
+                exportMeta["pixelmator_doc_name"] = (normalizedDoc as NSString).lastPathComponent
+            }
         }
         session.setInfillMaskPNGData(canvas.maskPNGData())
         return exportMeta

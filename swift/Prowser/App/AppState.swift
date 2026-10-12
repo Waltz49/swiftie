@@ -151,8 +151,17 @@ final class AppState {
     var informationMenuBarVisible = true
     /// True when viewing a custom file list (opened files, search results, etc.) — disables directory watcher refresh.
     var specificFilesActive = false
-    /// Set when ⌘Q already confirmed quit so `applicationShouldTerminate` does not prompt twice.
+    /// Set when File → Exit / ⌘Q already passed ``confirmQuitIfRunning`` so `applicationShouldTerminate` does not prompt twice.
     private var quitConfirmedViaClose = false
+
+    func shouldSkipQuitPromptBecauseAlreadyConfirmed() -> Bool {
+        quitConfirmedViaClose
+    }
+
+    func clearQuitTerminateCancellationState() {
+        quitConfirmedViaClose = false
+        imageGen.resetTerminateQuitConfirmation()
+    }
     /// Live column count from the thumbnail grid layout (source of truth for keyboard navigation).
     var thumbnailGridColumns = 1
     /// Visual row map for duplicate-section thumbnail ↑/↓ (from live grid layout).
@@ -1438,8 +1447,11 @@ final class AppState {
 
     /// Python File → Exit (⌘Q / `QAction.QuitRole`) is connected to `main_window.close`.
     func closeMainWindow() {
-        WindowFullscreen.noteMainWindowClosing()
+        if !confirmQuitIfRunning() {
+            return
+        }
         quitConfirmedViaClose = true
+        WindowFullscreen.noteMainWindowClosing()
         if let window = BrowserWindowIdentity.resolveMainBrowserWindow() {
             window.performClose(nil)
         }

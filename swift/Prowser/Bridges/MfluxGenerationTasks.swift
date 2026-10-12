@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 /// Runs one MFLUX CLI job at a time (replaces Python `model_tasks_worker` for generate).
 @MainActor
@@ -64,9 +67,7 @@ final class MfluxGenerationTasks {
         guard isBusy else { return }
         cancelled = true
         stepwiseWatcher?.stop()
-        if let process, process.isRunning {
-            process.terminate()
-        }
+        terminateTrackedProcess(force: false)
         // Keep the task busy until the terminated process has actually unwound. Advancing
         // synchronously here lets its stale completion overwrite the next copy/job's state.
     }
@@ -75,9 +76,41 @@ final class MfluxGenerationTasks {
     func unloadImageModel() -> Bool { true }
 
     func shutdown() {
-        cancel()
+        guard isBusy else {
+            runTask?.cancel()
+            runTask = nil
+            return
+        }
+        cancelled = true
+        stepwiseWatcher?.stop()
+        terminateTrackedProcess(force: true)
         runTask?.cancel()
         runTask = nil
+        let jobID = activeJobID
+        if !jobID.isEmpty {
+            finishJob(jobID: jobID, success: false, outputPath: "", error: "Cancelled")
+        }
+    }
+
+    /// SIGTERM (and SIGKILL when ``force``), port of Python ``ModelTasksController._terminate_worker`` / ``force_terminate_worker``.
+    private func terminateTrackedProcess(force: Bool) {
+        guard let process, process.isRunning else { return }
+        process.terminate()
+        guard force else { return }
+        let pid = process.processIdentifier
+        let deadline = Date().addingTimeInterval(2.0)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            #if canImport(Darwin)
+            kill(pid, SIGKILL)
+            #endif
+            let killDeadline = Date().addingTimeInterval(3.0)
+            while process.isRunning, Date() < killDeadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
     }
 
     private func runGenerate(payload: [String: Any], jobID: String) async {

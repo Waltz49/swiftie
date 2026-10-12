@@ -422,6 +422,9 @@ extension AppState {
     }
 
     func confirmQuitIfRunning() -> Bool {
+        if shouldSkipQuitPromptBecauseAlreadyConfirmed() {
+            return true
+        }
         if imageGen.quitGateAllowsImmediateTerminate() {
             return true
         }
