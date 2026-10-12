@@ -426,7 +426,6 @@ actor ThumbnailCache {
         }
 
         let base = cacheKey(for: imagePath)
-        let prefix = "\(base)_"
         // Smallest on-disk JPEG that still covers `size` (avoid loading 900px when 316 exists).
         var bestDiskSize = Int.max
         var bestDiskURL: URL?

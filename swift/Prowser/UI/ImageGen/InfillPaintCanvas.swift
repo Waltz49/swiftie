@@ -315,7 +315,16 @@ final class InfillPaintCanvasView: NSView {
     }
 
     private func displayBrushRadius() -> CGFloat {
-        max(2, CGFloat(brushRadius) * currentDisplayScale())
+        max(2, CGFloat(brushRadius) * fitScale)
+    }
+
+    /// Show brush ring after keyboard resize (Python unified dialog forwards `[` / `]` before first paint).
+    func revealBrushCursorForKeyboardAdjust() {
+        if !cursorVisible {
+            cursorVisible = true
+            cursorPos = CGPoint(x: bounds.midX, y: bounds.midY)
+        }
+        needsDisplay = true
     }
 
     private func displayToImageCoords(_ pos: CGPoint) -> (CGFloat, CGFloat) {

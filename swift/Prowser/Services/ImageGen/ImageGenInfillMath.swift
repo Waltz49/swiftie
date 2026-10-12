@@ -4,8 +4,37 @@ import Foundation
 
 /// Port of ``outpaint_mask.fit_infill_paint_dims`` / ``fit_edit_output_dims`` and infill mask semantics.
 enum ImageGenInfillMath {
+    /// MFLUX fill infill model floor; upscale smaller working sizes before export/generation.
+    static let infillModelMinimumSide = 512
+
     static func fitInfillPaintDims(width: Int, height: Int, maxSide: Int) -> (width: Int, height: Int) {
-        fitEditOutputDims(width: width, height: height, maxSide: maxSide, step: 16, minSide: 256)
+        let fitted = fitEditOutputDims(width: width, height: height, maxSide: maxSide, step: 16, minSide: 256)
+        return ensureMinimumModelSide(
+            width: fitted.width,
+            height: fitted.height,
+            minimumSide: infillModelMinimumSide,
+            step: 16
+        )
+    }
+
+    /// Upscale when min(width, height) is below ``infillModelMinimumSide`` (aspect preserved, step-aligned).
+    static func ensureMinimumModelSide(
+        width: Int,
+        height: Int,
+        minimumSide: Int = infillModelMinimumSide,
+        step: Int = 16
+    ) -> (width: Int, height: Int) {
+        var w = width
+        var h = height
+        let minDim = min(w, h)
+        guard minDim > 0, minDim < minimumSide else { return (w, h) }
+        let scale = Double(minimumSide) / Double(minDim)
+        w = max(minimumSide, Int(round(Double(w) * scale)))
+        h = max(minimumSide, Int(round(Double(h) * scale)))
+        let s = max(1, step)
+        w = max(minimumSide, w - (w % s))
+        h = max(minimumSide, h - (h % s))
+        return (w, h)
     }
 
     static func fitEditOutputDims(

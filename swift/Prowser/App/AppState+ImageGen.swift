@@ -276,6 +276,47 @@ extension AppState {
             scheduleJobsPaneGeometryRefit()
         }
     }
+    /// Reopen the unified dialog for a queue job (Python ``job_queue_edit_row`` / ``open_imagegen_dialog_from_job``).
+    func openImageGenDialogFromQueueJob(jobID: String) {
+        guard let job = imageGen.jobForQueueEditor(jobID: jobID) else { return }
+        let tempRoot = config.temporaryFilesDirectory.path
+        if job.function == "edit" {
+            let readable = ImageGenExifReferences.resolveSourceImagePaths(job.values)
+                .filter { FileManager.default.isReadableFile(atPath: $0) }
+            if readable.isEmpty {
+                StyledMessageDialog.showWarning(
+                    title: "Edit",
+                    message: "Source image files for this job are no longer available."
+                )
+                return
+            }
+            let restored = ImageGenJobDialogRestore.editSourcePaths(from: job.values, tempRoot: tempRoot)
+            let paths = restored.isEmpty ? readable : restored
+            openImageGenDialog(function: job.function, replaceJobID: jobID, editSourcePaths: paths)
+            return
+        }
+        if job.function == "expand" {
+            let readable = ImageGenExifReferences.resolveSourceImagePaths(job.values)
+                .filter { FileManager.default.isReadableFile(atPath: $0) }
+            if readable.isEmpty {
+                StyledMessageDialog.showWarning(
+                    title: "Expand",
+                    message: "Source image for this job is no longer available."
+                )
+                return
+            }
+        }
+        openImageGenDialog(function: job.function, replaceJobID: jobID)
+    }
+
+    private func presentImageGenUnifiedDialogWindow() {
+        if SceneWindowChrome.bringImageGenUnifiedWindowToFront() {
+            NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
+            return
+        }
+        NotificationCenter.default.post(name: .prowserPresentImageGenUnifiedWindow, object: nil)
+    }
+
     func openImageGenDialog(
         function: String? = nil,
         replaceJobID: String? = nil,
@@ -310,18 +351,20 @@ extension AppState {
         let requestUnchanged = newRequest == imageGenDialogRequest
         imageGenDialogRequest = newRequest
         if wasAlreadyOpen {
-            NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
             let refreshActiveSource = replaceJobID == nil
                 && (resolvedFunction == "infill" || resolvedFunction == "expand")
             if requestUnchanged, !refreshActiveSource {
+                presentImageGenUnifiedDialogWindow()
                 return
             }
             imageGenDialogApplyToken += 1
+            presentImageGenUnifiedDialogWindow()
             return
         }
         showImageGenUnifiedDialog = true
         // Closed-then-reopened (or first open): full load (SwiftUI Window view may persist).
         imageGenDialogReloadToken += 1
+        // First open: MainWindowView `onChange(of: showImageGenUnifiedDialog)` calls `openWindow`.
     }
 
     func closeImageGenUnifiedDialog() {
@@ -335,7 +378,7 @@ extension AppState {
     func editActiveQueueJob() {
         let rows = imageGen.queueSnapshot()
         guard let active = rows.first(where: { $0.isActive }) ?? rows.first else { return }
-        openImageGenDialog(function: nil, replaceJobID: active.jobID)
+        openImageGenDialogFromQueueJob(jobID: active.jobID)
     }
 
     func openGeneratedImageInBrowse(path: String) {

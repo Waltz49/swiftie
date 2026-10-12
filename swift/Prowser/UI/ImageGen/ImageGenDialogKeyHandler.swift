@@ -14,6 +14,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
     let onShiftOptionReturn: () -> Bool
     var onOptionLeft: (() -> Bool)? = nil
     var onOptionRight: (() -> Bool)? = nil
+    /// `[` / `]` with no modifiers (infill brush size); return true to consume the event.
+    var onBracketKey: ((Int) -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -51,6 +53,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
         private var onShiftOptionReturn: (() -> Bool)?
         private var onOptionLeft: (() -> Bool)?
         private var onOptionRight: (() -> Bool)?
+        private var onBracketKey: ((Int) -> Bool)?
 
         func attach(to view: NSView, settings: ImageGenDialogKeyHandler) {
             guard let hostWindow = view.window else { return }
@@ -66,6 +69,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                 onShiftOptionReturn = settings.onShiftOptionReturn
                 onOptionLeft = settings.onOptionLeft
                 onOptionRight = settings.onOptionRight
+                onBracketKey = settings.onBracketKey
                 return
             }
             detach()
@@ -80,6 +84,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
             onShiftOptionReturn = settings.onShiftOptionReturn
             onOptionLeft = settings.onOptionLeft
             onOptionRight = settings.onOptionRight
+            onBracketKey = settings.onBracketKey
 
             let expectedID = settings.windowIdentifier
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -130,6 +135,10 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                     if event.keyCode == 124 {
                         if self.onOptionRight?() == true { return nil }
                     }
+                }
+
+                if flags.isEmpty, event.keyCode == 33 || event.keyCode == 30 {
+                    if self.onBracketKey?(Int(event.keyCode)) == true { return nil }
                 }
                 return event
             }

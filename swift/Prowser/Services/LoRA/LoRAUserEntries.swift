@@ -37,7 +37,7 @@ enum LoRAUserEntries {
     }
 
     static func uniqueLoraID(base: String, existing: [String: LoRAEntry]) -> String {
-        var candidate = LoRAEntry.userIDPrefix + base
+        let candidate = LoRAEntry.userIDPrefix + base
         if existing[candidate] == nil { return candidate }
         var n = 2
         while existing["\(LoRAEntry.userIDPrefix)\(base)_\(n)"] != nil { n += 1 }

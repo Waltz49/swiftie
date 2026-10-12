@@ -1578,7 +1578,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
             appState.imageGen.moveJob(before: beforeID, jobID: jobID)
         }
         panel.onEdit = { jobID in
-            appState.openImageGenDialog(replaceJobID: jobID)
+            appState.openImageGenDialogFromQueueJob(jobID: jobID)
         }
         panel.onCancel = { jobID, cascade in
             appState.confirmCancelJob(id: jobID, cascade: cascade)

@@ -55,6 +55,7 @@ struct MainWindowView: View {
         .toolbar(.hidden, for: .windowToolbar)
         .background(MainWindowIdentityAnchor())
         .background(AuxiliaryDialogBridge())
+        .background(ImageGenUnifiedWindowPresentationBridge())
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
             appState.refreshSidebarLayout()
@@ -62,7 +63,9 @@ struct MainWindowView: View {
                 openWindow(id: "jobs-panel")
             }
             if appState.showImageGenUnifiedDialog {
-                openWindow(id: "imagegen-unified")
+                ImageGenUnifiedWindowPresentation.schedulePresent {
+                    openWindow(id: "imagegen-unified")
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
@@ -84,8 +87,9 @@ struct MainWindowView: View {
         }
         .onChange(of: appState.showImageGenUnifiedDialog) { _, show in
             if show {
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "imagegen-unified")
+                ImageGenUnifiedWindowPresentation.schedulePresent {
+                    openWindow(id: "imagegen-unified")
+                }
             } else {
                 dismissWindow(id: "imagegen-unified")
             }

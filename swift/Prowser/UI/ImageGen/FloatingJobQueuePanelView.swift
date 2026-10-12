@@ -67,6 +67,7 @@ struct FloatingJobQueuePanelView: View {
         .background(appState.theme.colors.sidebarBackground)
         .ignoresSafeArea(.container, edges: .top)
         .toolbarBackground(.hidden, for: .windowToolbar)
+        .background(ImageGenUnifiedWindowPresentationBridge())
         .persistedDialogGeometry(
             DialogGeometryKey.jobQueue,
             defaultWidth: 320,

@@ -2,10 +2,10 @@ import XCTest
 @testable import Prowser
 
 final class ImageGenInfillMathTests: XCTestCase {
-    func testFitInfillPaintDimsKeepsOriginalAlignedSize() {
+    func testFitInfillPaintDimsUpscaleSmallImagesToModelMinimum() {
         let (w, h) = ImageGenInfillMath.fitInfillPaintDims(width: 256, height: 256, maxSide: 1024)
-        XCTAssertEqual(w, 256)
-        XCTAssertEqual(h, 256)
+        XCTAssertEqual(w, ImageGenInfillMath.infillModelMinimumSide)
+        XCTAssertEqual(h, ImageGenInfillMath.infillModelMinimumSide)
     }
 
     func testFitInfillPaintDimsScalesDownToMaxSide() {

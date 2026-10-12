@@ -76,14 +76,23 @@ struct ImageGenInfillPreviewPane: View {
                 mask: mask,
                 tempRoot: tempRoot
             )
+            let refineBatchDir = pair.batchDir
             guard PixelmatorInfillService.launchPixelmatorProMultiFiles(paths: [pair.mask, pair.base]) else {
+                if !appState.config.bool(forKey: "debug_mode", default: false) {
+                    InfillExportService.removeBatchDirectory(refineBatchDir)
+                }
                 StyledMessageDialog.showWarning(
                     title: "Refine in Pixelmator",
                     message: "Could not open Pixelmator Pro."
                 )
                 return
             }
-            guard PixelmatorInfillService.runRefineDialog() else { return }
+            guard PixelmatorInfillService.runRefineDialog() else {
+                if !appState.config.bool(forKey: "debug_mode", default: false) {
+                    InfillExportService.removeBatchDirectory(refineBatchDir)
+                }
+                return
+            }
             switch PixelmatorInfillService.exportBaseAndMask(tempRoot: tempRoot) {
             case .failure(let err):
                 StyledMessageDialog.showWarning(

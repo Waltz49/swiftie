@@ -2,6 +2,7 @@ import Foundation
 
 /// Prepares registry payloads before MFLUX CLI invocation.
 enum ImageGenMfluxPrep {
+    private static let prepTempPathsKey = "_mflux_prep_temp_paths"
     /// MFLUX CLI target (temp); final ``output_path`` is copied here after success (Python ``mflux_output_path``).
     static func mfluxTempOutputPath(for finalOutputPath: String) -> String {
         let ext = (finalOutputPath as NSString).pathExtension
@@ -82,6 +83,27 @@ enum ImageGenMfluxPrep {
         return run
     }
 
+    /// Removes tracked prep paths from ``run`` (do not send to workers) and returns them for deferred cleanup.
+    static func takePrepTempPaths(from run: inout [String: Any]) -> [String] {
+        let paths = run[prepTempPathsKey] as? [String] ?? []
+        run.removeValue(forKey: prepTempPathsKey)
+        return paths.filter { !$0.isEmpty }
+    }
+
+    static func removePrepTempFiles(_ paths: [String], debugMode: Bool) {
+        guard !debugMode else { return }
+        for path in paths where !path.isEmpty {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+
+    private static func notePrepTemp(_ run: inout [String: Any], path: String) {
+        guard !path.isEmpty else { return }
+        var list = run[prepTempPathsKey] as? [String] ?? []
+        list.append(path)
+        run[prepTempPathsKey] = list
+    }
+
     static func finalizeKleinExpandIfNeeded(payload: [String: Any], cliOutputPath: String) throws -> String {
         guard payload["pipeline_id"] as? String == "mflux_flux2_klein_expand",
               let meta = payload["_klein_expand_post"] as? [String: String],
@@ -139,6 +161,8 @@ enum ImageGenMfluxPrep {
         _ = ImageGenOutpaintMask.savePNG(background, path: basePath)
         let maskPath = tempPNG(prefix: "imagegen-expand-mask-")
         _ = ImageGenOutpaintMask.savePNG(mask, path: maskPath)
+        notePrepTemp(&run, path: basePath)
+        notePrepTemp(&run, path: maskPath)
         run["source_image_path"] = basePath
         run["source_image_paths"] = [basePath]
         run["mask_image_path"] = maskPath
@@ -160,10 +184,14 @@ enum ImageGenMfluxPrep {
             throw MfluxCLIError.missingField("pixelmator_mask_path")
         }
         let maxSide = intValue(run["max_generation_dimension"], default: 1024)
+        let (floorW, floorH) = ImageGenInfillMath.ensureMinimumModelSide(
+            width: baseCG.width,
+            height: baseCG.height
+        )
         let aligned = ImageGenDimMath.alignDimsForPipeline(
             pipelineID: "flux_schnell_mflux_play",
-            width: baseCG.width,
-            height: baseCG.height,
+            width: floorW,
+            height: floorH,
             effectiveMaxSide: maxSide
         )
         let w = aligned.width
@@ -182,6 +210,8 @@ enum ImageGenMfluxPrep {
         let maskOut = tempPNG(prefix: "imagegen-mflux-infill-mask-")
         _ = ImageGenOutpaintMask.savePNG(baseResized, path: baseOut)
         _ = ImageGenOutpaintMask.savePNG(mfluxMask, path: maskOut)
+        notePrepTemp(&run, path: baseOut)
+        notePrepTemp(&run, path: maskOut)
         run["source_image_path"] = baseOut
         run["source_image_paths"] = [baseOut]
         run["mask_image_path"] = maskOut
@@ -220,6 +250,10 @@ enum ImageGenMfluxPrep {
         let compositePath = tempPNG(prefix: "imagegen-klein-expand-composite-")
         _ = ImageGenOutpaintMask.savePNG(composite, path: compositePath)
         let kleinOut = tempPNG(prefix: "imagegen-klein-expand-out-")
+        notePrepTemp(&run, path: bgPath)
+        notePrepTemp(&run, path: maskPath)
+        notePrepTemp(&run, path: compositePath)
+        notePrepTemp(&run, path: kleinOut)
         let finalOutput = run["output_path"] as? String ?? kleinOut
         run["source_image_path"] = compositePath
         run["source_image_paths"] = [compositePath]

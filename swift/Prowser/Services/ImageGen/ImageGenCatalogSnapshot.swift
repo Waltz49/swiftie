@@ -41,7 +41,7 @@ enum ImageGenCatalogSnapshot {
     static func pluginDictionary(pluginID: String) -> [String: Any]? {
         let id = pluginID.trimmingCharacters(in: .whitespacesAndNewlines)
         if cachedPlugins == nil {
-            loadPlugins()
+            _ = loadPlugins()
         }
         return cachedPluginByID[id]
     }

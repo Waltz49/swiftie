@@ -3,6 +3,8 @@ import SwiftUI
 
 extension Notification.Name {
     static let prowserRaiseImageGenDialog = Notification.Name("prowser.raiseImageGenDialog")
+    /// Open or front the SwiftUI ``imagegen-unified`` scene (works from jobs panel / sidebar).
+    static let prowserPresentImageGenUnifiedWindow = Notification.Name("prowser.presentImageGenUnifiedWindow")
 }
 
 @MainActor
@@ -29,6 +31,7 @@ struct ImageGenUnifiedDialog: View {
     @State private var postOpenWorkGeneration = 0
     /// Prevents duplicate persist/close when the user closes via the window button after ⌘W/Close.
     @State private var dismissing = false
+    @State private var skipWorkingFileCleanupOnClose = false
     /// Frozen edit sources while the dialog is open (Python ``_edit_source_paths_override``).
     @State private var lockedEditSourcePaths: [String] = []
     @State private var lockedExpandSourcePath: String?
@@ -109,7 +112,8 @@ struct ImageGenUnifiedDialog: View {
                 onOptionReturn: { false },
                 onShiftOptionReturn: { false },
                 onOptionLeft: { stepSourceImage(delta: -1) },
-                onOptionRight: { stepSourceImage(delta: 1) }
+                onOptionRight: { stepSourceImage(delta: 1) },
+                onBracketKey: { keyCode in handleInfillBrushBracketKey(keyCode) }
             )
         )
         .persistedDialogGeometry(
@@ -307,6 +311,7 @@ struct ImageGenUnifiedDialog: View {
 
     private func loadDialog() async {
         dismissing = false
+        skipWorkingFileCleanupOnClose = false
         loadGeneration += 1
         postOpenWorkGeneration += 1
         let generation = loadGeneration
@@ -327,29 +332,36 @@ struct ImageGenUnifiedDialog: View {
         appState.imageGen.beginImageGenDialogBuild()
         do {
             if let replaceJobID = pendingRequest.replaceJobID,
-               let job = appState.imageGen.queue.jobs.first(where: { $0.jobID == replaceJobID }) {
+               let job = appState.imageGen.jobForQueueEditor(jobID: replaceJobID) {
                 try await ensurePluginsLoaded(function: job.function, availability: .fast)
                 selectedFunction = job.function
                 selectedPluginID = job.pluginID
                 values = job.values
                 baselineValues = job.values
                 visitedFunctions.insert(selectedFunction)
-                if selectedFunction == "edit",
-                   let paths = job.values["source_image_paths"] as? [String] {
+                let tempRoot = appState.config.temporaryFilesDirectory.path
+                if selectedFunction == "edit" {
+                    let paths = ImageGenJobDialogRestore.editSourcePaths(from: job.values, tempRoot: tempRoot)
                     lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(paths)
                     appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
+                    if !lockedEditSourcePaths.isEmpty {
+                        values["source_image_paths"] = lockedEditSourcePaths
+                        values["source_image_path"] = lockedEditSourcePaths[0]
+                    }
                 }
-                if selectedFunction == "expand",
-                   let path = ImageGenFunctionPrerequisites.normalizedExistingFile(
-                       job.values["source_image_path"] as? String
-                   ) {
-                    lockedExpandSourcePath = path
+                if selectedFunction == "expand" {
+                    let expandPaths = ImageGenJobDialogRestore.editSourcePaths(from: job.values, tempRoot: tempRoot)
+                    if let path = expandPaths.first {
+                        lockedExpandSourcePath = path
+                        values["source_image_path"] = path
+                        values["source_image_paths"] = [path]
+                    }
                 }
                 if selectedFunction == "infill",
-                   let path = ImageGenFunctionPrerequisites.normalizedExistingFile(
-                       job.values["source_image_path"] as? String
-                   ) {
+                   let path = ImageGenJobDialogRestore.infillSourcePath(from: job.values, tempRoot: tempRoot) {
                     lockedInfillSourcePath = path
+                    values["source_image_path"] = path
+                    values["source_image_paths"] = [path]
                 }
                 if selectedFunction == "infill" {
                     restoreInfillMaskFromJobValues(job.values)
@@ -843,8 +855,33 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private func closeDialog() {
+        cleanupDialogWorkingFilesUnlessSkipped()
         appState.closeImageGenUnifiedDialog()
         dismiss()
+    }
+
+    private func cleanupDialogWorkingFilesUnlessSkipped() {
+        guard !skipWorkingFileCleanupOnClose else { return }
+        let debug = appState.config.bool(forKey: "debug_mode", default: false)
+        InfillExportService.cleanupDialogWorkingFiles(
+            values: values,
+            tempRoot: appState.config.temporaryFilesDirectory,
+            debugMode: debug
+        )
+    }
+
+    private func handleInfillBrushBracketKey(_ keyCode: Int) -> Bool {
+        guard selectedFunction == "infill", let canvas = infillCanvasHolder.canvas else { return false }
+        let step = 4
+        if keyCode == 33 {
+            canvas.adjustBrushRadius(delta: -step)
+        } else if keyCode == 30 {
+            canvas.adjustBrushRadius(delta: step)
+        } else {
+            return false
+        }
+        canvas.revealBrushCursorForKeyboardAdjust()
+        return true
     }
 
     private func raiseWindow() {
@@ -1074,6 +1111,7 @@ struct ImageGenUnifiedDialog: View {
             isDirty = false
             if closeOnGenerate {
                 dismissing = true
+                skipWorkingFileCleanupOnClose = true
                 persistVisitedFunctions()
                 closeDialog()
             }

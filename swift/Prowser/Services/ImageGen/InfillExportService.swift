@@ -91,11 +91,29 @@ enum InfillExportService {
         try? FileManager.default.removeItem(atPath: jobDir)
     }
 
+    static func removeBatchDirectory(_ jobDir: String?) {
+        guard let jobDir, !jobDir.isEmpty else { return }
+        try? FileManager.default.removeItem(atPath: jobDir)
+    }
+
+    /// Drop paint / Pixelmator working files from the unified dialog (Python batch cleanup; skip when debug is on).
+    static func cleanupDialogWorkingFiles(values: [String: Any], tempRoot: URL, debugMode: Bool) {
+        guard !debugMode else { return }
+        removePersistedBatch(values: values)
+        let exportDir = ProwserTempFiles.pixelmatorExportDirectory(tempRoot: tempRoot)
+        for name in ["base.webp", "mask.webp"] {
+            let path = (exportDir as NSString).appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: path) {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+        }
+    }
+
     static func writePaintInfillForPixelmator(
         basePath: String,
         mask: CGImage,
         tempRoot: URL
-    ) throws -> (base: String, mask: String) {
+    ) throws -> (base: String, mask: String, batchDir: String) {
         let source = URL(fileURLWithPath: basePath).standardizedFileURL.path
         guard FileManager.default.isReadableFile(atPath: source) else {
             throw InfillExportError.sourceMissing(source)
@@ -110,7 +128,7 @@ enum InfillExportService {
               ImageGenOutpaintMask.savePNG(pixel, path: maskDest) else {
             throw InfillExportError.writeFailed
         }
-        return (baseDest, maskDest)
+        return (baseDest, maskDest, jobDir)
     }
 }
 

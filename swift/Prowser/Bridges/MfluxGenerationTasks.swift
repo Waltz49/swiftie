@@ -85,6 +85,11 @@ final class MfluxGenerationTasks {
         do {
             let userOutputPath = payload["output_path"] as? String ?? ""
             var runPayload = try await ImageGenMfluxPrep.apply(to: payload)
+            let prepTempPaths = ImageGenMfluxPrep.takePrepTempPaths(from: &runPayload)
+            defer {
+                let debug = config?.bool(forKey: "debug_mode", default: false) ?? false
+                ImageGenMfluxPrep.removePrepTempFiles(prepTempPaths, debugMode: debug)
+            }
             let pipelineID = runPayload["pipeline_id"] as? String ?? ""
             let hfModelID = runPayload["hf_model_id"] as? String ?? payload["hf_model_id"] as? String ?? ""
             let usePythonWorker = ImageGenPipelineRouting.usesPythonWorker(

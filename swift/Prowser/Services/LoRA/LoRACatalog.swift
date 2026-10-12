@@ -11,7 +11,7 @@ enum LoRACatalog {
     }
 
     static func getEntry(loraID: String, lc: [String: Any]) -> LoRAEntry? {
-        var entry = mergedCatalog(lc: lc)[loraID]
+        let entry = mergedCatalog(lc: lc)[loraID]
         guard var resolved = entry else { return nil }
         let overrides = LoRACatalogSettings.entryOverrides(from: lc)[loraID]
         resolved = LoRACatalogSettings.applyEntryOverrides(resolved, overrides: overrides)

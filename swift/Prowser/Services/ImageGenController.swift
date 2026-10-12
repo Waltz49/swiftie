@@ -591,6 +591,14 @@ final class ImageGenController {
         bumpQueueRevision()
     }
 
+    /// Pending queue row or the active job (Python ``job_record_for_row``).
+    func jobForQueueEditor(jobID: String) -> ImageGenQueuedJob? {
+        if jobID == activeJobID {
+            return buildActiveQueuedJob()
+        }
+        return queue.jobs.first(where: { $0.jobID == jobID })
+    }
+
     func copiesForJobEditor(jobID: String) -> Int? {
         if jobID == activeJobID {
             if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
@@ -2503,7 +2511,8 @@ final class ImageGenController {
     /// Port of ``refresh_queued_job_status`` in ``model_task_queue.py``.
     private func refreshQueuedJobStatus(at index: Int) async {
         guard queue.jobs.indices.contains(index) else { return }
-        var job = queue.jobs[index]
+        let jobID = queue.jobs[index].jobID
+        guard var job = queuedJob(byID: jobID) else { return }
 
         if job.pluginUnavailable || ImageGenPluginCatalog.plugin(pluginID: job.pluginID) == nil {
             let built = buildQueueStatusView(
@@ -2517,8 +2526,9 @@ final class ImageGenController {
             job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
             job.fullPrompt = built.fullPrompt
             job.referencesInvalid = built.referencesInvalid
-            queue.jobs[index] = job
-            applyQueuedJobErrorBanner(at: index)
+            guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+            queue.jobs[writeIndex] = job
+            applyQueuedJobErrorBanner(at: writeIndex)
             bumpStripUI()
             return
         }
@@ -2579,8 +2589,9 @@ final class ImageGenController {
         job.statusView = built.statusView
         job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
         job.referencesInvalid = built.referencesInvalid
-        queue.jobs[index] = job
-        applyQueuedJobErrorBanner(at: index)
+        guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        queue.jobs[writeIndex] = job
+        applyQueuedJobErrorBanner(at: writeIndex)
         bumpStripUI()
     }
 
@@ -2686,9 +2697,10 @@ final class ImageGenController {
         copyCyclePluginID = ""
     }
 
-    /// Python ``remove_edit_aspect_pad_temps``.
+    /// Python ``_cleanup_infill_batch_assets``.
     private func cleanupInfillBatchAssets() {
-        guard activeFunction == "infill" || pendingValues["pixelmator_base_path"] != nil else { return }
+        guard activeFunction == "infill"
+            || ((pendingValues["_pixelmator_batch_dir"] as? String)?.isEmpty == false) else { return }
         InfillExportService.removePersistedBatch(values: pendingValues)
     }
 

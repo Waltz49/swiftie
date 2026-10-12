@@ -36,6 +36,55 @@ enum SceneWindowChrome {
         if window.identifier?.rawValue == jobsPanelID { return true }
         return window.title == "Job Control"
     }
+
+    static func bringImageGenUnifiedWindowToFront() -> Bool {
+        guard let window = imageGenUnifiedWindow() else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+}
+
+/// Coalesces duplicate ``openWindow`` requests (main + floating jobs bridges, stale re-present).
+@MainActor
+enum ImageGenUnifiedWindowPresentation {
+    private static var pendingWork: DispatchWorkItem?
+
+    static func schedulePresent(openWindow: @escaping () -> Void) {
+        pendingWork?.cancel()
+        let work = DispatchWorkItem {
+            if SceneWindowChrome.bringImageGenUnifiedWindowToFront() {
+                NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
+                return
+            }
+            openWindow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                if SceneWindowChrome.bringImageGenUnifiedWindowToFront() {
+                    NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
+                }
+            }
+        }
+        pendingWork = work
+        DispatchQueue.main.async(execute: work)
+    }
+}
+
+/// Calls ``openWindow(id: "imagegen-unified")`` when the unified scene is missing (e.g. job-card edit while flag already true).
+struct ImageGenUnifiedWindowPresentationBridge: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onReceive(NotificationCenter.default.publisher(for: .prowserPresentImageGenUnifiedWindow)) { _ in
+                appState.showImageGenUnifiedDialog = true
+                ImageGenUnifiedWindowPresentation.schedulePresent {
+                    openWindow(id: SceneWindowChrome.imageGenUnifiedID)
+                }
+            }
+    }
 }
 
 /// Sync AppState when the user closes a SwiftUI scene window (red button, ⌘W), not on transient view teardown.
