@@ -503,7 +503,7 @@ final class LoRAService {
     ) async throws {
         let store = try store()
         var lc = try await loadCatalog()
-        guard var raw = (lc[LoRACatalogSettings.userEntriesKey] as? [String: Any])?[loraID] as? [String: Any],
+        guard let raw = (lc[LoRACatalogSettings.userEntriesKey] as? [String: Any])?[loraID] as? [String: Any],
               var entry = LoRAEntry.fromDictionary(raw) else { return }
         entry.displayName = displayName
         entry.triggerWord = triggerWord.isEmpty ? nil : triggerWord

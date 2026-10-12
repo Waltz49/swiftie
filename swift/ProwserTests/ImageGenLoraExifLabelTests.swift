@@ -42,7 +42,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         """
         let normalized = ImageGenExifCommentFormatting.normalizeExifLoraDisplayLines(raw)
         XCTAssertTrue(normalized.contains("LoRA: First [1]"))
-        let contPrefix = String(repeating: "\u{00a0}", count: 6)
+        let contPrefix = String(repeating: " ", count: 6)
         XCTAssertTrue(normalized.contains("\(contPrefix)Second [0.5]"))
     }
 
@@ -55,7 +55,21 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
             quantization: 4,
             lora: "My LoRA [1] + Other [0.5]"
         )
-        XCTAssertTrue(comment.contains("LoRA: My LoRA [1]"))
-        XCTAssertTrue(comment.contains("\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}\u{00a0}Other [0.5]"))
+        XCTAssertTrue(comment.contains("LoRA: My LoRA [1] + Other [0.5]"))
+    }
+
+    func testParseExifLoraContinuationNBSPForImportRest() {
+        let nbsp = String(repeating: "\u{00a0}", count: 6)
+        let comment = """
+        Image Model:
+        FLUX.2 Klein 9B KV
+        LoRA: First [1]
+        \(nbsp)Second [0.5]
+
+        Prompt:
+        cat
+        """
+        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        XCTAssertEqual(parsed["lora"] as? String, "First [1] + Second [0.5]")
     }
 }

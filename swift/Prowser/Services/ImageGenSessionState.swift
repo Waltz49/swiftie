@@ -2,8 +2,11 @@ import Foundation
 
 @MainActor
 final class ImageGenSessionState {
+    private static let supportedFunctions = ["create", "edit", "expand", "infill"]
     private var valuesByFunction: [String: [String: Any]] = [:]
     private var pluginIDByFunction: [String: String] = [:]
+    private var infillMaskPNGByFunction: [String: Data] = [:]
+    private var infillPixelmatorDocPathByFunction: [String: String] = [:]
 
     func values(for function: String) -> [String: Any] {
         valuesByFunction[function] ?? [:]
@@ -23,18 +26,50 @@ final class ImageGenSessionState {
 
     func lastFunction(config: AppConfig) -> String {
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
-        return imagegen["last_function"] as? String ?? "create"
+        guard let function = imagegen["last_function"] as? String,
+              Self.supportedFunctions.contains(function) else {
+            return "create"
+        }
+        return function
     }
 
     func saveLastFunction(_ function: String, config: AppConfig) {
+        guard Self.supportedFunctions.contains(function) else { return }
         var imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         imagegen["last_function"] = function
         config.updateSetting("imagegen", value: imagegen)
     }
 
+    func infillMaskPNGData(for function: String = "infill") -> Data? {
+        infillMaskPNGByFunction[function]
+    }
+
+    func setInfillMaskPNGData(_ data: Data?, for function: String = "infill") {
+        if let data, !data.isEmpty {
+            infillMaskPNGByFunction[function] = data
+        } else {
+            infillMaskPNGByFunction.removeValue(forKey: function)
+        }
+    }
+
+    func infillPixelmatorDocPath(for function: String = "infill") -> String? {
+        infillPixelmatorDocPathByFunction[function]
+    }
+
+    func setInfillPixelmatorDocPath(_ path: String?, for function: String = "infill") {
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            infillPixelmatorDocPathByFunction.removeValue(forKey: function)
+        } else {
+            infillPixelmatorDocPathByFunction[function] = trimmed
+        }
+    }
+
     func reset() {
         valuesByFunction.removeAll()
         pluginIDByFunction.removeAll()
+        infillMaskPNGByFunction.removeAll()
+        infillPixelmatorDocPathByFunction.removeAll()
     }
 
     func copyValues(_ values: [String: Any]) -> [String: Any] {

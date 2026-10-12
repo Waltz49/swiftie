@@ -155,6 +155,10 @@ enum ImageGenOutpaintMask {
         return ctx.makeImage() ?? mask
     }
 
+    static func resizeImagePublic(_ image: CGImage, width: Int, height: Int) -> CGImage {
+        resizeImage(image, width: width, height: height)
+    }
+
     private static func resizeImage(_ image: CGImage, width: Int, height: Int) -> CGImage {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(

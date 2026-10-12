@@ -1548,6 +1548,7 @@ final class ImageGenController {
             }
         }
         removeAspectPadTemps()
+        cleanupInfillBatchAssets()
         clearCopyCycleExifSnapshot()
         activeJobID = nil
         activeJobNumber = nil
@@ -2686,6 +2687,11 @@ final class ImageGenController {
     }
 
     /// Python ``remove_edit_aspect_pad_temps``.
+    private func cleanupInfillBatchAssets() {
+        guard activeFunction == "infill" || pendingValues["pixelmator_base_path"] != nil else { return }
+        InfillExportService.removePersistedBatch(values: pendingValues)
+    }
+
     private func removeAspectPadTemps() {
         guard !aspectPadTempPaths.isEmpty else { return }
         for path in aspectPadTempPaths where !path.isEmpty {
@@ -2798,28 +2804,15 @@ final class ImageGenController {
         } else {
             comment = ""
         }
-        // Python ``write_exif_user_comment(..., reference_entries=...)``: the fallback write must
-        // still carry the References block (source images for edit/expand, AI reference images).
         let tempRoot = config.temporaryFilesDirectory.path
-        let sourcePaths = ImageGenExifReferences.sourcePathsForGenerationExif(
+        comment = ImageGenGenerationExifService.injectReferences(
+            baseComment: comment,
+            pluginID: pluginID,
             values: values,
-            extraPaths: fallbackSourcePaths,
-            tempRoot: tempRoot
-        )
-        let entries = ImageGenExifReferences.referenceEntries(
-            sourcePaths: sourcePaths,
             outputPath: outputPath,
+            fallbackSourcePaths: fallbackSourcePaths,
             tempRoot: tempRoot
         )
-        if !entries.isEmpty {
-            comment = ImageGenExifReferences.inject(
-                baseComment: comment,
-                outputPath: outputPath,
-                entries: entries,
-                allowCrossDirectory: true,
-                tempRoot: tempRoot
-            )
-        }
         try await ExifService.writeUserComment(path: outputPath, text: comment)
     }
 

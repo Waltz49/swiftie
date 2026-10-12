@@ -73,26 +73,34 @@ extension AppState {
         guard !isSlideshowActive else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
         let parent = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
-        guard let current = fileData.currentDirectory,
-              parent == URL(fileURLWithPath: current).standardizedFileURL.path else { return }
-        guard !specificFilesActive else { return }
+        let currentParent = fileData.currentDirectory.map {
+            URL(fileURLWithPath: $0).standardizedFileURL.path
+        }
+        let needsBrowseLevel = currentParent != parent || specificFilesActive
 
         if config.string(forKey: "sort_mode", default: "date") == SortMode.date.rawValue {
             config.updateSetting("sort_reversed", value: false)
         }
 
         beginSuppressDirectoryRefresh()
-        ensureImageListedForBrowse(path: path)
-        fileData.setCurrentImagePath(path)
-        if let index = fileData.displayedImages.firstIndex(of: path) {
-            fileData.setCurrentIndex(index)
+        if needsBrowseLevel {
+            if forceEnterBrowse, currentParent != parent {
+                displaceCurrentLevelIfOpeningNewDirectory(path)
+            }
+            setSpecificFilesActive(false)
+            openImageInBrowse(path: path, saveHistory: false)
+        } else {
+            ensureImageListedForBrowse(path: path)
+            fileData.setCurrentImagePath(path)
+            if let index = fileData.displayedImages.firstIndex(of: path) {
+                fileData.setCurrentIndex(index)
+            }
+            if forceEnterBrowse {
+                fileData.setViewMode(.browse)
+            }
         }
         DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [path])
         reloadBrowseImageIfCurrent(path: path)
-
-        if forceEnterBrowse {
-            fileData.setViewMode(.browse)
-        }
         imageGen.noteProgressiveBrowseOpened()
     }
 
@@ -303,7 +311,9 @@ extension AppState {
         imageGenDialogRequest = newRequest
         if wasAlreadyOpen {
             NotificationCenter.default.post(name: .prowserRaiseImageGenDialog, object: nil)
-            if requestUnchanged {
+            let refreshActiveSource = replaceJobID == nil
+                && (resolvedFunction == "infill" || resolvedFunction == "expand")
+            if requestUnchanged, !refreshActiveSource {
                 return
             }
             imageGenDialogApplyToken += 1
@@ -319,12 +329,7 @@ extension AppState {
     }
 
     func openFastImageGenDialog() {
-        let action = config.string(forKey: "imagegen_fast_open_action", default: "from_text")
-        if action == "edit_image" {
-            openImageGenDialog(function: "edit", autoImportEXIF: true)
-        } else {
-            openImageGenDialog(function: "create", autoImportEXIF: true)
-        }
+        openImageGenDialog(function: "create", autoImportEXIF: true)
     }
 
     func editActiveQueueJob() {

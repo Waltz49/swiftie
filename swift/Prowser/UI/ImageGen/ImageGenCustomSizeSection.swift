@@ -10,6 +10,7 @@ struct ImageGenCustomSizeSection: View {
     let heightSpec: [String: Any]
     let pipelineID: String
     let pluginMaxDimension: Int
+    let function: String
     let sourcePath: String?
     /// Edit uses optional ``use_custom_size`` (Python ``mount_edit_custom_size_section``); create/expand use collapse-for-visibility only.
     var usesOptionalCustomSize: Bool = false
@@ -229,8 +230,13 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private func sourcePixelSize() -> (width: Int, height: Int)? {
-        guard let sourcePath else { return nil }
-        return ResizeImagesService.dimensions(for: sourcePath)
+        guard let path = ImageGenExifImport.imagePathForImportSize(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState,
+            presentWarning: false
+        ) else { return nil }
+        return ResizeImagesService.dimensions(for: path)
     }
 
     private func captureAspectRatio() {
@@ -390,11 +396,12 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private func applyImportDims() {
-        guard sourcePath != nil else {
-            StyledMessageDialog.showWarning(title: "Import Size", message: "No image selected.")
-            return
-        }
-        guard let size = sourcePixelSize() else {
+        guard let path = ImageGenExifImport.imagePathForImportSize(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState
+        ) else { return }
+        guard let size = ResizeImagesService.dimensions(for: path) else {
             StyledMessageDialog.showWarning(
                 title: "Import Size",
                 message: "Could not read image dimensions."

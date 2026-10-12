@@ -28,10 +28,10 @@ enum MfluxProcessRunner {
             proc.environment = request.environment
             let stderrPipe = Pipe()
             proc.standardError = stderrPipe
+            try proc.run()
             if let onProcessStarted {
                 await onProcessStarted(proc)
             }
-            try proc.run()
             proc.waitUntilExit()
             let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             let stderrText = String(data: errData, encoding: .utf8) ?? ""

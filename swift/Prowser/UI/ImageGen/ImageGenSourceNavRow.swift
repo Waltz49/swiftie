@@ -5,6 +5,7 @@ import SwiftUI
 struct ImageGenSourceNavRow<Center: View>: View {
     @Environment(AppState.self) private var appState
     let currentPath: String?
+    var navigationLocked: Bool = false
     let onSelectPath: (String) -> Void
     @ViewBuilder var center: () -> Center
 
@@ -47,7 +48,7 @@ struct ImageGenSourceNavRow<Center: View>: View {
                 .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
-        .disabled(!canNavigate(delta: delta))
+        .disabled(navigationLocked || !canNavigate(delta: delta))
         .help(help)
     }
 

@@ -12,7 +12,14 @@ struct ImageGenPanelShell: View {
     var onEditSourcePathsChanged: (([String]) -> Void)?
     var onSingleSourcePathChanged: ((String) -> Void)?
     var compactSliderTracks: Bool = false
+    var infillCanvasHolder: ImageGenInfillCanvasHolder?
+    var infillMaskPNGData: Data?
+    var onInfillMaskPNGDataChanged: ((Data?) -> Void)?
+    var onInfillHasPaintChanged: ((Bool) -> Void)?
+    var onInfillPixelmatorDocPathChanged: ((String?) -> Void)?
+    var onInfillPixelmatorExportChanged: (([String: Any]) -> Void)?
 
+    @Environment(AppState.self) private var appState
     @State private var localSourcePath: String?
     @State private var localSourcePaths: [String] = []
 
@@ -79,7 +86,16 @@ struct ImageGenPanelShell: View {
                 ImageGenPreviewSplitter {
                     ImageGenInfillPreviewPane(
                         sourcePath: effectiveSourcePath,
-                        onSourcePathChanged: { adoptSingleSourcePath($0) }
+                        maxGenerationSide: infillMaxGenerationSide,
+                        maskPNGData: infillMaskPNGData,
+                        navigationLocked: infillSourceNavigationLocked,
+                        showRefineInPixelmator: infillShowRefineInPixelmator,
+                        canvasHolder: infillCanvasHolder ?? ImageGenInfillCanvasHolder(),
+                        onSourcePathChanged: { adoptSingleSourcePath($0) },
+                        onMaskPNGDataChanged: onInfillMaskPNGDataChanged,
+                        onHasPaintChanged: onInfillHasPaintChanged,
+                        onPixelmatorDocPathChanged: onInfillPixelmatorDocPathChanged,
+                        onPixelmatorExportChanged: onInfillPixelmatorExportChanged
                     )
                 } controls: {
                     splitControlsColumn
@@ -90,8 +106,11 @@ struct ImageGenPanelShell: View {
             }
         }
         .onAppear { syncSources() }
-        .onChange(of: sourcePath) { _, _ in
+        .onChange(of: sourcePath) { _, newPath in
             guard function != "edit" else { return }
+            if function == "create" || function == "expand" || function == "infill" {
+                localSourcePath = newPath
+            }
             syncSources()
         }
         .onChange(of: sourcePaths) { _, newPaths in
@@ -218,6 +237,7 @@ struct ImageGenPanelShell: View {
                             heightSpec: height,
                             pipelineID: plugin["pipeline_id"] as? String ?? "",
                             pluginMaxDimension: plugin["max_generation_dimension"] as? Int ?? 2048,
+                            function: function,
                             sourcePath: effectiveSourcePath,
                             usesOptionalCustomSize: function == "edit",
                             compactSliderTracks: compactSliderTracks,
@@ -290,7 +310,11 @@ struct ImageGenPanelShell: View {
             return
         }
 
-        if localSourcePath == nil {
+        if function == "expand" || function == "infill" {
+            if let path = sourcePath {
+                localSourcePath = path
+            }
+        } else if localSourcePath == nil {
             localSourcePath = sourcePath
         }
         localSourcePaths = sourcePaths
@@ -299,6 +323,27 @@ struct ImageGenPanelShell: View {
             values["source_image_paths"] = effectiveSourcePaths
             values["source_image_path"] = effectiveSourcePaths[0]
         }
+    }
+
+    private var infillMaxGenerationSide: Int {
+        let pluginMax = selectedPlugin?["max_generation_dimension"] as? Int ?? 1024
+        return ImageGenDimLimits.effectiveMaxGenerationDimension(
+            pluginMax: pluginMax,
+            settings: appState.config.rawSettings()
+        )
+    }
+
+    private var infillShowRefineInPixelmator: Bool {
+        let editor = appState.config.string(forKey: "image_editor_app", default: "Preview")
+        return ImageGenEditorSettings.shouldShowInfillPixelmatorRefine(editorApp: editor)
+    }
+
+    private var infillSourceNavigationLocked: Bool {
+        guard let path = effectiveSourcePath else { return false }
+        return ImageGenInfillPathSemantics.isWorkingTempPath(
+            path,
+            tempRoot: appState.config.temporaryFilesDirectory.path
+        )
     }
 
     private func introText(for function: String) -> String? {

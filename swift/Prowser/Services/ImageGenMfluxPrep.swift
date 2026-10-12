@@ -54,7 +54,7 @@ enum ImageGenMfluxPrep {
         case "mflux_fill_expand":
             try applyFillExpand(&run)
         case "mflux_fill_infill":
-            try validateInfill(&run)
+            try applyInfill(&run)
         case "mflux_flux2_klein_expand":
             try applyKleinExpand(&run)
         case "mflux_flux2_klein_edit":
@@ -144,17 +144,49 @@ enum ImageGenMfluxPrep {
         run["mask_image_path"] = maskPath
     }
 
-    private static func validateInfill(_ run: inout [String: Any]) throws {
-        let base = run["infill_base_image_path"] as? String ?? run["source_image_path"] as? String
-        let mask = run["infill_mask_image_path"] as? String ?? run["mask_image_path"] as? String
-        guard let base, FileManager.default.isReadableFile(atPath: base) else {
-            throw MfluxCLIError.missingField("infill_base_image_path")
+    private static func applyInfill(_ run: inout [String: Any]) throws {
+        let basePath = (run["pixelmator_base_path"] as? String)
+            ?? run["infill_base_image_path"] as? String
+            ?? run["source_image_path"] as? String
+        let maskPath = (run["pixelmator_mask_path"] as? String)
+            ?? run["infill_mask_image_path"] as? String
+            ?? run["mask_image_path"] as? String
+        guard let basePath, FileManager.default.isReadableFile(atPath: basePath),
+              let baseCG = ImageGenOutpaintMask.loadCGImage(path: basePath) else {
+            throw MfluxCLIError.missingField("pixelmator_base_path")
         }
-        guard let mask, FileManager.default.isReadableFile(atPath: mask) else {
-            throw MfluxCLIError.missingField("infill_mask_image_path")
+        guard let maskPath, FileManager.default.isReadableFile(atPath: maskPath),
+              let maskCG = ImageGenOutpaintMask.loadCGImage(path: maskPath) else {
+            throw MfluxCLIError.missingField("pixelmator_mask_path")
         }
-        run["source_image_path"] = base
-        run["mask_image_path"] = mask
+        let maxSide = intValue(run["max_generation_dimension"], default: 1024)
+        let aligned = ImageGenDimMath.alignDimsForPipeline(
+            pipelineID: "flux_schnell_mflux_play",
+            width: baseCG.width,
+            height: baseCG.height,
+            effectiveMaxSide: maxSide
+        )
+        let w = aligned.width
+        let h = aligned.height
+        let baseResized = (baseCG.width == w && baseCG.height == h)
+            ? baseCG
+            : ImageGenOutpaintMask.resizeImagePublic(baseCG, width: w, height: h)
+        var maskResized = maskCG
+        if maskCG.width != w || maskCG.height != h {
+            maskResized = ImageGenOutpaintMask.resizeImagePublic(maskCG, width: w, height: h)
+        }
+        guard let mfluxMask = ImageGenInfillMath.maskToMfluxGrayscale(maskResized) else {
+            throw MfluxCLIError.processFailed("Could not convert infill mask for MFLUX.")
+        }
+        let baseOut = tempPNG(prefix: "imagegen-mflux-infill-")
+        let maskOut = tempPNG(prefix: "imagegen-mflux-infill-mask-")
+        _ = ImageGenOutpaintMask.savePNG(baseResized, path: baseOut)
+        _ = ImageGenOutpaintMask.savePNG(mfluxMask, path: maskOut)
+        run["source_image_path"] = baseOut
+        run["source_image_paths"] = [baseOut]
+        run["mask_image_path"] = maskOut
+        run["width"] = w
+        run["height"] = h
     }
 
     private static func applyKleinExpand(_ run: inout [String: Any]) throws {

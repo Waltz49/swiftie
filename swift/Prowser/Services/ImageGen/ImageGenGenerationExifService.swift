@@ -129,6 +129,48 @@ enum ImageGenGenerationExifService {
         return true
     }
 
+    static func referenceEntriesForOutput(
+        pluginID: String,
+        values: [String: Any],
+        outputPath: String,
+        fallbackSourcePaths: [String],
+        tempRoot: String
+    ) -> [ImageGenExifReferences.Entry] {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return [] }
+        return referenceEntries(
+            plugin: plugin,
+            values: values,
+            outputPath: outputPath,
+            fallbackSourcePaths: fallbackSourcePaths,
+            tempRoot: tempRoot
+        )
+    }
+
+    static func injectReferences(
+        baseComment: String,
+        pluginID: String,
+        values: [String: Any],
+        outputPath: String,
+        fallbackSourcePaths: [String],
+        tempRoot: String
+    ) -> String {
+        let entries = referenceEntriesForOutput(
+            pluginID: pluginID,
+            values: values,
+            outputPath: outputPath,
+            fallbackSourcePaths: fallbackSourcePaths,
+            tempRoot: tempRoot
+        )
+        guard !entries.isEmpty else { return baseComment }
+        return ImageGenExifReferences.inject(
+            baseComment: baseComment,
+            outputPath: outputPath,
+            entries: entries,
+            allowCrossDirectory: true,
+            tempRoot: tempRoot
+        )
+    }
+
     private static func referenceEntries(
         plugin: ImageGenPluginDescriptor,
         values: [String: Any],
@@ -136,6 +178,19 @@ enum ImageGenGenerationExifService {
         fallbackSourcePaths: [String],
         tempRoot: String
     ) -> [ImageGenExifReferences.Entry] {
+        if plugin.pipelineID == "mflux_fill_infill",
+           let infillRef = ImageGenExifReferences.resolveInfillReferencePath(
+               outputPath: outputPath,
+               values: values,
+               fallbackSourcePaths: fallbackSourcePaths,
+               tempRoot: tempRoot
+           ) {
+            return ImageGenExifReferences.referenceEntries(
+                sourcePaths: [infillRef],
+                outputPath: outputPath,
+                tempRoot: tempRoot
+            )
+        }
         let sourcePaths = ImageGenExifReferences.sourcePathsForGenerationExif(
             values: values,
             extraPaths: fallbackSourcePaths,

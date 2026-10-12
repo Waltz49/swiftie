@@ -33,6 +33,8 @@ struct ImageGenUnifiedDialog: View {
     @State private var lockedEditSourcePaths: [String] = []
     @State private var lockedExpandSourcePath: String?
     @State private var lockedInfillSourcePath: String?
+    @State private var infillHasPaint = false
+    @State private var infillCanvasHolder = ImageGenInfillCanvasHolder()
     private let functions = ["edit", "create", "expand", "infill"]
     private let session = ImageGenSessionState()
 
@@ -57,7 +59,25 @@ struct ImageGenUnifiedDialog: View {
                     onSingleSourcePathChanged: { path in
                         adoptLockedSingleSourcePath(path)
                     },
-                    compactSliderTracks: true
+                    compactSliderTracks: true,
+                    infillCanvasHolder: infillCanvasHolder,
+                    infillMaskPNGData: session.infillMaskPNGData(),
+                    onInfillMaskPNGDataChanged: { data in
+                        session.setInfillMaskPNGData(data)
+                        markDirtyIfNeeded()
+                    },
+                    onInfillHasPaintChanged: { infillHasPaint = $0 },
+                    onInfillPixelmatorDocPathChanged: { path in
+                        session.setInfillPixelmatorDocPath(path)
+                        if let path, !path.isEmpty {
+                            values["pixelmator_doc_path"] = path
+                            values["pixelmator_doc_name"] = (path as NSString).lastPathComponent
+                        }
+                        markDirtyIfNeeded()
+                    },
+                    onInfillPixelmatorExportChanged: { meta in
+                        adoptInfillPixelmatorExportMeta(meta)
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .onChange(of: selectedPluginID) { oldValue, newValue in
@@ -158,7 +178,12 @@ struct ImageGenUnifiedDialog: View {
 
             Spacer()
 
-            DialogButtonRow(footerActionButtons, layout: .inline)
+            DialogButtonRow(
+                footerActionButtons,
+                allowReturnActivatesDefault: false,
+                useSwiftUIDefaultActionShortcut: false,
+                layout: .inline
+            )
         }
     }
 
@@ -293,6 +318,9 @@ struct ImageGenUnifiedDialog: View {
             : pendingRequest.function
         if pendingRequest.replaceJobID == nil {
             session.reset()
+            lockedInfillSourcePath = nil
+            lockedExpandSourcePath = nil
+            infillHasPaint = false
         }
         isLoading = true
         errorMessage = ""
@@ -323,12 +351,20 @@ struct ImageGenUnifiedDialog: View {
                    ) {
                     lockedInfillSourcePath = path
                 }
+                if selectedFunction == "infill" {
+                    restoreInfillMaskFromJobValues(job.values)
+                }
             } else {
                 let targetFunction = selectedFunction
                 try await ensurePluginsLoaded(function: targetFunction, availability: .fast)
                 lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
                 await switchFunction(from: "", to: targetFunction)
                 bootstrapEditSourcePaths(from: pendingRequest, force: true)
+                if targetFunction == "infill", pendingRequest.function == "infill" {
+                    refreshInfillFromMenuRequest()
+                } else if targetFunction == "expand", pendingRequest.function == "expand" {
+                    bootstrapSingleSourcePath(function: "expand", force: true)
+                }
                 if let prompt = pendingRequest.initialPrompt {
                     values["prompt"] = prompt.isEmpty
                         ? ""
@@ -369,6 +405,9 @@ struct ImageGenUnifiedDialog: View {
             let previous = selectedFunction
             guard await switchFunction(from: previous, to: targetFunction) else { return }
             bootstrapEditSourcePaths(from: pendingRequest, force: true)
+            if targetFunction == "infill" {
+                refreshInfillFromMenuRequest()
+            }
             if let prompt = pendingRequest.initialPrompt {
                 values["prompt"] = prompt.isEmpty
                     ? ""
@@ -376,6 +415,9 @@ struct ImageGenUnifiedDialog: View {
             }
         } else {
             bootstrapEditSourcePaths(from: pendingRequest, force: true)
+            if targetFunction == "infill" {
+                refreshInfillFromMenuRequest()
+            }
             if let prompt = pendingRequest.initialPrompt {
                 values["prompt"] = prompt.isEmpty
                     ? ""
@@ -514,6 +556,9 @@ struct ImageGenUnifiedDialog: View {
             persistCurrentFunction(oldFunction)
             session.setValues(values, for: oldFunction)
             session.setPluginID(selectedPluginID, for: oldFunction)
+            if oldFunction == "infill" {
+                session.setInfillMaskPNGData(infillCanvasHolder.canvas?.maskPNGData())
+            }
         }
 
         selectedFunction = newFunction
@@ -568,7 +613,14 @@ struct ImageGenUnifiedDialog: View {
         if newFunction == "expand" {
             bootstrapSingleSourcePath(function: "expand", force: oldFunction.isEmpty)
         } else if newFunction == "infill" {
-            bootstrapSingleSourcePath(function: "infill", force: oldFunction.isEmpty)
+            let forceInfillSource = oldFunction.isEmpty
+                || (request.function == "infill" && oldFunction != "infill")
+            bootstrapSingleSourcePath(function: "infill", force: forceInfillSource)
+            if forceInfillSource {
+                session.setInfillMaskPNGData(nil)
+            } else {
+                restoreInfillSessionFromJobOrMask()
+            }
         }
 
         baselineValues = values
@@ -591,11 +643,52 @@ struct ImageGenUnifiedDialog: View {
         markDirtyIfNeeded()
     }
 
+    private func adoptInfillPixelmatorExportMeta(_ meta: [String: Any]) {
+        for key in [
+            "pixelmator_base_path",
+            "pixelmator_mask_path",
+            "pixelmator_doc_path",
+            "pixelmator_doc_name",
+            "_pixelmator_batch_dir",
+        ] {
+            if let value = meta[key] as? String, !value.isEmpty {
+                values[key] = value
+            }
+        }
+        if let doc = values["pixelmator_doc_path"] as? String, !doc.isEmpty {
+            session.setInfillPixelmatorDocPath(doc)
+        }
+        markDirtyIfNeeded()
+    }
+
+    private func refreshInfillFromMenuRequest() {
+        bootstrapSingleSourcePath(function: "infill", force: true)
+        session.setInfillMaskPNGData(nil)
+        session.setInfillPixelmatorDocPath(nil)
+        infillHasPaint = false
+        infillCanvasHolder.canvas = nil
+        values.removeValue(forKey: "pixelmator_base_path")
+        values.removeValue(forKey: "pixelmator_mask_path")
+        values.removeValue(forKey: "pixelmator_doc_path")
+        values.removeValue(forKey: "pixelmator_doc_name")
+        values.removeValue(forKey: "_pixelmator_batch_dir")
+    }
+
     private func bootstrapSingleSourcePath(function: String, force: Bool) {
         let locked = function == "expand" ? lockedExpandSourcePath : lockedInfillSourcePath
         if !force, let locked, FileManager.default.fileExists(atPath: locked) {
             values["source_image_path"] = locked
             values["source_image_paths"] = [locked]
+            return
+        }
+        if force, let active = ImageGenFunctionPrerequisites.activeImagePathForExpandOrInfill(appState: appState) {
+            if function == "expand" {
+                lockedExpandSourcePath = active
+            } else {
+                lockedInfillSourcePath = active
+            }
+            values["source_image_path"] = active
+            values["source_image_paths"] = [active]
             return
         }
         if let persisted = ImageGenFunctionPrerequisites.normalizedExistingFile(
@@ -787,6 +880,59 @@ struct ImageGenUnifiedDialog: View {
         return ImageGenFunctionPrerequisites.normalizedExistingFile(values["source_image_path"] as? String)
     }
 
+    /// Original library path for EXIF/thumbnails — not Pixelmator/MFLUX temp exports.
+    private func infillCanonicalSourcePathForSubmit(values: [String: Any], tempRoot: String) -> String? {
+        let doc = (values["pixelmator_doc_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !doc.isEmpty {
+            let ap = URL(fileURLWithPath: doc).standardizedFileURL.path
+            if FileManager.default.isReadableFile(atPath: ap),
+               !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
+                return ap
+            }
+        }
+        if let locked = lockedInfillSourcePath,
+           let path = ImageGenFunctionPrerequisites.normalizedExistingFile(locked) {
+            let ap = URL(fileURLWithPath: path).standardizedFileURL.path
+            if !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
+                return ap
+            }
+        }
+        return nil
+    }
+
+    private func prepareInfillSubmitExports(submitValues: inout [String: Any]) throws -> [String: Any]? {
+        guard let canvas = infillCanvasHolder.canvas, canvas.hasPaintMask(), let mask = canvas.maskCGImage() else {
+            StyledMessageDialog.showWarning(
+                title: "Infill",
+                message: "Paint a mask over the region to infill before running."
+            )
+            return nil
+        }
+        guard let source = resolvedSubmitSourcePath(for: "infill") else {
+            StyledMessageDialog.showWarning(title: "Infill", message: "Infill requires an active source image.")
+            return nil
+        }
+        let pluginMax = (pluginsByFunction["infill"] ?? [])
+            .first { ($0["plugin_id"] as? String) == selectedPluginID }?["max_generation_dimension"] as? Int ?? 1024
+        let maxSide = ImageGenDimLimits.effectiveMaxGenerationDimension(
+            pluginMax: pluginMax,
+            settings: appState.config.rawSettings()
+        )
+        var exportMeta = try InfillExportService.persistPaintInfillExports(
+            sourcePath: source,
+            mask: mask,
+            maxSide: maxSide,
+            tempRoot: appState.config.temporaryFilesDirectory
+        )
+        if let doc = session.infillPixelmatorDocPath() ?? values["pixelmator_doc_path"] as? String,
+           !doc.isEmpty {
+            exportMeta["pixelmator_doc_path"] = doc
+            exportMeta["pixelmator_doc_name"] = (doc as NSString).lastPathComponent
+        }
+        session.setInfillMaskPNGData(canvas.maskPNGData())
+        return exportMeta
+    }
+
     private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {
         var out = input
         if out["random_seed"] as? Bool ?? true {
@@ -804,7 +950,13 @@ struct ImageGenUnifiedDialog: View {
             if let path = resolvedSubmitSourcePath(for: selectedFunction) {
                 out["source_image_path"] = path
                 out["source_image_paths"] = [path]
-                out["_canonical_source_image_paths"] = [path]
+                let tempRoot = appState.config.temporaryFilesDirectory.path
+                if selectedFunction == "infill",
+                   let canonical = infillCanonicalSourcePathForSubmit(values: out, tempRoot: tempRoot) {
+                    out["_canonical_source_image_paths"] = [canonical]
+                } else {
+                    out["_canonical_source_image_paths"] = [path]
+                }
             }
         case "edit":
             // Python ``ImageGenEditDialog.collect_values``: the panel's source list is authoritative
@@ -817,6 +969,35 @@ struct ImageGenUnifiedDialog: View {
             break
         }
         return out
+    }
+
+    private func restoreInfillSessionFromJobOrMask() {
+        if let doc = values["pixelmator_doc_path"] as? String, !doc.isEmpty {
+            session.setInfillPixelmatorDocPath(doc)
+        }
+        if session.infillMaskPNGData() == nil,
+           let maskPath = values["pixelmator_mask_path"] as? String,
+           FileManager.default.isReadableFile(atPath: maskPath),
+           let paint = ImageGenInfillMath.pixelmatorMaskFileToPaintMask(maskPath) {
+            let rep = NSBitmapImageRep(cgImage: paint)
+            if let data = rep.representation(using: .png, properties: [:]) {
+                session.setInfillMaskPNGData(data)
+            }
+        }
+    }
+
+    private func restoreInfillMaskFromJobValues(_ jobValues: [String: Any]) {
+        if let doc = jobValues["pixelmator_doc_path"] as? String, !doc.isEmpty {
+            session.setInfillPixelmatorDocPath(doc)
+        }
+        if let maskPath = jobValues["pixelmator_mask_path"] as? String,
+           FileManager.default.isReadableFile(atPath: maskPath),
+           let paint = ImageGenInfillMath.pixelmatorMaskFileToPaintMask(maskPath) {
+            let rep = NSBitmapImageRep(cgImage: paint)
+            if let data = rep.representation(using: .png, properties: [:]) {
+                session.setInfillMaskPNGData(data)
+            }
+        }
     }
 
     private func submit(replace: Bool) async {
@@ -834,6 +1015,17 @@ struct ImageGenUnifiedDialog: View {
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
         var submitValues = prepareSubmitValues(values)
         submitValues["copies"] = copies
+        if selectedFunction == "infill" {
+            do {
+                guard let exportMeta = try prepareInfillSubmitExports(submitValues: &submitValues) else {
+                    return
+                }
+                submitValues.merge(exportMeta) { _, new in new }
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
         do {
             if replace, let replaceJobID {
                 if appState.imageGen.isActiveJobRemainingUpdatable(jobID: replaceJobID) {

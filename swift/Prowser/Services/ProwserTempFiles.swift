@@ -30,6 +30,20 @@ enum ProwserTempFiles {
         return path
     }
 
+    static func makeInfillBatchDirectory(tempRoot: URL) -> String {
+        let base = tempRoot.standardizedFileURL.path
+        let name = "imagegen-infill-\(UUID().uuidString)"
+        let path = (base as NSString).appendingPathComponent(name)
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
+
+    static func pixelmatorExportDirectory(tempRoot: URL) -> String {
+        let path = tempRoot.appendingPathComponent("pixelmator", isDirectory: true).path
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
+
     static func imageGenProgressDirectory(prowserHome: URL? = nil) -> String {
         let home = prowserHome ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(ProfilePaths.defaultProfileDirectoryName, isDirectory: true)
@@ -41,18 +55,18 @@ enum ProwserTempFiles {
     private static let legacyProgressPrefix = ".imagegen-progress-"
 
     /// Remove ``{profile}/tmp/imagegen-progress`` on shutdown (debug off), matching profile tmp cleanup.
-    static func cleanupImageGenProgressDirectoryOnShutdown(debugMode: Bool) {
+    static func cleanupImageGenProgressDirectoryOnShutdown(prowserHome: URL, debugMode: Bool) {
         guard !debugMode else { return }
-        let dir = imageGenProgressDirectory()
+        let dir = imageGenProgressDirectory(prowserHome: prowserHome)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else { return }
         try? FileManager.default.removeItem(atPath: dir)
     }
 
     /// Port of ``prowser_temp_files.cleanup_stale_imagegen_worker_temps`` (orphaned files in profile tmp).
-    static func cleanupStaleImageGenWorkerTemps(debugMode: Bool) {
+    static func cleanupStaleImageGenWorkerTemps(prowserHome: URL, debugMode: Bool) {
         guard !debugMode else { return }
-        let tmpDir = (imageGenProgressDirectory() as NSString).deletingLastPathComponent
+        let tmpDir = (imageGenProgressDirectory(prowserHome: prowserHome) as NSString).deletingLastPathComponent
         let prefixes = [
             "imagegen-mflux-",
             "imagegen-progress-",
@@ -63,9 +77,13 @@ enum ProwserTempFiles {
             "imagegen-mflux-mask-",
         ]
         let dirPrefixes = ["imagegen-mflux-stepwise-"]
+        let protectedDirPrefixes = ["imagegen-infill-"]
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmpDir) else { return }
         for name in names {
             let full = (tmpDir as NSString).appendingPathComponent(name)
+            if protectedDirPrefixes.contains(where: { name.hasPrefix($0) }) {
+                continue
+            }
             if dirPrefixes.contains(where: { name.hasPrefix($0) }) {
                 var isDir: ObjCBool = false
                 if FileManager.default.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue {
@@ -76,6 +94,34 @@ enum ProwserTempFiles {
             if prefixes.contains(where: { name.hasPrefix($0) }) {
                 try? FileManager.default.removeItem(atPath: full)
             }
+        }
+    }
+
+    /// Remove loose image files directly inside ``{profile}/tmp`` on shutdown.
+    /// Other files and subdirectories are preserved.
+    @MainActor
+    static func cleanupProfileTemporaryImagesOnShutdown(
+        prowserHome: URL,
+        imageExtensions: [String],
+        debugMode: Bool
+    ) {
+        guard !debugMode else { return }
+        let extensions = Set(imageExtensions.map { AppConfig.normalizeExtension($0) })
+        guard !extensions.isEmpty else { return }
+
+        let tmpDirectory = prowserHome.appendingPathComponent("tmp", isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: tmpDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        ) else {
+            return
+        }
+        for entry in entries {
+            guard extensions.contains(AppConfig.normalizeExtension(entry.pathExtension)),
+                  (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                continue
+            }
+            try? FileManager.default.removeItem(at: entry)
         }
     }
 

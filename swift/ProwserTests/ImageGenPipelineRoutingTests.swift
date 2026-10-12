@@ -40,6 +40,20 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
         }
     }
 
+    func testFillCLIReceivesPreparedImageDimensions() throws {
+        let args = try MfluxCLIPipeline.buildArguments(payload: [
+            "pipeline_id": "mflux_fill_infill",
+            "output_path": "/tmp/output.png",
+            "source_image_path": "/tmp/base.png",
+            "mask_image_path": "/tmp/mask.png",
+            "width": 256,
+            "height": 256,
+        ])
+
+        XCTAssertEqual(args[args.firstIndex(of: "--width")! + 1], "256")
+        XCTAssertEqual(args[args.firstIndex(of: "--height")! + 1], "256")
+    }
+
     func testSceneWorksUsesPythonWorkerDespiteKleinPipeline() {
         let repo = ImageGenSceneWorksKlein.repoID
         XCTAssertTrue(

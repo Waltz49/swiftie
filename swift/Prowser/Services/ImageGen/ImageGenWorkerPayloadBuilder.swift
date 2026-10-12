@@ -74,6 +74,20 @@ enum ImageGenWorkerPayloadBuilder {
         if pipelineID == "mflux_fill_expand" {
             attachSourcePaths(&merged, canonical: true)
         }
+        if pipelineID == "mflux_fill_infill" {
+            let missing = InfillExportService.missingInfillExportPaths(merged)
+            if !missing.isEmpty {
+                let preview = missing.prefix(3).joined(separator: ", ")
+                throw ImageGenRegistryError.payload(
+                    "Infill base image or mask is not available on disk (\(preview)). "
+                        + "Re-run infill from the paint or Pixelmator dialog."
+                )
+            }
+            attachInfillCanonicalSourcePaths(
+                &merged,
+                tempRoot: config.temporaryFilesDirectory.path
+            )
+        }
 
         merged.removeValue(forKey: "aspect_ratio_lock")
         merged.removeValue(forKey: "_pixelmator_batch_dir")
@@ -103,6 +117,30 @@ enum ImageGenWorkerPayloadBuilder {
         }
         merged["source_image_paths"] = sources
         merged["source_image_path"] = sources[0]
+    }
+
+    private static func attachInfillCanonicalSourcePaths(_ merged: inout [String: Any], tempRoot: String) {
+        guard let canonical = infillCanonicalSourcePath(from: merged, tempRoot: tempRoot) else { return }
+        merged["_canonical_source_image_paths"] = [canonical]
+    }
+
+    private static func infillCanonicalSourcePath(from values: [String: Any], tempRoot: String) -> String? {
+        let doc = (values["pixelmator_doc_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !doc.isEmpty {
+            let ap = URL(fileURLWithPath: doc).standardizedFileURL.path
+            if FileManager.default.isReadableFile(atPath: ap),
+               !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
+                return ap
+            }
+        }
+        for raw in ImageGenExifReferences.resolveSourceImagePaths(values) {
+            let ap = URL(fileURLWithPath: raw).standardizedFileURL.path
+            if FileManager.default.isReadableFile(atPath: ap),
+               !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
+                return ap
+            }
+        }
+        return nil
     }
 
     private static func applyMfluxLoraStub(_ merged: inout [String: Any]) {

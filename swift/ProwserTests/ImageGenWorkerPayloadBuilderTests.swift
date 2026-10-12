@@ -48,6 +48,52 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         assertPayloadSubset(payload, matches: golden, ignoring: ["output_path"])
     }
 
+    @MainActor
+    func testInfillPayloadSetsCanonicalFromPixelmatorDocPath() throws {
+        let fm = FileManager.default
+        let dataDir = fm.temporaryDirectory.appendingPathComponent("infill-payload-\(UUID().uuidString)")
+        let config = AppConfig(dataDirectory: dataDir)
+        let tempRoot = config.temporaryFilesDirectory.path
+        let libraryDir = fm.temporaryDirectory.appendingPathComponent("infill-canonical-lib-\(UUID().uuidString)").path
+        try fm.createDirectory(atPath: libraryDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: libraryDir) }
+
+        let docPath = (libraryDir as NSString).appendingPathComponent("original.webp")
+        let basePath = (tempRoot as NSString).appendingPathComponent("infill-base.png")
+        let maskPath = (tempRoot as NSString).appendingPathComponent("infill-mask.png")
+        try fm.createDirectory(atPath: tempRoot, withIntermediateDirectories: true)
+        XCTAssertTrue(fm.createFile(atPath: docPath, contents: Data([0x00])))
+        XCTAssertTrue(fm.createFile(atPath: basePath, contents: Data([0x00])))
+        XCTAssertTrue(fm.createFile(atPath: maskPath, contents: Data([0x00])))
+
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_fill_infill") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: [
+                "prompt": "fill",
+                "pixelmator_doc_path": docPath,
+                "pixelmator_base_path": basePath,
+                "pixelmator_mask_path": maskPath,
+                "source_image_path": basePath,
+                "width": 512,
+                "height": 512,
+                "steps": 20,
+            ],
+            outputPath: (tempRoot as NSString).appendingPathComponent("out.png"),
+            config: config,
+            applyImageExit: false
+        )
+        let canonical = payload["_canonical_source_image_paths"] as? [String]
+        XCTAssertEqual(canonical?.count, 1)
+        XCTAssertEqual(
+            canonical?.first,
+            URL(fileURLWithPath: docPath).standardizedFileURL.path
+        )
+    }
+
     private func assertPayloadSubset(
         _ payload: [String: Any],
         matches golden: [String: Any],

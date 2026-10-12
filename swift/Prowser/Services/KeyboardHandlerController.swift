@@ -231,7 +231,7 @@ final class KeyboardHandlerController {
             switch event.charactersIgnoringModifiers {
             case "/", "÷":
                 if BundleCapabilities.imageGenUIEnabled {
-                    appState.openImageGenDialog(function: "create")
+                    appState.openImageGenDialog()
                     return true
                 }
             default:

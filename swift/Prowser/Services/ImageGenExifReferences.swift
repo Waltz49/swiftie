@@ -61,6 +61,38 @@ enum ImageGenExifReferences {
         return paths
     }
 
+    /// Python ``resolve_infill_reference`` / infill EXIF source selection.
+    static func resolveInfillReferencePath(
+        outputPath: String,
+        values: [String: Any],
+        fallbackSourcePaths: [String],
+        tempRoot: String?
+    ) -> String? {
+        if let pixelPath = values["pixelmator_doc_path"] as? String {
+            let ap = normalized(pixelPath)
+            if !ap.isEmpty, isFile(ap), !isTempWorkPath(ap, tempRoot: tempRoot) {
+                return ap
+            }
+        }
+        let docName = (values["pixelmator_doc_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !docName.isEmpty {
+            let outDir = URL(fileURLWithPath: normalized(outputPath)).deletingLastPathComponent().path
+            let candidate = URL(fileURLWithPath: outDir).appendingPathComponent(docName).standardizedFileURL.path
+            if isFile(candidate), !isTempWorkPath(candidate, tempRoot: tempRoot) {
+                return candidate
+            }
+            let stem = (docName as NSString).deletingPathExtension
+            for ext in [".webp", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".tif"] {
+                let alt = URL(fileURLWithPath: outDir).appendingPathComponent(stem + ext).standardizedFileURL.path
+                if isFile(alt), !isTempWorkPath(alt, tempRoot: tempRoot) {
+                    return alt
+                }
+            }
+        }
+        let fallbacks = sourcePathsForGenerationExif(values: values, extraPaths: fallbackSourcePaths, tempRoot: tempRoot)
+        return fallbacks.first
+    }
+
     /// Python ``source_paths_for_generation_exif``: canonical originals, then values, then fallbacks.
     static func sourcePathsForGenerationExif(
         values: [String: Any],

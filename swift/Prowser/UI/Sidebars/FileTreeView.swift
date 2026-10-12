@@ -853,12 +853,11 @@ struct FileTreeView: NSViewRepresentable {
             lastExpandedHighlightDirectory = nil
             FileTreeFilter.invalidateCache()
             excludedPaths = PathExclusions.excludedPaths(config: appState.config)
-            let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
             rootPaths = appState.config.rootDirectoriesForFileTree()
             refreshCustomUserRootPaths()
             roots = rootPaths.map { path in
                 let expanded = (path as NSString).expandingTildeInPath
-                return FileTreeNode(path: expanded, isDirectory: true, showHidden: showHidden, excluded: excludedPaths)
+                return FileTreeNode(path: expanded, isDirectory: true, excluded: excludedPaths)
             }
             lastSyncedDirectory = nil
             pendingHighlightSync?.cancel()
@@ -1937,16 +1936,14 @@ final class FileTreeNode: NSObject {
     var path: String
     var name: String
     let isDirectory: Bool
-    private let showHidden: Bool
     private let excluded: [String]
     var children: [FileTreeNode]?
     private var didLoad = false
 
-    init(path: String, isDirectory: Bool, showHidden: Bool, excluded: [String]) {
+    init(path: String, isDirectory: Bool, excluded: [String]) {
         self.path = path
         self.name = (path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent
         self.isDirectory = isDirectory
-        self.showHidden = showHidden
         self.excluded = excluded
         super.init()
     }
@@ -1970,7 +1967,6 @@ final class FileTreeNode: NSObject {
         didLoad = true
         children = Self.sortedDirectoryChildren(
             at: path,
-            showHidden: showHidden,
             excluded: excluded,
             appState: appState,
             rootPaths: rootPaths
@@ -1992,11 +1988,11 @@ final class FileTreeNode: NSObject {
 
     private static func sortedDirectoryChildren(
         at path: String,
-        showHidden: Bool,
         excluded: [String],
         appState: AppState,
         rootPaths: [String]
     ) -> [FileTreeNode] {
+        let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
         let url = URL(fileURLWithPath: path)
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: url,
@@ -2020,7 +2016,7 @@ final class FileTreeNode: NSObject {
                 if !FileTreeFilter.shouldShowDirectory(at: entry.path, appState: appState, rootPaths: normalizedRoots) {
                     return nil
                 }
-                return FileTreeNode(path: entry.path, isDirectory: true, showHidden: showHidden, excluded: excluded)
+                return FileTreeNode(path: entry.path, isDirectory: true, excluded: excluded)
             }
     }
 

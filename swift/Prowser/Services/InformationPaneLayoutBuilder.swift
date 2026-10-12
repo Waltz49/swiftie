@@ -23,7 +23,10 @@ enum InformationPaneLayoutBuilder {
         pattern: "^(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\\s*:\\s*(.*)$",
         options: [.caseInsensitive]
     )
-    private static let modelLoraContPattern = try? NSRegularExpression(pattern: "^\\u{00a0}{6}(.+)$", options: [])
+    private static let modelLoraContPattern = try? NSRegularExpression(
+        pattern: "^(?: {6}|\\u{00a0}{6})(.+)$",
+        options: []
+    )
 
     static func buildContent(
         data: InformationOverlayData,

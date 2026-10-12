@@ -3,7 +3,38 @@ import Foundation
 /// EXIF UserComment layout for MFLUX JSON and Prowser image-gen metadata.
 /// Port of `imagegen_plugins/image_gen_naming.py` (display paths only; no generation).
 enum ImageGenExifCommentFormatting {
-    private static let loraContinuationPrefix = String(repeating: "\u{00a0}", count: 6)
+    private static let loraContinuationPrefix = String(repeating: " ", count: 6)
+    private static let legacyLoraContinuationPrefix = String(repeating: "\u{00a0}", count: 6)
+
+    /// LoRA stack continuation lines in EXIF (six-space indent; legacy comments used NBSP).
+    static func isExifLoraContinuationLine(_ line: String) -> Bool {
+        exifLoraContinuationName(from: line) != nil
+    }
+
+    /// Name from a continuation line (`······name [w]` or NBSP indent); port of ``_EXIF_LORA_CONT_LINE``.
+    static func exifLoraContinuationName(from line: String) -> String? {
+        var trimmed = line
+        while let last = trimmed.last, last.isNewline || last.isWhitespace {
+            trimmed.removeLast()
+        }
+        for prefix in [legacyLoraContinuationPrefix, loraContinuationPrefix] {
+            guard trimmed.hasPrefix(prefix) else { continue }
+            let name = String(trimmed.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        return nil
+    }
+
+    /// Combine LoRA tokens for Import Rest / ``match_exif_lora_names_to_ids_and_scales`` (`a + b`).
+    static func appendExifLoraImportToken(existing: String?, name: String) -> String {
+        let token = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return existing ?? "" }
+        if let existing, !existing.isEmpty {
+            return "\(existing) + \(token)"
+        }
+        return token
+    }
 
     private static let hfModelDisplayNames: [String: String] = [
         "black-forest-labs/FLUX.1-schnell": "FLUX.1 Schnell",
@@ -273,7 +304,7 @@ enum ImageGenExifCommentFormatting {
             ) != nil {
                 continue
             }
-            if stripped.hasPrefix("\u{00a0}") { continue }
+            if isExifLoraContinuationLine(lines[index]) { continue }
             let presented = presentedModelName(stripped)
             if presented != stripped {
                 let indent = lines[index].prefix { $0 == " " || $0 == "\t" }
@@ -513,7 +544,10 @@ enum ImageGenExifCommentFormatting {
 
     private static func loraParamLinesForExif(_ lora: String?) -> [String] {
         guard let lora, !lora.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-        return formatLoraLinesForExif(names: loraNamesFromExifValue(lora))
+        let names = loraNamesFromExifValue(lora)
+        guard !names.isEmpty else { return [] }
+        // Single ``LoRA:`` line so Import Rest (Swift + Python) reads the full stack via `` + ``.
+        return ["LoRA: \(names.joined(separator: " + "))"]
     }
 
     /// Split a combined EXIF LoRA parameter (`a + b`) into display tokens.
@@ -541,8 +575,11 @@ enum ImageGenExifCommentFormatting {
             pattern: "^\\s*LoRA\\s*:\\s*(.+?)\\s*$",
             options: [.caseInsensitive]
         )
+        let contPrefixes = [loraContinuationPrefix, legacyLoraContinuationPrefix]
+            .map { NSRegularExpression.escapedPattern(for: $0) }
+            .joined(separator: "|")
         let loraContPattern = try? NSRegularExpression(
-            pattern: "^\(loraContinuationPrefix)(.+?)\\s*$",
+            pattern: "^(?:\(contPrefixes))(.+?)\\s*$",
             options: []
         )
 

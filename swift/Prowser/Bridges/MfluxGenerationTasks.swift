@@ -61,12 +61,14 @@ final class MfluxGenerationTasks {
     }
 
     func cancel() {
+        guard isBusy else { return }
         cancelled = true
         stepwiseWatcher?.stop()
         if let process, process.isRunning {
             process.terminate()
         }
-        finishJob(success: false, outputPath: "", error: "Cancelled")
+        // Keep the task busy until the terminated process has actually unwound. Advancing
+        // synchronously here lets its stale completion overwrite the next copy/job's state.
     }
 
     @discardableResult
@@ -89,6 +91,10 @@ final class MfluxGenerationTasks {
                 pipelineID: pipelineID,
                 hfModelID: hfModelID
             )
+            guard jobID == activeJobID, !cancelled else {
+                finishJob(jobID: jobID, success: false, outputPath: "", error: "Cancelled")
+                return
+            }
             if !usePythonWorker {
                 guard MfluxToolchain.shared.executableURL(forPipeline: pipelineID) != nil else {
                     throw MfluxCLIError.unsupportedPipeline(pipelineID)
@@ -129,7 +135,14 @@ final class MfluxGenerationTasks {
                     payload: runPayload,
                     environment: pyEnv,
                     onProcessStarted: { [weak self] proc in
-                        self?.process = proc
+                        guard let self, self.activeJobID == jobID else {
+                            if proc.isRunning { proc.terminate() }
+                            return
+                        }
+                        self.process = proc
+                        if self.cancelled, proc.isRunning {
+                            proc.terminate()
+                        }
                     },
                     onProgress: { message in
                         Task { @MainActor in
@@ -139,7 +152,7 @@ final class MfluxGenerationTasks {
                 )
                 process = nil
                 if cancelled {
-                    finishJob(success: false, outputPath: finalOutputPath, error: "Cancelled")
+                    finishJob(jobID: jobID, success: false, outputPath: finalOutputPath, error: "Cancelled")
                     return
                 }
                 guard workerRun.exitStatus == 0 else {
@@ -179,17 +192,25 @@ final class MfluxGenerationTasks {
                 )
 
                 let runResult = try await MfluxProcessRunner.run(request) { [weak self] proc in
-                    self?.process = proc
+                    guard let self, self.activeJobID == jobID else {
+                        if proc.isRunning { proc.terminate() }
+                        return
+                    }
+                    self.process = proc
+                    if self.cancelled, proc.isRunning {
+                        proc.terminate()
+                    }
                 }
                 await stepwiseWatcher?.flushAndStop()
-                stepwiseWatcher = nil
                 process = nil
 
                 if cancelled {
-                    finishJob(success: false, outputPath: finalOutputPath, error: "Cancelled")
+                    stepwiseWatcher = nil
+                    finishJob(jobID: jobID, success: false, outputPath: finalOutputPath, error: "Cancelled")
                     return
                 }
                 guard runResult.exitStatus == 0 else {
+                    stepwiseWatcher = nil
                     let tail = runResult.stderrText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .split(separator: "\n")
@@ -203,6 +224,8 @@ final class MfluxGenerationTasks {
                 if usesTempCLI {
                     try ImageGenMfluxPrep.promoteMfluxOutput(cliPath: mfluxCLIPath, finalPath: finalOutputPath)
                 }
+                stepwiseWatcher?.emitFinalStepProgress()
+                stepwiseWatcher = nil
                 var result: [String: Any] = ["output_path": finalOutputPath, "success": true]
                 if let seed = runPayload["resolved_seed"] {
                     result["seed"] = seed
@@ -220,13 +243,17 @@ final class MfluxGenerationTasks {
             }
             lastGenerateResult["output_path"] = finalOutput
             lastGenerateResult["success"] = true
-            finishJob(success: true, outputPath: finalOutput, error: "")
+            finishJob(jobID: jobID, success: true, outputPath: finalOutput, error: "")
         } catch {
             stepwiseWatcher?.stop()
             stepwiseWatcher = nil
             process = nil
+            if jobID == activeJobID, cancelled {
+                finishJob(jobID: jobID, success: false, outputPath: "", error: "Cancelled")
+                return
+            }
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            finishJob(success: false, outputPath: "", error: message)
+            finishJob(jobID: jobID, success: false, outputPath: "", error: message)
         }
     }
 
@@ -266,11 +293,15 @@ final class MfluxGenerationTasks {
         return "SceneWorks Klein worker exited with status \(status).\n\n\(tail)"
     }
 
-    private func finishJob(success: Bool, outputPath: String, error: String) {
+    private func finishJob(jobID: String, success: Bool, outputPath: String, error: String) {
+        guard jobID == activeJobID else { return }
         let kind = activeKind
         isBusy = false
         activeKind = ""
         activeJobID = ""
+        process = nil
+        runTask = nil
+        cancelled = false
         if kind == "generate" {
             onGenerateFinished?(success, outputPath, error)
         }

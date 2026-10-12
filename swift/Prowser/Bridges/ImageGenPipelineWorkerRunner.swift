@@ -48,10 +48,6 @@ enum ImageGenPipelineWorkerRunner {
             proc.standardOutput = stdoutPipe
             proc.standardError = stderrPipe
 
-            if let onProcessStarted {
-                await onProcessStarted(proc)
-            }
-
             let stderrHandle = stderrPipe.fileHandleForReading
             let stderrCollector = StderrProgressCollector(onProgress: onProgress)
             let stderrTask = Task.detached {
@@ -75,6 +71,9 @@ enum ImageGenPipelineWorkerRunner {
             try proc.run()
             stdinPipe.fileHandleForWriting.write(jsonData)
             try stdinPipe.fileHandleForWriting.close()
+            if let onProcessStarted {
+                await onProcessStarted(proc)
+            }
             proc.waitUntilExit()
             _ = await stderrTask.value
 

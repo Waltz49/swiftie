@@ -71,12 +71,6 @@ struct ImageGenerationSettingsSection: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 200)
 
-            Picker("Fast Open Key Source (⇧⌥ /)", selection: stringBinding("imagegen_fast_open_action", default: "from_text")) {
-                Text("Prompt Only").tag("from_text")
-                Text("Image and Prompt").tag("edit_image")
-            }
-            .pickerStyle(.radioGroup)
-
             Toggle("Low RAM mode", isOn: boolBinding("imagegen_low_ram", default: true))
             Toggle("Include triggers in final exif data", isOn: boolBinding("imagegen_include_triggers_in_exif"))
             Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))

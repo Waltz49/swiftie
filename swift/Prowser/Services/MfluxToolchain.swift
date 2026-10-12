@@ -210,12 +210,16 @@ enum MfluxCLIPipeline {
         let model = payload["hf_model_id"] as? String ?? "black-forest-labs/FLUX.1-Fill-dev"
         let quantize = intValue(payload["mflux_quantize"], default: 4)
         let steps = intValue(payload["steps"], default: 20)
+        let width = intValue(payload["width"], default: 1024)
+        let height = intValue(payload["height"], default: 1024)
         let seed = resolvedSeed(payload)
         let guidance = doubleValue(payload["guidance_scale"], default: 30)
         var args = [
             "--model", model,
             "-q", "\(quantize)",
             "--steps", "\(steps)",
+            "--width", "\(width)",
+            "--height", "\(height)",
             "--seed", "\(seed)",
             "--guidance", "\(guidance)",
             "--image-path", source,

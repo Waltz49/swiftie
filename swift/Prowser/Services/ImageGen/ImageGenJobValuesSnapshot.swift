@@ -68,11 +68,14 @@ enum ImageGenJobValuesSnapshot {
 
 enum ImageGenRegistryError: LocalizedError {
     case unknownPlugin(String)
+    case payload(String)
 
     var errorDescription: String? {
         switch self {
         case .unknownPlugin(let id):
             return "Unknown image generation plugin: \(id)"
+        case .payload(let message):
+            return message
         }
     }
 }

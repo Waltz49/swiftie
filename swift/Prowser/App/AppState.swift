@@ -1725,8 +1725,19 @@ final class AppState {
 
     func prepareForApplicationExit() {
         let debugMode = config.bool(forKey: "debug_mode", default: false)
-        ProwserTempFiles.cleanupStaleImageGenWorkerTemps(debugMode: debugMode)
-        ProwserTempFiles.cleanupImageGenProgressDirectoryOnShutdown(debugMode: debugMode)
+        ProwserTempFiles.cleanupStaleImageGenWorkerTemps(
+            prowserHome: config.prowserHome,
+            debugMode: debugMode
+        )
+        ProwserTempFiles.cleanupImageGenProgressDirectoryOnShutdown(
+            prowserHome: config.prowserHome,
+            debugMode: debugMode
+        )
+        ProwserTempFiles.cleanupProfileTemporaryImagesOnShutdown(
+            prowserHome: config.prowserHome,
+            imageExtensions: config.imageExtensions,
+            debugMode: debugMode
+        )
         imageGen.cleanup()
         workers.shutdown()
         auxiliaryDialogs.closeAll()

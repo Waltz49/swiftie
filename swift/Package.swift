@@ -55,6 +55,7 @@ let packageTargets: [Target] = [
             .process("Resources/ImageGenPluginCatalogSnapshot.json"),
             .copy("Resources/ImageGenPython"),
             .copy("Resources/requirements-imagegen.txt"),
+            .copy("Resources/applescript_pixelmator_export.applescript"),
         ],
         linkerSettings: [
             .linkedFramework("Photos"),

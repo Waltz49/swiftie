@@ -30,6 +30,43 @@ enum ImageGenExifImport {
         return nil
     }
 
+    /// Image path for custom-size **Import** (pixel dimensions). Port of ``_image_path_for_import_size``.
+    static func imagePathForImportSize(
+        function: String,
+        sourcePath: String?,
+        appState: AppState,
+        presentWarning: Bool = true
+    ) -> String? {
+        switch function {
+        case "edit", "expand", "infill":
+            guard let sourcePath, FileManager.default.isReadableFile(atPath: sourcePath) else {
+                if presentWarning {
+                    Self.showWarning(title: "Import Size", message: "No image selected.")
+                }
+                return nil
+            }
+            return sourcePath
+        default:
+            guard isBrowseOrThumbnail(appState) else {
+                if presentWarning {
+                    Self.showWarning(
+                        title: "Import Size",
+                        message: "Select an image in browse view, or select a single thumbnail, "
+                            + "before importing."
+                    )
+                }
+                return nil
+            }
+            guard let path = activeImagePathForBrowseOrThumbnail(appState: appState) else {
+                if presentWarning {
+                    Self.showWarning(title: "Import Size", message: "No image selected.")
+                }
+                return nil
+            }
+            return path
+        }
+    }
+
     @MainActor
     static func importPrompt(
         function: String,
@@ -217,7 +254,7 @@ enum ImageGenExifImport {
         return out
     }
 
-    private static func parseExifGenerationMetadata(_ fullComment: String) -> [String: Any] {
+    static func parseExifGenerationMetadata(_ fullComment: String) -> [String: Any] {
         var out: [String: Any] = [:]
         let trimmed = fullComment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return out }
@@ -284,11 +321,18 @@ enum ImageGenExifImport {
                let valueRange = Range(match.range(at: 1), in: stripped) {
                 let name = String(stripped[valueRange]).trimmingCharacters(in: .whitespaces)
                 guard !name.isEmpty else { continue }
-                if let prev = out["lora"] as? String, !prev.isEmpty {
-                    out["lora"] = "\(prev) + \(name)"
-                } else {
-                    out["lora"] = name
-                }
+                out["lora"] = ImageGenExifCommentFormatting.appendExifLoraImportToken(
+                    existing: out["lora"] as? String,
+                    name: name
+                )
+                continue
+            }
+
+            if let contName = ImageGenExifCommentFormatting.exifLoraContinuationName(from: String(line)) {
+                out["lora"] = ImageGenExifCommentFormatting.appendExifLoraImportToken(
+                    existing: out["lora"] as? String,
+                    name: contName
+                )
             }
         }
         return out
@@ -318,7 +362,7 @@ enum ImageGenExifImport {
             if stripped.range(of: #"^\s*(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\s*:"#, options: .regularExpression) != nil {
                 continue
             }
-            if stripped.hasPrefix("\u{00a0}") { continue }
+            if ImageGenExifCommentFormatting.isExifLoraContinuationLine(String(line)) { continue }
             return ImageGenExifCommentFormatting.presentedModelName(stripped)
         }
         return nil

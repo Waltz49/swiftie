@@ -97,6 +97,8 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Prowser displays images that live inside your Photos library when you browse them.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Prowser uses automation to export infill masks from Pixelmator Pro when you choose Refine in Pixelmator.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

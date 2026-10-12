@@ -52,6 +52,14 @@ final class StepwiseProgressWatcher {
         }
     }
 
+    /// Port of ``finalize_stepwise_progress`` in ``mflux_stepwise_progress.py`` (after CLI output is promoted).
+    func emitFinalStepProgress() {
+        guard expectedSteps > 1,
+              let progressiveOutputPath,
+              !progressiveOutputPath.isEmpty else { return }
+        onProgress(stepProgressPayload(path: progressiveOutputPath, step: expectedSteps, total: expectedSteps))
+    }
+
     private var stepwisePattern: NSRegularExpression? {
         try? NSRegularExpression(pattern: #"^seed_(\d+)_step(\d+)of(\d+)\.png$"#, options: .caseInsensitive)
     }
@@ -86,15 +94,24 @@ final class StepwiseProgressWatcher {
             if let progressiveOutputPath, !progressiveOutputPath.isEmpty {
                 atomicCopy(from: path, to: progressiveOutputPath)
             }
-            onProgress([
-                "type": "progress",
-                "path": progressiveOutputPath ?? path,
-                "step": step,
-                "step_total": total,
-            ])
+            let outPath = progressiveOutputPath ?? path
+            onProgress(stepProgressPayload(path: outPath, step: step, total: total))
             added += 1
         }
         return added
+    }
+
+    private func stepProgressPayload(path: String, step: Int, total: Int) -> [String: Any] {
+        var payload: [String: Any] = [
+            "type": "progress",
+            "path": path,
+            "step": step,
+            "step_total": total,
+        ]
+        if let progressiveOutputPath, !progressiveOutputPath.isEmpty {
+            payload["progressive_output_path"] = progressiveOutputPath
+        }
+        return payload
     }
 
     /// Port of `_png_looks_complete` in `mflux_stepwise_progress.py` (IEND at bytes size-8..size-5).
