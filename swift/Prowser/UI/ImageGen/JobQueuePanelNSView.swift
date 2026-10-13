@@ -295,7 +295,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 scrollWidth: scrollWidth,
                 selected: isSelected,
                 colors: themeColors,
-                skipUnchanged: !forceContentRefresh
+                skipUnchanged: !forceContentRefresh && !row.isActive
             )
             nextCards.append(card)
             if isSelected { selectedCard = card }
@@ -1308,6 +1308,7 @@ final class JobCardNSView: NSView {
         }
 
         if skipUnchanged, !identityChanged, rowContentUnchanged(row: row, scrollWidth: scrollWidth, selected: selected) {
+            updateJobNumberDisplay(row: row)
             updateChrome(selected: selected, running: row.isActive)
             return
         }

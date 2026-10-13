@@ -393,7 +393,31 @@ final class ImageGenController {
 
     // MARK: - Queue management
 
+    func jobNumberForDisplay(jobID: String) -> Int? {
+        let id = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+        if id == activeJobID {
+            return resolvedActiveJobNumber()
+        }
+        return queue.jobs.first(where: { $0.jobID == id })?.jobNumber
+    }
+
+    private func resolvedActiveJobNumber() -> Int? {
+        if let activeJobNumber { return activeJobNumber }
+        if let activeJobID,
+           let queued = queue.jobs.first(where: { $0.jobID == activeJobID })?.jobNumber {
+            activeJobNumber = queued
+            return queued
+        }
+        if let stepPendingDoc, let parsed = ImageGenJobNumber.parse(from: stepPendingDoc) {
+            activeJobNumber = parsed
+            return parsed
+        }
+        return nil
+    }
+
     func queueSnapshot() -> [QueueRowSnapshot] {
+        let activeNumber = resolvedActiveJobNumber()
         var pending = queue.jobs
             .filter { $0.jobID != activeJobID }
             .map { job in
@@ -426,7 +450,7 @@ final class ImageGenController {
             pluginUnavailable: false,
             statusLabel: progressMessage,
             copiesTotal: copiesTotal,
-            jobNumber: activeJobNumber,
+            jobNumber: activeNumber,
             held: activeJobHeld(),
             inError: false
         )
@@ -1383,12 +1407,14 @@ final class ImageGenController {
             thumbnailPaths: job.thumbnailPaths,
             continuousMode: continuous,
             continuousTemplate: continuousTemplate,
+            jobNumber: job.jobNumber,
             held: job.held
         )
         // Publish only after status, thumbs, and prompt are installed. An earlier bump
         // painted this job id with the previous active card.
         bumpQueueRevision()
         persistQueue()
+        persistStepState()
         await promoteAndRunNextStep()
     }
 
@@ -1420,6 +1446,7 @@ final class ImageGenController {
         liveEstimateSeconds = nil
         progressMessage = "Starting…"
         taskStatusHTML = progressMessage
+        persistStepState()
         startLiveStatusTimer()
         await refreshActiveJobStatusView()
         rebuildActiveStripViewLocally()
@@ -1555,18 +1582,8 @@ final class ImageGenController {
             pendingValues = cycleValues
             copyCycleValues = cycleValues
             copyCyclePluginID = activePluginID
-            if let step = stepRunning {
-                let runningDoc = JobStepQueue.buildRunningJobDoc(
-                    jobID: activeJobID ?? "",
-                    pluginID: activePluginID,
-                    function: activeFunction,
-                    step: step,
-                    outputPath: outputPath,
-                    fullPrompt: values["prompt"] as? String ?? "",
-                    thumbnailPaths: activeThumbnailPaths
-                )
-                JobStepPersistence.saveActiveRunning(runningDoc, config: config)
-                JobStepPersistence.saveActivePending(stepPendingDoc, config: config)
+            if stepRunning != nil {
+                persistStepState()
             }
             progressMessage = "Generating…"
             taskStatusHTML = progressMessage
@@ -2328,7 +2345,7 @@ final class ImageGenController {
             fullPrompt: pendingValues["prompt"] as? String ?? "",
             thumbnailPaths: activeThumbnailPaths,
             steps: stepPendingDoc?["steps"] as? [[String: Any]] ?? [],
-            jobNumber: activeJobNumber,
+            jobNumber: resolvedActiveJobNumber(),
             held: activeJobHeld()
         )
     }
@@ -2341,24 +2358,21 @@ final class ImageGenController {
 
     private func persistStepState() {
         if queuePersistSuppressed { return }
-        let runningDoc: [String: Any]?
-        if let stepRunning {
-            runningDoc = JobStepPersistence.loadActiveRunning(config: config)
-                ?? JobStepQueue.buildRunningJobDoc(
-                    jobID: activeJobID ?? "",
-                    pluginID: activePluginID,
-                    function: activeFunction,
-                    step: stepRunning,
-                    outputPath: activeOutputPath ?? "",
-                    fullPrompt: pendingValues["prompt"] as? String ?? "",
-                    thumbnailPaths: activeThumbnailPaths
-                )
-        } else {
-            runningDoc = nil
-        }
+        let docs = JobStepQueue.activeJobStepDocsForPersist(
+            jobID: activeJobID ?? "",
+            pluginID: activePluginID,
+            function: activeFunction,
+            runningStep: stepRunning,
+            pendingDoc: stepPendingDoc,
+            outputPath: activeOutputPath ?? "",
+            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            thumbnailPaths: activeThumbnailPaths,
+            jobNumber: resolvedActiveJobNumber(),
+            held: activeJobHeld()
+        )
         JobStepPersistence.persistStepJobFiles(
-            running: runningDoc,
-            pending: stepPendingDoc,
+            running: docs.running,
+            pending: docs.pending,
             queue: queueWithActiveDisplayIndex(),
             config: config
         )
@@ -3383,23 +3397,21 @@ final class ImageGenController {
             prependRunningStepToPending()
         }
         syncChainStateToPendingDoc()
-        let runningDoc: [String: Any]?
-        if let stepRunning {
-            runningDoc = JobStepQueue.buildRunningJobDoc(
-                jobID: activeJobID ?? "",
-                pluginID: activePluginID,
-                function: activeFunction,
-                step: stepRunning,
-                outputPath: activeOutputPath ?? "",
-                fullPrompt: pendingValues["prompt"] as? String ?? "",
-                thumbnailPaths: activeThumbnailPaths
-            )
-        } else {
-            runningDoc = nil
-        }
+        let docs = JobStepQueue.activeJobStepDocsForPersist(
+            jobID: activeJobID ?? "",
+            pluginID: activePluginID,
+            function: activeFunction,
+            runningStep: stepRunning,
+            pendingDoc: stepPendingDoc,
+            outputPath: activeOutputPath ?? "",
+            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            thumbnailPaths: activeThumbnailPaths,
+            jobNumber: resolvedActiveJobNumber(),
+            held: activeJobHeld()
+        )
         JobStepPersistence.persistStepJobFiles(
-            running: runningDoc,
-            pending: stepPendingDoc,
+            running: docs.running,
+            pending: docs.pending,
             queue: queueWithActiveDisplayIndex(),
             config: config
         )
@@ -3487,6 +3499,7 @@ final class ImageGenController {
 
     private func clearActiveGenerationState() {
         activeJobID = nil
+        activeJobNumber = nil
         isProcessing = false
         progressMessage = ""
         taskStatusHTML = ""
@@ -3514,10 +3527,11 @@ final class ImageGenController {
 
     private func restorePersistedJobQueue() {
         queue = JobStepPersistence.loadQueue(config: config)
-        ImageGenJobNumber.reconcile(
-            knownNumbers: queue.jobs.compactMap(\.jobNumber),
-            config: config
-        )
+        var knownNumbers = queue.jobs.compactMap(\.jobNumber)
+        if let activeJobNumber {
+            knownNumbers.append(activeJobNumber)
+        }
+        ImageGenJobNumber.reconcile(knownNumbers: knownNumbers, config: config)
         activeDisplayIndex = queue.activeDisplayIndex
         let hasActive = restoreActiveJobFromStepFiles()
         Task { await refreshAllQueuedJobStatusViews() }
@@ -3538,6 +3552,15 @@ final class ImageGenController {
         let function = source["function"] as? String ?? ""
         let jobID = source["job_id"] as? String ?? ""
         guard !pluginID.isEmpty, !function.isEmpty, !jobID.isEmpty else { return false }
+
+        var restoredJobNumber = ImageGenJobNumber.parse(from: pendingDoc ?? [:])
+        if restoredJobNumber == nil, let runningDoc {
+            restoredJobNumber = ImageGenJobNumber.parse(from: runningDoc)
+        }
+        if restoredJobNumber == nil {
+            restoredJobNumber = queue.jobs.first(where: { $0.jobID == jobID })?.jobNumber
+        }
+        activeJobNumber = restoredJobNumber
 
         activeJobID = jobID
         activeDisplayIndex = max(0, min(activeDisplayIndex, queue.jobs.count))

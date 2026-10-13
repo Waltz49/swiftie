@@ -451,9 +451,10 @@ extension AppState {
 
     func confirmCancelGeneration() {
         guard imageGen.isRunning() else { return }
+        let jobNumber = imageGen.activeJobID.flatMap { imageGen.jobNumberForDisplay(jobID: $0) }
         if StyledMessageDialog.showConfirm(
             title: "Cancel job?",
-            message: "Cancel the running job?",
+            message: ImageGenJobNumber.cancelConfirmMessage(isActive: true, jobNumber: jobNumber),
             confirmTitle: "Cancel Job",
             cancelTitle: "Keep Running",
             defaultCancel: true
@@ -469,7 +470,10 @@ extension AppState {
         }
         let rows = imageGen.queueSnapshot()
         guard let row = rows.first(where: { $0.jobID == id }) else { return }
-        let prompt = row.isActive ? "Cancel the running job?" : "Remove this job from the queue?"
+        let prompt = ImageGenJobNumber.cancelConfirmMessage(
+            isActive: row.isActive,
+            jobNumber: imageGen.jobNumberForDisplay(jobID: id)
+        )
         let confirmTitle = row.isActive ? "Cancel Job" : "Remove"
         let keepTitle = row.isActive ? "Keep Running" : "Keep"
         let parent = BrowserWindowIdentity.resolveMainBrowserWindow()

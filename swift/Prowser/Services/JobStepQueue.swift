@@ -257,6 +257,14 @@ enum JobStepQueue {
         return out
     }
 
+    static func applyJobNumberToDoc(_ doc: [String: Any], jobNumber: Int?) -> [String: Any] {
+        var out = doc
+        if let jobNumber, (1...ImageGenJobNumber.jobNumberMax).contains(jobNumber) {
+            out["job_number"] = jobNumber
+        }
+        return out
+    }
+
     static func buildPendingJobDoc(
         jobID: String,
         pluginID: String,
@@ -267,6 +275,7 @@ enum JobStepQueue {
         stepsDone: Int = 0,
         continuousMode: Bool = false,
         continuousTemplate: [String: Any]? = nil,
+        jobNumber: Int? = nil,
         held: Bool = false
     ) -> [String: Any] {
         var doc: [String: Any] = [
@@ -287,6 +296,7 @@ enum JobStepQueue {
         if let continuousTemplate {
             doc[continuousTemplateKey] = continuousTemplate
         }
+        doc = applyJobNumberToDoc(doc, jobNumber: jobNumber)
         return applyHeldToDoc(doc, held: held)
     }
 
@@ -297,9 +307,11 @@ enum JobStepQueue {
         step: [String: Any],
         outputPath: String,
         fullPrompt: String,
-        thumbnailPaths: [String]
+        thumbnailPaths: [String],
+        jobNumber: Int? = nil,
+        held: Bool = false
     ) -> [String: Any] {
-        [
+        var doc: [String: Any] = [
             "version": stepVersion,
             "job_id": jobID,
             "plugin_id": pluginID,
@@ -311,6 +323,57 @@ enum JobStepQueue {
             ],
             "step": step,
         ]
+        doc = applyJobNumberToDoc(doc, jobNumber: jobNumber)
+        return applyHeldToDoc(doc, held: held)
+    }
+
+    /// Port of ``active_job_step_docs_for_persist`` (`job_step_queue.py`).
+    static func activeJobStepDocsForPersist(
+        jobID: String,
+        pluginID: String,
+        function: String,
+        runningStep: [String: Any]?,
+        pendingDoc: [String: Any]?,
+        outputPath: String,
+        fullPrompt: String,
+        thumbnailPaths: [String],
+        jobNumber: Int?,
+        held: Bool
+    ) -> (running: [String: Any]?, pending: [String: Any]?) {
+        let heldOnPending = parseHeldFromDoc(pendingDoc) || held
+        var runningDoc: [String: Any]?
+        if let runningStep {
+            runningDoc = buildRunningJobDoc(
+                jobID: jobID,
+                pluginID: pluginID,
+                function: function,
+                step: runningStep,
+                outputPath: outputPath,
+                fullPrompt: fullPrompt,
+                thumbnailPaths: thumbnailPaths,
+                jobNumber: jobNumber,
+                held: heldOnPending
+            )
+        }
+        var pendingOut = pendingDoc
+        if pendingOut == nil, runningStep == nil {
+            return (nil, nil)
+        }
+        if pendingOut == nil {
+            pendingOut = buildPendingJobDoc(
+                jobID: jobID,
+                pluginID: pluginID,
+                function: function,
+                steps: [],
+                fullPrompt: fullPrompt,
+                thumbnailPaths: thumbnailPaths,
+                jobNumber: jobNumber,
+                held: heldOnPending
+            )
+        } else if jobNumber != nil {
+            pendingOut = applyJobNumberToDoc(pendingOut!, jobNumber: jobNumber)
+        }
+        return (runningDoc, pendingOut)
     }
 
     static func popNextStep(from doc: inout [String: Any]) -> [String: Any]? {

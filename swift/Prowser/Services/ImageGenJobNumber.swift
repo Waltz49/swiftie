@@ -9,6 +9,20 @@ enum ImageGenJobNumber {
         String(format: "J%04d", n)
     }
 
+    static func cancelConfirmMessage(isActive: Bool, jobNumber: Int?) -> String {
+        if let jobNumber {
+            let label = format(jobNumber)
+            if isActive {
+                return "Do you want to cancel job \(label)?"
+            }
+            return "Do you want to delete job \(label)?"
+        }
+        if isActive {
+            return "Cancel the running job?"
+        }
+        return "Remove this job from the queue?"
+    }
+
     private static func clamp(_ n: Int) -> Int {
         Swift.max(1, Swift.min(jobNumberMax, n))
     }
