@@ -70,6 +70,8 @@ final class AppState {
     var progressiveRefreshTask: Task<Void, Never>?
     var pendingProgressivePath: String?
     var pendingProgressiveForceEnterBrowse = false
+    var pendingProgressiveCompletedStep = 0
+    var pendingProgressiveStepTotal = 0
     var prowserGeneratedImageOpenTask: Task<Void, Never>?
     private let generationTimingDialog = GenerationTimingDialogController()
     var fileTreeFocusToken = 0
@@ -338,8 +340,13 @@ final class AppState {
             status.show("Saved \(name) to \(folder)")
             showProwserGeneratedImage(at: path)
         }
-        imageGen.onProgressivePreview = { [weak self] path, forceEnterBrowse in
-            self?.scheduleProgressiveBrowseRefresh(path, forceEnterBrowse: forceEnterBrowse)
+        imageGen.onProgressivePreview = { [weak self] path, forceEnterBrowse, completedStep, stepTotal in
+            self?.scheduleProgressiveBrowseRefresh(
+                path,
+                forceEnterBrowse: forceEnterBrowse,
+                completedStep: completedStep,
+                stepTotal: stepTotal
+            )
         }
         imageGen.onQueueChanged = { [weak self] in
             guard let self else { return }
@@ -351,6 +358,7 @@ final class AppState {
                 self?.jobsQueuePanelSync?()
             }
         }
+        installExifMetadataChangeHooks()
         KeyboardInputTracer.installIfNeeded(config: config)
 
         directoryHistory.referenceGraphStateProvider = { [weak self] in
@@ -1394,7 +1402,6 @@ final class AppState {
             do {
                 try await ExifService.writeUserComment(path: path, text: editUserCommentText)
                 cancelEditUserComment()
-                metadataCache.invalidate(path: path)
                 refreshDirectory()
             } catch {
                 StyledMessageDialog.showWarning(

@@ -127,6 +127,7 @@ struct ImageGenFluxPromptSection: View {
                 TextEditor(text: $systemPrompt)
                     .frame(minHeight: 72, maxHeight: 120)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    .imageGenPromptSentenceCaseOnBlur($systemPrompt, perLine: true)
                     .onChange(of: systemPrompt) { _, text in
                         ImageGenPersistence.saveFluxSystemPrompt(
                             text: text,

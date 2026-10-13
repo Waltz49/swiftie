@@ -145,15 +145,14 @@ final class MfluxGenerationTasks {
             let progressive = (runPayload["progressive_output_path"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? finalOutputPath
             let progressHandler: ([String: Any]) -> Void = { [weak self] message in
-                self?.onProgress?(message)
+                let enriched = Self.enrichProgressMessage(message, progressiveOutputPath: progressive)
+                self?.onProgress?(enriched)
             }
 
-            // CLI and MFLUX Python workers (including SceneWorks Klein 9B KV MLX) write
-            // seed_*_stepNofM.png; SD15/SDXL emit step progress on stderr instead.
-            let writesStepwisePNGs = !usePythonWorker
-                || pipelineID.hasPrefix("mflux_")
-                || pipelineID.hasPrefix("flux_schnell")
-            if writesStepwisePNGs,
+            // MFLUX CLI writes seed_*_stepNofM.png into stepwise_image_output_dir; Swift copies to
+            // progressive_output_path. Python workers (SD15/SDXL VAE previews, run_with_stepwise_watcher)
+            // emit NDJSON progress on stderr instead.
+            if !usePythonWorker,
                let stepwiseDir = runPayload["stepwise_image_output_dir"] as? String,
                !stepwiseDir.isEmpty {
                 stepwiseWatcher = StepwiseProgressWatcher(
@@ -173,6 +172,11 @@ final class MfluxGenerationTasks {
                     )
                 }
                 runPayload["output_path"] = finalOutputPath
+                if let flag = runPayload["show_progressive_images"] {
+                    runPayload["show_progressive_images"] = ImageGenPipelineModes.boolFromSettingsValue(flag)
+                } else {
+                    runPayload["show_progressive_images"] = ImageGenPipelineModes.showProgressiveImages(config: config)
+                }
                 let workerRun = try await ImageGenPipelineWorkerRunner.run(
                     pipelineID: pipelineID,
                     payload: runPayload,
@@ -354,6 +358,24 @@ final class MfluxGenerationTasks {
         if kind == "generate" {
             onGenerateFinished?(success, outputPath, error)
         }
+    }
+
+    /// SD15/SDXL workers emit ``path`` only when a VAE preview lands; keep browse target aligned with Python.
+    private static func enrichProgressMessage(
+        _ message: [String: Any],
+        progressiveOutputPath: String
+    ) -> [String: Any] {
+        var msg = message
+        let progressive = progressiveOutputPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !progressive.isEmpty else { return msg }
+
+        let hasPath = (msg["path"] as? String)?.isEmpty == false
+            || (msg["preview_path"] as? String)?.isEmpty == false
+        if !hasPath, FileManager.default.fileExists(atPath: progressive) {
+            msg["path"] = progressive
+            msg["progressive_output_path"] = progressive
+        }
+        return msg
     }
 }
 

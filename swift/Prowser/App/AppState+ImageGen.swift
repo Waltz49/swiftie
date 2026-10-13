@@ -1,9 +1,17 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 extension AppState {
-    func scheduleProgressiveBrowseRefresh(_ path: String, forceEnterBrowse: Bool) {
+    func scheduleProgressiveBrowseRefresh(
+        _ path: String,
+        forceEnterBrowse: Bool,
+        completedStep: Int,
+        stepTotal: Int
+    ) {
         pendingProgressivePath = path
+        pendingProgressiveCompletedStep = completedStep
+        pendingProgressiveStepTotal = stepTotal
         pendingProgressiveForceEnterBrowse = pendingProgressiveForceEnterBrowse || forceEnterBrowse
         if forceEnterBrowse {
             flushProgressiveBrowseRefresh()
@@ -22,6 +30,8 @@ extension AppState {
         progressiveRefreshTask = nil
         pendingProgressivePath = nil
         pendingProgressiveForceEnterBrowse = false
+        pendingProgressiveCompletedStep = 0
+        pendingProgressiveStepTotal = 0
     }
 
     private func flushProgressiveBrowseRefresh() {
@@ -29,17 +39,58 @@ extension AppState {
         progressiveRefreshTask = nil
         guard let path = pendingProgressivePath else { return }
         let forceEnterBrowse = pendingProgressiveForceEnterBrowse
+        let completedStep = pendingProgressiveCompletedStep
+        let stepTotal = pendingProgressiveStepTotal
         pendingProgressivePath = nil
         pendingProgressiveForceEnterBrowse = false
+        pendingProgressiveCompletedStep = 0
+        pendingProgressiveStepTotal = 0
         Task { @MainActor in
-            await flushProgressiveBrowseRefreshAsync(path: path, forceEnterBrowse: forceEnterBrowse)
+            await flushProgressiveBrowseRefreshAsync(
+                path: path,
+                forceEnterBrowse: forceEnterBrowse,
+                completedStep: completedStep,
+                stepTotal: stepTotal
+            )
         }
     }
 
-    private func flushProgressiveBrowseRefreshAsync(path: String, forceEnterBrowse: Bool) async {
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        await imageGen.writeProgressivePreviewExifIfNeeded(at: path)
-        refreshProgressiveImageInBrowse(at: path, forceEnterBrowse: forceEnterBrowse)
+    private func flushProgressiveBrowseRefreshAsync(
+        path: String,
+        forceEnterBrowse: Bool,
+        completedStep: Int,
+        stepTotal: Int
+    ) async {
+        // Python emits progress on stderr right after atomic_replace; the Swift worker subprocess
+        // can deliver the message before the preview file is visible here (especially on first preview).
+        await Task.yield()
+        var readablePath: String?
+        for _ in 0..<40 {
+            if Task.isCancelled { return }
+            if FileManager.default.fileExists(atPath: path), progressivePreviewFileIsReadable(path) {
+                readablePath = path
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard let readablePath else { return }
+        await imageGen.writeProgressivePreviewExifIfNeeded(
+            at: path,
+            completedStep: completedStep > 0 ? completedStep : nil,
+            totalSteps: stepTotal > 0 ? stepTotal : nil
+        )
+        refreshProgressiveImageInBrowse(at: readablePath, forceEnterBrowse: forceEnterBrowse)
+    }
+
+    /// Port of Python ``_progressive_image_readable`` (skip truncated/incomplete image files).
+    private func progressivePreviewFileIsReadable(_ path: String) -> Bool {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        let rasterExts = ["png", "webp", "jpg", "jpeg", "tif", "tiff"]
+        guard rasterExts.contains(ext) else { return true }
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else {
+            return false
+        }
+        return CGImageSourceGetStatus(source) == .statusComplete
     }
 
     /// Show a Prowser-generated output in browse immediately (port of Python ``_open_in_browse``).

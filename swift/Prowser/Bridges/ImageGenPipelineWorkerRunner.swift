@@ -128,8 +128,17 @@ enum ImageGenPipelineWorkerRunner {
         }
 
         private func handleProgressLine(_ line: String) {
-            guard let onProgress,
-                  let data = line.data(using: .utf8),
+            guard let onProgress else { return }
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let jsonText: String
+            if let start = trimmed.firstIndex(of: "{"),
+               let end = trimmed.lastIndex(of: "}") {
+                jsonText = String(trimmed[start...end])
+            } else {
+                jsonText = trimmed
+            }
+            guard let data = jsonText.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   object["type"] as? String == "progress" else { return }
             Task { @MainActor in

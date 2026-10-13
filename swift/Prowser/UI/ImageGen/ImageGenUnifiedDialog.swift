@@ -788,23 +788,42 @@ struct ImageGenUnifiedDialog: View {
         }) else { return }
 
         let hostID = plugin["lora_host_id"] as? String ?? ""
+        let stackMode = !hostID.isEmpty && hostID != LoRAHostRegistry.sd15
         let validIDs: Set<String>
         if hostID.isEmpty {
             validIDs = []
         } else {
-            guard let choices = try? await appState.workers.lora.choicesForPlugin(
-                pluginID: pluginID,
-                values: values
-            ) else { return }
-            guard selectedFunction == function, selectedPluginID == pluginID else { return }
-            validIDs = Set(choices.selectableChoices.map(\.presetID))
+            do {
+                let choices = try await appState.workers.lora.choicesForPlugin(
+                    pluginID: pluginID,
+                    values: values
+                )
+                guard selectedFunction == function, selectedPluginID == pluginID else { return }
+                validIDs = Set(choices.selectableChoices.map(\.presetID))
+            } catch {
+                guard selectedFunction == function, selectedPluginID == pluginID else { return }
+                let retained = Set(LoRAJobSnapshot.effectiveLoraIDs(from: values))
+                let changed = LoRAJobSnapshot.retainApplicableLoras(
+                    in: &values,
+                    validIDs: retained,
+                    stackMode: stackMode
+                )
+                guard changed, replaceJobID == nil else { return }
+                ImageGenPersistence.savePluginDialogSettings(
+                    function: function,
+                    pluginID: pluginID,
+                    values: values,
+                    config: appState.config
+                )
+                return
+            }
         }
 
         guard selectedFunction == function, selectedPluginID == pluginID else { return }
         let changed = LoRAJobSnapshot.retainApplicableLoras(
             in: &values,
             validIDs: validIDs,
-            stackMode: !hostID.isEmpty && hostID != LoRAHostRegistry.sd15
+            stackMode: stackMode
         )
         guard changed, replaceJobID == nil else { return }
         ImageGenPersistence.savePluginDialogSettings(
@@ -1041,6 +1060,7 @@ struct ImageGenUnifiedDialog: View {
 
     private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {
         var out = input
+        ImageGenPromptSentenceCase.flushPromptValues(&out)
         if out["random_seed"] as? Bool ?? true {
             let seed = Int.random(in: 0...(2_147_483_647))
             out["seed"] = seed

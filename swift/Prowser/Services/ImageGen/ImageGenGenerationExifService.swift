@@ -96,10 +96,18 @@ enum ImageGenGenerationExifService {
               FileManager.default.isReadableFile(atPath: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
 
-        if let existing = ExifService.userComment(path: outputPath),
-           existing.contains("Image Model:"),
-           existing.contains("LoRA:") {
-            return false
+        let loraLabel = (ImageGenExifCommentFormatting.loraNameForExifFromValues(
+            values: values,
+            pipelineID: plugin.pipelineID,
+            loraHostID: plugin.loraHostID
+        ) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = ExifService.userComment(path: outputPath)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           existing.hasPrefix("Image Model:") {
+            if existing.contains("LoRA:") || loraLabel.isEmpty {
+                return false
+            }
         }
 
         let comment = formatGenerationExifComment(

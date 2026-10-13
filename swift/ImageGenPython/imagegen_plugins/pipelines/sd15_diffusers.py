@@ -28,6 +28,18 @@ _DEFAULT_VAE_HF_MODEL_ID = SD15_DEFAULT_VAE
 # Minimum wall time between VAE decodes for progressive browse previews.
 _PROGRESSIVE_PREVIEW_MIN_INTERVAL_S = 4.0
 
+
+def _payload_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
 _pipe = None
 _loaded_model_key: Optional[Tuple[str, str]] = None
 _active_lora_key: Optional[Tuple[str, float]] = None
@@ -327,7 +339,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     output_path = str(payload["output_path"])
     negative_prompt = str(payload.get("negative_prompt") or "").strip()
     if "show_progressive_images" in payload:
-        show_progressive = bool(payload.get("show_progressive_images"))
+        show_progressive = _payload_bool(payload.get("show_progressive_images"))
     else:
         from imagegen_plugins.image_gen_persistence import load_show_progressive_images
 

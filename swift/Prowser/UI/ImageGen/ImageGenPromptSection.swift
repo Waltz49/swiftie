@@ -39,10 +39,12 @@ struct ImageGenPromptSection: View {
 
             TextField("Prompt", text: promptBinding, axis: .vertical)
                 .lineLimit(3...8)
+                .imageGenPromptSentenceCaseOnBlur(promptBinding)
 
             if showNegativePrompt {
                 TextField("Negative prompt", text: negativePromptBinding, axis: .vertical)
                     .lineLimit(2...5)
+                    .imageGenPromptSentenceCaseOnBlur(negativePromptBinding)
             }
 
             if showImportButtons {

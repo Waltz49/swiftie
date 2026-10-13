@@ -2,6 +2,10 @@ import Foundation
 import ImageIO
 /// EXIF read/write via ImageIO. Port of `exif/exif_utils.py` (phase 1).
 enum ExifService {
+    /// Invoked on the main actor after user-comment EXIF is written or cleared.
+    @MainActor
+    static var didUpdateUserCommentAtPath: ((String) -> Void)?
+
     private static let exifDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -270,11 +274,13 @@ enum ExifService {
     @MainActor
     static func writeUserComment(path: String, text: String) async throws {
         try writeUserCommentImageIO(path: path, text: text)
+        didUpdateUserCommentAtPath?(path)
     }
 
     @MainActor
     static func deleteUserComment(path: String) async throws {
         try deleteUserCommentImageIO(path: path)
+        didUpdateUserCommentAtPath?(path)
     }
 
     private static func writeUserCommentImageIO(path: String, text: String) throws {

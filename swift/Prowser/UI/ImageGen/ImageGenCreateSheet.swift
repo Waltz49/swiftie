@@ -14,6 +14,7 @@ struct ImageGenCreateSheet: View {
             Text("Create Image").font(.title2)
 
             TextField("Prompt", text: $prompt, axis: .vertical)
+                .imageGenPromptSentenceCaseOnBlur($prompt)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...8)
 

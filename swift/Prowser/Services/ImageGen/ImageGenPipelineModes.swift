@@ -32,6 +32,36 @@ enum ImageGenPipelineModes {
         modes[pipelineID]
     }
 
+    /// Settings values may be `Bool`, `NSNumber` (JSON/plist), or legacy strings.
+    static func boolFromSettingsValue(_ value: Any?) -> Bool {
+        switch value {
+        case let flag as Bool:
+            return flag
+        case let number as NSNumber:
+            return number.boolValue
+        case let number as Int:
+            return number != 0
+        case let text as String:
+            switch text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "1", "true", "yes", "on":
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
+        }
+    }
+
+    static func showProgressiveImages(in imagegen: [String: Any]) -> Bool {
+        boolFromSettingsValue(imagegen["show_progressive_images"])
+    }
+
+    static func showProgressiveImages(config: AppConfig) -> Bool {
+        let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
+        return showProgressiveImages(in: imagegen)
+    }
+
     static func finalizeRunValues(pipelineID: String, values: [String: Any], config: AppConfig) -> [String: Any] {
         var out = values
         guard let mode = mode(pipelineID: pipelineID) else { return out }
@@ -44,8 +74,7 @@ enum ImageGenPipelineModes {
         }
         out["steps"] = steps
         if mode.supportsProgressiveImages {
-            let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
-            out["show_progressive_images"] = imagegen["show_progressive_images"] as? Bool ?? false
+            out["show_progressive_images"] = showProgressiveImages(config: config)
         }
         if mode.supportsLowRAM {
             out["low_ram"] = config.bool(forKey: "imagegen_low_ram", default: true)
