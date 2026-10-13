@@ -257,6 +257,8 @@ enum JobQueueLayout {
     }
     static let cardInnerSpacing: CGFloat = 2
     static let listSpacing: CGFloat = 8
+    /// Horizontal insertion marker thickness for job-queue reorder (px).
+    static let dropIndicatorHeight: CGFloat = 5
     static let inlineRefsMinScrollWidth: CGFloat = 350
     static let inlineRefsRightPadding: CGFloat = 2
     static let inlineTextRefsSpacing: CGFloat = 4

@@ -414,25 +414,26 @@ final class ImageGenController {
                 )
             }
         pending = orderSnapshotRowsUnheldBeforeHeld(pending)
-        if let activeJobID {
-            let activeRow = QueueRowSnapshot(
-                jobID: activeJobID,
-                isActive: true,
-                statusHTML: taskStatusHTML.isEmpty ? progressMessage : taskStatusHTML,
-                statusView: activeStatusView,
-                thumbnailPaths: activeJobCardThumbnailPaths(),
-                fullPrompt: pendingValues["prompt"] as? String ?? "",
-                referencesInvalid: false,
-                pluginUnavailable: false,
-                statusLabel: progressMessage,
-                copiesTotal: copiesTotal,
-                jobNumber: activeJobNumber,
-                held: activeJobHeld(),
-                inError: false
-            )
-            return [activeRow] + pending
-        }
-        return pending
+        guard let activeJobID else { return pending }
+        let activeRow = QueueRowSnapshot(
+            jobID: activeJobID,
+            isActive: true,
+            statusHTML: taskStatusHTML.isEmpty ? progressMessage : taskStatusHTML,
+            statusView: activeStatusView,
+            thumbnailPaths: activeJobCardThumbnailPaths(),
+            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            referencesInvalid: false,
+            pluginUnavailable: false,
+            statusLabel: progressMessage,
+            copiesTotal: copiesTotal,
+            jobNumber: activeJobNumber,
+            held: activeJobHeld(),
+            inError: false
+        )
+        let insertAt = max(0, min(activeDisplayIndex, pending.count))
+        var rows = pending
+        rows.insert(activeRow, at: insertAt)
+        return rows
     }
 
     private func orderSnapshotRowsUnheldBeforeHeld(_ rows: [QueueRowSnapshot]) -> [QueueRowSnapshot] {
@@ -480,6 +481,8 @@ final class ImageGenController {
         queue.activeDisplayIndex = activeDisplayIndex
         persistQueue()
         bumpQueueRevision()
+        // Idle pipeline only; an in-flight copy finishes, then the new head runs.
+        _ = yieldActiveIfSupersededByReorder()
     }
 
     func replaceQueuedJob(jobID: String, pluginID: String, function: String, values: [String: Any]) async throws {
@@ -1146,6 +1149,14 @@ final class ImageGenController {
         return jobIDNextInLine() == activeJobID
     }
 
+    /// Port of ``ImageGenController._yield_active_if_superseded_by_reorder``.
+    @discardableResult
+    private func yieldActiveIfSupersededByReorder() -> Bool {
+        if activeIsNextToRun() { return false }
+        if generationWorkerActive() { return false }
+        return yieldActiveBatchIfNotNextToRun()
+    }
+
     /// Port of ``ImageGenController._yield_active_batch_if_not_next_to_run``.
     @discardableResult
     private func yieldActiveBatchIfNotNextToRun() -> Bool {
@@ -1283,19 +1294,21 @@ final class ImageGenController {
             }
             return
         }
-        if let head = queue.jobs.first, head.pluginUnavailable, isRunnableQueuedJob(head) {
+        guard let nextID = jobIDNextInLine(),
+              let index = queue.jobs.firstIndex(where: { $0.jobID == nextID }) else {
+            return
+        }
+        let head = queue.jobs[index]
+        if head.pluginUnavailable, isRunnableQueuedJob(head) {
             lastError =
                 "The first queued job uses an unavailable model (\(head.pluginID)). "
                 + "Edit or remove it to continue."
             return
         }
-        if let head = queue.jobs.first, head.referencesInvalid, isRunnableQueuedJob(head) {
+        if head.referencesInvalid, isRunnableQueuedJob(head) {
             lastError =
                 "The first queued job has missing reference files. "
                 + "Edit or remove it to continue."
-            return
-        }
-        guard let index = queue.jobs.firstIndex(where: { isRunnableQueuedJob($0) }) else {
             return
         }
         clearQueueErrorDisplay()
@@ -1358,7 +1371,7 @@ final class ImageGenController {
         activeThumbnailPaths = cardPaths
         activeJobCardThumbnailPathsCache = cardPaths
         activeStatusView = job.statusView
-        activeDisplayIndex = index
+        activeDisplayIndex = 0
         let continuous = JobStepQueue.isSeriesContinuousCopies(job.copiesTotal)
         let continuousTemplate = continuous && !steps.isEmpty ? steps[0] : nil
         stepPendingDoc = JobStepQueue.buildPendingJobDoc(

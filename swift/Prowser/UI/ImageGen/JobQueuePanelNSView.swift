@@ -51,6 +51,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var lastConfiguredScrollWidth: CGFloat = 0
     private var documentWidthConstraint: NSLayoutConstraint?
     private var documentHeightConstraint: NSLayoutConstraint?
+    private var stackTrailingConstraint: NSLayoutConstraint?
+    private var lastStackScrollbarReserve: CGFloat = 0
     private var pendingScrollWidth: CGFloat?
     private var scrollWidthReconfigureScheduled = false
     private var actionBarVisible = false
@@ -97,13 +99,15 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         wireActionBar()
 
         addSubview(scrollView)
+        let stackTrailing = stackView.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -4)
+        stackTrailingConstraint = stackTrailing
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             stackView.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 4),
-            stackView.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -4),
+            stackTrailing,
             stackView.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 4),
         ])
     }
@@ -187,8 +191,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     ) {
         self.rows = rows
         self.selectedJobID = selectedJobID
-        if scrollWidth > 0 {
-            lastConfiguredScrollWidth = scrollWidth
+        let cardScrollWidth = scrollWidthForRowLayout(proposed: scrollWidth)
+        if cardScrollWidth > 0 {
+            lastConfiguredScrollWidth = cardScrollWidth
         }
 
         let forceCardContentRefresh = imageGenUIRevision != lastSyncedImageGenUIRevision
@@ -205,17 +210,18 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 rebuildRows(
                     rows,
                     selectedJobID: selectedJobID,
-                    scrollWidth: scrollWidth,
+                    scrollWidth: cardScrollWidth,
                     forceContentRefresh: true
                 )
             } else {
                 refreshAlignedRows(
                     rows,
                     selectedJobID: selectedJobID,
-                    scrollWidth: scrollWidth,
+                    scrollWidth: cardScrollWidth,
                     forceContentRefresh: forceCardContentRefresh
                 )
             }
+            syncStackTrailingInsetForScrollbar()
             updateDocumentHeight()
         }
         refreshActionBarState()
@@ -425,8 +431,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     /// Height for pane auto-resize after layout at ``layoutWidth`` (reflows cards when width is known).
     func intrinsicPanelBlockHeight(mode: JobsQueueSizeMode, layoutWidth: CGFloat) -> CGFloat {
-        if layoutWidth > 1, abs(lastConfiguredScrollWidth - layoutWidth) > 0.5, !rows.isEmpty {
-            reconfigureRowsForScrollWidth(layoutWidth)
+        let cardScrollWidth = scrollWidthForRowLayout(proposed: layoutWidth)
+        if cardScrollWidth > 1, abs(lastConfiguredScrollWidth - cardScrollWidth) > 0.5, !rows.isEmpty {
+            reconfigureRowsForScrollWidth(cardScrollWidth)
         }
         layoutSubtreeIfNeeded()
         switch mode {
@@ -441,6 +448,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     /// Width used to wrap card text. The document view itself stays at the clip width.
     func layoutViewportWidth() -> CGFloat {
+        let clipW = rawClipViewportWidth()
+        let reserve = verticalScrollbarReservedWidth()
+        return max(clipW - reserve, 80)
+    }
+
+    private func rawClipViewportWidth() -> CGFloat {
         let clipW = scrollView.contentView.bounds.width
         if clipW > 20 {
             return clipW
@@ -449,6 +462,38 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             return bounds.width
         }
         return max(lastConfiguredScrollWidth, 260)
+    }
+
+    /// Port of Python ``get_viewport_width`` scrollbar fudge when content scrolls vertically.
+    private func verticalScrollbarReservedWidth() -> CGFloat {
+        guard scrollView.hasVerticalScroller, contentNeedsVerticalScroller() else { return 0 }
+        let controlSize = scrollView.verticalScroller?.controlSize ?? .regular
+        let style = scrollView.verticalScroller?.scrollerStyle ?? .legacy
+        return NSScroller.scrollerWidth(for: controlSize, scrollerStyle: style)
+    }
+
+    private func contentNeedsVerticalScroller() -> Bool {
+        let clipH = scrollView.contentView.bounds.height
+        guard clipH > 1 else { return false }
+        let docH = documentHeightConstraint?.constant ?? documentView.frame.height
+        let contentH = max(measuredCardStackHeight(), docH, fittingContentHeight)
+        return contentH > clipH + 1
+    }
+
+    /// Live card layout width (scrollbar-aware). Ignores stale wider values from SwiftUI proposals.
+    private func scrollWidthForRowLayout(proposed: CGFloat) -> CGFloat {
+        if scrollView.contentView.bounds.width > 20 || bounds.width > 20 {
+            return layoutViewportWidth()
+        }
+        if proposed > 1 { return proposed }
+        return max(proposed, 260)
+    }
+
+    private func syncStackTrailingInsetForScrollbar() {
+        let reserve = verticalScrollbarReservedWidth()
+        guard abs(reserve - lastStackScrollbarReserve) > 0.5 else { return }
+        lastStackScrollbarReserve = reserve
+        stackTrailingConstraint?.constant = -(4 + reserve)
     }
 
     private func effectiveScrollWidth() -> CGFloat {
@@ -514,11 +559,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         documentWidthConstraint?.constant = docW
         documentHeightConstraint?.constant = contentHeight
         documentView.frame = NSRect(x: 0, y: 0, width: docW, height: contentHeight)
+        syncStackTrailingInsetForScrollbar()
         stackView.layoutSubtreeIfNeeded()
     }
 
     override func layout() {
         super.layout()
+        syncStackTrailingInsetForScrollbar()
         let width = effectiveScrollWidth()
         jobsPaneDebug(
             "layout bounds=\(bounds) inWindow=\(window == nil ? "nil" : "\(convert(bounds, to: nil))") "
@@ -608,8 +655,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         dropLine.isHidden = true
-        pendingDropInsertIndex = nil
-        stopAutoScroll()
+        // Keep auto-scroll running until the drag session ends (pointer may be in pane titlebar).
+        // Keep pendingDropInsertIndex. AppKit sends exited immediately before the drop.
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -640,13 +687,22 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         convert(draggingInfo.draggingLocation, from: nil)
     }
 
+    /// Pointer in the flipped document (y grows downward, matching the card list).
+    private func documentPoint(from draggingInfo: NSDraggingInfo) -> NSPoint {
+        documentView.convert(draggingInfo.draggingLocation, from: nil)
+    }
+
+    private func cardFrameInDocument(_ card: NSView) -> NSRect {
+        card.convert(card.bounds, to: documentView)
+    }
+
     /// Display insert index before ``rows[index]`` (or end when index == rows.count).
-    private func insertIndex(forPointInPanel point: NSPoint) -> Int {
+    private func insertIndex(forPointInDocument point: NSPoint) -> Int {
         stackView.layoutSubtreeIfNeeded()
-        let localY = stackView.convert(point, from: self).y
         let visibleCount = min(cardViews.count, rows.count)
         for index in 0..<visibleCount {
-            if localY < cardViews[index].frame.midY {
+            let frame = cardFrameInDocument(cardViews[index])
+            if point.y < frame.midY {
                 return index
             }
         }
@@ -661,37 +717,46 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private func dropLineFrame(forInsertIndex insertIndex: Int) -> NSRect {
         stackView.layoutSubtreeIfNeeded()
         let spacing = JobQueueLayout.listSpacing
+        let lineHeight = JobQueueLayout.dropIndicatorHeight
         let marginX: CGFloat = 4
         let width = max(1, documentView.bounds.width - marginX * 2)
         let visibleCount = min(cardViews.count, rows.count)
 
-        let gapY: CGFloat
+        let centerY: CGFloat
         if visibleCount == 0 {
-            gapY = 4
+            centerY = 4
         } else if insertIndex <= 0 {
-            gapY = cardViews[0].frame.minY - max(1, spacing / 2)
+            centerY = cardFrameInDocument(cardViews[0]).minY - max(1, spacing / 2)
         } else if insertIndex >= visibleCount {
-            gapY = cardViews[visibleCount - 1].frame.maxY + max(1, spacing / 2)
+            centerY = cardFrameInDocument(cardViews[visibleCount - 1]).maxY + max(1, spacing / 2)
         } else {
-            gapY = cardViews[insertIndex].frame.minY - max(1, spacing / 2)
+            centerY = cardFrameInDocument(cardViews[insertIndex]).minY - max(1, spacing / 2)
         }
 
-        let stackOrigin = stackView.convert(NSPoint.zero, to: documentView)
-        return NSRect(x: marginX, y: stackOrigin.y + gapY, width: width, height: 2)
+        let y = centerY - lineHeight / 2
+        return NSRect(x: marginX, y: y, width: width, height: lineHeight)
     }
 
-    private func updateDropIndicator(for draggingInfo: NSDraggingInfo) {
-        let insertIndex = insertIndex(forPointInPanel: panelPoint(from: draggingInfo))
+    private func applyDropIndicator(insertIndex: Int) {
         pendingDropInsertIndex = insertIndex
         dropLine.isHidden = false
         dropLine.layer?.backgroundColor = NSColor(themeColors.jobQueueSelectionBorder).cgColor
         dropLine.frame = dropLineFrame(forInsertIndex: insertIndex)
+        documentView.addSubview(dropLine, positioned: .above, relativeTo: nil)
+        jobsPaneDebug("drop indicator index=\(insertIndex) frame=\(dropLine.frame)")
+    }
+
+    private func updateDropIndicator(for draggingInfo: NSDraggingInfo) {
+        applyDropIndicator(insertIndex: insertIndex(forPointInDocument: documentPoint(from: draggingInfo)))
     }
 
     private func applyReorder(at panelPoint: NSPoint) {
         guard !reorderApplied, let jobID = dragJobID else { return }
-        let insertIndex = pendingDropInsertIndex ?? insertIndex(forPointInPanel: panelPoint)
+        let insertIndex = pendingDropInsertIndex ?? insertIndex(
+            forPointInDocument: documentView.convert(panelPoint, from: self)
+        )
         let beforeID = beforeJobID(forInsertIndex: insertIndex)
+        jobsPaneDebug("drop apply job=\(jobID) index=\(insertIndex) before=\(beforeID ?? "end")")
         if beforeID == jobID { return }
         reorderApplied = true
         stopAutoScroll()
@@ -700,11 +765,14 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     private func startAutoScroll() {
-        autoScrollTimer?.invalidate()
-        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor [weak self] in self?.autoScrollTick() }
+        guard autoScrollTimer == nil else { return }
+        let timer = Timer(timeInterval: ThumbnailDragAutoScroll.tickInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.autoScrollTick()
+            }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        autoScrollTimer = timer
     }
 
     private func stopAutoScroll() {
@@ -712,15 +780,58 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         autoScrollTimer = nil
     }
 
-    private func autoScrollTick() {
-        guard let window else { return }
-        let mouse = window.mouseLocationOutsideOfEventStream
-        let local = scrollView.convert(mouse, from: nil)
-        if local.y < 20 {
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: scrollView.contentView.bounds.origin.y + 8))
-        } else if local.y > scrollView.bounds.height - 20 {
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, scrollView.contentView.bounds.origin.y - 8)))
+    /// Qt-style viewport Y (0 at top), including titlebar above the scroll view (Python global hover).
+    private func dragAutoScrollYInViewport(mouse: NSPoint) -> CGFloat {
+        let inScroll = scrollView.convert(mouse, from: nil)
+        let inPanel = convert(mouse, from: nil)
+        let viewportHeight = scrollView.bounds.height
+        let scrollFrame = scrollView.frame
+        if inPanel.y > scrollFrame.maxY {
+            return 0
         }
+        if inPanel.y < scrollFrame.minY {
+            return viewportHeight
+        }
+        if scrollView.isFlipped {
+            return inScroll.y
+        }
+        return viewportHeight - inScroll.y
+    }
+
+    /// Python job queue + thumbnail grid: 16 ms timer on ``RunLoop.Mode.common`` (fires during drag).
+    private func autoScrollTick() {
+        guard let window, dragJobID != nil else {
+            stopAutoScroll()
+            return
+        }
+        let clip = scrollView.contentView
+        let mouse = window.mouseLocationOutsideOfEventStream
+        let inScroll = scrollView.convert(mouse, from: nil)
+        let viewportHeight = clip.bounds.height
+        let viewportWidth = clip.bounds.width
+        let yInViewport = dragAutoScrollYInViewport(mouse: mouse)
+        guard viewportWidth > 0, viewportHeight > 0 else { return }
+        guard inScroll.x >= 0, inScroll.x <= scrollView.bounds.width else { return }
+
+        let docPoint = documentView.convert(mouse, from: nil)
+        applyDropIndicator(insertIndex: insertIndex(forPointInDocument: docPoint))
+
+        let delta = ThumbnailDragAutoScroll.scrollStep(
+            xInViewport: inScroll.x,
+            yInViewport: yInViewport,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight
+        )
+        guard delta != 0 else { return }
+
+        let visible = scrollView.documentVisibleRect
+        let documentHeight = documentView.frame.height
+        let maxOriginY = max(0, documentHeight - visible.height)
+        if delta < 0, visible.origin.y <= 0 { return }
+        if delta > 0, visible.origin.y >= maxOriginY - 0.5 { return }
+        let newY = min(max(0, visible.origin.y + delta), maxOriginY)
+        clip.scroll(to: NSPoint(x: visible.origin.x, y: newY))
+        scrollView.reflectScrolledClipView(clip)
     }
 }
 
@@ -1824,7 +1935,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
     ) -> CGFloat {
         if let proposalWidth = proposal?.width, proposalWidth > 1 { return proposalWidth }
         // Match pre-992af3d layout: avoid 1px placeholder width (breaks card metrics / hit targets).
-        return max(panel.bounds.width, panel.lastConfiguredScrollWidthForDebug, 260)
+        return max(panel.layoutViewportWidth(), 260)
     }
 
     @MainActor

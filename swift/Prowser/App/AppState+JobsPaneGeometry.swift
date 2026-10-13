@@ -141,7 +141,7 @@ extension AppState {
         jobsQueueStripMeasureRefresh?()
         jobsQueuePanelSync?()
         guard let host = jobsQueuePanelMeasureHost else { return }
-        let width = host.bounds.width > 1 ? host.bounds.width : 280
+        let width = host.panel.layoutViewportWidth()
         let mode = jobsQueueSizeMode
         jobsQueuePanelIntrinsicHeight = host.panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
     }
