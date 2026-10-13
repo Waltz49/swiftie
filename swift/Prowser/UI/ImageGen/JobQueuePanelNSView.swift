@@ -815,10 +815,35 @@ private final class JobNumberBadgeLabel: NSView {
 private final class JobCardClickOverlay: NSView {
     weak var card: JobCardNSView?
     private var receivedMouseDown = false
+    private var trackingArea: NSTrackingArea?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        card?.showPromptTooltipIfNeeded(from: self)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        card?.hidePromptTooltip(from: self)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        card?.hidePromptTooltip(from: self)
         receivedMouseDown = true
         card?.handleSelectionMouseDown(event)
     }
@@ -875,6 +900,7 @@ final class JobCardNSView: NSView {
     private var lastJobNumberHeld = false
     private var lastJobNumberInError = false
     private var lastCopiesTotal: Int?
+    private var storedFullPrompt = ""
     private let jobNumberBadge = JobNumberBadgeLabel()
     private var jobNumberBadgeTopConstraint: NSLayoutConstraint?
     private var jobNumberBadgeTrailingConstraint: NSLayoutConstraint?
@@ -1035,6 +1061,7 @@ final class JobCardNSView: NSView {
         selected: Bool,
         colors: ThemeColors
     ) {
+        syncStoredFullPrompt(row.fullPrompt)
         let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
         let useInline = Self.useInlineRefs(
@@ -1103,6 +1130,7 @@ final class JobCardNSView: NSView {
         syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
         updateChrome(selected: selected, running: row.isActive)
         invalidateIntrinsicContentSize()
+        dismissPromptTooltipIfContentChanged()
     }
 
     /// Python ``JobCard._use_inline_refs_layout``: wide pane and 1–2 (valid) references.
@@ -1158,6 +1186,7 @@ final class JobCardNSView: NSView {
         colors: ThemeColors,
         skipUnchanged: Bool = false
     ) {
+        syncStoredFullPrompt(row.fullPrompt)
         let identityChanged = !boundJobID.isEmpty && boundJobID != row.jobID
         boundJobID = row.jobID
         self.colors = colors
@@ -1209,6 +1238,7 @@ final class JobCardNSView: NSView {
         statusWidget.setStatusView(statusView, contentWidth: textWidth)
         lastHasBelowRefs = !useInline && refsView.cellCount > 0
         syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
+        dismissPromptTooltipIfContentChanged()
 
         lastViewFingerprint = statusFingerprint(
             textWidth: textWidth,
@@ -1387,7 +1417,41 @@ final class JobCardNSView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    func showPromptTooltipIfNeeded(from host: NSView) {
+        let tip = promptTooltipText
+        guard !tip.isEmpty else { return }
+        ListPromptTooltip.shared.scheduleShow(
+            text: tip,
+            colors: colors,
+            anchorView: host,
+            delayMs: 3001
+        )
+    }
+
+    func hidePromptTooltip(from host: NSView) {
+        ListPromptTooltip.shared.hide(for: host)
+    }
+
+    private var promptTooltipText: String {
+        JobPromptTooltipText.make(
+            fullPrompt: storedFullPrompt,
+            displayedPrompt: statusWidget.displayedPromptText()
+        )
+    }
+
+    private func syncStoredFullPrompt(_ fullPrompt: String) {
+        guard fullPrompt != storedFullPrompt else { return }
+        storedFullPrompt = fullPrompt
+        ListPromptTooltip.shared.hide(for: clickOverlay)
+    }
+
+    /// Python ``notify_job_prompt_tooltip_content_updating`` — hide while status HTML refreshes.
+    private func dismissPromptTooltipIfContentChanged() {
+        ListPromptTooltip.shared.hide(for: clickOverlay)
+    }
+
     func handleSelectionMouseDown(_ event: NSEvent) {
+        hidePromptTooltip(from: clickOverlay)
         mouseDownLocation = event.locationInWindow
         clickCount = event.clickCount
     }

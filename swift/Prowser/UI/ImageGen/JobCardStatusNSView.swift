@@ -9,7 +9,12 @@ final class JobCardStatusNSView: NSView {
     private var colors: ThemeColors = .dark
     private var contentWidth: CGFloat = 0
     private var lastFingerprint = ""
+    private var lastDisplayedPromptText = ""
     private let rowsStack = NSStackView()
+
+    func displayedPromptText() -> String {
+        lastDisplayedPromptText
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -59,6 +64,7 @@ final class JobCardStatusNSView: NSView {
         contentWidth = w
         guard let view, !view.isEmpty else {
             rowsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            lastDisplayedPromptText = ""
             lastFingerprint = ""
             invalidateIntrinsicContentSize()
             return
@@ -81,6 +87,7 @@ final class JobCardStatusNSView: NSView {
 
     private func rebuild(view: QueueJobStatusView, width: CGFloat) {
         rowsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        lastDisplayedPromptText = ""
         let valueWidth = max(40, width - JobQueueLayout.labelWidth - 2)
 
         for row in view.rows {
@@ -113,6 +120,7 @@ final class JobCardStatusNSView: NSView {
 
             case .prompt(let label, let value):
                 let clamped = PromptDisplayLayout.clampPromptForDisplay(value, width: valueWidth)
+                lastDisplayedPromptText = clamped
                 let block = NSStackView()
                 block.orientation = .vertical
                 block.spacing = 0

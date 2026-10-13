@@ -255,6 +255,7 @@ final class AppState {
         sessionViewLogURL = SessionViewLog.logFileURL(config: config)
         config.bindSessionViewLogURL(sessionViewLogURL)
         SessionViewLog.install(logFileURL: sessionViewLogURL)
+        ImageGenCommandLog.bindSessionLog(logFileURL: sessionViewLogURL)
         if launchOptions.debug {
             SessionViewLog.appendLine(
                 "[\(SessionViewLog.debugTimestamp())] Debug mode enabled (--debug)\n",

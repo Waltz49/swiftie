@@ -129,3 +129,25 @@ enum PromptDisplayLayout {
         clampCache[key] = value
     }
 }
+
+/// Hover tooltip text for job queue cards (`model_task_status_info.full_prompt_tooltip_text`).
+enum JobPromptTooltipText {
+    static func make(fullPrompt: String, displayedPrompt: String?) -> String {
+        let full = fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if full.isEmpty { return "" }
+        if let displayedPrompt {
+            let shown = normalizePromptForDisplay(displayedPrompt)
+            if shown == full || shown.isEmpty { return "" }
+            return full
+        }
+        return full
+    }
+
+    static func normalizePromptForDisplay(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
