@@ -249,6 +249,7 @@ struct ImageGenPanelShell: View {
                     ImageGenFieldRenderer(
                         layout: filteredLayout,
                         compactSliderTracks: compactSliderTracks,
+                        copiesSliderMax: compactSliderTracks ? JobStepQueue.seriesContinuousCopies : nil,
                         values: $values
                     )
                 }

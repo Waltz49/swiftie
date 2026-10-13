@@ -282,6 +282,7 @@ final class ImageGenController {
             progressiveBrowseOpened = false
             onProgressivePreview?(path, true, liveStep, liveStepTotal)
         }
+        bumpStripUI()
     }
 
     func resetProgressiveBrowseOpened() {
@@ -837,7 +838,12 @@ final class ImageGenController {
     func addActiveSeriesCycle(delta: Int = 1) {
         guard activeJobID != nil else { return }
         if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return }
-        copiesTotal = min(50, copiesTotal + delta)
+        let proposed = copiesTotal + delta
+        if JobStepQueue.isSeriesContinuousCopies(proposed) {
+            setActiveSeriesContinuous()
+            return
+        }
+        copiesTotal = min(JobStepQueue.seriesContinuousCopies - 1, proposed)
         copyBatchActive = copiesTotal > 1
         appendPendingSteps(count: delta)
         persistStepState()
@@ -866,8 +872,9 @@ final class ImageGenController {
         guard activeJobID != nil else { return }
         copiesTotal = JobStepQueue.seriesContinuousCopies
         copyBatchActive = true
+        pendingValues["copies"] = JobStepQueue.seriesContinuousCopies
         if var doc = stepPendingDoc {
-            doc[JobStepQueue.continuousModeKey] = true
+            activateContinuousSeriesPendingDoc(&doc)
             stepPendingDoc = doc
         }
         persistStepState()
@@ -1340,6 +1347,8 @@ final class ImageGenController {
         activeJobCardThumbnailPathsCache = cardPaths
         activeStatusView = job.statusView
         activeDisplayIndex = index
+        let continuous = JobStepQueue.isSeriesContinuousCopies(job.copiesTotal)
+        let continuousTemplate = continuous && !steps.isEmpty ? steps[0] : nil
         stepPendingDoc = JobStepQueue.buildPendingJobDoc(
             jobID: job.jobID,
             pluginID: job.pluginID,
@@ -1347,6 +1356,8 @@ final class ImageGenController {
             steps: steps,
             fullPrompt: resolvedPrompt,
             thumbnailPaths: job.thumbnailPaths,
+            continuousMode: continuous,
+            continuousTemplate: continuousTemplate,
             held: job.held
         )
         // Publish only after status, thumbs, and prompt are installed. An earlier bump
@@ -1368,6 +1379,7 @@ final class ImageGenController {
             finishOrAbortQueuedJobStart()
             return
         }
+        appendContinuousPendingStepIfNeeded(&doc)
         guard let step = JobStepQueue.popNextStep(from: &doc) else {
             stepPendingDoc = doc
             finishOrAbortQueuedJobStart()
@@ -2193,7 +2205,7 @@ final class ImageGenController {
             return
         }
         if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
-            finishCopyBatchForDeferredQuit()
+            finishCopyBatch(cancelled: false)
             maybeQuitAfterCurrentWorker()
             return
         }
@@ -2211,6 +2223,34 @@ final class ImageGenController {
             return
         }
         await action()
+    }
+
+    /// Port of ``ImageGenController._activate_continuous_series_pending_doc``.
+    private func activateContinuousSeriesPendingDoc(
+        _ doc: inout [String: Any],
+        templateStep: [String: Any]? = nil
+    ) {
+        let template: [String: Any]?
+        if let templateStep {
+            template = templateStep
+        } else if let steps = doc["steps"] as? [[String: Any]], let first = steps.first {
+            template = first
+        } else if let stepRunning {
+            template = stepRunning
+        } else {
+            template = nil
+        }
+        guard let template else { return }
+        doc[JobStepQueue.continuousModeKey] = true
+        doc[JobStepQueue.continuousTemplateKey] = template
+    }
+
+    /// Port of ``ImageGenController._append_continuous_pending_step`` (before ``_promote_next_step_to_running``).
+    private func appendContinuousPendingStepIfNeeded(_ doc: inout [String: Any]) {
+        guard JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return }
+        guard JobStepQueue.pendingStepCount(doc) <= 0 else { return }
+        guard let template = doc[JobStepQueue.continuousTemplateKey] as? [String: Any] else { return }
+        doc = JobStepQueue.appendContinuousStep(to: doc, templateStep: template)
     }
 
     private func appendPendingSteps(count: Int) {
@@ -3190,7 +3230,7 @@ final class ImageGenController {
             return
         }
         if copyBatchActive {
-            finishCopyBatchForDeferredQuit()
+            finishCopyBatch(cancelled: false)
         }
         maybeQuitAfterCurrentWorker()
     }
@@ -3253,14 +3293,8 @@ final class ImageGenController {
             JobStepPersistence.saveActivePending(nil, config: config)
             JobStepPersistence.saveActiveRunning(nil, config: config)
         }
-        finishCopyBatchForDeferredQuit()
-        maybeQuitAfterCurrentWorker()
+        finishCopyBatch(cancelled: false)
         return true
-    }
-
-    private func finishCopyBatchForDeferredQuit() {
-        copyBatchActive = false
-        copyBatchCancelled = true
     }
 
     private func dismissDeferredQuitDialog() {

@@ -358,6 +358,9 @@ final class AppState {
                 self?.jobsQueuePanelSync?()
             }
         }
+        imageGen.onDeferredQuitComplete = { [weak self] in
+            self?.closeMainWindowAfterDeferredQuit()
+        }
         installExifMetadataChangeHooks()
         KeyboardInputTracer.installIfNeeded(config: config)
 
@@ -1456,6 +1459,16 @@ final class AppState {
         default:
             return nil
         }
+    }
+
+    /// Python ``_maybe_quit_after_current_worker`` → ``main_window.close`` after the active unit finishes.
+    func closeMainWindowAfterDeferredQuit() {
+        quitConfirmedViaClose = true
+        WindowFullscreen.noteMainWindowClosing()
+        if let window = BrowserWindowIdentity.resolveMainBrowserWindow() {
+            window.performClose(nil)
+        }
+        NSApp.terminate(nil)
     }
 
     /// Python File → Exit (⌘Q / `QAction.QuitRole`) is connected to `main_window.close`.

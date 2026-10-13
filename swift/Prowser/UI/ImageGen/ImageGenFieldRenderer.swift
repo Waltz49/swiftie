@@ -4,6 +4,8 @@ import SwiftUI
 struct ImageGenFieldRenderer: View {
     let layout: [[String: Any]]
     var compactSliderTracks: Bool = false
+    /// When set (unified dialog / panel mode), copies slider max is 51 (continuous).
+    var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
 
     var body: some View {
@@ -12,6 +14,7 @@ struct ImageGenFieldRenderer: View {
                 ImageGenFieldNodeView(
                     node: layout[index],
                     compactSliderTracks: compactSliderTracks,
+                    copiesSliderMax: copiesSliderMax,
                     values: $values
                 )
             }
@@ -23,6 +26,7 @@ struct ImageGenFieldRenderer: View {
 private struct ImageGenFieldNodeView: View {
     let node: [String: Any]
     var compactSliderTracks: Bool = false
+    var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
 
     var body: some View {
@@ -39,6 +43,7 @@ private struct ImageGenFieldNodeView: View {
                 ImageGenStepsQuantRowGroup(
                     node: node,
                     compactSliderTracks: compactSliderTracks,
+                    copiesSliderMax: copiesSliderMax,
                     values: $values
                 )
             } else if layout == "prompt_block" {
@@ -56,6 +61,7 @@ private struct ImageGenFieldNodeView: View {
                             ImageGenFieldNodeView(
                                 node: children[idx],
                                 compactSliderTracks: compactSliderTracks,
+                                copiesSliderMax: copiesSliderMax,
                                 values: $values
                             )
                         }
@@ -66,6 +72,7 @@ private struct ImageGenFieldNodeView: View {
             ImageGenFieldSpecView(
                 spec: spec,
                 compactSliderTracks: compactSliderTracks,
+                copiesSliderMax: copiesSliderMax,
                 values: $values
             )
         }
@@ -76,7 +83,15 @@ private struct ImageGenFieldNodeView: View {
 private struct ImageGenFieldSpecView: View {
     let spec: [String: Any]
     var compactSliderTracks: Bool = false
+    var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
+
+    private func effectiveIntSliderMax(spec: [String: Any], key: String) -> Int {
+        if key == "copies", let copiesSliderMax {
+            return copiesSliderMax
+        }
+        return spec["max_value"] as? Int ?? 100
+    }
 
     var body: some View {
         let key = spec["key"] as? String ?? ""
@@ -92,11 +107,14 @@ private struct ImageGenFieldSpecView: View {
                 label: label,
                 key: key,
                 minValue: spec["min_value"] as? Int ?? 0,
-                maxValue: spec["max_value"] as? Int ?? 100,
+                maxValue: effectiveIntSliderMax(spec: spec, key: key),
                 step: spec["step"] as? Int ?? 1,
                 resetDefault: spec["reset_default"],
                 compactTrack: compactSliderTracks,
                 inlineLabel: compactSliderTracks,
+                continuousAt: key == "copies" && copiesSliderMax != nil
+                    ? JobStepQueue.seriesContinuousCopies
+                    : nil,
                 values: $values
             )
         case "float_slider":
@@ -321,6 +339,7 @@ private struct ImageGenSeedRowGroup: View {
 private struct ImageGenStepsQuantRowGroup: View {
     let node: [String: Any]
     var compactSliderTracks: Bool = false
+    var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
 
     private var childSpecs: [[String: Any]] {
@@ -335,6 +354,7 @@ private struct ImageGenStepsQuantRowGroup: View {
                 ImageGenFieldSpecView(
                     spec: stepsSpec,
                     compactSliderTracks: compactSliderTracks,
+                    copiesSliderMax: copiesSliderMax,
                     values: $values
                 )
                 .fixedSize(horizontal: compactSliderTracks, vertical: false)
@@ -343,6 +363,7 @@ private struct ImageGenStepsQuantRowGroup: View {
                 ImageGenFieldSpecView(
                     spec: quantSpec,
                     compactSliderTracks: compactSliderTracks,
+                    copiesSliderMax: copiesSliderMax,
                     values: $values
                 )
                 .fixedSize(horizontal: compactSliderTracks, vertical: false)

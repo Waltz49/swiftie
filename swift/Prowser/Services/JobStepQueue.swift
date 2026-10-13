@@ -4,6 +4,8 @@ import Foundation
 enum JobStepQueue {
     static let stepVersion = 1
     static let seriesContinuousCopies = 51
+    /// Port of ``ImageGenController._COPIES_MAX``.
+    static let copiesMax = 200
     static let chainStateKey = "chain_state"
     static let continuousModeKey = "continuous_mode"
     static let continuousTemplateKey = "continuous_template"
@@ -116,8 +118,11 @@ enum JobStepQueue {
 
     static func normalizeCopies(_ raw: Any) -> Int {
         let value = (raw as? Int) ?? Int("\(raw)") ?? 1
-        let clamped = max(1, min(50, value))
-        return clamped >= seriesContinuousCopies ? seriesContinuousCopies : clamped
+        let clamped = max(1, min(copiesMax, value))
+        if isSeriesContinuousCopies(clamped) {
+            return seriesContinuousCopies
+        }
+        return clamped
     }
 
     static func materializeSteps(
@@ -176,6 +181,14 @@ enum JobStepQueue {
     private static func hasFluxPromptAIJob(_ values: [String: Any]) -> Bool {
         guard let meta = values[fluxPromptAIJobKey] as? [String: Any] else { return false }
         return !(meta["kind"] as? String ?? "").isEmpty
+    }
+
+    /// Append one generation step from a continuous-series template (port of ``_append_continuous_pending_step``).
+    static func appendContinuousStep(to doc: [String: Any], templateStep: [String: Any]) -> [String: Any] {
+        let values = mergeStepIntoValues(templateStep)
+        let needsAI = stepNeedsAI(templateStep) || hasFluxPromptAIJob(values)
+        let step = copyStep(from: values, needsAI: needsAI)
+        return appendPendingStep(doc: doc, step: step)
     }
 
     private static func copyStep(from values: [String: Any], needsAI: Bool) -> [String: Any] {
@@ -311,6 +324,13 @@ enum JobStepQueue {
         let steps = doc["steps"] as? [[String: Any]] ?? []
         var out = doc
         out["steps"] = [step] + steps
+        return out
+    }
+
+    static func appendPendingStep(doc: [String: Any], step: [String: Any]) -> [String: Any] {
+        let steps = doc["steps"] as? [[String: Any]] ?? []
+        var out = doc
+        out["steps"] = steps + [step]
         return out
     }
 

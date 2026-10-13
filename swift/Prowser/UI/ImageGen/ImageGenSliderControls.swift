@@ -158,6 +158,8 @@ struct ImageGenIntSliderRow: View {
     var compactTrack: Bool = false
     var inlineLabel: Bool = false
     var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
+    /// When set, show a "Continuous" hint beside the value at this slider value (copies = 51).
+    var continuousAt: Int? = nil
     @Binding var values: [String: Any]
 
     private var includesReset: Bool { resetDefault != nil }
@@ -185,6 +187,11 @@ struct ImageGenIntSliderRow: View {
                 controlWidth: valueControlWidth
             )
             .frame(width: valueControlWidth)
+            if let continuousAt, currentValue == continuousAt {
+                Text("Continuous")
+                    .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                    .foregroundStyle(.secondary)
+            }
             if includesReset {
                 ImageGenFieldResetButton(
                     isActive: !ImageGenFieldResetLogic.matchesDefault(
