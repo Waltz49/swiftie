@@ -488,7 +488,8 @@ final class ImageGenController {
         var submitValues = values
         submitValues["copies"] = copies
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
-        let steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: copies)
+        var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: copies)
+        JobStepQueue.stampSeriesCopiesOnSteps(&steps, copies: copies)
         queue.jobs[index].pluginID = pluginID
         queue.jobs[index].function = function
         queue.jobs[index].values = submitValues
@@ -589,16 +590,27 @@ final class ImageGenController {
         submitValues["copies"] = copies
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         copiesTotal = copies
-        copyBatchActive = copies > 1 || copiesDone > 0
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+            copyBatchActive = true
+        } else {
+            copyBatchActive = copies > 1 || copiesDone > 0
+        }
         activePluginID = pluginID
         pendingValues = submitValues
         let future = max(0, copies - copiesDone - inProgress)
         if var doc = stepPendingDoc {
-            let steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: future)
+            let steps = try JobStepQueue.materializePendingStepsFromUpdate(
+                pluginID: pluginID,
+                templateValues: submitValues,
+                count: future
+            )
             doc["steps"] = steps
             stepPendingDoc = doc
         }
+        await syncActiveJobQueueRow(pluginID: pluginID, values: submitValues, copiesTotal: copies)
+        await refreshActiveJobStatusView()
         persistStepState()
+        persistQueue()
         bumpQueueRevision()
     }
 
@@ -2773,17 +2785,14 @@ final class ImageGenController {
             )
         }
 
-        let displayCopiesTotal = max(job.copiesTotal, job.steps.isEmpty ? 1 : job.steps.count)
-        if displayCopiesTotal != job.copiesTotal {
-            job.copiesTotal = displayCopiesTotal
-            job.values["copies"] = displayCopiesTotal
-        }
+        let copiesForStatus = max(1, job.copiesTotal)
+        job.values["copies"] = copiesForStatus
         let loraLabel = await resolvedLoraStatusLabel(pluginID: job.pluginID, values: job.values)
         let built = buildQueueStatusView(
             pluginID: job.pluginID,
             function: job.function,
             values: job.values,
-            copiesTotal: displayCopiesTotal,
+            copiesTotal: copiesForStatus,
             payload: payload.isEmpty ? nil : payload,
             withAI: hasFluxAI,
             loraLabel: loraLabel
@@ -2800,6 +2809,36 @@ final class ImageGenController {
         applyQueuedJobErrorBanner(at: writeIndex)
         publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
         bumpStripUI()
+    }
+
+    /// Port of ``_sync_active_job_queue_row`` (active job still has a queue row until the worker pops it).
+    private func syncActiveJobQueueRow(
+        pluginID: String,
+        values: [String: Any],
+        copiesTotal: Int
+    ) async {
+        guard let jobID = activeJobID,
+              let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
+        queue.jobs[index].pluginID = pluginID
+        queue.jobs[index].function = activeFunction
+        queue.jobs[index].pluginUnavailable = false
+        queue.jobs[index].values = values
+        queue.jobs[index].copiesTotal = copiesTotal
+        queue.jobs[index].fullPrompt = JobStepQueue.resolvedFullPrompt(
+            stored: queue.jobs[index].fullPrompt,
+            values: values,
+            steps: queue.jobs[index].steps,
+            statusView: queue.jobs[index].statusView
+        )
+        let thumbs = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
+        if !thumbs.isEmpty {
+            queue.jobs[index].thumbnailPaths = thumbs
+        }
+        queue.jobs[index].referencesInvalid = JobCardThumbnailPaths.referencesInvalid(
+            pluginID: pluginID,
+            values: values
+        )
+        await refreshQueuedJobStatus(at: index)
     }
 
     /// The visible active row reads ``activeStatusView``, not the queued copy.

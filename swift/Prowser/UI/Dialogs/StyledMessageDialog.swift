@@ -423,7 +423,7 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     func runModal(parentWindow: NSWindow? = nil) {
         panel.center()
         NSApp.activate(ignoringOtherApps: true)
-        if let parentWindow {
+        if let parentWindow = Self.effectiveSheetParent(for: parentWindow) {
             sheetParent = parentWindow
             parentWindow.makeKeyAndOrderFront(nil)
             parentWindow.beginSheet(panel) { [weak self] _ in
@@ -431,6 +431,7 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             }
         } else {
             panel.makeKeyAndOrderFront(nil)
+            panel.orderFrontRegardless()
         }
         if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
             panel.makeFirstResponder(firstResponder)
@@ -455,6 +456,18 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             NSApp.stopModal()
         }
         BrowserWindowIdentity.restoreBrowserKeyAfterAuxiliaryDialog()
+    }
+
+    /// Use a sheet only when the explicit parent is already frontmost; otherwise a sheet would sit
+    /// behind other visible windows (e.g. Image Generation unified dialog, preferences).
+    private static func effectiveSheetParent(for explicitParent: NSWindow?) -> NSWindow? {
+        guard let explicitParent, explicitParent.isVisible else { return nil }
+        let visibleWindows = NSApp.windows.filter(\.isVisible)
+        guard let frontmost = visibleWindows.last else { return explicitParent }
+        if frontmost === explicitParent || frontmost.parent === explicitParent {
+            return explicitParent
+        }
+        return nil
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

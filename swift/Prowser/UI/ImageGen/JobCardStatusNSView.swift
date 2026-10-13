@@ -50,6 +50,10 @@ final class JobCardStatusNSView: NSView {
         lastFingerprint = ""
     }
 
+    func hasRenderedView() -> Bool {
+        !rowsStack.arrangedSubviews.isEmpty
+    }
+
     func setStatusView(_ view: QueueJobStatusView?, contentWidth width: CGFloat) {
         let w = max(80, width)
         contentWidth = w

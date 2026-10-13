@@ -43,6 +43,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var rows: [QueueRowSnapshot] = []
     /// When the running job id changes, force a card rebuild (pool reuse can leave stale running chrome).
     private var lastDisplayedActiveJobID: String?
+    private var lastSyncedImageGenUIRevision = -1
     private var dragJobID: String?
     private var pendingDropInsertIndex: Int?
     private var reorderApplied = false
@@ -178,12 +179,20 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         }
     }
 
-    func updateRows(_ rows: [QueueRowSnapshot], selectedJobID: String?, scrollWidth: CGFloat) {
+    func updateRows(
+        _ rows: [QueueRowSnapshot],
+        selectedJobID: String?,
+        scrollWidth: CGFloat,
+        imageGenUIRevision: Int
+    ) {
         self.rows = rows
         self.selectedJobID = selectedJobID
         if scrollWidth > 0 {
             lastConfiguredScrollWidth = scrollWidth
         }
+
+        let forceCardContentRefresh = imageGenUIRevision != lastSyncedImageGenUIRevision
+        lastSyncedImageGenUIRevision = imageGenUIRevision
 
         let activeJobID = rows.first(where: { $0.isActive })?.jobID
         let activeJobChanged = activeJobID != lastDisplayedActiveJobID
@@ -193,9 +202,19 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             if rows.isEmpty {
                 parkAllCards()
             } else if activeJobChanged || !cardsAlignWithSnapshot(rows) {
-                rebuildRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
+                rebuildRows(
+                    rows,
+                    selectedJobID: selectedJobID,
+                    scrollWidth: scrollWidth,
+                    forceContentRefresh: true
+                )
             } else {
-                refreshAlignedRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
+                refreshAlignedRows(
+                    rows,
+                    selectedJobID: selectedJobID,
+                    scrollWidth: scrollWidth,
+                    forceContentRefresh: forceCardContentRefresh
+                )
             }
             updateDocumentHeight()
         }
@@ -214,7 +233,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private func refreshAlignedRows(
         _ rows: [QueueRowSnapshot],
         selectedJobID: String?,
-        scrollWidth: CGFloat
+        scrollWidth: CGFloat,
+        forceContentRefresh: Bool
     ) {
         var selectedCard: JobCardNSView?
         for (index, row) in rows.enumerated() {
@@ -229,7 +249,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 colors: themeColors,
                 // Python skips unchanged inactive rows only. The active card must
                 // repaint when a newly submitted job becomes current.
-                skipUnchanged: !row.isActive
+                skipUnchanged: !forceContentRefresh && !row.isActive
             )
             if isSelected { selectedCard = card }
         }
@@ -241,7 +261,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private func rebuildRows(
         _ rows: [QueueRowSnapshot],
         selectedJobID: String?,
-        scrollWidth: CGFloat
+        scrollWidth: CGFloat,
+        forceContentRefresh: Bool
     ) {
         var lookup: [String: JobCardNSView] = [:]
         for card in cardPool where !card.boundJobID.isEmpty {
@@ -268,7 +289,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 scrollWidth: scrollWidth,
                 selected: isSelected,
                 colors: themeColors,
-                skipUnchanged: false
+                skipUnchanged: !forceContentRefresh
             )
             nextCards.append(card)
             if isSelected { selectedCard = card }
@@ -455,7 +476,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         preserveScrollPosition {
             guard cardViews.count == rows.count,
                   zip(cardViews, rows).allSatisfy({ $0.matchesSnapshotRow($1) }) else {
-                rebuildRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
+                rebuildRows(
+                    rows,
+                    selectedJobID: selectedJobID,
+                    scrollWidth: scrollWidth,
+                    forceContentRefresh: true
+                )
                 updateDocumentHeight()
                 return
             }
@@ -1237,6 +1263,7 @@ final class JobCardNSView: NSView {
         selected: Bool
     ) -> Bool {
         guard boundJobID == row.jobID else { return false }
+        if !statusWidget.hasRenderedView() { return false }
         let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
         let useInline = Self.useInlineRefs(
@@ -1578,7 +1605,12 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         }
         panel.applyTheme(appState.theme.colors)
         let scrollWidth = resolvedLayoutWidth(proposal: nil, panel: panel)
-        panel.updateRows(rows, selectedJobID: selectedJobID, scrollWidth: scrollWidth)
+        panel.updateRows(
+            rows,
+            selectedJobID: selectedJobID,
+            scrollWidth: scrollWidth,
+            imageGenUIRevision: appState.imageGenUIRevision
+        )
     }
 
     @MainActor
