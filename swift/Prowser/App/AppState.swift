@@ -342,8 +342,14 @@ final class AppState {
             self?.scheduleProgressiveBrowseRefresh(path, forceEnterBrowse: forceEnterBrowse)
         }
         imageGen.onQueueChanged = { [weak self] in
-            self?.bumpImageGenUI()
-            self?.jobsQueuePanelSync?()
+            guard let self else { return }
+            self.bumpImageGenUI()
+            self.jobsQueuePanelSync?()
+            // SwiftUI may replace the representable when the queue changes shape.
+            // Sync again after that replacement has installed its callback.
+            DispatchQueue.main.async { [weak self] in
+                self?.jobsQueuePanelSync?()
+            }
         }
         KeyboardInputTracer.installIfNeeded(config: config)
 

@@ -26,6 +26,7 @@ struct ImageGenUnifiedDialog: View {
     @State private var baselineValues: [String: Any] = [:]
     @State private var visitedFunctions: Set<String> = []
     @State private var pluginSwitchGuard = false
+    @State private var importedPluginSwitchID: String?
     @State private var suppressCloseOnGeneratePersist = false
     @State private var loadGeneration = 0
     @State private var postOpenWorkGeneration = 0
@@ -55,6 +56,7 @@ struct ImageGenUnifiedDialog: View {
                     sourcePaths: selectedFunction == "edit" ? lockedEditSourcePaths : [],
                     sourcePath: panelSourcePath,
                     onValuesChanged: { markDirtyIfNeeded() },
+                    onPluginImported: { prepareImportedPluginSelection($0) },
                     onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
                         lockedEditSourcePaths = paths
                         appState.imageGenDialogRequest.editSourcePaths = paths
@@ -84,8 +86,12 @@ struct ImageGenUnifiedDialog: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .onChange(of: selectedPluginID) { oldValue, newValue in
+                    if importedPluginSwitchID == newValue {
+                        importedPluginSwitchID = nil
+                        return
+                    }
                     guard !pluginSwitchGuard, !isLoading, !oldValue.isEmpty, oldValue != newValue else { return }
-                    switchPlugin(from: oldValue, to: newValue)
+                    Task { await switchPlugin(from: oldValue, to: newValue) }
                 }
             }
             if !submitNotice.isEmpty {
@@ -751,7 +757,7 @@ struct ImageGenUnifiedDialog: View {
         return true
     }
 
-    private func switchPlugin(from oldPluginID: String, to newPluginID: String) {
+    private func switchPlugin(from oldPluginID: String, to newPluginID: String) async {
         let preservedPrompt = values["prompt"] as? String ?? ""
         values = ImageGenPersistence.switchPluginPreservingPrompt(
             function: selectedFunction,
@@ -767,10 +773,46 @@ struct ImageGenUnifiedDialog: View {
             values["source_image_paths"] = lockedEditSourcePaths
             values["source_image_path"] = lockedEditSourcePaths[0]
         }
+        await removeLorasInapplicableToSelectedPlugin(newPluginID)
+        guard selectedPluginID == newPluginID else { return }
         session.setValues(values, for: selectedFunction)
         session.setPluginID(newPluginID, for: selectedFunction)
         baselineValues = values
         isDirty = false
+    }
+
+    private func removeLorasInapplicableToSelectedPlugin(_ pluginID: String) async {
+        let function = selectedFunction
+        guard let plugin = (pluginsByFunction[function] ?? []).first(where: {
+            ($0["plugin_id"] as? String) == pluginID
+        }) else { return }
+
+        let hostID = plugin["lora_host_id"] as? String ?? ""
+        let validIDs: Set<String>
+        if hostID.isEmpty {
+            validIDs = []
+        } else {
+            guard let choices = try? await appState.workers.lora.choicesForPlugin(
+                pluginID: pluginID,
+                values: values
+            ) else { return }
+            guard selectedFunction == function, selectedPluginID == pluginID else { return }
+            validIDs = Set(choices.selectableChoices.map(\.presetID))
+        }
+
+        guard selectedFunction == function, selectedPluginID == pluginID else { return }
+        let changed = LoRAJobSnapshot.retainApplicableLoras(
+            in: &values,
+            validIDs: validIDs,
+            stackMode: !hostID.isEmpty && hostID != LoRAHostRegistry.sd15
+        )
+        guard changed, replaceJobID == nil else { return }
+        ImageGenPersistence.savePluginDialogSettings(
+            function: function,
+            pluginID: pluginID,
+            values: values,
+            config: appState.config
+        )
     }
 
     /// Python `auto_import_available` → panel `import_available` / Import Rest.
@@ -788,6 +830,7 @@ struct ImageGenUnifiedDialog: View {
         }
         values = result.values
         if let pluginID = result.selectedPluginID {
+            prepareImportedPluginSelection(pluginID)
             selectedPluginID = pluginID
         }
         if let sourcePaths = result.sourcePaths, !sourcePaths.isEmpty {
@@ -798,6 +841,11 @@ struct ImageGenUnifiedDialog: View {
         }
         baselineValues = values
         isDirty = false
+    }
+
+    private func prepareImportedPluginSelection(_ pluginID: String) {
+        guard pluginID != selectedPluginID else { return }
+        importedPluginSwitchID = pluginID
     }
 
     private func persistCurrentFunction(_ function: String) {

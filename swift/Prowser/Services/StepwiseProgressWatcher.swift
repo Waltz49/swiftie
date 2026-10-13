@@ -1,5 +1,31 @@
 import Foundation
 
+/// Parses MFLUX stepwise PNG names (port of ``_MFLUX_STEPWISE_RE``).
+enum StepwiseProgressName {
+    private static let pattern = try? NSRegularExpression(
+        pattern: #"^seed_(\d+)_step(\d+)of(\d+)\.png$"#,
+        options: .caseInsensitive
+    )
+
+    static func parse(_ name: String) -> (step: Int, total: Int)? {
+        guard let pattern,
+              !name.lowercased().contains("composite") else {
+            return nil
+        }
+        let range = NSRange(name.startIndex..<name.endIndex, in: name)
+        guard let match = pattern.firstMatch(in: name, options: [], range: range),
+              match.numberOfRanges >= 4,
+              let stepRange = Range(match.range(at: 2), in: name),
+              let totalRange = Range(match.range(at: 3), in: name),
+              let step = Int(name[stepRange]),
+              let total = Int(name[totalRange]),
+              step <= total else {
+            return nil
+        }
+        return (step, total)
+    }
+}
+
 /// Watches MFLUX stepwise PNG output (port of `mflux_stepwise_progress.py`).
 @MainActor
 final class StepwiseProgressWatcher {
@@ -39,10 +65,9 @@ final class StepwiseProgressWatcher {
     func flushAndStop() async {
         task?.cancel()
         task = nil
-        guard let pattern = stepwisePattern else { return }
         var idlePasses = 0
         while idlePasses < 4 {
-            let added = collectStepwiseProgress(pattern: pattern)
+            let added = collectStepwiseProgress()
             if added > 0 {
                 idlePasses = 0
             } else {
@@ -60,34 +85,20 @@ final class StepwiseProgressWatcher {
         onProgress(stepProgressPayload(path: progressiveOutputPath, step: expectedSteps, total: expectedSteps))
     }
 
-    private var stepwisePattern: NSRegularExpression? {
-        try? NSRegularExpression(pattern: #"^seed_(\d+)_step(\d+)of(\d+)\.png$"#, options: .caseInsensitive)
-    }
-
     private func pollLoop() async {
-        guard let pattern = stepwisePattern else { return }
         while !Task.isCancelled {
-            _ = collectStepwiseProgress(pattern: pattern)
+            _ = collectStepwiseProgress()
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
     @discardableResult
-    private func collectStepwiseProgress(pattern: NSRegularExpression) -> Int {
+    private func collectStepwiseProgress() -> Int {
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: stepwiseDir) else { return 0 }
         var added = 0
         for name in entries.sorted() {
-            if seen.contains(name) || name.lowercased().contains("composite") { continue }
-            let range = NSRange(name.startIndex..<name.endIndex, in: name)
-            guard let match = pattern.firstMatch(in: name, options: [], range: range),
-                  match.numberOfRanges >= 4,
-                  let stepRange = Range(match.range(at: 2), in: name),
-                  let totalRange = Range(match.range(at: 3), in: name),
-                  let step = Int(name[stepRange]),
-                  let total = Int(name[totalRange]) else {
-                continue
-            }
-            if step > total { continue }
+            if seen.contains(name) { continue }
+            guard let parsed = StepwiseProgressName.parse(name) else { continue }
             let path = (stepwiseDir as NSString).appendingPathComponent(name)
             guard pngLooksComplete(path) else { continue }
             seen.insert(name)
@@ -95,7 +106,7 @@ final class StepwiseProgressWatcher {
                 atomicCopy(from: path, to: progressiveOutputPath)
             }
             let outPath = progressiveOutputPath ?? path
-            onProgress(stepProgressPayload(path: outPath, step: step, total: total))
+            onProgress(stepProgressPayload(path: outPath, step: parsed.step, total: parsed.total))
             added += 1
         }
         return added

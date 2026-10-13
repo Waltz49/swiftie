@@ -239,8 +239,9 @@ final class KeyboardHandlerController {
             }
         }
 
-        if hasShift, hasOption, !hasCommand, !hasControl,
-           event.charactersIgnoringModifiers == "/" || event.charactersIgnoringModifiers == "÷" {
+        // ⇧⌥/ can report a layout-produced character (for example `¿`) instead of `/`.
+        // Match the physical slash key so it cannot fall through to the help shortcut below.
+        if hasShift, hasOption, !hasCommand, !hasControl, event.keyCode == 44 {
             if BundleCapabilities.imageGenUIEnabled {
                 appState.openFastImageGenDialog()
                 return true

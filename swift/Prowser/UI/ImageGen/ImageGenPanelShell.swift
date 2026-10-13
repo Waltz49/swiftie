@@ -9,6 +9,7 @@ struct ImageGenPanelShell: View {
     var sourcePaths: [String] = []
     var sourcePath: String? = nil
     var onValuesChanged: (() -> Void)?
+    var onPluginImported: ((String) -> Void)?
     var onEditSourcePathsChanged: (([String]) -> Void)?
     var onSingleSourcePathChanged: ((String) -> Void)?
     var compactSliderTracks: Bool = false
@@ -216,7 +217,8 @@ struct ImageGenPanelShell: View {
                     guard !normalized.isEmpty else { return }
                     localSourcePaths = normalized
                     syncEditSourceValues()
-                } : nil
+                } : nil,
+                onPluginImported: onPluginImported
             )
             .padding(.top, 8)
 

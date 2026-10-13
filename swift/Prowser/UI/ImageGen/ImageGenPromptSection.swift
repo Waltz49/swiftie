@@ -15,6 +15,7 @@ struct ImageGenPromptSection: View {
     var promptLabel: String = "Image Prompt"
     var onValuesChanged: (() -> Void)?
     var onSourcePathsImported: (([String]) -> Void)?
+    var onPluginImported: ((String) -> Void)?
 
     @State private var showImportButtons = true
 
@@ -154,6 +155,7 @@ struct ImageGenPromptSection: View {
         }
         values = result.values
         if let pluginID = result.selectedPluginID {
+            onPluginImported?(pluginID)
             selectedPluginID = pluginID
         }
         if let sourcePaths = result.sourcePaths {

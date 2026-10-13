@@ -225,12 +225,16 @@ enum ImageGenExifImport {
                 if let last = hfID.split(separator: "/").last {
                     keys.insert(normalizeExifModelToken(String(last)))
                 }
+                let presented = normalizeExifModelToken(
+                    ImageGenExifCommentFormatting.menuLabelForHFModelId(hfID)
+                )
+                if !presented.isEmpty { keys.insert(presented) }
             }
         }
         return keys
     }
 
-    private static func resolvePluginID(forExifModel modelText: String, plugins: [[String: Any]]) -> String? {
+    static func resolvePluginID(forExifModel modelText: String, plugins: [[String: Any]]) -> String? {
         let token = normalizeExifModelToken(modelText)
         guard !token.isEmpty else { return nil }
         for plugin in plugins where plugin["available"] as? Bool ?? true {

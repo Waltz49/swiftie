@@ -72,4 +72,22 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
         XCTAssertEqual(parsed["lora"] as? String, "First [1] + Second [0.5]")
     }
+
+    func testImportRestResolvesGeneratedExifModelLabel() {
+        let plugins: [[String: Any]] = [[
+            "plugin_id": "flux_schnell_mflux",
+            "display_name": "FLUX.1 Schnell MFLUX",
+            "model_label": "FLUX.1 Schnell MFLUX",
+            "hf_model_id": "black-forest-labs/FLUX.1-schnell",
+            "available": true,
+        ]]
+
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: "FLUX.1 Schnell",
+                plugins: plugins
+            ),
+            "flux_schnell_mflux"
+        )
+    }
 }

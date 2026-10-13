@@ -377,14 +377,8 @@ final class LoRAService {
         }
         let lc = try await loadCatalog()
         let pairs = LoRACatalog.choicesForPlugin(plugin: plugin, lc: lc)
-        var choices = pairs.map { LoRAChoice(presetID: $0.id, label: $0.label) }
+        let choices = pairs.map { LoRAChoice(presetID: $0.id, label: $0.label) }
         let selected = LoRAJobSnapshot.effectiveLoraIDs(from: values, pipelineID: plugin.pipelineID)
-        let choiceIDs = Set(choices.map(\.presetID))
-        for pid in selected where !choiceIDs.contains(pid) {
-            if let entry = LoRACatalog.getEntry(loraID: pid, lc: lc) {
-                choices.append(LoRAChoice(presetID: pid, label: entry.displayName))
-            }
-        }
         let scales = Self.doubleMap(from: values["mflux_lora_scales_by_id"])
         var catalogScales: [String: Double] = [:]
         var bestGuess: [String: Double] = [:]

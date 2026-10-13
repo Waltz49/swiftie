@@ -148,7 +148,12 @@ final class MfluxGenerationTasks {
                 self?.onProgress?(message)
             }
 
-            if !usePythonWorker,
+            // CLI and MFLUX Python workers (including SceneWorks Klein 9B KV MLX) write
+            // seed_*_stepNofM.png; SD15/SDXL emit step progress on stderr instead.
+            let writesStepwisePNGs = !usePythonWorker
+                || pipelineID.hasPrefix("mflux_")
+                || pipelineID.hasPrefix("flux_schnell")
+            if writesStepwisePNGs,
                let stepwiseDir = runPayload["stepwise_image_output_dir"] as? String,
                !stepwiseDir.isEmpty {
                 stepwiseWatcher = StepwiseProgressWatcher(
@@ -188,12 +193,15 @@ final class MfluxGenerationTasks {
                         }
                     }
                 )
+                await stepwiseWatcher?.flushAndStop()
                 process = nil
                 if cancelled {
+                    stepwiseWatcher = nil
                     finishJob(jobID: jobID, success: false, outputPath: finalOutputPath, error: "Cancelled")
                     return
                 }
                 guard workerRun.exitStatus == 0 else {
+                    stepwiseWatcher = nil
                     throw MfluxCLIError.processFailed(
                         workerFailureMessage(
                             stdout: workerRun.stdoutText,
@@ -209,8 +217,11 @@ final class MfluxGenerationTasks {
                 } else if FileManager.default.fileExists(atPath: finalOutputPath) {
                     lastGenerateResult = ["output_path": finalOutputPath, "success": true]
                 } else {
+                    stepwiseWatcher = nil
                     throw MfluxCLIError.processFailed("Python worker returned no output path.")
                 }
+                stepwiseWatcher?.emitFinalStepProgress()
+                stepwiseWatcher = nil
             } else {
                 guard let executable = MfluxToolchain.shared.executableURL(forPipeline: pipelineID) else {
                     throw MfluxCLIError.unsupportedPipeline(pipelineID)

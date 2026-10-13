@@ -2225,24 +2225,18 @@ final class ImageGenController {
                 ?? message["path"] as? String,
                self.showProgressiveImages {
                 self.progressivePreviewPath = path
-                let step = (message["step"] as? Int) ?? Int("\(message["step"] ?? "")") ?? -1
-                let stepTotal = (message["step_total"] as? Int)
-                    ?? Int("\(message["step_total"] ?? "")")
-                    ?? self.liveStepTotal
+                let step = self.intFromAny(message["step"]) ?? -1
+                let stepTotal = self.intFromAny(message["step_total"]) ?? self.liveStepTotal
                 if step != 0 {
                     let isFinal = step > 0 && stepTotal > 0 && step >= stepTotal
                     let forceEnterBrowse = isFinal || !self.progressiveBrowseOpened
                     self.onProgressivePreview?(path, forceEnterBrowse)
                 }
             }
-            if let step = message["step"] as? Int {
+            if let step = self.intFromAny(message["step"]) {
                 self.updateLiveStepProgress(step: step, stepTotal: message["step_total"])
-            } else if let step = message["step"] {
-                let stepInt = (step as? Int) ?? Int("\(step)") ?? self.liveStep
-                self.updateLiveStepProgress(step: stepInt, stepTotal: message["step_total"])
-            } else if let total = message["step_total"] as? Int {
-                self.liveStepTotal = total
-            } else if let total = message["total_steps"] as? Int {
+            } else if let total = self.intFromAny(message["step_total"])
+                        ?? self.intFromAny(message["total_steps"]) {
                 self.liveStepTotal = total
             }
             _ = self.snapshotLiveTiming(inCooldown: self.cooldownSecondsRemaining > 0)
@@ -2324,12 +2318,7 @@ final class ImageGenController {
     }
 
     private func updateLiveStepProgress(step: Int, stepTotal: Any?) {
-        var total = liveStepTotal
-        if let stepTotal = stepTotal as? Int {
-            total = stepTotal
-        } else if let stepTotal = stepTotal as? NSNumber {
-            total = stepTotal.intValue
-        }
+        let total = intFromAny(stepTotal) ?? liveStepTotal
         if step > 0, stepProgressStartTime != nil, let elapsed = liveGenerationElapsedSeconds() {
             stepSecondsPerStep = elapsed / Double(step)
         }
@@ -3209,6 +3198,13 @@ final class ImageGenController {
         } else if let doc = stepPendingDoc {
             copiesDone = max(0, doc["steps_done"] as? Int ?? 0)
         }
+    }
+
+    private func intFromAny(_ value: Any?) -> Int? {
+        if let n = value as? Int { return n }
+        if let n = value as? NSNumber { return n.intValue }
+        if let s = value as? String { return Int(s) }
+        return nil
     }
 
     private func abortActiveGenerationForShutdown() {

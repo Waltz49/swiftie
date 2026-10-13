@@ -1527,6 +1527,13 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> JobQueuePanelHostView {
         let host = JobQueuePanelHostView()
+        if compactForFloating {
+            if appState.showFloatingJobsPanel {
+                appState.jobsQueuePanelMeasureHost = host
+            }
+        } else if appState.jobsDisplayMode == .pane {
+            appState.jobsQueuePanelMeasureHost = host
+        }
         configurePanel(host.panel, context: context)
         context.coordinator.panel = host.panel
         return host
@@ -1659,8 +1666,10 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
     static func dismantleNSView(_ host: JobQueuePanelHostView, coordinator: Coordinator) {
         if coordinator.appState?.jobsQueuePanelMeasureHost === host {
             coordinator.appState?.jobsQueuePanelMeasureHost = nil
+            // Only the currently registered host owns this callback. A stale host
+            // can dismantle after its replacement has already installed a new one.
+            coordinator.appState?.jobsQueuePanelSync = nil
         }
-        coordinator.appState?.jobsQueuePanelSync = nil
         coordinator.panel = nil
         coordinator.appState = nil
     }

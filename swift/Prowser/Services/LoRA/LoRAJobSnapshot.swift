@@ -97,6 +97,53 @@ enum LoRAJobSnapshot {
         return ids
     }
 
+    @discardableResult
+    static func retainApplicableLoras(
+        in values: inout [String: Any],
+        validIDs: Set<String>,
+        stackMode: Bool
+    ) -> Bool {
+        let current = effectiveLoraIDs(from: values)
+        let retained = current.filter { validIDs.contains($0) }
+        let resolvedKeys = [
+            "mflux_lora_paths", "mflux_lora_scales",
+            "sd15_lora_paths", "sd15_lora_scales",
+            "sdxl_lora_paths", "sdxl_lora_scales",
+            loraTriggerWordsKey,
+        ]
+        let hadResolvedValues = resolvedKeys.contains { values[$0] != nil }
+        let hadWrongSelectionShape = stackMode
+            ? values["mflux_lora"] != nil
+            : values["mflux_lora_stack"] != nil
+        let rawScales = values[loraScalesByIDKey] as? [String: Any] ?? [:]
+        let retainedScales = rawScales.filter { retained.contains($0.key) }
+        let changed = retained != current
+            || hadResolvedValues
+            || hadWrongSelectionShape
+            || retainedScales.count != rawScales.count
+        guard changed else { return false }
+
+        clearResolvedLoraKeys(&values)
+        if stackMode {
+            values["mflux_lora_stack"] = retained
+            values.removeValue(forKey: "mflux_lora")
+        } else {
+            values.removeValue(forKey: "mflux_lora_stack")
+            if let first = retained.first {
+                values["mflux_lora"] = first
+            } else {
+                values.removeValue(forKey: "mflux_lora")
+            }
+        }
+
+        if retainedScales.isEmpty {
+            values.removeValue(forKey: loraScalesByIDKey)
+        } else {
+            values[loraScalesByIDKey] = retainedScales
+        }
+        return true
+    }
+
     private static func loraScale(for values: [String: Any], presetID: String, entry: LoRAEntry) -> Double {
         if let map = values["mflux_lora_scales_by_id"] as? [String: Any],
            let raw = map[presetID] {
@@ -107,13 +154,7 @@ enum LoRAJobSnapshot {
     }
 
     private static func clearLoraKeys(_ values: inout [String: Any], host: String?, pipelineID: String) {
-        values.removeValue(forKey: "mflux_lora_paths")
-        values.removeValue(forKey: "mflux_lora_scales")
-        values.removeValue(forKey: "sd15_lora_paths")
-        values.removeValue(forKey: "sd15_lora_scales")
-        values.removeValue(forKey: "sdxl_lora_paths")
-        values.removeValue(forKey: "sdxl_lora_scales")
-        values.removeValue(forKey: loraTriggerWordsKey)
+        clearResolvedLoraKeys(&values)
         values.removeValue(forKey: loraScalesByIDKey)
         if host == LoRAHostRegistry.sd15 {
             values["mflux_lora"] = "none"
@@ -122,5 +163,15 @@ enum LoRAJobSnapshot {
             values["mflux_lora_stack"] = []
             values.removeValue(forKey: "mflux_lora")
         }
+    }
+
+    private static func clearResolvedLoraKeys(_ values: inout [String: Any]) {
+        values.removeValue(forKey: "mflux_lora_paths")
+        values.removeValue(forKey: "mflux_lora_scales")
+        values.removeValue(forKey: "sd15_lora_paths")
+        values.removeValue(forKey: "sd15_lora_scales")
+        values.removeValue(forKey: "sdxl_lora_paths")
+        values.removeValue(forKey: "sdxl_lora_scales")
+        values.removeValue(forKey: loraTriggerWordsKey)
     }
 }
