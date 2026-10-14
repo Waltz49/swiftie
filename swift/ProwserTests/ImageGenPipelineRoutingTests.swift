@@ -96,6 +96,16 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
             XCTAssertFalse(loraArgs.contains("--no-bake-lora"))
             XCTAssertTrue(loraArgs.contains("--lora-paths"))
         }
+
+        let kleinEditArgs = try MfluxCLIPipeline.buildArguments(payload: [
+            "pipeline_id": "mflux_flux2_klein_edit",
+            "prompt": "test",
+            "output_path": "/tmp/output.png",
+            "source_image_path": "/tmp/source.png",
+            "hf_model_id": "black-forest-labs/FLUX.2-klein-4B",
+        ])
+        XCTAssertTrue(kleinEditArgs.contains("--image-paths"))
+        XCTAssertFalse(kleinEditArgs.contains("--image-path"))
     }
 
     func testSceneWorksUsesPythonWorkerDespiteKleinPipeline() {

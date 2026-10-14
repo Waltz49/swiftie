@@ -258,9 +258,8 @@ enum MfluxCLIPipeline {
         let prompt = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { throw MfluxCLIError.missingField("prompt") }
         let output = payload["output_path"] as? String ?? ""
-        let source = payload["source_image_path"] as? String
-            ?? (payload["source_image_paths"] as? [String])?.first
-        guard let source, !source.isEmpty else { throw MfluxCLIError.missingField("source_image_path") }
+        let sources = resolvedSourceImagePaths(payload)
+        guard !sources.isEmpty else { throw MfluxCLIError.missingField("source_image_path") }
         let params = try MfluxKleinCLI.resolve(payload: payload)
         var args: [String] = []
         MfluxKleinCLI.appendCommonArgs(
@@ -271,11 +270,24 @@ enum MfluxCLIPipeline {
             prompt: prompt,
             includeSize: false
         )
-        args += ["--image-path", source]
+        // mflux-generate-flux2-edit uses --image-paths (plural); fill/kontext use --image-path.
+        args += ["--image-paths"] + sources
         if let w = payload["width"] as? Int, w > 0, let h = payload["height"] as? Int, h > 0 {
             args += ["--width", "\(w)", "--height", "\(h)"]
         }
         return args
+    }
+
+    private static func resolvedSourceImagePaths(_ payload: [String: Any]) -> [String] {
+        if let paths = payload["source_image_paths"] as? [String] {
+            let trimmed = paths.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if !trimmed.isEmpty { return trimmed }
+        }
+        if let source = payload["source_image_path"] as? String {
+            let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return [trimmed] }
+        }
+        return []
     }
 
     private static func resolvedSeed(_ payload: [String: Any]) -> Int {
