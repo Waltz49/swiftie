@@ -342,7 +342,10 @@ final class LoRAService {
         let entries = LoRACatalog.settingsEntries(lc: lc, modelKey: modelKey, draftByModel: draftByModel)
             .map { LoRACatalogEntry.fromEntry($0, modelKey: modelKey, lc: lc, draftByModel: draftByModel) }
             .filter { !hideUninstalled || $0.lifecycle != "uninstalled" }
-        let discovered = discoverDiskEntries(lc: lc, savedPaths: entries)
+        let profilePaths = config?.profilePaths ?? ProfilePaths(profilePath: nil)
+        let discovered = await Task.detached(priority: .utility) {
+            Self.discoverDiskEntries(lc: lc, savedPaths: entries, profilePaths: profilePaths)
+        }.value
         return (entries, discovered, slice.enabledIDs, slice.deletedIDs)
     }
 
@@ -578,8 +581,13 @@ final class LoRAService {
     }
 
     func findChoices() async throws -> [[String: Any]] {
-        let result = try await opsRequest(["command": "find_choices"])
-        return result["choices"] as? [[String: Any]] ?? []
+        let store = try store()
+        let lc = store.load()
+        let profilePaths = config?.profilePaths ?? ProfilePaths(profilePath: nil)
+        let choices = await Task.detached(priority: .userInitiated) {
+            LoRAFindChoicesDiscovery.discover(lc: lc, profilePaths: profilePaths)
+        }.value
+        return LoRAFindChoicesDiscovery.bridgeDictionaries(from: choices)
     }
 
     func findOrigin(loraID: String) async throws -> [String: Any] {
@@ -657,43 +665,41 @@ final class LoRAService {
         return (result["removed"] as? NSNumber)?.intValue ?? 0
     }
 
-    private func discoverDiskEntries(lc: [String: Any], savedPaths: [LoRACatalogEntry]) -> [LoRACatalogEntry] {
-        let downloads = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Downloads", isDirectory: true)
-        guard let files = try? FileManager.default.contentsOfDirectory(at: downloads, includingPropertiesForKeys: [.fileSizeKey]) else {
-            return []
-        }
+    private nonisolated static func discoverDiskEntries(
+        lc: [String: Any],
+        savedPaths: [LoRACatalogEntry],
+        profilePaths: ProfilePaths
+    ) -> [LoRACatalogEntry] {
         let saved = Set(savedPaths.map(\.localPath))
-        var out: [LoRACatalogEntry] = []
-        for file in files where file.pathExtension.lowercased() == "safetensors" {
-            let path = file.path
-            if saved.contains(path) { continue }
-            let name = file.deletingPathExtension().lastPathComponent
-            out.append(
-                LoRACatalogEntry(
-                    loraID: "path:\(path)",
-                    displayName: name,
-                    label: name,
-                    hostID: "",
-                    scale: 1,
-                    bestGuess: 1,
-                    triggerWord: "",
-                    comment: "",
-                    referencePrompt: "",
-                    repoID: "",
-                    filename: file.lastPathComponent,
-                    localPath: path,
-                    sourcePath: path,
-                    installed: true,
-                    lifecycle: "discovered",
-                    statusLabel: "Needs setup",
-                    hasRecoverySource: false,
-                    registered: false,
-                    probeStateForModel: "unknown"
-                )
+        let orphans = LoRAFindChoicesDiscovery.discover(lc: lc, profilePaths: profilePaths)
+            .filter { $0.key.hasPrefix("path:") }
+            .filter { !saved.contains($0.weightsPath) }
+        return orphans.map { choice in
+            let path = choice.weightsPath
+            let name = choice.displayName
+            let fileName = URL(fileURLWithPath: path).lastPathComponent
+            return LoRACatalogEntry(
+                loraID: choice.key,
+                displayName: name,
+                label: name,
+                hostID: "",
+                scale: 1,
+                bestGuess: 1,
+                triggerWord: choice.triggerWord,
+                comment: "",
+                referencePrompt: "",
+                repoID: "",
+                filename: fileName,
+                localPath: path,
+                sourcePath: path,
+                installed: true,
+                lifecycle: "discovered",
+                statusLabel: "Needs setup",
+                hasRecoverySource: false,
+                registered: false,
+                probeStateForModel: "unknown"
             )
         }
-        return out.sorted { $0.displayName.lowercased() < $1.displayName.lowercased() }
     }
 
     private static func doubleMap(from raw: Any?) -> [String: Double] {

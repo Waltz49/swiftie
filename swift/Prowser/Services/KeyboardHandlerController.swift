@@ -871,8 +871,11 @@ final class KeyboardHandlerController {
                 keyCode: 17,
                 appState: appState,
                 onMatch: {
+                    appState.beginFileTreeExplicitFocusPending()
                     _ = returnToThumbnails(appState: appState)
-                    appState.showFileTree()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        appState.showFileTree()
+                    }
                 }
             )
         case "p":
@@ -882,7 +885,9 @@ final class KeyboardHandlerController {
                 appState: appState,
                 onMatch: {
                     _ = returnToThumbnails(appState: appState)
-                    appState.showPreviewPane()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        appState.showPreviewPane()
+                    }
                 }
             )
         case "b":

@@ -110,7 +110,17 @@ extension AppState {
         if let outline = fileTreeOutlineView {
             outline.window?.makeFirstResponder(outline)
         } else {
-            requestFileTreeFocus()
+            fileTreeFocusToken += 1
+        }
+        syncFileTreeKeyboardFocus()
+    }
+
+    /// Focus tree when the pane is actually on screen (deferred after show; Python `QTimer.singleShot` → `focus_tree`).
+    func focusFileTreeKeyboardTargetIfShown() {
+        let display = SidebarPaneSplitModel.leftDisplayPaneVisibility(appState: self)
+        guard effectiveLeftSidebarVisible, display[0] else { return }
+        if let outline = fileTreeOutlineView {
+            outline.window?.makeFirstResponder(outline)
         }
         syncFileTreeKeyboardFocus()
     }
@@ -121,6 +131,14 @@ extension AppState {
         if fileTreeKeyboardFocused != focused {
             fileTreeKeyboardFocused = focused
         }
+        if focused {
+            noteFileTreeKeyboardFocusAcquired()
+        }
+    }
+
+    func shouldThumbnailClaimKeyboardFocus(in window: NSWindow?) -> Bool {
+        if fileTreeExplicitFocusPending { return false }
+        return !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: window)
     }
 
     func focusLeftSidebarTabStop() {

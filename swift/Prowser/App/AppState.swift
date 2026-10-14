@@ -81,6 +81,10 @@ final class AppState {
     /// While set, tree highlight follows this directory until the active image catches up (Python `user_requested_directory`).
     var userRequestedTreeDirectory: String?
     var userRequestedTreeClearWork: DispatchWorkItem?
+    /// While set, thumbnail grid should not reclaim first responder (browse exit → show tree).
+    var fileTreeExplicitFocusPending = false
+    private var fileTreeExplicitFocusPendingClearWork: DispatchWorkItem?
+    private var fileTreeFocusRetryGeneration = 0
     /// One-shot directory priming when opening search sheets from the file tree (not persisted until OK).
     var pendingPersonSearchDirectoryPrime: SearchSheetDirectoryPrime?
     var pendingClipSearchDirectoryPrime: SearchSheetDirectoryPrime?
@@ -1251,8 +1255,33 @@ final class AppState {
         requestFileTreeFocus()
     }
 
+    func beginFileTreeExplicitFocusPending() {
+        fileTreeExplicitFocusPending = true
+        fileTreeExplicitFocusPendingClearWork?.cancel()
+        let clearWork = DispatchWorkItem { [weak self] in
+            self?.fileTreeExplicitFocusPending = false
+        }
+        fileTreeExplicitFocusPendingClearWork = clearWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: clearWork)
+    }
+
+    func noteFileTreeKeyboardFocusAcquired() {
+        fileTreeExplicitFocusPending = false
+        fileTreeExplicitFocusPendingClearWork?.cancel()
+    }
+
     func requestFileTreeFocus() {
         fileTreeFocusToken += 1
+        beginFileTreeExplicitFocusPending()
+
+        fileTreeFocusRetryGeneration += 1
+        let generation = fileTreeFocusRetryGeneration
+        for delay in [0.0, 0.05, 0.15, 0.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.fileTreeFocusRetryGeneration == generation else { return }
+                self.focusFileTreeKeyboardTargetIfShown()
+            }
+        }
     }
 
     func noteUserRequestedTreeDirectory(_ path: String) {
@@ -1764,22 +1793,13 @@ final class AppState {
 
     func prepareForApplicationExit() {
         let debugMode = config.bool(forKey: "debug_mode", default: false)
-        ProwserTempFiles.cleanupStaleImageGenWorkerTemps(
-            prowserHome: config.prowserHome,
-            debugMode: debugMode
-        )
-        ProwserTempFiles.cleanupImageGenProgressDirectoryOnShutdown(
-            prowserHome: config.prowserHome,
-            debugMode: debugMode
-        )
-        ProwserTempFiles.cleanupProfileTemporaryImagesOnShutdown(
-            prowserHome: config.prowserHome,
-            imageExtensions: config.imageExtensions,
-            debugMode: debugMode
-        )
         imageGen.cleanup()
         workers.shutdown()
         auxiliaryDialogs.closeAll()
+        ProwserTempFiles.cleanupProfileTmpDirectoryOnShutdown(
+            prowserHome: config.prowserHome,
+            debugMode: debugMode
+        )
     }
 
 

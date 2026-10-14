@@ -60,6 +60,7 @@ struct FileTreeView: NSViewRepresentable {
             context.coordinator.syncOutlineAfterReattach()
         }
         MainWindowKeyViewLoop.sync(appState: appState)
+        context.coordinator.focusTreeIfRequested()
         return tabStop
     }
 
@@ -142,7 +143,7 @@ struct FileTreeView: NSViewRepresentable {
 
         init(appState: AppState) {
             self.appState = appState
-            lastFocusToken = appState.fileTreeFocusToken
+            // Keep lastFocusToken at 0 so focus requested before remount is not dropped.
             lastCollapseUIToken = appState.fileTreeCollapseUIToken
             lastExpandToken = appState.fileTreeExpandToken
             lastReloadToken = appState.fileTreeReloadToken

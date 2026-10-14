@@ -379,7 +379,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
             if inThumbnailMode,
                !gridView.isInlineRenaming,
-               !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: gridView.window) {
+               appState.shouldThumbnailClaimKeyboardFocus(in: gridView.window) {
                 gridView.claimKeyboardFocus()
             }
         }
@@ -455,7 +455,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             lastSyncedIndex = index
             gridView.selectIndex(index, scroll: false, notifyDelegate: false)
             gridView.scrollToSelectionAfterLayout()
-            if !KeyboardHandlerController.fileTreeKeyboardTargetIsFocused(in: gridView.window) {
+            if appState.shouldThumbnailClaimKeyboardFocus(in: gridView.window) {
                 gridView.claimKeyboardFocus()
             }
 

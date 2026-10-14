@@ -253,36 +253,60 @@ struct LoRAFindSheet: View {
     let onPick: (LoRAFindChoice) -> Void
 
     @State private var choices: [LoRAFindChoice] = []
+    @State private var filterText = ""
     @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    private var filteredChoices: [LoRAFindChoice] {
+        let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return choices }
+        return choices.filter {
+            $0.label.lowercased().contains(needle) || $0.path.lowercased().contains(needle)
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Find LoRA").font(.title2)
+            Text("Double-click a name to fill the Add LoRA form. Weights are scanned from LoRA cache folders and top-level Downloads.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             if isLoading {
-                ProgressView("Scanning…")
-            } else if choices.isEmpty {
-                Text("No LoRA weights found on disk.").foregroundStyle(.secondary)
+                ProgressView("Looking up on-disk LoRA files…")
             } else {
-                List(choices) { choice in
-                    Button(choice.label) {
-                        onPick(choice)
-                        dismiss()
+                TextField("Search", text: $filterText)
+                    .textFieldStyle(.roundedBorder)
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(.red).font(.caption)
+                } else if choices.isEmpty {
+                    Text("No LoRA weights found on disk.").foregroundStyle(.secondary)
+                } else if filteredChoices.isEmpty {
+                    Text("No names match your search.").foregroundStyle(.secondary)
+                } else {
+                    List(filteredChoices) { choice in
+                        Button(choice.label) {
+                            onPick(choice)
+                            dismiss()
+                        }
+                        .buttonStyle(.plain)
+                        .help(choice.path)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             DialogButtonRow([DialogButton("Close", isCancel: true) { dismiss() }])
         }
         .padding()
-        .frame(width: 420, height: 400)
+        .frame(width: 480, height: 440)
         .task { await load() }
     }
 
     private func load() async {
         guard appState.workers.lora.isAvailable else {
+            errorMessage = "LoRA settings are not available."
             isLoading = false
             return
         }
+        errorMessage = nil
         do {
             let raw = try await appState.workers.lora.findChoices()
             choices = raw.compactMap { dict in
@@ -293,6 +317,7 @@ struct LoRAFindSheet: View {
             }
         } catch {
             choices = []
+            errorMessage = error.localizedDescription
         }
         isLoading = false
     }

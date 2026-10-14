@@ -54,75 +54,15 @@ enum ProwserTempFiles {
 
     private static let legacyProgressPrefix = ".imagegen-progress-"
 
-    /// Remove ``{profile}/tmp/imagegen-progress`` on shutdown (debug off), matching profile tmp cleanup.
-    static func cleanupImageGenProgressDirectoryOnShutdown(prowserHome: URL, debugMode: Bool) {
+    /// Remove the entire ``{profile}/tmp`` tree on shutdown when debug mode is off.
+    static func cleanupProfileTmpDirectoryOnShutdown(prowserHome: URL, debugMode: Bool) {
         guard !debugMode else { return }
-        let dir = imageGenProgressDirectory(prowserHome: prowserHome)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else { return }
-        try? FileManager.default.removeItem(atPath: dir)
-    }
-
-    /// Port of ``prowser_temp_files.cleanup_stale_imagegen_worker_temps`` (orphaned files in profile tmp).
-    static func cleanupStaleImageGenWorkerTemps(prowserHome: URL, debugMode: Bool) {
-        guard !debugMode else { return }
-        let tmpDir = (imageGenProgressDirectory(prowserHome: prowserHome) as NSString).deletingLastPathComponent
-        let prefixes = [
-            "imagegen-mflux-",
-            "imagegen-progress-",
-            "imagegen-expand-base-",
-            "imagegen-mflux-infill-",
-            "imagegen-mflux-infill-mask-",
-            "imagegen-mflux-fill-",
-            "imagegen-mflux-mask-",
-        ]
-        let dirPrefixes = ["imagegen-mflux-stepwise-"]
-        let protectedDirPrefixes = ["imagegen-infill-"]
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmpDir) else { return }
-        for name in names {
-            let full = (tmpDir as NSString).appendingPathComponent(name)
-            if protectedDirPrefixes.contains(where: { name.hasPrefix($0) }) {
-                continue
-            }
-            if dirPrefixes.contains(where: { name.hasPrefix($0) }) {
-                var isDir: ObjCBool = false
-                if FileManager.default.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue {
-                    try? FileManager.default.removeItem(atPath: full)
-                }
-                continue
-            }
-            if prefixes.contains(where: { name.hasPrefix($0) }) {
-                try? FileManager.default.removeItem(atPath: full)
-            }
-        }
-    }
-
-    /// Remove loose image files directly inside ``{profile}/tmp`` on shutdown.
-    /// Other files and subdirectories are preserved.
-    @MainActor
-    static func cleanupProfileTemporaryImagesOnShutdown(
-        prowserHome: URL,
-        imageExtensions: [String],
-        debugMode: Bool
-    ) {
-        guard !debugMode else { return }
-        let extensions = Set(imageExtensions.map { AppConfig.normalizeExtension($0) })
-        guard !extensions.isEmpty else { return }
-
         let tmpDirectory = prowserHome.appendingPathComponent("tmp", isDirectory: true)
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: tmpDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey]
-        ) else {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: tmpDirectory.path, isDirectory: &isDir), isDir.boolValue else {
             return
         }
-        for entry in entries {
-            guard extensions.contains(AppConfig.normalizeExtension(entry.pathExtension)),
-                  (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
-                continue
-            }
-            try? FileManager.default.removeItem(at: entry)
-        }
+        try? FileManager.default.removeItem(at: tmpDirectory)
     }
 
     /// Port of ``prowser_temp_files.cleanup_cancelled_generation_output_artifacts``.
