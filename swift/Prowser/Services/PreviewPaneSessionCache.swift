@@ -34,9 +34,7 @@ final class PreviewPaneSessionCache {
 
     func cachedImage(for path: String) -> NSImage? {
         guard let imagePath else { return nil }
-        let requested = URL(fileURLWithPath: path).standardizedFileURL.path
-        let stored = URL(fileURLWithPath: imagePath).standardizedFileURL.path
-        guard requested == stored else { return nil }
+        guard FileDataModel.pathsReferToSameFile(path, imagePath) else { return nil }
         return image
     }
 
@@ -54,5 +52,13 @@ final class PreviewPaneSessionCache {
     func clear() {
         imagePath = nil
         image = nil
+    }
+
+    /// Drop session pixmap when the file at *path* was replaced on disk (same path, new bytes).
+    func invalidate(path: String) {
+        guard let imagePath else { return }
+        if FileDataModel.pathsReferToSameFile(path, imagePath) {
+            clear()
+        }
     }
 }

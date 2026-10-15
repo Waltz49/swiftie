@@ -36,6 +36,10 @@ struct PreviewPaneView: View {
         .onChange(of: appState.fileData.currentImagePath) { _, path in
             Task { await reloadPreview(path: path) }
         }
+        .onChange(of: appState.previewPaneContentRevision) { _, _ in
+            loadedPath = nil
+            Task { await reloadPreview(path: appState.fileData.currentImagePath, force: true) }
+        }
         .onAppear {
             appState.previewPaneInLayout = true
             restoreFromSessionCache()
@@ -61,22 +65,29 @@ struct PreviewPaneView: View {
     }
 
     @MainActor
-    private func reloadPreview(path: String?) async {
+    private func reloadPreview(path: String?, force: Bool = false) async {
         guard let path else {
             previewImage = nil
             loadedPath = nil
             appState.previewPaneCache.clear()
             return
         }
-        if path == loadedPath, previewImage != nil { return }
+        if !force, path == loadedPath, previewImage != nil { return }
 
-        if let cached = appState.previewPaneCache.cachedImage(for: path) {
+        if !force, let cached = appState.previewPaneCache.cachedImage(for: path) {
             previewImage = cached
             loadedPath = path
             return
         }
 
         loadedPath = path
+        let ignoreExif = appState.config.ignoreExifRotation
+        if force, let direct = BrowseImageLoader.loadImage(from: path, ignoreExifRotation: ignoreExif) {
+            previewImage = direct
+            appState.previewPaneCache.remember(path: path, image: direct)
+            return
+        }
+
         let pixelSize = max(256, Int(appState.leftSidebarWidth * 2))
         let cgImage = await appState.thumbnailCache.generateThumbnail(for: path, size: pixelSize)
         // The active image may have changed during the await; do not apply a stale result.

@@ -289,21 +289,33 @@ enum DirectoryRefreshService {
         guard !paths.isEmpty else { return }
         for path in paths {
             appState.metadataCache.invalidate(path: path)
+            appState.previewPaneCache.invalidate(path: path)
         }
         appState.backgroundImageRecognition.noteThumbnailDiskCacheInvalidated()
-        let cache = appState.thumbnailCache
-        Task {
-            for path in paths {
-                await cache.invalidate(for: path)
-            }
-        }
         appState.thumbnailInvalidationGeneration += 1
         appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(paths))
-        let pathsToRecord = paths
-        Task { @MainActor in
-            for path in pathsToRecord {
-                appState.metadataCache.recordDiskSnapshot(path: path)
+
+        let cache = appState.thumbnailCache
+        let pathsCopy = paths
+        Task {
+            for path in pathsCopy {
+                await cache.invalidate(for: path)
+            }
+            _ = await cache.removeDiskThumbnails(for: pathsCopy)
+            await MainActor.run {
+                refreshPreviewAndBrowseIfCurrentImageChanged(appState: appState, paths: pathsCopy)
+                for path in pathsCopy {
+                    appState.metadataCache.recordDiskSnapshot(path: path)
+                }
             }
         }
     }
+
+    private static func refreshPreviewAndBrowseIfCurrentImageChanged(appState: AppState, paths: [String]) {
+        guard let current = appState.fileData.currentImagePath else { return }
+        guard paths.contains(where: { FileDataModel.pathsReferToSameFile($0, current) }) else { return }
+        appState.previewPaneContentRevision += 1
+        appState.reloadBrowseImageIfCurrent(path: current)
+    }
+
 }

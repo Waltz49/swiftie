@@ -21,6 +21,7 @@ enum WebPImageWriter {
         image: CGImage,
         to url: URL,
         sourcePathForMetadata: String? = nil,
+        metadataExifTiff: Data? = nil,
         lossless: Bool = false
     ) throws {
         let encoder = WebPEncoder()
@@ -30,29 +31,39 @@ enum WebPImageWriter {
             config.lossless = 1
         }
 
-        let encoded: Data
-        if cgImageHasAlpha(image) {
-            encoded = try encoder.encode(RGBA: image, config: config)
-        } else {
-            encoded = try encoder.encode(RGB: image, config: config)
-        }
+        // ImageIO/CGImage pixel layout varies (often BGRA); encoding via data provider bytes corrupts output.
+        let raster = canonicalRGBA8Image(from: image)
+        let encoded = try encoder.encode(RGBA: raster, config: config)
 
         var output = encoded
-        if let sourcePathForMetadata,
-           let exifChunk = extractExifChunk(from: sourcePathForMetadata) {
+        let exifChunk = metadataExifTiff
+            ?? sourcePathForMetadata.flatMap { extractExifChunk(from: $0) }
+        if let exifChunk {
             output = try muxExifChunk(into: encoded, exif: exifChunk)
         }
 
         try output.write(to: url, options: .atomic)
     }
 
-    private static func cgImageHasAlpha(_ image: CGImage) -> Bool {
-        switch image.alphaInfo {
-        case .none, .noneSkipFirst, .noneSkipLast:
-            return false
-        default:
-            return true
+    /// Draw into RGBA8 / premultipliedLast so libwebp `WebPPictureImportRGBA` matches memory layout.
+    private static func canonicalRGBA8Image(from image: CGImage) -> CGImage {
+        let width = image.width
+        let height = image.height
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else {
+            return image
         }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
     }
 
     private static func extractExifChunk(from path: String) -> Data? {

@@ -39,7 +39,8 @@ enum ScreenSizeCopyService {
         path: String,
         fitMethod: FitMethod,
         bordersOnCopy: Bool,
-        preserveDates: Bool
+        preserveDates: Bool,
+        ignoreExifRotation: Bool = false
     ) throws -> String {
         guard FileManager.default.fileExists(atPath: path) else {
             throw CopyError.fileNotFound
@@ -49,8 +50,9 @@ enum ScreenSizeCopyService {
         let screenWidth = Int(screen.width.rounded())
         let screenHeight = Int(screen.height.rounded())
 
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        let sourceURL = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+              let image = ImageReencodeMetadata.orientedImage(from: source, ignoreExifRotation: ignoreExifRotation) else {
             throw CopyError.loadFailed
         }
 
@@ -101,11 +103,23 @@ enum ScreenSizeCopyService {
             finalImage = resized
         }
 
-        var properties: [CFString: Any] = [:]
-        if uti == UTType.jpeg.identifier {
-            properties[kCGImageDestinationLossyCompressionQuality] = 0.95
+        let ext = outputURL.pathExtension.lowercased()
+        let saveFormat = ImageReencodeMetadata.saveFormatName(for: ext) ?? "JPEG"
+        let encodeImage = saveFormat == "JPEG"
+            ? ImageReencodeMetadata.imageForJPEGSave(finalImage)
+            : finalImage
+        let properties: [CFString: Any]
+        if ExifService.canWriteExif(path: outputPath) {
+            let metadata = ImageReencodeMetadata.propertiesForSave(
+                from: source,
+                renderedImage: encodeImage,
+                ignoreExifRotation: ignoreExifRotation
+            )
+            properties = ImageReencodeMetadata.destinationEncodeProperties(saveFormat: saveFormat, base: metadata)
+        } else {
+            properties = ImageReencodeMetadata.destinationEncodeProperties(saveFormat: saveFormat, base: [:])
         }
-        CGImageDestinationAddImage(destination, finalImage, properties as CFDictionary)
+        CGImageDestinationAddImage(destination, encodeImage, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             throw CopyError.saveFailed
         }

@@ -117,6 +117,11 @@ final class FileDataModel {
         return URL(fileURLWithPath: expanded).standardizedFileURL.path
     }
 
+    /// Same inode on disk (case-insensitive volume safe).
+    static func pathsReferToSameFile(_ lhs: String, _ rhs: String) -> Bool {
+        URL(fileURLWithPath: lhs).standardizedFileURL == URL(fileURLWithPath: rhs).standardizedFileURL
+    }
+
     /// Parent directory of `path`, normalized (for “does this file belong in this folder?” checks).
     static func parentDirectory(of path: String) -> String? {
         guard let normalized = normalizePath(path) else { return nil }

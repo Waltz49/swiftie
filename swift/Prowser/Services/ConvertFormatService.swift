@@ -3,12 +3,13 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Basic JPEG/PNG conversion using ImageIO. Port of `files/convert_format.py` (minimal).
+/// JPEG/PNG/WebP conversion (ImageIO + libwebp for WebP encode). Port of `files/convert_format.py` (minimal).
 @MainActor
 enum ConvertFormatService {
     enum TargetFormat: String, CaseIterable, Identifiable {
-        case jpeg
         case png
+        case webp
+        case jpeg
 
         var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum ConvertFormatService {
             switch self {
             case .jpeg: return "JPEG"
             case .png: return "PNG"
+            case .webp: return "WebP"
             }
         }
 
@@ -23,6 +25,7 @@ enum ConvertFormatService {
             switch self {
             case .jpeg: return "jpg"
             case .png: return "png"
+            case .webp: return "webp"
             }
         }
 
@@ -30,6 +33,7 @@ enum ConvertFormatService {
             switch self {
             case .jpeg: return .jpeg
             case .png: return .png
+            case .webp: return UTType.webP
             }
         }
     }
@@ -63,7 +67,8 @@ enum ConvertFormatService {
         path: String,
         to target: TargetFormat,
         deleteOriginal: Bool = false,
-        preserveDates: Bool = true
+        preserveDates: Bool = false,
+        ignoreExifRotation: Bool = false
     ) throws -> String {
         guard FileManager.default.fileExists(atPath: path) else {
             throw ConvertError.fileNotFound
@@ -78,29 +83,78 @@ enum ConvertFormatService {
         let outputPath = base + "." + target.fileExtension
         let sourceURL = URL(fileURLWithPath: path)
         let outputURL = URL(fileURLWithPath: outputPath)
+        let tempURL = outputURL.deletingLastPathComponent()
+            .appendingPathComponent(".convert_\(UUID().uuidString)")
+            .appendingPathExtension(target.fileExtension)
 
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+              var image = ImageReencodeMetadata.orientedImage(from: source, ignoreExifRotation: ignoreExifRotation) else {
             throw ConvertError.loadFailed
         }
 
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let saveFormat = ImageReencodeMetadata.saveFormatName(for: target.fileExtension) ?? "JPEG"
+        let metadata = ImageReencodeMetadata.propertiesForSave(
+            from: source,
+            renderedImage: image,
+            ignoreExifRotation: ignoreExifRotation
+        )
 
-        guard let destination = CGImageDestinationCreateWithURL(
-            outputURL as CFURL,
-            target.utType.identifier as CFString,
-            1,
-            nil
-        ) else {
+        if target == .jpeg {
+            image = ImageReencodeMetadata.imageForJPEGSave(image)
+        }
+
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        if target == .webp {
+            let lossless = ImageReencodeMetadata.imageHasAlpha(image)
+            let exifTiff = ImageReencodeMetadata.exifTiffForWebP(from: metadata)
+            do {
+                try WebPImageWriter.write(
+                    image: image,
+                    to: tempURL,
+                    sourcePathForMetadata: path,
+                    metadataExifTiff: exifTiff,
+                    lossless: lossless
+                )
+            } catch {
+                throw ConvertError.saveFailed(outputPath)
+            }
+        } else {
+            guard let destination = CGImageDestinationCreateWithURL(
+                tempURL as CFURL,
+                target.utType.identifier as CFString,
+                1,
+                nil
+            ) else {
+                throw ConvertError.saveFailed(outputPath)
+            }
+
+            let properties = ImageReencodeMetadata.destinationEncodeProperties(
+                saveFormat: saveFormat,
+                base: metadata
+            )
+            CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else {
+                throw ConvertError.saveFailed(outputPath)
+            }
+        }
+
+        guard outputFileIsValid(at: tempURL.path) else {
             throw ConvertError.saveFailed(outputPath)
         }
 
-        var properties: [CFString: Any] = [:]
-        if target == .jpeg {
-            properties[kCGImageDestinationLossyCompressionQuality] = 0.95
+        do {
+            if FileManager.default.fileExists(atPath: outputPath) {
+                _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: tempURL)
+            } else {
+                try FileManager.default.moveItem(at: tempURL, to: outputURL)
+            }
+        } catch {
+            throw ConvertError.saveFailed(outputPath)
         }
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else {
+
+        guard outputFileIsValid(at: outputPath) else {
             throw ConvertError.saveFailed(outputPath)
         }
 
@@ -114,7 +168,7 @@ enum ConvertFormatService {
         }
 
         if deleteOriginal {
-            try? FileManager.default.removeItem(atPath: path)
+            deleteSourceAfterSuccessfulConvert(sourcePath: path, outputPath: outputPath)
         }
 
         return outputPath
@@ -124,7 +178,8 @@ enum ConvertFormatService {
         paths: [String],
         to target: TargetFormat,
         deleteOriginal: Bool = false,
-        preserveDates: Bool = true
+        preserveDates: Bool = false,
+        ignoreExifRotation: Bool = false
     ) -> (converted: [String], errors: [String]) {
         var converted: [String] = []
         var errors: [String] = []
@@ -134,7 +189,8 @@ enum ConvertFormatService {
                     path: path,
                     to: target,
                     deleteOriginal: deleteOriginal,
-                    preserveDates: preserveDates
+                    preserveDates: preserveDates,
+                    ignoreExifRotation: ignoreExifRotation
                 )
                 converted.append(output)
             } catch {
@@ -144,4 +200,23 @@ enum ConvertFormatService {
         }
         return (converted, errors)
     }
+
+    /// Python: only delete after verified output exists; never delete on failed save.
+    private static func deleteSourceAfterSuccessfulConvert(sourcePath: String, outputPath: String) {
+        guard !FileDataModel.pathsReferToSameFile(sourcePath, outputPath) else { return }
+        if RenamePrefixPlanner.isInsidePhotosLibrary(sourcePath) { return }
+        guard outputFileIsValid(at: outputPath) else { return }
+        guard FileManager.default.fileExists(atPath: sourcePath) else { return }
+        try? FileManager.default.removeItem(atPath: sourcePath)
+    }
+
+    private static func outputFileIsValid(at path: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? NSNumber else {
+            return false
+        }
+        return size.int64Value > 0
+    }
+
 }

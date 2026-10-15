@@ -368,7 +368,7 @@ enum ExifService {
     }
 
     /// Build a TIFF EXIF blob (for WebP EXIF chunk) from ImageIO property dictionaries.
-    private static func exifTiffBytes(fromImageProperties properties: [CFString: Any]) throws -> Data {
+    static func exifTiffBytes(fromImageProperties properties: [CFString: Any]) throws -> Data {
         let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("prowser-exif-stub-\(UUID().uuidString).jpg")
         defer { try? FileManager.default.removeItem(at: tempURL) }

@@ -176,6 +176,8 @@ final class AppState {
     var thumbnailInvalidationGeneration = 0
     /// Bumped when the active browse image file changes on disk at the same path.
     var browseImageContentRevision = 0
+    /// Bumped when the active preview path is overwritten; forces `PreviewPaneView` to reload.
+    var previewPaneContentRevision = 0
     var fileTreeCollapseUIToken = 0
     var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
@@ -1197,15 +1199,18 @@ final class AppState {
     }
 
     private static func directoryPathsMatch(_ left: String, _ right: String) -> Bool {
-        URL(fileURLWithPath: left).standardizedFileURL.path
-            == URL(fileURLWithPath: right).standardizedFileURL.path
+        guard let leftPath = FileDataModel.normalizePath(left),
+              let rightPath = FileDataModel.normalizePath(right) else {
+            return false
+        }
+        return leftPath == rightPath
     }
 
     /// Force the browse canvas to reload when a file is overwritten at the same path.
     func reloadBrowseImageIfCurrent(path: String) {
         guard fileData.currentViewMode == .browse else { return }
-        guard let normalized = FileDataModel.normalizePath(path) else { return }
-        guard normalized == fileData.currentImagePath else { return }
+        guard let current = fileData.currentImagePath else { return }
+        guard FileDataModel.pathsReferToSameFile(path, current) else { return }
         browseImageContentRevision += 1
     }
 
@@ -1846,6 +1851,7 @@ final class AppState {
     }
 
     func prepareForApplicationExit() {
+        previewPaneCache.clear()
         let debugMode = config.bool(forKey: "debug_mode", default: false)
         imageGen.cleanup()
         workers.shutdown()
@@ -2024,7 +2030,8 @@ final class AppState {
                     path: path,
                     fitMethod: method,
                     bordersOnCopy: borders,
-                    preserveDates: preserveDates
+                    preserveDates: preserveDates,
+                    ignoreExifRotation: config.ignoreExifRotation
                 )
                 created += 1
             } catch {
