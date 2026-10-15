@@ -14,6 +14,8 @@ final class CancellableProgressPanelController {
     private let bucketIndicator: NSProgressIndicator?
     private let cancelButton: FocusableDialogButton
     private let cancelTarget = CancelTarget()
+    private let accessoryButton: FocusableDialogButton?
+    private let accessoryTarget = AccessoryTarget()
     private var keyboardMonitor: Any?
     private var isClosed = false
     private let isIndeterminateMode: Bool
@@ -38,6 +40,8 @@ final class CancellableProgressPanelController {
     nonisolated var cancelRequested: Bool { cancelFlag.isCancelled }
     /// Invoked on the main thread when the user cancels (after the cancel flag is set).
     var onCancel: (() -> Void)?
+    /// Optional leading action (e.g. Test LoRAs “Work directory”).
+    var onAccessory: (() -> Void)?
 
     /// Shown on the second line during long similar-image bucket compares (see `setLongCompareNoteVisible`).
     static let longCompareNoteMessage =
@@ -55,7 +59,9 @@ final class CancellableProgressPanelController {
         showsTimeRemainingEstimate: Bool? = nil,
         usesExtractionBasedTimeEstimate: Bool = false,
         minimumProgressUpdateInterval: TimeInterval = ProgressDialogTiming.progressUpdateInterval,
-        throttleProgressUpdates: Bool = true
+        throttleProgressUpdates: Bool = true,
+        accessoryButtonTitle: String? = nil,
+        promptAccessoryText: String? = nil
     ) {
         let showETA = showsTimeRemainingEstimate ?? (detailText != nil)
         self.showsTimeRemainingEstimate = showETA
@@ -75,8 +81,21 @@ final class CancellableProgressPanelController {
         if showsBucketProgressLine {
             panelHeight += 22
         }
+        if accessoryButtonTitle != nil {
+            panelHeight += 36
+        }
+        let trimmedPromptAccessory = promptAccessoryText?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let promptAccessory: JobQueuePromptAccessoryNSView?
+        if !trimmedPromptAccessory.isEmpty {
+            promptAccessory = JobQueuePromptAccessoryNSView(prompt: trimmedPromptAccessory)
+            panelHeight += JobQueuePromptAccessoryNSView.preferredScrollHeight + 12
+        } else {
+            promptAccessory = nil
+        }
+        let panelWidth: CGFloat = promptAccessory == nil ? 440 : 480
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: panelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
             styleMask: [.titled],
             backing: .buffered,
             defer: false
@@ -91,7 +110,7 @@ final class CancellableProgressPanelController {
         label = NSTextField(labelWithString: "")
         label.lineBreakMode = .byClipping
         label.usesSingleLineMode = false
-        label.maximumNumberOfLines = 3
+        label.maximumNumberOfLines = promptAccessory == nil ? 3 : 8
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let timeRemaining: NSTextField?
@@ -155,16 +174,38 @@ final class CancellableProgressPanelController {
         cancelButton.bezelStyle = .rounded
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         self.cancelButton = cancelButton
+
+        let accessoryButton: FocusableDialogButton?
+        if let accessoryButtonTitle {
+            let button = FocusableDialogButton(
+                title: accessoryButtonTitle,
+                target: accessoryTarget,
+                action: #selector(AccessoryTarget.tapped)
+            )
+            button.bezelStyle = .rounded
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.isEnabled = false
+            accessoryButton = button
+        } else {
+            accessoryButton = nil
+        }
+        self.accessoryButton = accessoryButton
         cancelTarget.onCancel = { [weak self] in
             guard let self else { return }
             self.cancelFlag.cancel()
             self.setLabelOnMain("Cancelling…")
             self.onCancel?()
         }
+        accessoryTarget.onTapped = { [weak self] in
+            self?.onAccessory?()
+        }
 
         let content = NSView()
         content.wantsLayer = true
         content.addSubview(label)
+        if let promptAccessory {
+            content.addSubview(promptAccessory)
+        }
         if let longCompareNote {
             content.addSubview(longCompareNote)
         }
@@ -176,16 +217,25 @@ final class CancellableProgressPanelController {
             content.addSubview(bucketBar)
         }
         content.addSubview(cancelButton)
+        if let accessoryButton {
+            content.addSubview(accessoryButton)
+        }
+
+        let anchorBelowLabel: NSLayoutYAxisAnchor = longCompareNote?.bottomAnchor ?? label.bottomAnchor
+        let anchorBelowPromptOrLabel: NSLayoutYAxisAnchor =
+            promptAccessory?.bottomAnchor ?? anchorBelowLabel
 
         let progressTopAnchor: NSLayoutYAxisAnchor
         if let timeRemaining {
             progressTopAnchor = timeRemaining.bottomAnchor
+        } else if promptAccessory != nil {
+            progressTopAnchor = anchorBelowPromptOrLabel
         } else if let longCompareNote {
             progressTopAnchor = longCompareNote.bottomAnchor
         } else {
             progressTopAnchor = label.bottomAnchor
         }
-        let progressTopSpacing: CGFloat = (timeRemaining == nil && longCompareNote == nil) ? 10 : 6
+        let progressTopSpacing: CGFloat = (timeRemaining == nil && longCompareNote == nil && promptAccessory == nil) ? 10 : 6
 
         var constraints: [NSLayoutConstraint] = [
             label.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
@@ -194,10 +244,18 @@ final class CancellableProgressPanelController {
             label.widthAnchor.constraint(lessThanOrEqualToConstant: Self.labelMaxWidth),
             indicator.topAnchor.constraint(equalTo: progressTopAnchor, constant: progressTopSpacing),
             indicator.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            indicator.trailingAnchor.constraint(equalTo: cancelButton.leadingAnchor, constant: -12),
-            cancelButton.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
-            cancelButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
         ]
+        if accessoryButton != nil {
+            constraints.append(
+                indicator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
+            )
+        } else {
+            constraints += [
+                indicator.trailingAnchor.constraint(equalTo: cancelButton.leadingAnchor, constant: -12),
+                cancelButton.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
+                cancelButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            ]
+        }
 
         if let bucketBar {
             constraints += [
@@ -215,11 +273,18 @@ final class CancellableProgressPanelController {
             ]
         }
 
-        if let timeRemaining {
-            let timeTop = longCompareNote?.bottomAnchor ?? label.bottomAnchor
-            let timeTopSpacing: CGFloat = longCompareNote == nil ? 4 : 4
+        if let promptAccessory {
             constraints += [
-                timeRemaining.topAnchor.constraint(equalTo: timeTop, constant: timeTopSpacing),
+                promptAccessory.topAnchor.constraint(equalTo: anchorBelowLabel, constant: 8),
+                promptAccessory.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+                promptAccessory.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            ]
+        }
+
+        if let timeRemaining {
+            let timeTopSpacing: CGFloat = 8
+            constraints += [
+                timeRemaining.topAnchor.constraint(equalTo: anchorBelowPromptOrLabel, constant: timeTopSpacing),
                 timeRemaining.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
                 timeRemaining.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
                 timeRemaining.heightAnchor.constraint(equalToConstant: 16),
@@ -242,6 +307,14 @@ final class CancellableProgressPanelController {
                 detail.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
                 detail.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             ]
+        } else if let accessoryButton {
+            constraints += [
+                accessoryButton.topAnchor.constraint(equalTo: progressBottomAnchor, constant: 12),
+                accessoryButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+                cancelButton.topAnchor.constraint(equalTo: progressBottomAnchor, constant: 12),
+                cancelButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+                accessoryButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+            ]
         } else {
             constraints.append(progressBottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16))
         }
@@ -260,9 +333,13 @@ final class CancellableProgressPanelController {
             startProgressFlushTimerIfNeeded()
         }
         panel.center()
+        var dialogButtons: [NSButton] = [cancelButton]
+        if let accessoryButton {
+            dialogButtons.insert(accessoryButton, at: 0)
+        }
         keyboardMonitor = AppKitDialogKeyboardNavigation.install(
             on: panel,
-            buttonsLeftToRight: [cancelButton],
+            buttonsLeftToRight: dialogButtons,
             escapeButton: cancelButton
         )
         NSApp.activate(ignoringOtherApps: true)
@@ -286,7 +363,9 @@ final class CancellableProgressPanelController {
         }
         isClosed = true
         cancelTarget.onCancel = nil
+        accessoryTarget.onTapped = nil
         onCancel = nil
+        onAccessory = nil
         etaTimerTarget.owner = nil
         progressFlushTimerTarget.owner = nil
         etaTimer?.invalidate()
@@ -320,6 +399,10 @@ final class CancellableProgressPanelController {
             self.setLabelOnMain(text)
             self.refreshOnMain()
         }
+    }
+
+    func setAccessoryButtonEnabled(_ enabled: Bool) {
+        accessoryButton?.isEnabled = enabled
     }
 
     /// Switch to an indeterminate bar after feature extraction (sorting / thumbnail rebuild).
@@ -588,6 +671,14 @@ final class CancellableProgressPanelController {
 
         @objc func tapped() {
             onCancel?()
+        }
+    }
+
+    private final class AccessoryTarget: NSObject {
+        var onTapped: (() -> Void)?
+
+        @objc func tapped() {
+            onTapped?()
         }
     }
 

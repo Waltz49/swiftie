@@ -50,9 +50,11 @@ final class LoRASettingsViewModel {
     var pendingImportPath: String?
 
     private weak var bridge: LoRABridge?
+    private weak var config: AppConfig?
 
-    func bind(bridge: LoRABridge) {
+    func bind(bridge: LoRABridge, config: AppConfig) {
         self.bridge = bridge
+        self.config = config
     }
 
     var selectedModel: LoRASettingsModel? {
@@ -79,7 +81,11 @@ final class LoRASettingsViewModel {
         do {
             models = try await bridge.settingsModels()
             if selectedModelKey.isEmpty {
-                selectedModelKey = models.first?.modelKey ?? ""
+                selectedModelKey = Self.resolveInitialModelKey(
+                    models: models,
+                    storedKey: config?.string(forKey: "imagegen_lora_model_key") ?? "",
+                    sessionKey: SettingsTab.lastSessionLoraModelKey
+                )
             }
             await reloadEntries()
         } catch {
@@ -212,7 +218,34 @@ final class LoRASettingsViewModel {
     func modelChanged(to key: String) async {
         persistCurrentModelDraft()
         selectedModelKey = key
+        persistModelSelection(key)
         await reloadEntries()
+    }
+
+    private func persistModelSelection(_ key: String) {
+        SettingsTab.rememberSessionLoraModelKey(key)
+    }
+
+    private static func resolveInitialModelKey(
+        models: [LoRASettingsModel],
+        storedKey: String,
+        sessionKey: String?
+    ) -> String {
+        let validKeys = Set(models.map(\.modelKey))
+        if let sessionKey {
+            let trimmed = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, validKeys.contains(trimmed) {
+                return trimmed
+            }
+        }
+        let stored = storedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !stored.isEmpty, validKeys.contains(stored) {
+            return stored
+        }
+        if validKeys.contains(LoRAHFModelIDs.flux1Dev) {
+            return LoRAHFModelIDs.flux1Dev
+        }
+        return models.first?.modelKey ?? ""
     }
 
     func toggleEnabled(_ loraID: String, enabled: Bool) {

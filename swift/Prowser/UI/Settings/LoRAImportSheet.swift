@@ -48,6 +48,7 @@ struct LoRAImportSheet: View {
                         controlWidth: Self.weightControlWidth
                     )
                     .frame(width: Self.weightControlWidth)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 TextField("Comment", text: $comment)
                 TextField("Reference prompt (compatibility test)", text: $referencePrompt)
@@ -73,12 +74,18 @@ struct LoRAImportSheet: View {
             }
             Task { await loadEditIfNeeded() }
         }
+        .onChange(of: sourcePath) { _, _ in
+            guard case .add = mode else { return }
+            Task { await validatePath() }
+        }
         .sheet(isPresented: $showFindSheet) {
             LoRAFindSheet(modelKey: modelKey) { choice in
                 sourcePath = choice.path
-                if displayName.isEmpty {
-                    displayName = choice.label
+                let name = choice.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !name.isEmpty {
+                    displayName = name
                 }
+                Task { await validatePath() }
             }
         }
     }
@@ -118,10 +125,7 @@ struct LoRAImportSheet: View {
     }
 
     private func loadEditIfNeeded() async {
-        guard case .edit(let loraID) = mode else {
-            if !sourcePath.isEmpty { await validatePath() }
-            return
-        }
+        guard case .edit(let loraID) = mode else { return }
         guard appState.workers.lora.isAvailable else { return }
         do {
             if let entry = try await appState.workers.lora.getEntry(loraID: loraID, modelKey: modelKey) {
@@ -142,23 +146,79 @@ struct LoRAImportSheet: View {
         }
     }
 
+    private static func defaultLabelFromPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let filename = (trimmed as NSString).lastPathComponent
+        let stem = (filename as NSString).deletingPathExtension
+        return stem.isEmpty ? filename : stem
+    }
+
+    private func applyFilenameDefaultsIfNeeded(for path: String) {
+        let suggested = Self.defaultLabelFromPath(path)
+        guard !suggested.isEmpty else { return }
+        if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            displayName = suggested
+        }
+        if triggerWord.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            triggerWord = suggested
+        }
+    }
+
+    private func applyReuseMetadata(from result: [String: Any]) {
+        if let name = result["display_name"] as? String {
+            displayName = name
+        }
+        triggerWord = result["trigger_word"] as? String ?? ""
+        if let best = result["best_guess"] as? Double {
+            bestGuess = min(Self.weightRange.upperBound, max(Self.weightRange.lowerBound, best))
+        } else if let best = result["best_guess"] as? NSNumber {
+            let value = best.doubleValue
+            bestGuess = min(Self.weightRange.upperBound, max(Self.weightRange.lowerBound, value))
+        }
+        comment = result["comment"] as? String ?? ""
+        let ref = (result["reference_prompt"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !ref.isEmpty {
+            referencePrompt = ref
+        }
+    }
+
     private func validatePath() async {
+        guard case .add = mode else { return }
         guard appState.workers.lora.isAvailable else { return }
         let path = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else { return }
+        guard !path.isEmpty else {
+            reuseLoraID = nil
+            return
+        }
         do {
             let result = try await appState.workers.lora.validateSource(path: path, modelKey: modelKey)
+            if let displayPath = result["display_path"] as? String,
+               !displayPath.isEmpty,
+               displayPath != path
+            {
+                sourcePath = displayPath
+            }
+            let resolvedPath = (result["display_path"] as? String ?? path)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             if result["valid"] as? Bool == true {
-                if displayName.isEmpty {
-                    displayName = result["display_name"] as? String ?? ""
-                }
-                if let reuse = result["reuse_lora_id"] as? String {
-                    reuseLoraID = reuse
+                errorMessage = nil
+                if result["reusing"] as? Bool == true {
+                    applyReuseMetadata(from: result)
+                    reuseLoraID = result["reuse_lora_id"] as? String
+                } else {
+                    reuseLoraID = nil
+                    applyFilenameDefaultsIfNeeded(for: resolvedPath)
                 }
             } else {
+                reuseLoraID = nil
+                applyFilenameDefaultsIfNeeded(for: resolvedPath.isEmpty ? path : resolvedPath)
                 errorMessage = result["error"] as? String ?? "Invalid LoRA file."
             }
         } catch {
+            reuseLoraID = nil
+            applyFilenameDefaultsIfNeeded(for: path)
             errorMessage = error.localizedDescription
         }
     }

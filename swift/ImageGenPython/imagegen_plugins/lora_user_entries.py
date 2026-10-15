@@ -288,7 +288,7 @@ def find_user_lora_for_source(
     host_id: str,
     settings: Optional[Dict[str, Any]] = None,
 ) -> Optional[FluxLoraEntry]:
-    """Return an existing user LoRA entry that refers to the same weights file."""
+    """Return an existing user LoRA entry that refers to the same source file."""
     host = str(host_id or "").strip()
     if not host:
         return None
@@ -298,31 +298,12 @@ def find_user_lora_for_source(
         source = path.expanduser()
     if not source.is_file():
         return None
-    from imagegen_plugins.lora_compatibility_checker import _size_conflict_set
-
-    compare_paths = [source]
-    for entry in user_lora_entries_from_settings(settings).values():
-        if entry.host_id != host:
-            continue
-        compare_paths.extend(_entry_path_candidates(entry))
-    hash_sizes = _size_conflict_set(compare_paths)
-    digest_cache: Dict[Path, str] = {}
-    source_digest = lora_weights_content_digest(
-        source, digest_cache=digest_cache, hash_sizes=hash_sizes
-    )
     for entry in user_lora_entries_from_settings(settings).values():
         if entry.host_id != host:
             continue
         for candidate in _entry_path_candidates(entry):
             if same_lora_file(source, candidate):
                 return entry
-        if source_digest:
-            for candidate in _entry_path_candidates(entry):
-                other = lora_weights_content_digest(
-                    candidate, digest_cache=digest_cache, hash_sizes=hash_sizes
-                )
-                if other and other == source_digest:
-                    return entry
     return None
 
 

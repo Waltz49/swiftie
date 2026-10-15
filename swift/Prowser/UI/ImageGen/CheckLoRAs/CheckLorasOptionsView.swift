@@ -8,7 +8,7 @@ struct CheckLorasOptionsView: View {
     var appConfig: AppConfig
     var loraBridge: LoRABridge
     var onCancel: () -> Void
-    var onRun: () -> Void
+    var onRun: (CheckLorasOptions) -> Void
 
     @State private var validationMessage: String?
     @State private var showClearHistoryConfirm = false
@@ -40,7 +40,7 @@ struct CheckLorasOptionsView: View {
         appConfig: AppConfig,
         loraBridge: LoRABridge,
         onCancel: @escaping () -> Void,
-        onRun: @escaping () -> Void
+        onRun: @escaping (CheckLorasOptions) -> Void
     ) {
         self.choices = choices
         self.installedModels = installedModels
@@ -386,6 +386,6 @@ struct CheckLorasOptionsView: View {
         let snapshot = snapshotOptions()
         options = snapshot
         appConfig.persistCheckLorasOptions(snapshot)
-        onRun()
+        onRun(snapshot)
     }
 }

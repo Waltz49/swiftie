@@ -73,9 +73,18 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     /// Session-only; updated when Settings closes with OK or Cancel (Python `_last_tab_id`).
     private(set) static var lastSessionTab: SettingsTab = .general
 
+    /// Session-only LoRA base-model picker (Python `SettingsDialog._last_lora_model_key`).
+    private(set) static var lastSessionLoraModelKey: String?
+
     static func rememberSessionTab(_ tab: SettingsTab) {
         let visible = visibleTabs()
         lastSessionTab = visible.contains(tab) ? tab : (visible.first ?? .general)
+    }
+
+    static func rememberSessionLoraModelKey(_ modelKey: String) {
+        let trimmed = modelKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lastSessionLoraModelKey = trimmed
     }
 
     static func resolvedOpenTab(explicit: SettingsTab?) -> SettingsTab {

@@ -62,6 +62,11 @@ struct AppNumericSpinBox: NSViewRepresentable {
         Coordinator(self)
     }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: AppNumericSpinBoxView, context: Context) -> CGSize? {
+        let size = nsView.intrinsicContentSize
+        return CGSize(width: controlWidth, height: size.height)
+    }
+
     private func configure(_ view: AppNumericSpinBoxView) {
         view.controlWidth = controlWidth
         view.stepper.minValue = range.lowerBound
@@ -195,8 +200,14 @@ final class AppNumericSpinBoxView: NSView {
     override func layout() {
         super.layout()
         let stepperWidth = stepper.fittingSize.width
-        let height = bounds.height
-        textField.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - stepperWidth - 2), height: height)
-        stepper.frame = NSRect(x: bounds.width - stepperWidth, y: 0, width: stepperWidth, height: height)
+        let controlHeight = max(textField.fittingSize.height, stepper.fittingSize.height)
+        let y = max(0, (bounds.height - controlHeight) / 2)
+        textField.frame = NSRect(
+            x: 0,
+            y: y,
+            width: max(0, bounds.width - stepperWidth - 2),
+            height: controlHeight
+        )
+        stepper.frame = NSRect(x: bounds.width - stepperWidth, y: y, width: stepperWidth, height: controlHeight)
     }
 }

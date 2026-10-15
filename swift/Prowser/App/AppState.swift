@@ -1087,6 +1087,27 @@ final class AppState {
         loadDirectory(home, saveHistory: true)
     }
 
+    /// Profile `{profile}/tmp` thumbnails (Python ``_open_profile_temp_thumbnails``).
+    func openProfileTemporaryWorkDirectoryInThumbnailView() {
+        let tempDir = config.temporaryFilesDirectory.path
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: tempDir, isDirectory: &isDir), isDir.boolValue else {
+            return
+        }
+        config.updateSetting("sort_mode", value: SortMode.date.rawValue)
+        config.updateSetting("sort_reversed", value: false)
+        if fileData.currentViewMode == .browse {
+            closeBrowseView()
+        } else if fileData.currentViewMode == .list {
+            fileData.setViewMode(.thumbnail)
+        }
+        if filterSettings.filterPattern != "*" {
+            filterSettings.setFilterPattern("*", persist: true)
+            status.show("New directory opened, filter cleared")
+        }
+        loadDirectory(tempDir, saveHistory: true)
+    }
+
     /// After browse, align `currentDirectory` with the active image so the file tree can highlight correctly.
     func ensureCurrentDirectoryAlignedWithActiveImage() {
         guard let path = fileData.currentImagePath,
@@ -1774,6 +1795,39 @@ final class AppState {
         onClose: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
+        // #region agent log
+        if id == DialogID.checkLorasOptions || id == DialogID.checkLorasResults {
+            let path = "/Users/douglasnadel/dev/swiftie/.cursor/debug-f5adc1.log"
+            let visible = auxiliaryDialogs.isVisible(id)
+            let payload: [String: Any] = [
+                "sessionId": "f5adc1",
+                "hypothesisId": "E",
+                "location": "AppState.syncDialog",
+                "message": "check loras dialog sync",
+                "data": [
+                    "id": id,
+                    "show": String(show),
+                    "alreadyVisible": String(visible),
+                ],
+                "timestamp": Int(Date().timeIntervalSince1970 * 1000),
+            ]
+            if JSONSerialization.isValidJSONObject(payload),
+               let json = try? JSONSerialization.data(withJSONObject: payload),
+               let line = String(data: json, encoding: .utf8) {
+                let url = URL(fileURLWithPath: path)
+                if !FileManager.default.fileExists(atPath: path) {
+                    FileManager.default.createFile(atPath: path, contents: nil)
+                }
+                if let handle = try? FileHandle(forWritingTo: url) {
+                    defer { try? handle.close() }
+                    _ = try? handle.seekToEnd()
+                    if let bytes = (line + "\n").data(using: .utf8) {
+                        try? handle.write(contentsOf: bytes)
+                    }
+                }
+            }
+        }
+        // #endregion
         if show {
             guard !auxiliaryDialogs.isVisible(id) else { return }
             auxiliaryDialogs.present(

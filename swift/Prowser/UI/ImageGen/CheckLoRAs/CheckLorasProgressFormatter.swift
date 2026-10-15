@@ -1,8 +1,6 @@
 import Foundation
 
 enum CheckLorasProgressFormatter {
-    private static let probePromptDisplayMax = 60
-
     static func statusText(
         message: [String: Any],
         elapsed: TimeInterval,
@@ -85,14 +83,6 @@ enum CheckLorasProgressFormatter {
             "Model \(modelPos) · LoRA \(loraPos) on this model · Probe \(probePos)/\(workTotal) (\(probesDone) finished)"
         )
 
-        let fullPrompt = (stats["probe_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fullPrompt.isEmpty {
-            let display = fullPrompt.count <= probePromptDisplayMax
-                ? fullPrompt
-                : String(fullPrompt.prefix(probePromptDisplayMax - 1)) + "…"
-            lines.append("Prompt: \(display)")
-        }
-
         if !activity.isEmpty {
             lines.append(activity)
         } else {
@@ -125,6 +115,18 @@ enum CheckLorasProgressFormatter {
         if skippedUnchanged > 0 {
             lines.append("Skipped unchanged renders: \(skippedUnchanged)")
         }
+    }
+
+    /// ETA from completed GPU renders only (skipped / history pairs are not timed work).
+    static func estimatedGPURemaining(
+        stats: [String: Any],
+        gpuPhaseElapsed: TimeInterval?
+    ) -> TimeInterval? {
+        let gpuDone = int(stats["gpu_probes_done"])
+        let gpuTotal = int(stats["probes_total"])
+        guard gpuTotal > 0, gpuDone > 0, gpuDone < gpuTotal else { return nil }
+        guard let gpuPhaseElapsed, gpuPhaseElapsed > 0 else { return nil }
+        return (gpuPhaseElapsed / Double(gpuDone)) * Double(gpuTotal - gpuDone)
     }
 
     static func progressValue(message: [String: Any]) -> (done: Int, total: Int) {

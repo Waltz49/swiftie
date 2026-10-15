@@ -660,37 +660,13 @@ def _path_is_registered(
     path: Path,
     settings: Optional[Dict[str, Any]],
 ) -> bool:
+    """Fast path/source match for Find / Check LoRAs prescan (no full-file MD5)."""
     from imagegen_plugins.lora_host_registry import LORA_HOSTS
-    from imagegen_plugins.lora_user_entries import (
-        _entry_path_candidates,
-        find_user_lora_for_source,
-        lora_weights_content_digest,
-        same_lora_file,
-        user_lora_entries_from_settings,
-    )
+    from imagegen_plugins.lora_user_entries import find_user_lora_for_source
 
     for host_id in LORA_HOSTS:
         if find_user_lora_for_source(path, host_id=host_id, settings=settings) is not None:
             return True
-    from imagegen_plugins.lora_user_entries import user_lora_weight_paths
-
-    compare_paths = [path] + user_lora_weight_paths(settings)
-    hash_sizes = _size_conflict_set(compare_paths)
-    digest_cache: Dict[Path, str] = {}
-    source_digest = lora_weights_content_digest(
-        path, digest_cache=digest_cache, hash_sizes=hash_sizes
-    )
-    if not source_digest:
-        return False
-    for entry in user_lora_entries_from_settings(settings).values():
-        for candidate in _entry_path_candidates(entry):
-            if same_lora_file(path, candidate):
-                return True
-            other = lora_weights_content_digest(
-                candidate, digest_cache=digest_cache, hash_sizes=hash_sizes
-            )
-            if other and other == source_digest:
-                return True
     return False
 
 

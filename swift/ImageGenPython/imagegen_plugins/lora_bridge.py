@@ -1166,7 +1166,7 @@ def _handle_check_loras_prescan(cmd: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _execute_check_loras_prepare(cmd: Dict[str, Any], job_id: str) -> Dict[str, Any]:
-    """Build probe plan on the IPC thread (Swift worker cannot rely on daemon thread progress)."""
+    """Build probe plan; result is emitted on stdout from a background worker thread."""
     global _check_loras_prepared
     from dataclasses import asdict
 
@@ -1179,6 +1179,14 @@ def _execute_check_loras_prepare(cmd: Dict[str, Any], job_id: str) -> Dict[str, 
     )
 
     options = _check_loras_options_from_dict(cmd.get("options") or {})
+    if _check_loras_cancel_flag[0]:
+        return {
+            "type": "result",
+            "job_id": job_id,
+            "command": "check_loras_prepare",
+            "success": False,
+            "cancelled": True,
+        }
     try:
         persist_check_loras_options(options)
         cfg = get_config().load_settings()
@@ -1227,6 +1235,16 @@ def _execute_check_loras_prepare(cmd: Dict[str, Any], job_id: str) -> Dict[str, 
         }
 
 
+def _run_check_loras_prepare_worker(cmd: Dict[str, Any], job_id: str) -> None:
+    global _check_loras_preparing, _active_check_loras_prepare_thread
+
+    try:
+        emit_message(_execute_check_loras_prepare(cmd, job_id))
+    finally:
+        _check_loras_preparing = False
+        _active_check_loras_prepare_thread = None
+
+
 def _handle_check_loras_prepare(cmd: Dict[str, Any]) -> Dict[str, Any]:
     global _check_loras_cancel_flag, _active_check_loras_prepare_thread, _check_loras_preparing
 
@@ -1240,11 +1258,19 @@ def _handle_check_loras_prepare(cmd: Dict[str, Any]) -> Dict[str, Any]:
     job_id = str(cmd.get("job_id") or "")
     _check_loras_cancel_flag[0] = False
     _check_loras_preparing = True
-    _active_check_loras_prepare_thread = None
-    try:
-        return _execute_check_loras_prepare(cmd, job_id)
-    finally:
-        _check_loras_preparing = False
+    thread = threading.Thread(
+        target=_run_check_loras_prepare_worker,
+        args=(cmd, job_id),
+        daemon=True,
+    )
+    _active_check_loras_prepare_thread = thread
+    thread.start()
+    return {
+        "type": "result",
+        "job_id": job_id,
+        "command": "check_loras_prepare",
+        "started": True,
+    }
 
 
 def _handle_check_loras_save_options(cmd: Dict[str, Any]) -> Dict[str, Any]:
@@ -1361,10 +1387,11 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
         )
     finally:
         _check_loras_running = False
+        _active_check_loras_thread = None
 
 
-def _handle_check_loras_run(cmd: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Run probes on the IPC thread; worker emits progress + final result on stdout."""
+def _handle_check_loras_run(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    """Start probe worker on a background thread; progress + final result on stdout."""
     global _check_loras_cancel_flag, _active_check_loras_thread, _check_loras_running
 
     if _check_loras_preparing:
@@ -1377,12 +1404,19 @@ def _handle_check_loras_run(cmd: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     job_id = str(cmd.get("job_id") or "")
     _check_loras_cancel_flag[0] = False
     _check_loras_running = True
-    _active_check_loras_thread = None
-    try:
-        _run_check_loras_worker(cmd, job_id)
-    finally:
-        _check_loras_running = False
-    return None
+    thread = threading.Thread(
+        target=_run_check_loras_worker,
+        args=(cmd, job_id),
+        daemon=True,
+    )
+    _active_check_loras_thread = thread
+    thread.start()
+    return {
+        "type": "result",
+        "job_id": job_id,
+        "command": "check_loras_run",
+        "started": True,
+    }
 
 
 def _handle_check_loras_cancel(cmd: Dict[str, Any]) -> Dict[str, Any]:

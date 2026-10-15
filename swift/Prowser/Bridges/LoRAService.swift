@@ -619,7 +619,7 @@ final class LoRAService {
     func checkLorasPrepare(options: CheckLorasOptions) async throws -> CheckLorasPrepareResult {
         let result = try await opsRequest(
             ["command": "check_loras_prepare", "options": options.bridgeDictionary()],
-            awaitFinalResult: false
+            awaitFinalResult: true
         )
         return CheckLorasPrepareResult(
             success: result["success"] as? Bool ?? false,

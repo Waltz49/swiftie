@@ -18,7 +18,7 @@ struct LoRASettingsTab: View {
             }
         }
         .task(id: appState.workers.pythonAvailable) {
-            viewModel.bind(bridge: appState.workers.lora)
+            viewModel.bind(bridge: appState.workers.lora, config: appState.config)
             guard appState.workers.lora.isAvailable else { return }
             await viewModel.loadInitial()
             if let key = appState.pendingLoraSettingsModelKey, !key.isEmpty {
