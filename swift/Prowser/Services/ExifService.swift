@@ -24,6 +24,37 @@ enum ExifService {
         supportedWriteExtensions.contains((path as NSString).pathExtension.lowercased())
     }
 
+    /// Port of ``image_bytes_match_path_extension`` — false when on-disk format disagrees with the path extension.
+    ///
+    /// MFLUX stepwise previews copy intermediate PNGs onto the final output path (e.g. ``imagegen-123.webp``)
+    /// before the job writes real WebP bytes; WebP EXIF mux must not run on those files.
+    static func imageBytesMatchPathExtension(path: String) -> Bool {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+        let head: Data
+        do {
+            head = try handle.read(upToCount: 16) ?? Data()
+        } catch {
+            return false
+        }
+        switch ext {
+        case "png":
+            return head.starts(with: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+        case "jpg", "jpeg":
+            return head.count >= 2 && head[0] == 0xFF && head[1] == 0xD8
+        case "webp":
+            guard head.count >= 12 else { return false }
+            return head.prefix(4) == Data("RIFF".utf8) && head[8..<12] == Data("WEBP".utf8)
+        case "tif", "tiff":
+            guard head.count >= 4 else { return false }
+            let sig = head.prefix(4)
+            return sig == Data([0x49, 0x49, 0x2A, 0x00]) || sig == Data([0x4D, 0x4D, 0x00, 0x2A])
+        default:
+            return true
+        }
+    }
+
     // MARK: - Read
 
     static func loadRecord(for path: String) -> ExifRecord {

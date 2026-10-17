@@ -203,9 +203,9 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     ensure_native_dlib
     echo "Building Prowser ($CONFIG)..."
     if [[ "$CONFIG" == "release" ]]; then
-        swift build -v -c release -Xswiftc -Osize -Xlinker -dead_strip
+        swift build -c release -Xswiftc -Osize -Xlinker -dead_strip
     else
-        swift build -v -c "$CONFIG"
+        swift build -c "$CONFIG"
     fi
 else
     echo "Skipping build; packaging existing $CONFIG artifacts..."

@@ -3091,6 +3091,7 @@ final class ImageGenController {
         let values = copyCycleExifValues
         let elapsed = liveGenerationElapsedSeconds()
         let fallback = exifFallbackSourcePaths(from: values)
+        let loraLabel = await resolvedLoraExifLabel(pluginID: copyCycleExifPluginID, values: values)
         do {
             _ = try await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
                 pluginID: copyCycleExifPluginID,
@@ -3100,7 +3101,8 @@ final class ImageGenController {
                 completedStep: step,
                 totalSteps: total,
                 fallbackSourcePaths: fallback,
-                tempRoot: config.temporaryFilesDirectory.path
+                tempRoot: config.temporaryFilesDirectory.path,
+                lora: loraLabel
             )
         } catch {
             print("DEBUG writeProgressivePreviewExifIfNeeded: failed for \(path): \(error)")

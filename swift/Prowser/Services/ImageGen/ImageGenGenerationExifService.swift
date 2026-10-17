@@ -90,17 +90,20 @@ enum ImageGenGenerationExifService {
         completedStep: Int,
         totalSteps: Int,
         fallbackSourcePaths: [String],
-        tempRoot: String
+        tempRoot: String,
+        lora: String? = nil
     ) async throws -> Bool {
         guard completedStep < totalSteps,
               FileManager.default.isReadableFile(atPath: outputPath),
+              ExifService.imageBytesMatchPathExtension(path: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
 
         let comment = formatGenerationExifComment(
             pluginID: pluginID,
             values: values,
             workerResult: [:],
-            elapsedSeconds: elapsedSeconds
+            elapsedSeconds: elapsedSeconds,
+            lora: lora
         )
         var finalComment = comment
         let entries = referenceEntries(

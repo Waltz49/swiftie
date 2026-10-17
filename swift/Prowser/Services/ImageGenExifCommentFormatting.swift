@@ -325,15 +325,6 @@ enum ImageGenExifCommentFormatting {
         guard loraHostID != nil else { return nil }
         let stack = effectiveLoraIDsFromValues(values: values, pipelineID: pipelineID, loraHostID: loraHostID)
         if !stack.isEmpty {
-            for (pathsKey, scalesKey) in loraPathScaleKeys {
-                if let paths = values[pathsKey] as? [Any], paths.count == stack.count,
-                   let label = loraNameForExifFromPathsAndScales(
-                       paths: paths,
-                       scales: values[scalesKey]
-                   ) {
-                    return label
-                }
-            }
             var labels: [String] = []
             for (index, presetID) in stack.enumerated() {
                 let scale = loraScaleForExif(values: values, presetID: presetID, index: index)
