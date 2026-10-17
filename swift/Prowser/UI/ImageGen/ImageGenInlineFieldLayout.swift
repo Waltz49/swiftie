@@ -5,6 +5,9 @@ import SwiftUI
 enum ImageGenInlineFieldLayout {
     /// Python ``IMAGE_GEN_FIELD_CONTROL_INDENT``.
     static let controlIndent: CGFloat = 30
+    /// Model / LoRA menu fields (Python min-width 280 on combos).
+    static let fieldControlMinWidth: CGFloat = 280
+    static let fieldControlMaxWidth: CGFloat = 400
     static let labelPad: CGFloat = 12
     static let rowSpacing: CGFloat = 6
     static let blockSpacing: CGFloat = 6

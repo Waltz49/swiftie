@@ -266,11 +266,12 @@ extension AppState {
             // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
             // card); size from the fallback estimate until the new panel reports.
             measuredJobsCardStackHeight = 0
+            jobsPaneAllMultiHeightPinned = false
         }
         jobsQueueSizeMode = mode
         JobsQueueSizePersistence.save(mode, config: config)
         config.updateSetting("jobs_pane_compact", value: mode == .strip)
-        syncJobsPaneGeometry()
+        syncJobsPaneGeometry(forceRefit: forceRefit)
     }
 
     func cycleJobsQueueSizeMode() {
@@ -292,7 +293,10 @@ extension AppState {
         return imageGen.queueSnapshot().isEmpty
     }
 
-    func syncJobsPaneGeometry() {
+    func syncJobsPaneGeometry(forceRefit: Bool = false) {
+        if forceRefit {
+            jobsPaneGeometryForceRefit = true
+        }
         scheduleJobsPaneGeometryRefit()
     }
 
@@ -305,6 +309,7 @@ extension AppState {
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: height)
         guard abs(measuredActiveJobStripHeight - height) > tolerance else { return }
         measuredActiveJobStripHeight = height
+        guard shouldScheduleJobsPaneRefitForContentChange() else { return }
         scheduleJobsPaneGeometryRefit()
     }
 
@@ -313,7 +318,22 @@ extension AppState {
         guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
         measuredJobsCardStackHeight = cardStackHeight
         bumpImageGenUI()
+        guard shouldScheduleJobsPaneRefitForContentChange(allowGrowWhenAllMultiPinned: true) else { return }
         scheduleJobsPaneGeometryRefit()
+    }
+
+    /// Port of ``ensure_jobs_pane_fits_content`` gating when ``JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE`` is false.
+    func shouldScheduleJobsPaneRefitForContentChange(allowGrowWhenAllMultiPinned: Bool = false) -> Bool {
+        guard jobsDisplayMode == .pane else { return false }
+        if jobsQueueSizeMode == .all, imageGen.queue.jobs.count > 1, jobsPaneAllMultiHeightPinned {
+            guard allowGrowWhenAllMultiPinned else { return false }
+            refreshJobsPaneLiveMeasurements()
+            let target = jobsPaneTargetPaneHeight()
+            let current = rightSidebarSplit.sizes[2]
+            let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: target)
+            return target > current + tolerance
+        }
+        return true
     }
 
     func beginJobsPaneGeometryAdjustment() {

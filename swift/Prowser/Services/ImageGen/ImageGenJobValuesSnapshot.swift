@@ -20,6 +20,31 @@ enum ImageGenJobValuesSnapshot {
         }
     }
 
+    /// Port of ``preserve_job_queue_only_keys``.
+    static func preserveJobQueueOnlyKeys(values: inout [String: Any], source: [String: Any]) {
+        for key in jobQueueOnlyKeys {
+            if source[key] != nil, values[key] == nil {
+                values[key] = source[key]
+            }
+        }
+    }
+
+    /// Port of ``normalize_replaced_job_values`` in ``flux_prompt_job.py``.
+    static func normalizeReplacedJobValues(_ values: inout [String: Any]) {
+        guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any],
+              !(meta["kind"] as? String ?? "").isEmpty
+        else { return }
+        let prompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let user = (meta["user_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty {
+            var updated = meta
+            updated["user_prompt"] = prompt
+            values[JobStepQueue.fluxPromptAIJobKey] = updated
+        } else if !user.isEmpty {
+            values["prompt"] = user
+        }
+    }
+
     static func snapshotJobValuesAtSubmit(
         plugin: ImageGenPluginDescriptor,
         values: [String: Any],

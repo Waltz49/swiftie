@@ -1158,6 +1158,7 @@ struct ImageGenUnifiedDialog: View {
                     try await appState.imageGen.updateActiveJobRemaining(
                         jobID: replaceJobID,
                         pluginID: selectedPluginID,
+                        function: selectedFunction,
                         values: submitValues
                     )
                     submitNotice = "Job updated."

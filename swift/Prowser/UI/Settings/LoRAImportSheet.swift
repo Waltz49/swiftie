@@ -26,9 +26,6 @@ struct LoRAImportSheet: View {
     @State private var referencePrompt = ""
     @State private var reuseLoraID: String?
     @State private var isImporting = false
-    @State private var progressLabel = ""
-    @State private var progressStep = 0
-    @State private var progressMax = 1
     @State private var errorMessage: String?
     @State private var showFindSheet = false
 
@@ -53,15 +50,11 @@ struct LoRAImportSheet: View {
                 TextField("Comment", text: $comment)
                 TextField("Reference prompt (compatibility test)", text: $referencePrompt)
             }
-            if isImporting {
-                ProgressView(value: Double(progressStep), total: Double(max(progressMax, 1))) {
-                    Text(progressLabel)
-                }
-            }
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
             DialogButtonRow(addModeButtons)
+                .disabled(isImporting)
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 360)
@@ -277,14 +270,45 @@ struct LoRAImportSheet: View {
         if skipCompatibilityProbe {
             payload["skip_compatibility_probe"] = true
         }
+
+        let title = skipCompatibilityProbe ? "Add LoRA — Saving" : "Add LoRA"
+        let progress = CancellableProgressPanelController(
+            title: title,
+            labelText: skipCompatibilityProbe ? "Saving…" : "Starting…",
+            maximum: 100,
+            showsTimeRemainingEstimate: false,
+            throttleProgressUpdates: false,
+            accessoryButtonTitle: "Work directory"
+        )
+        progress.onCancel = {
+            Task { try? await appState.workers.lora.cancelImport() }
+        }
+        progress.onAccessory = {
+            appState.openProfileTemporaryWorkDirectoryInThumbnailView()
+        }
+        progress.setAccessoryButtonEnabled(
+            CheckLorasWorkDirectory.containsWorkImages(config: appState.config)
+        )
+        progress.show()
+
+        var workDirectoryRefreshTimer: Timer?
+        workDirectoryRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                progress.setAccessoryButtonEnabled(
+                    CheckLorasWorkDirectory.containsWorkImages(config: appState.config)
+                )
+            }
+        }
+
         do {
             let result = try await appState.workers.lora.importLora(payload: payload) { activity, step, maximum in
                 Task { @MainActor in
-                    progressLabel = activity
-                    progressStep = step
-                    progressMax = maximum
+                    progress.setMaximum(max(1, maximum))
+                    progress.update(value: step, label: activity)
                 }
             }
+            workDirectoryRefreshTimer?.invalidate()
+            progress.close()
             isImporting = false
             if result["success"] as? Bool == true {
                 NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
@@ -293,6 +317,8 @@ struct LoRAImportSheet: View {
                 errorMessage = result["message"] as? String ?? "Import failed."
             }
         } catch {
+            workDirectoryRefreshTimer?.invalidate()
+            progress.close()
             isImporting = false
             errorMessage = error.localizedDescription
         }

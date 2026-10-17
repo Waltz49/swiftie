@@ -8,7 +8,6 @@ extension Notification.Name {
 enum LoRASettingsListFilter: String, CaseIterable, Identifiable {
     case all = "All LoRA files"
     case worksWithModel = "Works with this model"
-    case inCreateMenu = "In Create menu"
 
     var id: String { rawValue }
 }
@@ -28,7 +27,6 @@ struct LoRASettingsRow: Identifiable, Equatable {
     var entry: LoRACatalogEntry
     var kind: LoRASettingsRowKind
     var compatibility: LoRASettingsCompatibility?
-    var inCreateMenu: Bool
 
     var id: String { entry.loraID }
 }
@@ -69,8 +67,6 @@ final class LoRASettingsViewModel {
             return rows.filter { row in
                 row.kind == .saved && row.compatibility == .works
             }
-        case .inCreateMenu:
-            return rows.filter { $0.inCreateMenu }
         }
     }
 
@@ -117,21 +113,17 @@ final class LoRASettingsViewModel {
 
     func rebuildRows() {
         var built: [LoRASettingsRow] = entries.map { entry in
-            let compatibility = compatibility(for: entry)
-            let works = compatibility == .works
-            return LoRASettingsRow(
+            LoRASettingsRow(
                 entry: entry,
                 kind: .saved,
-                compatibility: compatibility,
-                inCreateMenu: works && enabledIDs.contains(entry.loraID)
+                compatibility: compatibility(for: entry)
             )
         }
         let discovered = discoveredEntries.map { entry in
             LoRASettingsRow(
                 entry: entry,
                 kind: .needsSetup,
-                compatibility: nil,
-                inCreateMenu: false
+                compatibility: nil
             )
         }
         built.append(contentsOf: discovered)

@@ -219,7 +219,7 @@ struct ImageGenLoraPicker: View {
             if choices.selectableChoices.isEmpty {
                 loraEmptySelectionView
             } else {
-                Picker("LoRA", selection: singleBinding) {
+                Picker("", selection: singleBinding) {
                     Text("—").tag("")
                     ForEach(choices.selectableChoices) { choice in
                         Text(choice.label).tag(choice.presetID)
@@ -227,7 +227,12 @@ struct ImageGenLoraPicker: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("LoRA")
+                .frame(
+                    minWidth: ImageGenInlineFieldLayout.fieldControlMinWidth,
+                    maxWidth: ImageGenInlineFieldLayout.fieldControlMaxWidth,
+                    alignment: .leading
+                )
                 .onChange(of: singleBinding.wrappedValue) { _, _ in
                     onValuesChanged?()
                     Task { await refreshSummaryOnly() }

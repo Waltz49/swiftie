@@ -277,7 +277,7 @@ final class SidebarPaneSplitModel {
         if mode == .all, jobCount > 1 {
             resizePaneToHeight(paneIndex: 2, targetHeight: sizes[2] + extraContentHeight, appState: appState)
         } else {
-            resizeJobsPaneToMode(appState: appState)
+            ensureJobsPaneFitsContent(appState: appState, forceRefit: false)
         }
     }
 
@@ -293,7 +293,8 @@ final class SidebarPaneSplitModel {
         resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
     }
 
-    func resizeJobsPaneToMode(appState: AppState) {
+    /// Port of ``right_sidebar_combined.ensure_jobs_pane_fits_content``.
+    func ensureJobsPaneFitsContent(appState: AppState, forceRefit: Bool) {
         guard side == .right else { return }
         appState.beginJobsPaneGeometryAdjustment()
         defer { appState.endJobsPaneGeometryAdjustment() }
@@ -308,24 +309,38 @@ final class SidebarPaneSplitModel {
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: target)
 
         jobsPaneDebug(
-            "resizeToMode \(mode) target=\(target) current=\(current) "
+            "ensureFits \(mode) force=\(forceRefit) target=\(target) current=\(current) "
             + "liveContent=\(appState.jobsPaneLiveContentHeight()) "
             + "panel=\(appState.jobsQueuePanelIntrinsicHeight) "
             + "cards=\(appState.measuredJobsCardStackHeight) strip=\(appState.measuredActiveJobStripHeight)"
         )
 
-        // ALL + multiple jobs: never shrink user-expanded height.
-        if mode == .all, !shrinkWrap, jobCount > 1 {
-            if target > current + tolerance {
+        switch mode {
+        case .strip:
+            if shrinkWrap || abs(current - target) > tolerance || forceRefit {
                 resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
             }
-            return
-        }
-
-        // Pin modes: grow to fit live content; never shrink (avoids relayout ↔ formula oscillation).
-        let newHeight = max(current, target)
-        if newHeight > current + tolerance {
-            resizePaneToHeight(paneIndex: 2, targetHeight: newHeight, appState: appState)
+        case .one:
+            if shrinkWrap || abs(current - target) > tolerance || forceRefit {
+                resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+            }
+        case .all:
+            if shrinkWrap {
+                if abs(current - target) > tolerance || forceRefit {
+                    resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                }
+                appState.jobsPaneAllMultiHeightPinned = false
+            } else if jobCount > 1 {
+                if forceRefit {
+                    resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                    appState.jobsPaneAllMultiHeightPinned = true
+                } else if target > current + tolerance {
+                    resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                }
+            } else if abs(current - target) > tolerance || forceRefit {
+                resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                appState.jobsPaneAllMultiHeightPinned = false
+            }
         }
     }
 

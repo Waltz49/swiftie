@@ -30,7 +30,9 @@ extension AppState {
                 return
             }
             guard self.jobsDisplayMode == .pane else { return }
-            self.rightSidebarSplit.resizeJobsPaneToMode(appState: self)
+            let forceRefit = self.jobsPaneGeometryForceRefit
+            self.jobsPaneGeometryForceRefit = false
+            self.rightSidebarSplit.ensureJobsPaneFitsContent(appState: self, forceRefit: forceRefit)
         }
         jobsPaneResizeDebounce = work
         DispatchQueue.main.async(execute: work)
@@ -103,10 +105,28 @@ extension AppState {
     func jobsPaneLiveContentHeight() -> CGFloat {
         let mode = jobsQueueSizeMode
         let jobCount = imageGen.queue.jobs.count
+        let shrinkWrap = shouldShrinkWrapJobsClient()
         let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
-        let toolbar = jobsToolbarVisible && jobsDisplayMode == .pane
-            ? JobQueuePaneMetrics.toolbarBlockHeight
-            : 0
+        let toolbarShown = jobsToolbarVisible && jobsDisplayMode == .pane
+        let toolbar = toolbarShown ? JobQueuePaneMetrics.toolbarBlockHeight : 0
+        let statusBarHeight = effectiveStatusBarHeight
+
+        if shrinkWrap {
+            let bottom = JobQueuePaneMetrics.paneAutoResizeBottomInset(
+                mode: mode,
+                shrinkWrap: true,
+                jobCount: jobCount,
+                viewBorderWidthPx: theme.colors.viewBorderWidthPx,
+                statusBarHeight: statusBarHeight
+            )
+            let padding = JobQueuePaneMetrics.panelPadding * 2
+            if mode == .strip {
+                return padding
+                    + JobQueuePaneMetrics.emptyStateClientHeight(toolbarVisible: toolbarShown)
+                    + bottom
+            }
+            return toolbar + padding + JobQueuePaneMetrics.emptyQueueLabelHeight + bottom
+        }
 
         var body = JobQueuePaneMetrics.panelPadding * 2
 
@@ -123,9 +143,10 @@ extension AppState {
 
         let bottom = JobQueuePaneMetrics.paneAutoResizeBottomInset(
             mode: mode,
-            shrinkWrap: shouldShrinkWrapJobsClient(),
+            shrinkWrap: false,
             jobCount: jobCount,
-            viewBorderWidthPx: theme.colors.viewBorderWidthPx
+            viewBorderWidthPx: theme.colors.viewBorderWidthPx,
+            statusBarHeight: statusBarHeight
         )
 
         return toolbar + body + bottom
@@ -134,6 +155,9 @@ extension AppState {
     func jobsPaneTargetPaneHeight() -> CGFloat {
         let header = SidebarPaneLayout.headerHeight
         let content = jobsPaneLiveContentHeight()
+        if shouldShrinkWrapJobsClient() {
+            return header + content
+        }
         return header + max(content, SidebarPaneLayout.minJobsQueueContentHeight)
     }
 

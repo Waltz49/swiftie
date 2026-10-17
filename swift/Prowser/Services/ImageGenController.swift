@@ -435,7 +435,9 @@ final class ImageGenController {
                     copiesTotal: job.copiesTotal,
                     jobNumber: job.jobNumber,
                     held: job.held,
-                    inError: job.inError
+                    inError: job.inError,
+                    pluginID: job.pluginID,
+                    function: job.function
                 )
             }
         pending = orderSnapshotRowsUnheldBeforeHeld(pending)
@@ -453,7 +455,9 @@ final class ImageGenController {
             copiesTotal: copiesTotal,
             jobNumber: activeNumber,
             held: activeJobHeld(),
-            inError: false
+            inError: false,
+            pluginID: activePluginID,
+            function: activeFunction
         )
         let insertAt = max(0, min(activeDisplayIndex, pending.count))
         var rows = pending
@@ -513,9 +517,12 @@ final class ImageGenController {
     func replaceQueuedJob(jobID: String, pluginID: String, function: String, values: [String: Any]) async throws {
         guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
+        let priorValues = queue.jobs[index].values
         var submitValues = values
         submitValues["copies"] = copies
+        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: priorValues)
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
+        ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&submitValues)
         var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: copies)
         JobStepQueue.stampSeriesCopiesOnSteps(&steps, copies: copies)
         queue.jobs[index].pluginID = pluginID
@@ -536,6 +543,7 @@ final class ImageGenController {
             pluginID: pluginID,
             values: submitValues
         )
+        queue.jobs[index].statusView = nil
         await refreshQueuedJobStatus(at: index)
         clearQueueErrorDisplay()
         if activeJobID == jobID {
@@ -608,7 +616,12 @@ final class ImageGenController {
         return nil
     }
 
-    func updateActiveJobRemaining(jobID: String, pluginID: String, values: [String: Any]) async throws {
+    func updateActiveJobRemaining(
+        jobID: String,
+        pluginID: String,
+        function: String,
+        values: [String: Any]
+    ) async throws {
         guard jobID == activeJobID else { return }
         let inProgress = isProcessing ? 1 : 0
         var remaining = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
@@ -616,7 +629,9 @@ final class ImageGenController {
         let copies = copiesDone + remaining
         var submitValues = values
         submitValues["copies"] = copies
+        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: pendingValues)
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
+        ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&submitValues)
         copiesTotal = copies
         if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
             copyBatchActive = true
@@ -624,6 +639,7 @@ final class ImageGenController {
             copyBatchActive = copies > 1 || copiesDone > 0
         }
         activePluginID = pluginID
+        activeFunction = function
         pendingValues = submitValues
         let future = max(0, copies - copiesDone - inProgress)
         if var doc = stepPendingDoc {
@@ -635,7 +651,12 @@ final class ImageGenController {
             doc["steps"] = steps
             stepPendingDoc = doc
         }
-        await syncActiveJobQueueRow(pluginID: pluginID, values: submitValues, copiesTotal: copies)
+        await syncActiveJobQueueRow(
+            pluginID: pluginID,
+            function: function,
+            values: submitValues,
+            copiesTotal: copies
+        )
         await refreshActiveJobStatusView()
         persistStepState()
         persistQueue()
@@ -2854,13 +2875,14 @@ final class ImageGenController {
     /// Port of ``_sync_active_job_queue_row`` (active job still has a queue row until the worker pops it).
     private func syncActiveJobQueueRow(
         pluginID: String,
+        function: String,
         values: [String: Any],
         copiesTotal: Int
     ) async {
         guard let jobID = activeJobID,
               let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
         queue.jobs[index].pluginID = pluginID
-        queue.jobs[index].function = activeFunction
+        queue.jobs[index].function = function
         queue.jobs[index].pluginUnavailable = false
         queue.jobs[index].values = values
         queue.jobs[index].copiesTotal = copiesTotal
@@ -2871,9 +2893,8 @@ final class ImageGenController {
             statusView: queue.jobs[index].statusView
         )
         let thumbs = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
-        if !thumbs.isEmpty {
-            queue.jobs[index].thumbnailPaths = thumbs
-        }
+        queue.jobs[index].thumbnailPaths = thumbs
+        queue.jobs[index].statusView = nil
         queue.jobs[index].referencesInvalid = JobCardThumbnailPaths.referencesInvalid(
             pluginID: pluginID,
             values: values

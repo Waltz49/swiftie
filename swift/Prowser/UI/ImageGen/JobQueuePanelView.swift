@@ -45,7 +45,11 @@ struct JobQueuePanelView: View {
             appState.syncJobsPaneGeometry()
         }
         .onChange(of: activeStripStructureKey) { _, _ in
-            appState.syncJobsPaneGeometry()
+            let mode = appState.jobsQueueSizeMode
+            if mode == .all, appState.imageGen.queue.jobs.count > 1 { return }
+            if mode == .one || mode == .strip {
+                appState.syncJobsPaneGeometry()
+            }
         }
     }
 

@@ -27,20 +27,35 @@ enum JobQueuePaneMetrics {
     static let toolbarBlockHeight: CGFloat = 29
     /// Reserved bottom buffer for sidebar auto-resize; matches ``ChromeLayoutAnimator.statusBarHeight``.
     static let statusBarFitBufferHeight: CGFloat = 24
+    /// Port of ``empty_queue_label_height_px`` (~1.5 caption lines).
+    static let emptyQueueLabelHeight: CGFloat = 20
+
+    /// Port of ``empty_state_height_hint`` (label + optional jobs toolbar).
+    static func emptyStateClientHeight(toolbarVisible: Bool) -> CGFloat {
+        var height = emptyQueueLabelHeight
+        if toolbarVisible {
+            height += toolbarBlockHeight
+        }
+        return height
+    }
 
     /// Bottom inset for sidebar pane auto-resize: pane border, fit slack, and status-bar row buffer.
     static func paneAutoResizeBottomInset(
         mode: JobsQueueSizeMode,
         shrinkWrap: Bool,
         jobCount: Int,
-        viewBorderWidthPx: Int
+        viewBorderWidthPx: Int,
+        statusBarHeight: CGFloat
     ) -> CGFloat {
         if mode == .strip { return 0 }
         let border = CGFloat(max(1, viewBorderWidthPx))
-        guard jobCount > 0, !shrinkWrap else { return border }
+        if shrinkWrap {
+            return border + max(0, statusBarHeight)
+        }
+        guard jobCount > 0 else { return border }
         return border
             + JobQueueLayout.paneFitBottomSlack
-            + statusBarFitBufferHeight
+            + (statusBarHeight > 0 ? statusBarFitBufferHeight : 0)
     }
 
     /// Port of ``ActiveJobStripWidget.content_height`` / ``_active_strip_block_height`` using strip row layout.

@@ -440,8 +440,10 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         case .strip:
             return 0
         case .one:
+            guard !rows.isEmpty else { return 0 }
             return max(measuredFirstCardHeight(), 40)
         case .all:
+            guard !rows.isEmpty else { return 0 }
             return max(measuredQueueContentHeight(), 40)
         }
     }
@@ -1011,6 +1013,8 @@ final class JobCardNSView: NSView {
     private var lastJobNumberHeld = false
     private var lastJobNumberInError = false
     private var lastCopiesTotal: Int?
+    private var lastPluginID = ""
+    private var lastFunction = ""
     private var storedFullPrompt = ""
     private let jobNumberBadge = JobNumberBadgeLabel()
     private var jobNumberBadgeTopConstraint: NSLayoutConstraint?
@@ -1297,15 +1301,23 @@ final class JobCardNSView: NSView {
         colors: ThemeColors,
         skipUnchanged: Bool = false
     ) {
+        let priorFullPrompt = storedFullPrompt
         syncStoredFullPrompt(row.fullPrompt)
         let identityChanged = !boundJobID.isEmpty && boundJobID != row.jobID
+        let contentIdentityChanged = !identityChanged
+            && boundJobID == row.jobID
+            && (row.pluginID != lastPluginID || row.function != lastFunction || row.fullPrompt != priorFullPrompt)
         boundJobID = row.jobID
         self.colors = colors
-        if identityChanged {
+        if identityChanged || contentIdentityChanged {
             // Reused cards keep the previous job's rendered status and thumbs.
             statusWidget.discardRenderedFingerprint()
-            refsView.discardRenderedPaths()
+            if identityChanged {
+                refsView.discardRenderedPaths()
+            }
         }
+        lastPluginID = row.pluginID
+        lastFunction = row.function
 
         if skipUnchanged, !identityChanged, rowContentUnchanged(row: row, scrollWidth: scrollWidth, selected: selected) {
             updateJobNumberDisplay(row: row)
@@ -1443,6 +1455,8 @@ final class JobCardNSView: NSView {
         if row.jobNumber != lastJobNumber { return false }
         if row.held != lastJobNumberHeld { return false }
         if row.inError != lastJobNumberInError { return false }
+        if row.pluginID != lastPluginID { return false }
+        if row.function != lastFunction { return false }
         return true
     }
 

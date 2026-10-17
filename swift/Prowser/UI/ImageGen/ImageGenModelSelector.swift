@@ -6,7 +6,7 @@ struct ImageGenModelSelector: View {
     @Binding var selectedPluginID: String
 
     var body: some View {
-        Picker("Model", selection: $selectedPluginID) {
+        Picker("", selection: $selectedPluginID) {
             ForEach(plugins.indices, id: \.self) { index in
                 let plugin = plugins[index]
                 let id = plugin["plugin_id"] as? String ?? ""
@@ -17,6 +17,12 @@ struct ImageGenModelSelector: View {
             }
         }
         .pickerStyle(.menu)
-        .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
+        .labelsHidden()
+        .accessibilityLabel("Model")
+        .frame(
+            minWidth: ImageGenInlineFieldLayout.fieldControlMinWidth,
+            maxWidth: ImageGenInlineFieldLayout.fieldControlMaxWidth,
+            alignment: .leading
+        )
     }
 }

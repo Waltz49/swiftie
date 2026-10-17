@@ -187,7 +187,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
     }
 
     /// `scaledSizes` drift goes to the last pane; re-pin jobs to content. In ALL+multi-job
-    /// mode `resizeJobsPaneToMode` is grow-only, so the user's height is otherwise kept.
+    /// mode ``ensureJobsPaneFitsContent`` is grow-only when pinned, so user height is kept.
     private func refitJobsPane(appState: AppState) {
         guard model.side == .right, appState.jobsDisplayMode == .pane else { return }
         appState.scheduleJobsPaneGeometryRefit()
