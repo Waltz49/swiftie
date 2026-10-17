@@ -10,13 +10,7 @@ enum ImageGenCatalogSnapshot {
     private static var cachedPlugins: [[String: Any]]?
     private static var cachedPluginByID: [String: [String: Any]] = [:]
 
-    private static var resourceBundle: Bundle {
-        #if SWIFT_PACKAGE
-        Bundle.module
-        #else
-        Bundle.main
-        #endif
-    }
+    private static var resourceBundle: Bundle { ProwserResourceBundle.bundle }
 
     static func loadPlugins() -> [[String: Any]] {
         if let cachedPlugins { return cachedPlugins }

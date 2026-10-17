@@ -6,13 +6,7 @@ enum AppAssets {
     /// Locked-file overlay (`assets/padlock_bright.png`).
     static var padlockBright: NSImage? { nsImage(name: "padlock_bright") }
 
-    private static var bundle: Bundle {
-        #if SWIFT_PACKAGE
-        Bundle.module
-        #else
-        Bundle.main
-        #endif
-    }
+    private static var bundle: Bundle { ProwserResourceBundle.bundle }
 
     static func url(name: String, fileExtension: String) -> URL? {
         bundle.url(forResource: name, withExtension: fileExtension, subdirectory: "Assets")

@@ -45,6 +45,59 @@ create_dmg() {
     open "$dmg_path"
 }
 
+verify_portable_resource_bundle() {
+    local app_path="$1"
+    local embedded="$app_path/Contents/Resources/Prowser_Prowser.bundle"
+
+    if [[ ! -d "$embedded" ]]; then
+        echo "error: missing embedded resource bundle: $embedded" >&2
+        exit 1
+    fi
+    /usr/bin/swift -e 'import Foundation
+let path = CommandLine.arguments[1]
+guard Bundle(path: path) != nil else {
+    fputs("error: Bundle(path:) failed for resource bundle\n", stderr)
+    exit(1)
+}
+' "$embedded"
+}
+
+# Ensures launch does not depend on the local .build copy (SPM compile-time fallback).
+verify_launch_without_build_fallback() {
+    local app_path="$1"
+    local build_bundle="$2"
+    local hidden=""
+
+    if [[ ! -d "$build_bundle" ]]; then
+        return 0
+    fi
+    hidden="${build_bundle}.packaging_verify_hidden"
+    rm -rf "$hidden"
+    mv "$build_bundle" "$hidden"
+
+    local binary="$app_path/Contents/MacOS/Prowser"
+    "$binary" >/dev/null 2>&1 &
+    local pid=$!
+    local ok=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            ok=0
+            break
+        fi
+        ok=1
+        sleep 0.2
+    done
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    mv "$hidden" "$build_bundle"
+
+    if [[ "$ok" -ne 1 ]]; then
+        echo "error: app exited immediately without .build resource bundle fallback" >&2
+        echo "  (check Console for resource_bundle_accessor fatalError)" >&2
+        exit 1
+    fi
+}
+
 register_default_open() {
     local app_path="$1"
     echo "Registering $app_path as the default opener for jpg, jpeg, png, webp ..."
@@ -238,9 +291,9 @@ if [[ "$CONFIG" == "release" ]]; then
     # Drop debug symbols and unused local symbols from the packaged binary.
     strip -rSTx "$APP_MACOS/Prowser"
 fi
-# SwiftPM Bundle.module resolves Prowser_Prowser.bundle under Contents/Resources when packaged.
-# Do not place it at the .app root (breaks codesign sealing / Full Disk Access identity).
+# Packaged apps load this via ProwserResourceBundle (Contents/Resources), not SPM's .build fallback.
 ditto --norsrc --noextattr --noqtn "$RESOURCE_BUNDLE" "$APP_RESOURCES/Prowser_Prowser.bundle"
+verify_portable_resource_bundle "$OUTPUT"
 
 cp "$INFO_PLIST_SRC" "$OUTPUT/Contents/Info.plist"
 ICON_SRC="$SWIFT_ROOT/Prowser/Resources/Assets/Prowser.icns"
@@ -290,6 +343,8 @@ sign_app_bundle() {
 
 ENTITLEMENTS="$SWIFT_ROOT/Prowser/Resources/Prowser.entitlements"
 sign_app_bundle "$OUTPUT" "$ENTITLEMENTS"
+verify_launch_without_build_fallback "$OUTPUT" "$RESOURCE_BUNDLE"
+echo "  portable check:  resource bundle loads without local .build fallback"
 
 if [[ -n "$INSTALL_APP_PATH" ]]; then
     INSTALL_APP_PATH="$(cd "$(dirname "$INSTALL_APP_PATH")" && pwd)/$(basename "$INSTALL_APP_PATH")"
@@ -297,6 +352,8 @@ if [[ -n "$INSTALL_APP_PATH" ]]; then
     rm -rf "$INSTALL_APP_PATH"
     ditto --norsrc --noextattr --noqtn "$OUTPUT" "$INSTALL_APP_PATH"
     sign_app_bundle "$INSTALL_APP_PATH" "$ENTITLEMENTS"
+    verify_portable_resource_bundle "$INSTALL_APP_PATH"
+    verify_launch_without_build_fallback "$INSTALL_APP_PATH" "$RESOURCE_BUNDLE"
     OUTPUT="$INSTALL_APP_PATH"
 fi
 
