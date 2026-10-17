@@ -43,7 +43,8 @@ struct ImageGenUnifiedDialog: View {
     private let session = ImageGenSessionState()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let _ = appState.imageGenUIRevision
+        return VStack(alignment: .leading, spacing: 8) {
             if isLoading {
                 ProgressView("Loading…")
                     .frame(maxWidth: .infinity, minHeight: 220)
@@ -137,6 +138,9 @@ struct ImageGenUnifiedDialog: View {
         }
         .onChange(of: appState.imageGenDialogApplyToken) { _, _ in
             Task { await applyOpenRequest() }
+        }
+        .onChange(of: appState.imageGenUIRevision) { _, _ in
+            refreshQueueReplaceChromeFromJobCard()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserRaiseImageGenDialog)) { _ in
             raiseWindow()
@@ -910,6 +914,20 @@ struct ImageGenUnifiedDialog: View {
 
     private func markDirtyIfNeeded() {
         isDirty = !ImageGenPersistence.snapshotsEqual(values, baselineValues)
+    }
+
+    /// Python ``ImageGenUnifiedDialog._on_queue_replace_job_state_changed`` (visibility + copies mirror).
+    private func refreshQueueReplaceChromeFromJobCard() {
+        guard let jobID = replaceJobID else { return }
+        if !showReplaceUpdate, !appState.imageGen.queueReplaceJobStillExists(jobID: jobID) {
+            appState.imageGenDialogRequest.replaceJobID = nil
+            return
+        }
+        guard let copies = appState.imageGen.copiesForJobEditor(jobID: jobID) else { return }
+        let current = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
+        if current != copies {
+            values["copies"] = copies
+        }
     }
 
     private func performClose() {

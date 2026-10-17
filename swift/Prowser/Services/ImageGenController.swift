@@ -689,8 +689,24 @@ final class ImageGenController {
         jobID != activeJobID && queue.jobs.contains(where: { $0.jobID == jobID })
     }
 
+    /// Pending batch copies that can still pick up updated settings (Python ``active_job_future_copies_updatable``).
+    func activeJobFutureCopiesUpdatable() -> Int {
+        guard activeJobID != nil, copyBatchActive else { return 0 }
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+            return 1
+        }
+        return JobStepQueue.pendingStepCount(stepPendingDoc)
+    }
+
     func isActiveJobRemainingUpdatable(jobID: String) -> Bool {
-        jobID == activeJobID && (JobStepQueue.pendingStepCount(stepPendingDoc) > 0 || copyBatchActive)
+        guard jobID == activeJobID else { return false }
+        return activeJobFutureCopiesUpdatable() > 0
+    }
+
+    func queueReplaceJobStillExists(jobID: String) -> Bool {
+        guard !jobID.isEmpty else { return false }
+        if jobID == activeJobID { return true }
+        return queue.jobs.contains(where: { $0.jobID == jobID })
     }
 
     func cancelJob(id: String, cascade: Bool = false) {
