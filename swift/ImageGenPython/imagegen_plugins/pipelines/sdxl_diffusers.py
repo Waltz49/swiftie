@@ -448,12 +448,15 @@ def _preview_image_from_latents(pipe: Any, latents: Any) -> Any:
 
 
 def _write_progressive_preview(pipe: Any, latents: Any, output_path: str) -> bool:
-    """Decode latents and atomically update the run's output PNG for browse preview."""
+    """Decode latents and atomically update the run's output image for browse preview."""
+    from imagegen_plugins.image_gen_output_format import pil_save_kwargs_for_path
     from imagegen_plugins.pipelines.mflux_stepwise_progress import atomic_copy2
 
-    tmp_path = prowser_mkstemp_path(prefix="sdxl-progress-", suffix=".png")
+    suffix = os.path.splitext(output_path)[1] or ".png"
+    tmp_path = prowser_mkstemp_path(prefix="sdxl-progress-", suffix=suffix)
     try:
-        _preview_image_from_latents(pipe, latents).save(tmp_path)
+        image = _preview_image_from_latents(pipe, latents)
+        image.save(tmp_path, **pil_save_kwargs_for_path(output_path))
         atomic_copy2(tmp_path, output_path)
         return True
     finally:
@@ -548,6 +551,19 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 try:
                     if _write_progressive_preview(pipe_obj, latents, output_path):
                         preview_path = output_path
+                        from imagegen_plugins.pipelines.diffusers_progressive_exif import (
+                            stamp_progressive_preview_exif,
+                        )
+
+                        stamp_progressive_preview_exif(
+                            output_path,
+                            payload,
+                            hf_model_id=hf_model_id,
+                            completed_step=step_num,
+                            total_steps=steps,
+                            elapsed_seconds=time.perf_counter() - t0,
+                            seed=seed if not payload.get("random_seed") else None,
+                        )
                 except Exception as exc:
                     print(
                         f"[sdxl_diffusers] progressive preview failed at step {step_num}: {exc}",

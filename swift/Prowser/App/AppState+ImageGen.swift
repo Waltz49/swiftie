@@ -549,4 +549,5 @@ extension AppState {
         config.applySettingsChange(emit: eventBus)
         SceneWindowChrome.applyJobsPanelAlwaysOnTop(enabled)
     }
+
 }

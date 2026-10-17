@@ -802,6 +802,155 @@
     },
     {
       "available": true,
+      "display_name": "SD 1.5 Base",
+      "field_layout": [
+        {
+          "spec": {
+            "default": "",
+            "key": "prompt",
+            "kind": "text",
+            "label": "Image Prompt",
+            "required": true
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": "",
+            "key": "negative_prompt",
+            "kind": "text",
+            "label": "Negative prompt",
+            "required": false
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 512,
+            "key": "width",
+            "kind": "int_slider",
+            "label": "Width",
+            "max_value": 768,
+            "min_value": 256,
+            "required": false,
+            "reset_default": 512,
+            "step": 8
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 512,
+            "key": "height",
+            "kind": "int_slider",
+            "label": "Height",
+            "max_value": 768,
+            "min_value": 256,
+            "required": false,
+            "reset_default": 512,
+            "step": 8
+          },
+          "type": "field"
+        },
+        {
+          "children": [
+            {
+              "spec": {
+                "default": 0,
+                "key": "seed",
+                "kind": "seed",
+                "label": "Seed",
+                "required": false
+              },
+              "type": "field"
+            },
+            {
+              "spec": {
+                "bool_label_override": "Randomize",
+                "default": true,
+                "key": "random_seed",
+                "kind": "bool",
+                "label": "Random seed",
+                "required": false
+              },
+              "type": "field"
+            }
+          ],
+          "label": null,
+          "layout": "seed_row",
+          "type": "group"
+        },
+        {
+          "spec": {
+            "default": 25,
+            "key": "steps",
+            "kind": "int_slider",
+            "label": "Steps",
+            "max_value": 50,
+            "min_value": 1,
+            "required": false,
+            "reset_default": 25,
+            "step": 1
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 7.5,
+            "key": "guidance_scale",
+            "kind": "float_slider",
+            "label": "Guidance",
+            "max_value": 20.0,
+            "min_value": 1.0,
+            "required": false,
+            "reset_default": 7.5,
+            "step": 0.1
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 1,
+            "key": "copies",
+            "kind": "int_slider",
+            "label": "Copies",
+            "max_value": 30,
+            "min_value": 1,
+            "required": false,
+            "reset_default": 1,
+            "step": 1
+          },
+          "type": "field"
+        }
+      ],
+      "function": "create",
+      "hf_model_id": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+      "lora_host_id": "sd15",
+      "max_generation_dimension": 768,
+      "merged_defaults": {
+        "aspect_ratio_lock": false,
+        "copies": 1,
+        "guidance_scale": 7.5,
+        "height": 512,
+        "hf_model_id": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+        "mflux_lora": "none",
+        "mflux_quantize": 4,
+        "negative_prompt": "",
+        "prompt": "",
+        "random_seed": true,
+        "seed": 0,
+        "steps": 25,
+        "vae_hf_model_id": "",
+        "width": 512
+      },
+      "model_comment": "Original SD 1.5; bundled VAE; general-purpose SD 1.5 LoRAs",
+      "model_label": "SD 1.5 Base",
+      "pipeline_id": "sd15_diffusers",
+      "plugin_id": "sd15_base_v1_5",
+      "quantize_status_key": "mflux_quantize"
+    },
+    {
+      "available": true,
       "display_name": "Anything Furry",
       "field_layout": [
         {

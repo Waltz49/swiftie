@@ -171,6 +171,20 @@ final class MfluxGenerationTasks {
                         "Python environment not configured (Settings → Image Generation)."
                     )
                 }
+                let hfForCheck = hfModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !hfForCheck.isEmpty,
+                   !ImageGenHFModelLocality.modelIsInstalled(pipelineID: pipelineID, repoID: hfForCheck) {
+                    throw MfluxCLIError.processFailed(
+                        "Model weights for \(hfForCheck) are not installed locally. "
+                            + "Use Image → Manage models… to download, then try again."
+                    )
+                }
+                progressHandler([
+                    "type": "progress",
+                    "step": 0,
+                    "step_total": steps,
+                    "phase": "loading_model",
+                ])
                 runPayload["output_path"] = finalOutputPath
                 if let flag = runPayload["show_progressive_images"] {
                     runPayload["show_progressive_images"] = ImageGenPipelineModes.boolFromSettingsValue(flag)

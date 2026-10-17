@@ -13,9 +13,24 @@ SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX = "SceneWorks/flux2-klein-9b-kv-mlx"
 
 REALISTIC_VISION_V4_NOVAE = "SG161222/Realistic_Vision_V4.0_noVAE"
 ANYTHING_FURRY = "stablediffusionapi/anythingfurry"
+SD15_BASE_V1_5 = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 SD15_DEFAULT_VAE = "stabilityai/sd-vae-ft-mse"
 
 SDXL_BASE_1_0 = "stabilityai/stable-diffusion-xl-base-1.0"
+
+# Diffusers-only subset for sd15_diffusers on the official v1.5 repo (skip multi-GB .ckpt checkpoints).
+SD15_DIFFUSERS_ALLOW_PATTERNS: tuple[str, ...] = (
+    "model_index.json",
+    "feature_extractor/*",
+    "scheduler/*",
+    "tokenizer/*",
+    "unet/config.json",
+    "unet/diffusion_pytorch_model.safetensors",
+    "text_encoder/config.json",
+    "text_encoder/model.safetensors",
+    "vae/config.json",
+    "vae/diffusion_pytorch_model.safetensors",
+)
 
 # Diffusers-only subset for sdxl_diffusers (~13–14 GB fp32 weights; not the full ~54 GB repo).
 SDXL_DIFFUSERS_ALLOW_PATTERNS: tuple[str, ...] = (
@@ -39,6 +54,7 @@ Z_IMAGE_TURBO_SDNQ_INT8 = "Disty0/Z-Image-Turbo-SDNQ-int8"
 
 # SD 1.5 checkpoints that use HOST_SD15 (settings + run dialog LoRA lists).
 SD15_LORA_MODEL_KEYS: tuple[str, ...] = (
+    SD15_BASE_V1_5,
     REALISTIC_VISION_V4_NOVAE,
     ANYTHING_FURRY,
 )
@@ -57,6 +73,7 @@ LORA_PROBE_MODEL_ORDER: tuple[str, ...] = (
     FLUX2_KLEIN_9B_KV,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     Z_IMAGE_TURBO,
+    SD15_BASE_V1_5,
     REALISTIC_VISION_V4_NOVAE,
     ANYTHING_FURRY,
     SDXL_BASE_1_0,
@@ -70,6 +87,7 @@ LORA_MODEL_DISPLAY_NAMES: dict[str, str] = {
     FLUX2_KLEIN_9B: "FLUX.2 Klein 9B",
     FLUX2_KLEIN_9B_KV: "FLUX.2 Klein 9B KV",
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX: "FLUX.2 Klein 9B KV MLX",
+    SD15_BASE_V1_5: "SD 1.5 Base",
     REALISTIC_VISION_V4_NOVAE: "Realistic Vision V4.0",
     ANYTHING_FURRY: "Anything Furry",
     SDXL_BASE_1_0: "SDXL 1.0 Base",
@@ -159,6 +177,8 @@ def hf_repo_snapshot_allow_patterns(
     pipeline_id: str, repo_id: str
 ) -> tuple[str, ...] | None:
     """Subset of HF repo files to download for a pipeline (None = full repo)."""
+    if pipeline_id == "sd15_diffusers" and repo_id == SD15_BASE_V1_5:
+        return SD15_DIFFUSERS_ALLOW_PATTERNS
     if pipeline_id == "sdxl_diffusers" and repo_id == SDXL_BASE_1_0:
         return SDXL_DIFFUSERS_ALLOW_PATTERNS
     return None

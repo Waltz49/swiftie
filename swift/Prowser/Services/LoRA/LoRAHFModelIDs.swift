@@ -10,18 +10,20 @@ enum LoRAHFModelIDs {
     static let flux2Klein9BKV = "black-forest-labs/FLUX.2-klein-9b-kv"
     static let sceneworksFlux2Klein9BKVMLX = "SceneWorks/flux2-klein-9b-kv-mlx"
 
+    static let sd15BaseV15 = "stable-diffusion-v1-5/stable-diffusion-v1-5"
     static let realisticVisionV4NoVAE = "SG161222/Realistic_Vision_V4.0_noVAE"
     static let anythingFurry = "stablediffusionapi/anythingfurry"
     static let sdxlBase10 = "stabilityai/stable-diffusion-xl-base-1.0"
     static let zImageTurbo = "Tongyi-MAI/Z-Image-Turbo"
 
-    static let sd15LoraModelKeys: [String] = [realisticVisionV4NoVAE, anythingFurry]
+    static let sd15LoraModelKeys: [String] = [sd15BaseV15, realisticVisionV4NoVAE, anythingFurry]
     static let sdxlLoraModelKeys: [String] = [sdxlBase10]
 
     static let probeModelOrder: [String] = [
         flux1Schnell, flux1Dev, flux1FillDev,
         flux2Klein4B, flux2Klein9B, flux2Klein9BKV, sceneworksFlux2Klein9BKVMLX,
         zImageTurbo,
+        sd15BaseV15,
         realisticVisionV4NoVAE, anythingFurry,
         sdxlBase10,
     ]
@@ -40,6 +42,7 @@ enum LoRAHFModelIDs {
             flux2Klein9B: "FLUX.2 Klein 9B",
             flux2Klein9BKV: "FLUX.2 Klein 9B KV",
             sceneworksFlux2Klein9BKVMLX: "FLUX.2 Klein 9B KV MLX",
+            sd15BaseV15: "SD 1.5 Base",
             realisticVisionV4NoVAE: "Realistic Vision V4.0",
             anythingFurry: "Anything Furry",
             sdxlBase10: "SDXL 1.0 Base",

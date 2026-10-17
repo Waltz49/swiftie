@@ -881,6 +881,7 @@ def make_readable_user_comment_before_browse(
     allow_cross_directory_references: bool = False,
     include_quantization: bool = True,
     quantization: Optional[int] = None,
+    force_refresh: bool = False,
 ) -> None:
     """Write final-style Image Model / Prompt EXIF for in-progress step previews."""
     if not image_path or not os.path.isfile(image_path):
@@ -905,17 +906,18 @@ def make_readable_user_comment_before_browse(
     pipeline_id = str(values.get("pipeline_id") or "").strip() or None
     lora = lora_name_for_exif_from_values(values, pipeline_id=pipeline_id)
 
-    try:
-        raw = get_usercomment_from_path(image_path)
-        if raw:
-            text = decode_usercomment(raw).strip()
-            if text.startswith("Image Model:"):
-                if "LoRA:" in text or not lora:
-                    return
-    except Exception:
-        pass
+    if not force_refresh:
+        try:
+            raw = get_usercomment_from_path(image_path)
+            if raw:
+                text = decode_usercomment(raw).strip()
+                if text.startswith("Image Model:"):
+                    if "LoRA:" in text or not lora:
+                        return
+        except Exception:
+            pass
 
-    meta = _mflux_json_from_user_comment(image_path)
+    meta = _mflux_json_from_user_comment(image_path) if not force_refresh else None
     if meta is not None:
         comment = format_exif_comment_from_mflux_metadata(
             meta,

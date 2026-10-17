@@ -45,6 +45,7 @@ enum ImageGenExifCommentFormatting {
         "black-forest-labs/FLUX.2-klein-9b-kv": "FLUX.2 Klein 9B KV",
         "SceneWorks/flux2-klein-9b-kv-mlx": "FLUX.2 Klein 9B KV MLX",
         "SG161222/Realistic_Vision_V4.0_noVAE": "Realistic Vision V4.0",
+        "stable-diffusion-v1-5/stable-diffusion-v1-5": "SD 1.5 Base",
         "stablediffusionapi/anythingfurry": "Anything Furry",
         "stabilityai/stable-diffusion-xl-base-1.0": "SDXL 1.0 Base",
         "Disty0/Z-Image-Turbo-SDNQ-int8": "Z-Image Turbo",

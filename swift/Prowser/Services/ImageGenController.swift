@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 
 /// Swift port of `imagegen_plugins/image_gen_controller.py`.
 /// UI refresh is driven by ``AppState/imageGenUIRevision`` (not Swift Observation).
@@ -2457,6 +2458,10 @@ final class ImageGenController {
         }
         modelTasks.onProgress = { [weak self] message in
             guard let self else { return }
+            if (message["phase"] as? String) == "loading_model" {
+                self.progressMessage = "Loading model…"
+                self.taskStatusHTML = self.progressMessage
+            }
             if let step = self.intFromAny(message["step"]) {
                 self.updateLiveStepProgress(step: step, stepTotal: message["step_total"])
             } else if let total = self.intFromAny(message["step_total"])
@@ -2470,6 +2475,11 @@ final class ImageGenController {
                 let stepTotal = self.intFromAny(message["step_total"]) ?? self.liveStepTotal
                 if step != 0 {
                     let isFinal = step > 0 && stepTotal > 0 && step >= stepTotal
+                    if !isFinal {
+                        // SD15/SDXL overwrite the same output PNG each step; stamp EXIF as soon as the
+                        // preview lands (Python ``_refresh_progressive_image``), not only on debounced browse flush.
+                        Task { await self.writeProgressivePreviewExifIfNeeded(at: path) }
+                    }
                     let forceEnterBrowse = isFinal || !self.progressiveBrowseOpened
                     self.onProgressivePreview?(path, forceEnterBrowse, step, stepTotal)
                 }
@@ -2564,6 +2574,9 @@ final class ImageGenController {
         }
         if step > 0 {
             progressMessage = "Step \(step)"
+            taskStatusHTML = progressMessage
+        } else if total > 0 {
+            progressMessage = "Loading model…"
             taskStatusHTML = progressMessage
         }
     }
@@ -3035,24 +3048,54 @@ final class ImageGenController {
     ) async {
         guard showProgressiveImages,
               !path.isEmpty,
-              FileManager.default.fileExists(atPath: path),
               !copyCycleExifPluginID.isEmpty else { return }
-        let step = completedStep ?? liveStep
-        let total = totalSteps ?? liveStepTotal
+        // SD15/SDXL workers stamp progressive EXIF in Python (piexif); Swift WebP mux can fail on partial files.
+        if let plugin = ImageGenPluginCatalog.plugin(pluginID: copyCycleExifPluginID),
+           plugin.pipelineID == "sd15_diffusers" || plugin.pipelineID == "sdxl_diffusers" {
+            return
+        }
+        var ready = false
+        for _ in 0..<40 {
+            if progressivePreviewRasterIsComplete(path) {
+                ready = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard ready else { return }
+        // Match Python ``_refresh_progressive_image``: use live step counters at write time.
+        let step = liveStep > 0 ? liveStep : (completedStep ?? 0)
+        let total = liveStepTotal > 0 ? liveStepTotal : (totalSteps ?? 0)
         guard step > 0, total > 0, step < total else { return }
         let values = copyCycleExifValues
         let elapsed = liveGenerationElapsedSeconds()
         let fallback = exifFallbackSourcePaths(from: values)
-        _ = try? await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
-            pluginID: copyCycleExifPluginID,
-            outputPath: path,
-            values: values,
-            elapsedSeconds: elapsed,
-            completedStep: step,
-            totalSteps: total,
-            fallbackSourcePaths: fallback,
-            tempRoot: config.temporaryFilesDirectory.path
-        )
+        do {
+            _ = try await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
+                pluginID: copyCycleExifPluginID,
+                outputPath: path,
+                values: values,
+                elapsedSeconds: elapsed,
+                completedStep: step,
+                totalSteps: total,
+                fallbackSourcePaths: fallback,
+                tempRoot: config.temporaryFilesDirectory.path
+            )
+        } catch {
+            print("DEBUG writeProgressivePreviewExifIfNeeded: failed for \(path): \(error)")
+        }
+    }
+
+    /// Port of Python ``_progressive_image_readable`` (skip truncated/incomplete raster files).
+    private func progressivePreviewRasterIsComplete(_ path: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        let rasterExts = ["png", "webp", "jpg", "jpeg", "tif", "tiff"]
+        guard rasterExts.contains(ext) else { return true }
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else {
+            return false
+        }
+        return CGImageSourceGetStatus(source) == .statusComplete
     }
 
     private func writeGenerationExif(

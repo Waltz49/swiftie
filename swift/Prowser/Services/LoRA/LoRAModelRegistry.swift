@@ -28,6 +28,7 @@ enum LoRAModelRegistry {
             displayName: LoRAHFModelIDs.sceneworksFlux2Klein9BKVMLX,
             availableIn: ["create", "edit", "expand"]
         ),
+        .init(modelKey: LoRAHFModelIDs.sd15BaseV15, displayName: LoRAHFModelIDs.sd15BaseV15, availableIn: ["create"]),
         .init(modelKey: LoRAHFModelIDs.realisticVisionV4NoVAE, displayName: LoRAHFModelIDs.realisticVisionV4NoVAE, availableIn: ["create"]),
         .init(modelKey: LoRAHFModelIDs.anythingFurry, displayName: LoRAHFModelIDs.anythingFurry, availableIn: ["create"]),
         .init(modelKey: LoRAHFModelIDs.sdxlBase10, displayName: LoRAHFModelIDs.sdxlBase10, availableIn: ["create"]),

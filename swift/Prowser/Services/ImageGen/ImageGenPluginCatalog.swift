@@ -89,6 +89,15 @@ enum ImageGenPluginCatalog {
             reportsQuantization: false
         ),
         .init(
+            pluginID: "sd15_base_v1_5",
+            pipelineID: "sd15_diffusers",
+            function: "create",
+            displayName: "SD 1.5 Base",
+            hfModelID: "stable-diffusion-v1-5/stable-diffusion-v1-5",
+            loraHostID: "sd15",
+            reportsQuantization: false
+        ),
+        .init(
             pluginID: "sdxl_base_1_0",
             pipelineID: "sdxl_diffusers",
             function: "create",

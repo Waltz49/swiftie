@@ -1026,6 +1026,13 @@ struct ProwserImageCommands: Commands {
             }
             .keyboardShortcut("j", modifiers: .command)
             .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Divider()
+
+            Button("Manage models…") {
+                Task { @MainActor in appState.showManageModelsDialog() }
+            }
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
         }
     }
 }

@@ -26,19 +26,7 @@ from imagegen_plugins.lora_catalog import lora_weights_file_is_valid
 _DEFAULT_HF_MODEL_ID = REALISTIC_VISION_V4_NOVAE
 _DEFAULT_VAE_HF_MODEL_ID = SD15_DEFAULT_VAE
 # Minimum wall time between VAE decodes for progressive browse previews.
-_PROGRESSIVE_PREVIEW_MIN_INTERVAL_S = 4.0
-
-
-def _payload_bool(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return bool(value)
+_PROGRESSIVE_PREVIEW_MIN_INTERVAL_S = 2.0 # DGN
 
 _pipe = None
 _loaded_model_key: Optional[Tuple[str, str]] = None
@@ -133,6 +121,12 @@ def _release_torch_allocators() -> None:
 
 def unload_pipeline() -> None:
     global _pipe, _loaded_model_key, _active_lora_key, _active_lora_peft
+    try:
+        from imagegen_plugins.conditioning_cache import clear_torch_text_conditioning_cache
+
+        clear_torch_text_conditioning_cache()
+    except Exception:
+        pass
     _pipe = None
     _loaded_model_key = None
     _active_lora_key = None
@@ -241,6 +235,7 @@ def _ensure_pipeline(hf_model_id: str, vae_hf_model_id: str) -> Any:
         "torch_dtype": torch_dtype,
         "safety_checker": None,
         "requires_safety_checker": False,
+        "feature_extractor": None,
         **tok_kwargs,
         **model_local_kwargs,
     }
@@ -297,16 +292,15 @@ def _preview_image_from_latents(pipe: Any, latents: Any) -> Any:
 
 
 def _write_progressive_preview(pipe: Any, latents: Any, output_path: str) -> bool:
-    """Decode latents and atomically update the run's output file for browse preview."""
+    """Decode latents and atomically update the run's output image for browse preview."""
     from imagegen_plugins.image_gen_output_format import pil_save_kwargs_for_path
     from imagegen_plugins.pipelines.mflux_stepwise_progress import atomic_copy2
 
     suffix = os.path.splitext(output_path)[1] or ".png"
     tmp_path = prowser_mkstemp_path(prefix="sd15-progress-", suffix=suffix)
     try:
-        _preview_image_from_latents(pipe, latents).save(
-            tmp_path, **pil_save_kwargs_for_path(output_path)
-        )
+        image = _preview_image_from_latents(pipe, latents)
+        image.save(tmp_path, **pil_save_kwargs_for_path(output_path))
         atomic_copy2(tmp_path, output_path)
         return True
     finally:
@@ -339,7 +333,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     output_path = str(payload["output_path"])
     negative_prompt = str(payload.get("negative_prompt") or "").strip()
     if "show_progressive_images" in payload:
-        show_progressive = _payload_bool(payload.get("show_progressive_images"))
+        show_progressive = bool(payload.get("show_progressive_images"))
     else:
         from imagegen_plugins.image_gen_persistence import load_show_progressive_images
 
@@ -398,6 +392,19 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                         if _write_progressive_preview(pipe_obj, latents, output_path):
                             preview_path = output_path
                             last_preview_at = now
+                            from imagegen_plugins.pipelines.diffusers_progressive_exif import (
+                                stamp_progressive_preview_exif,
+                            )
+
+                            stamp_progressive_preview_exif(
+                                output_path,
+                                payload,
+                                hf_model_id=hf_model_id,
+                                completed_step=step_num,
+                                total_steps=steps,
+                                elapsed_seconds=time.perf_counter() - t0,
+                                seed=seed if not payload.get("random_seed") else None,
+                            )
                     except Exception as exc:
                         print(
                             f"[sd15_diffusers] progressive preview failed at step {step_num}: {exc}",
@@ -412,13 +419,35 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         return callback_kwargs
 
     pipe_kwargs: Dict[str, Any] = dict(gen_kwargs)
-    if show_progressive and steps > 1:
+    # Step counter always updates when steps > 1; VAE previews remain gated on show_progressive.
+    if steps > 1:
         pipe_kwargs["callback_on_step_end"] = _on_step_end
         if progressive_vae_previews:
             pipe_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+    from imagegen_plugins.diffusers_conditioning import (
+        apply_conditioning_to_pipe_kwargs,
+        encode_sd15_cached,
+    )
+
+    model_key = (hf_model_id, vae_hf_model_id)
+    lora_key = _active_lora_key
+    with PerfTimer("prompt_encode", pipeline="sd15_diffusers"):
+        conditioning = encode_sd15_cached(
+            pipe,
+            pipeline_kind="sd15_diffusers",
+            model_key=model_key,
+            lora_key=lora_key,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            guidance=guidance,
+            device=getattr(pipe, "_execution_device", None)
+            or getattr(pipe, "device", None)
+            or gen.device,
+        )
+    apply_conditioning_to_pipe_kwargs(conditioning, pipe_kwargs)
     with PerfTimer("sd15_inference", steps=steps, seed=seed):
         out = pipe(**pipe_kwargs)
-    if show_progressive and steps > 1:
+    if steps > 1:
         emit_mflux_progress(step=steps, step_total=steps)
     with PerfTimer("save_output", pipeline="sd15_diffusers"):
         from imagegen_plugins.image_gen_output_format import save_generation_image

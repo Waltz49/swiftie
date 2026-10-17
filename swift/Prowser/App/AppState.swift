@@ -74,6 +74,7 @@ final class AppState {
     var pendingProgressiveStepTotal = 0
     var prowserGeneratedImageOpenTask: Task<Void, Never>?
     private let generationTimingDialog = GenerationTimingDialogController()
+    private let manageModelsDialog = ManageModelsDialogController()
     var fileTreeFocusToken = 0
     /// Tree pane keyboard focus (Python `combined_sidebar._update_tree_header_focus`).
     var fileTreeKeyboardFocused = false
@@ -973,6 +974,10 @@ final class AppState {
                 message: error.localizedDescription
             )
         }
+    }
+
+    func showManageModelsDialog() {
+        manageModelsDialog.show(appState: self)
     }
 
     func showAboutDialog() {
