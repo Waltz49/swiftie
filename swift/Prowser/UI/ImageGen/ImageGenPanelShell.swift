@@ -19,6 +19,10 @@ struct ImageGenPanelShell: View {
     var onInfillHasPaintChanged: ((Bool) -> Void)?
     var onInfillPixelmatorDocPathChanged: ((String?) -> Void)?
     var onInfillPixelmatorExportChanged: (([String: Any]) -> Void)?
+    var fluxContext: ImageGenFluxPromptSubmitContext?
+    var fluxRefineCoordinator: FluxPromptRefineCoordinator?
+    var activeBrowsePath: String?
+    var onQueueJobWithAI: (() -> Void)?
 
     @Environment(AppState.self) private var appState
     @State private var localSourcePath: String?
@@ -222,12 +226,18 @@ struct ImageGenPanelShell: View {
             )
             .padding(.top, 8)
 
-            ImageGenFluxPromptSection(
-                values: $values,
-                function: function,
-                sourcePaths: effectiveSourcePaths,
-                onValuesChanged: onValuesChanged
-            )
+            if let fluxContext, let fluxRefineCoordinator {
+                ImageGenFluxPromptSection(
+                    values: $values,
+                    fluxContext: fluxContext,
+                    refineCoordinator: fluxRefineCoordinator,
+                    function: function,
+                    sourcePaths: effectiveSourcePaths,
+                    activeBrowsePath: activeBrowsePath,
+                    onValuesChanged: onValuesChanged,
+                    onQueueJobWithAI: onQueueJobWithAI
+                )
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {

@@ -73,6 +73,16 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         XCTAssertEqual(parsed["lora"] as? String, "First [1] + Second [0.5]")
     }
 
+    func testMergingPluginDefaultsPreservesCopies() {
+        let defaults: [String: Any] = ["copies": 1, "steps": 4, "width": 512]
+        let values: [String: Any] = ["copies": 5, "steps": 20, "width": 1024, "prompt": "keep"]
+        let merged = ImageGenExifImport.mergingPluginDefaults(defaults, preserving: values)
+        XCTAssertEqual(merged["copies"] as? Int, 5)
+        XCTAssertEqual(merged["steps"] as? Int, 4)
+        XCTAssertEqual(merged["width"] as? Int, 1024)
+        XCTAssertEqual(merged["prompt"] as? String, "keep")
+    }
+
     func testImportRestResolvesGeneratedExifModelLabel() {
         let plugins: [[String: Any]] = [[
             "plugin_id": "flux_schnell_mflux",

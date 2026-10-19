@@ -6,13 +6,16 @@ final class ImageGenServices {
     let modelTasks = MfluxGenerationTasks()
     let imageGenRegistry: SwiftImageGenRegistry
     let lora: LoRAService
-    let foregroundModelTasks = FluxPromptTasksStub()
+    let fluxPromptTasks = FluxPromptModelTasks()
+    let foregroundModelTasks = FluxPromptModelTasks()
 
     private(set) var pythonAvailable = false
 
     init(profilePath: String?, config: AppConfig) {
         MfluxToolchain.shared.bind(config: config)
         modelTasks.bind(config: config)
+        fluxPromptTasks.bind(config: config)
+        foregroundModelTasks.bind(config: config)
         imageGenRegistry = SwiftImageGenRegistry(config: config)
         lora = LoRAService(config: config)
         pythonAvailable = imageGenPythonPipelinesAvailable(config: config)
@@ -24,6 +27,8 @@ final class ImageGenServices {
     func reloadSettings(config: AppConfig) {
         MfluxToolchain.shared.bind(config: config)
         modelTasks.bind(config: config)
+        fluxPromptTasks.bind(config: config)
+        foregroundModelTasks.bind(config: config)
         imageGenRegistry.reloadSettings(config: config)
         lora.bind(config: config)
         pythonAvailable = imageGenPythonPipelinesAvailable(config: config)
@@ -31,6 +36,8 @@ final class ImageGenServices {
 
     func shutdown() {
         modelTasks.shutdown()
+        fluxPromptTasks.shutdown()
+        foregroundModelTasks.shutdown()
         imageGenRegistry.shutdown()
         lora.shutdown()
     }

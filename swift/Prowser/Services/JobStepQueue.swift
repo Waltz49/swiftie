@@ -178,9 +178,8 @@ enum JobStepQueue {
         }
     }
 
-    private static func hasFluxPromptAIJob(_ values: [String: Any]) -> Bool {
-        guard let meta = values[fluxPromptAIJobKey] as? [String: Any] else { return false }
-        return !(meta["kind"] as? String ?? "").isEmpty
+    static func hasFluxPromptAIJob(_ values: [String: Any]) -> Bool {
+        values[fluxPromptAIJobKey] is [String: Any]
     }
 
     /// Append one generation step from a continuous-series template (port of ``_append_continuous_pending_step``).
@@ -374,6 +373,26 @@ enum JobStepQueue {
             pendingOut = applyJobNumberToDoc(pendingOut!, jobNumber: jobNumber)
         }
         return (runningDoc, pendingOut)
+    }
+
+    static func fluxPromptAIJobMeta(_ step: [String: Any]?) -> [String: Any]? {
+        guard let step else { return nil }
+        if let meta = step[fluxPromptAIJobKey] as? [String: Any] { return meta }
+        return stepValues(step)[fluxPromptAIJobKey] as? [String: Any]
+    }
+
+    /// Port of ``prepare_step_ai_launch``.
+    static func prepareStepAILaunch(_ step: inout [String: Any]) -> Bool {
+        guard var meta = fluxPromptAIJobMeta(step) else { return false }
+        var values = stepValues(step)
+        let prompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty {
+            meta["user_prompt"] = prompt
+            step[fluxPromptAIJobKey] = meta
+            values[fluxPromptAIJobKey] = meta
+            step["values"] = jsonSafeDict(values)
+        }
+        return fluxPromptAIJobMeta(step) != nil
     }
 
     static func popNextStep(from doc: inout [String: Any]) -> [String: Any]? {

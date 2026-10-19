@@ -76,7 +76,10 @@ verify_launch_without_build_fallback() {
     mv "$build_bundle" "$hidden"
 
     local binary="$app_path/Contents/MacOS/Prowser"
-    "$binary" >/dev/null 2>&1 &
+    # Isolated profile so a running daily Prowser instance does not steal the lock and exit immediately.
+    local smoke_profile="${TMPDIR:-/tmp}/prowser_packaging_verify_$$"
+    mkdir -p "$smoke_profile"
+    PROWSER_PROFILE="$smoke_profile" "$binary" -p "$smoke_profile" >/dev/null 2>&1 &
     local pid=$!
     local ok=0
     for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -89,6 +92,7 @@ verify_launch_without_build_fallback() {
     done
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
+    rm -rf "$smoke_profile"
     mv "$hidden" "$build_bundle"
 
     if [[ "$ok" -ne 1 ]]; then

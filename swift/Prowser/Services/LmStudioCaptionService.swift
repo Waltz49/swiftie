@@ -44,6 +44,274 @@ final class LmStudioCaptionService {
         activeTask = nil
     }
 
+    /// OpenAI-compatible streaming chat (flux prompt refinement, grammar, etc.).
+    func streamChatCompletion(
+        systemPrompt: String,
+        userPrompt: String,
+        imagePaths: [String],
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        guard let base = apiBaseURL(host: captionHost(config: config)) else {
+            throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
+        }
+        let settings = captionSettings(config: config)
+        var system = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var user = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        system = AIPromptExitService.applyTextAIExit(system, config: config)
+        user = AIPromptExitService.applyTextAIExit(user, config: config)
+
+        let normalizedPaths = imagePaths
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && FileManager.default.isReadableFile(atPath: $0) }
+        let uniquePaths: [String] = normalizedPaths.reduce(into: []) { acc, path in
+            if !acc.contains(path) { acc.append(path) }
+        }
+
+        let modelID = try await resolveModelID(baseURL: base, config: config)
+
+        SessionViewLog.logModelInput(
+            tag: Self.logTag,
+            payload: [
+                "system_prompt": system,
+                "user_prompt": user,
+                "image_paths": uniquePaths,
+                "config": ["temperature": settings.temperature, "model": modelID],
+            ],
+            config: config
+        )
+
+        if uniquePaths.isEmpty {
+            return try await streamTextChatRequest(
+                baseURL: base,
+                modelID: modelID,
+                systemPrompt: system,
+                userPrompt: user,
+                temperature: settings.temperature,
+                config: config,
+                onChunk: onChunk
+            )
+        }
+
+        var lastImageError = ""
+        for imagePath in uniquePaths {
+            let encoded = try prepareVisionImagePayloads(imagePath: imagePath)
+            for imageURL in lmStudioImageURLCandidates(jpegBase64: encoded.jpegBase64, pngBase64: encoded.pngBase64) {
+                do {
+                    return try await streamVisionChatRequest(
+                        baseURL: base,
+                        modelID: modelID,
+                        systemPrompt: system,
+                        userPrompt: user,
+                        temperature: settings.temperature,
+                        imageURL: imageURL,
+                        config: config,
+                        onChunk: onChunk
+                    )
+                } catch CaptionError.runtime(let message) {
+                    if impliesVisionRequired(message) {
+                        throw CaptionError.runtime(message)
+                    }
+                    if isLMStudioImagePayloadError(message) {
+                        lastImageError = message
+                        continue
+                    }
+                    throw CaptionError.runtime(message)
+                }
+            }
+        }
+        let finalMessage = lastImageError.isEmpty
+            ? "Prompt refinement failed.\n\nCould not send image to LM Studio."
+            : "Prompt refinement failed.\n\nDetail: \(lastImageError)"
+        throw CaptionError.runtime(finalMessage)
+    }
+
+    private func streamTextChatRequest(
+        baseURL: URL,
+        modelID: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void,
+        retriedModelLoad: Bool = false
+    ) async throws -> String {
+        let url = baseURL.appending(path: "chat/completions")
+        let body: [String: Any] = [
+            "model": modelID,
+            "stream": true,
+            "temperature": temperature,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userPrompt],
+            ],
+        ]
+        return try await performStreamingChatRequest(
+            url: url,
+            body: body,
+            baseURL: baseURL,
+            modelID: modelID,
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            temperature: temperature,
+            imageURL: nil,
+            config: config,
+            onChunk: onChunk,
+            retriedModelLoad: retriedModelLoad
+        )
+    }
+
+    private func streamVisionChatRequest(
+        baseURL: URL,
+        modelID: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double,
+        imageURL: String,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void,
+        retriedModelLoad: Bool = false
+    ) async throws -> String {
+        let url = baseURL.appending(path: "chat/completions")
+        let body: [String: Any] = [
+            "model": modelID,
+            "stream": true,
+            "temperature": temperature,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                [
+                    "role": "user",
+                    "content": [
+                        ["type": "text", "text": userPrompt],
+                        ["type": "image_url", "image_url": ["url": imageURL, "detail": "auto"]],
+                    ],
+                ],
+            ],
+        ]
+        return try await performStreamingChatRequest(
+            url: url,
+            body: body,
+            baseURL: baseURL,
+            modelID: modelID,
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            temperature: temperature,
+            imageURL: imageURL,
+            config: config,
+            onChunk: onChunk,
+            retriedModelLoad: retriedModelLoad
+        )
+    }
+
+    private func performStreamingChatRequest(
+        url: URL,
+        body: [String: Any],
+        baseURL: URL,
+        modelID: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double,
+        imageURL: String?,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void,
+        retriedModelLoad: Bool
+    ) async throws -> String {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        SessionViewLog.logLMStudioCall(method: "POST \(url.path)", payload: body, config: config)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CaptionError.runtime("No response from LM Studio.")
+        }
+        if http.statusCode == 400 || http.statusCode == 422 || !(200 ..< 300).contains(http.statusCode) {
+            let msg = try await readErrorBody(from: bytes)
+            SessionViewLog.logLMStudioError("Chat HTTP \(http.statusCode)", detail: msg, config: config)
+            if impliesVisionRequired(msg) {
+                throw CaptionError.runtime(Self.visionRequiredMessage)
+            }
+            if imageURL != nil {
+                return try await retryCaptionAfterModelLoadIfNeeded(
+                    errorMessage: msg,
+                    baseURL: baseURL,
+                    modelID: modelID,
+                    systemPrompt: systemPrompt,
+                    userPrompt: userPrompt,
+                    temperature: temperature,
+                    imageURL: imageURL!,
+                    config: config,
+                    onChunk: onChunk,
+                    retriedModelLoad: retriedModelLoad
+                ) {
+                    throw CaptionError.runtime("Prompt refinement failed.\n\nDetail: \(msg)")
+                }
+            }
+            if retriedModelLoad || !isNoModelLoadedMessage(msg) {
+                throw CaptionError.runtime("Prompt refinement failed.\n\nDetail: \(msg)")
+            }
+            let saved = savedModelKey(config: config)
+            let reloadKey = saved.isEmpty ? modelID : saved
+            try await reloadSavedCaptionModel(savedKey: reloadKey, config: config)
+            if imageURL != nil {
+                return try await streamVisionChatRequest(
+                    baseURL: baseURL,
+                    modelID: reloadKey,
+                    systemPrompt: systemPrompt,
+                    userPrompt: userPrompt,
+                    temperature: temperature,
+                    imageURL: imageURL!,
+                    config: config,
+                    onChunk: onChunk,
+                    retriedModelLoad: true
+                )
+            }
+            return try await streamTextChatRequest(
+                baseURL: baseURL,
+                modelID: reloadKey,
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt,
+                temperature: temperature,
+                config: config,
+                onChunk: onChunk,
+                retriedModelLoad: true
+            )
+        }
+
+        var accumulated = ""
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            SessionViewLog.logLMStudioSSELine(String(payload), config: config)
+            if payload == "[DONE]" { break }
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let first = choices.first,
+                  let delta = first["delta"] as? [String: Any],
+                  let chunk = delta["content"] as? String,
+                  !chunk.isEmpty else {
+                continue
+            }
+            accumulated += chunk
+            onChunk(chunk)
+        }
+
+        let final = Self.stripThinkTags(accumulated).trimmingCharacters(in: .whitespacesAndNewlines)
+        if final.isEmpty {
+            throw CaptionError.runtime(
+                "The model returned an empty response.\n\n"
+                    + "Try a different prompt or check the loaded model."
+            )
+        }
+        SessionViewLog.logModelOutput(tag: Self.logTag, text: final, config: config)
+        persistLastModelKey(modelID, config: config)
+        return final
+    }
+
     func startCaption(
         imagePath: String,
         userPromptOverride: String?,

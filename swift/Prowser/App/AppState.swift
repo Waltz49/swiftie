@@ -298,6 +298,7 @@ final class AppState {
         imageGen = ImageGenController(
             config: config,
             modelTasks: workers.modelTasks,
+            fluxPromptTasks: workers.fluxPromptTasks,
             foregroundTasks: workers.foregroundModelTasks,
             registry: workers.imageGenRegistry
         )

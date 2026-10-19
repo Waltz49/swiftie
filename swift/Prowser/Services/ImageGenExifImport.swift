@@ -107,15 +107,7 @@ enum ImageGenExifImport {
             if let plugin = plugins.first(where: { ($0["plugin_id"] as? String) == resolved }),
                let defaults = plugin["merged_defaults"] as? [String: Any] {
                 updated = defaults
-                if let prompt = values["prompt"] as? String, !prompt.isEmpty {
-                    updated["prompt"] = prompt
-                }
-                // Size controls stay as the user left them (Python plugin-switch preserve).
-                for key in ["width", "height", "use_custom_size", "aspect_ratio_lock"] {
-                    if let value = values[key] {
-                        updated[key] = value
-                    }
-                }
+                updated = mergingPluginDefaults(defaults, preserving: values)
             }
         }
 
@@ -168,6 +160,20 @@ enum ImageGenExifImport {
 
     static func showWarning(title: String, message: String) {
         StyledMessageDialog.showWarning(title: title, message: message)
+    }
+
+    /// Apply plugin ``merged_defaults`` while keeping dialog-owned fields (Python never resets copies on Import Rest).
+    static func mergingPluginDefaults(_ defaults: [String: Any], preserving values: [String: Any]) -> [String: Any] {
+        var updated = defaults
+        if let prompt = values["prompt"] as? String, !prompt.isEmpty {
+            updated["prompt"] = prompt
+        }
+        for key in ["width", "height", "use_custom_size", "aspect_ratio_lock", "copies"] {
+            if let value = values[key] {
+                updated[key] = value
+            }
+        }
+        return updated
     }
 
     // MARK: - Private

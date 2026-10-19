@@ -25,6 +25,8 @@ struct ActiveJobStripView: View {
 final class ActiveJobStripNSView: NSView {
     var onCancel: (() -> Void)?
     var onSkipCooldown: (() -> Void)?
+    var onAddSeries: ((Int, Bool) -> Void)?
+    var onSubtractSeries: ((Bool) -> Void)?
 
     private struct BarHandle {
         let prefix: NSTextField
@@ -40,6 +42,9 @@ final class ActiveJobStripNSView: NSView {
     private let iconColumn = NSView()
     private var cooldownSkipView: CooldownSkipNSView?
     private var cancelButton: NSButton?
+    private var plusButton: NSAssetIconButton?
+    private var minusButton: NSAssetIconButton?
+    private var iconColumnWidthConstraint: NSLayoutConstraint?
     private var colors: ThemeColors = .dark
     private var lastStructureKey = ""
     private var lastColorsID = ""
@@ -80,7 +85,9 @@ final class ActiveJobStripNSView: NSView {
         frameRow.addArrangedSubview(iconColumn)
         frameView.addSubview(frameRow)
         addSubview(frameView)
-        iconColumn.widthAnchor.constraint(equalToConstant: JobQueueLayout.actionButtonSize).isActive = true
+        let iconWidth = iconColumn.widthAnchor.constraint(equalToConstant: JobQueueLayout.stripIconColumnWidth)
+        iconWidth.isActive = true
+        iconColumnWidthConstraint = iconWidth
         rowsStack.widthAnchor.constraint(equalTo: contentColumn.widthAnchor).isActive = true
         cooldownRow.widthAnchor.constraint(equalTo: contentColumn.widthAnchor).isActive = true
         NSLayoutConstraint.activate([
@@ -262,7 +269,7 @@ final class ActiveJobStripNSView: NSView {
             cooldownSkipView = nil
         }
         cooldownRow.isHidden = cooldownSkipView == nil
-        updateCancelButton(show: stripView.showCancelIcon)
+        updateIconColumn(show: stripView.showCancelIcon, canAdd: false, canSubtract: false)
         for case let row as NSStackView in rowsStack.arrangedSubviews {
             row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
         }
@@ -328,34 +335,108 @@ final class ActiveJobStripNSView: NSView {
         return row
     }
 
-    private func updateCancelButton(show: Bool) {
-        cancelButton?.removeFromSuperview()
+    func updateSeriesControls(canAdd: Bool, canSubtract: Bool) {
+        plusButton?.isEnabled = canAdd
+        minusButton?.isEnabled = canSubtract
+    }
+
+    private func updateIconColumn(show: Bool, canAdd: Bool, canSubtract: Bool) {
+        iconColumn.subviews.forEach { $0.removeFromSuperview() }
         cancelButton = nil
+        plusButton = nil
+        minusButton = nil
         iconColumn.isHidden = !show
         guard show else { return }
-        let button = makeCancelIconButton()
-        cancelButton = button
-        iconColumn.addSubview(button)
-        button.translatesAutoresizingMaskIntoConstraints = false
+
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.spacing = 2
+        column.alignment = .centerX
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        let seriesRow = NSStackView()
+        seriesRow.orientation = .horizontal
+        seriesRow.spacing = 4
+        seriesRow.alignment = .centerY
+        let plus = makeSeriesPlusButton()
+        let minus = makeSeriesMinusButton()
+        plus.isEnabled = canAdd
+        minus.isEnabled = canSubtract
+        plusButton = plus
+        minusButton = minus
+        seriesRow.addArrangedSubview(plus)
+        seriesRow.addArrangedSubview(minus)
+
+        let trash = makeCancelIconButton()
+        cancelButton = trash
+
+        column.addArrangedSubview(seriesRow)
+        column.addArrangedSubview(trash)
+
+        iconColumn.addSubview(column)
         NSLayoutConstraint.activate([
-            button.centerXAnchor.constraint(equalTo: iconColumn.centerXAnchor),
-            button.centerYAnchor.constraint(equalTo: iconColumn.centerYAnchor),
+            column.centerXAnchor.constraint(equalTo: iconColumn.centerXAnchor),
+            column.centerYAnchor.constraint(equalTo: iconColumn.centerYAnchor),
         ])
     }
 
-    private func makeCancelIconButton() -> NSButton {
+    private func makeStripIconButton(
+        normalName: String,
+        hoverName: String,
+        tooltip: String,
+        action: Selector
+    ) -> NSAssetIconButton {
         let button = NSAssetIconButton(
-            normalName: "trash_icon",
-            hoverName: "trash_icon_hover",
-            size: 16,
-            tooltip: "Cancel generation"
+            normalName: normalName,
+            hoverName: hoverName,
+            size: JobQueueLayout.stripIconSize,
+            tooltip: tooltip
         )
         button.target = self
-        button.action = #selector(cancelAction)
+        button.action = action
         return button
     }
 
+    private func makeSeriesPlusButton() -> NSAssetIconButton {
+        makeStripIconButton(
+            normalName: "series_plus_icon",
+            hoverName: "series_plus_icon_hover",
+            tooltip: """
+            Add another image to this series
+            Option+click to set copies to 51 (runs continuously).
+            """,
+            action: #selector(addSeriesAction)
+        )
+    }
+
+    private func makeSeriesMinusButton() -> NSAssetIconButton {
+        makeStripIconButton(
+            normalName: "series_minus_icon",
+            hoverName: "series_minus_icon_hover",
+            tooltip: """
+            Remove one pending image from the series.
+            Option+click to remove all remaining images.
+            """,
+            action: #selector(subtractSeriesAction)
+        )
+    }
+
+    private func makeCancelIconButton() -> NSButton {
+        makeStripIconButton(
+            normalName: "trash_icon",
+            hoverName: "trash_icon_hover",
+            tooltip: "Cancel generation",
+            action: #selector(cancelAction)
+        )
+    }
+
     @objc private func cancelAction() { onCancel?() }
+    @objc private func addSeriesAction() {
+        onAddSeries?(1, NSEvent.modifierFlags.contains(.option))
+    }
+    @objc private func subtractSeriesAction() {
+        onSubtractSeries?(NSEvent.modifierFlags.contains(.option))
+    }
 }
 
 struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
@@ -375,17 +456,18 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ActiveJobStripNSView {
         let view = ActiveJobStripNSView()
-        view.onCancel = { appState.confirmCancelGeneration() }
-        view.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
+        wireStripActions(on: view, appState: appState)
         installCallbacks(on: view, context: context)
         return view
     }
 
     func updateNSView(_ nsView: ActiveJobStripNSView, context: Context) {
         installCallbacks(on: nsView, context: context)
+        wireStripActions(on: nsView, appState: appState)
         // Read the controller so a deferred SwiftUI pass cannot paint a stale bar
         // over an in-place progress tick.
         nsView.update(stripView: appState.imageGen.activeStripView, colors: appState.theme.colors)
+        applySeriesControlState(to: nsView, appState: appState)
     }
 
     static func dismantleNSView(_ nsView: ActiveJobStripNSView, coordinator: Coordinator) {
@@ -394,6 +476,34 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         }
         coordinator.sinkID = nil
         coordinator.controller = nil
+    }
+
+    @MainActor
+    private func wireStripActions(on nsView: ActiveJobStripNSView, appState: AppState) {
+        nsView.onCancel = { appState.confirmCancelGeneration() }
+        nsView.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
+        nsView.onAddSeries = { delta, option in
+            guard let jobID = appState.imageGen.activeJobID else { return }
+            if option {
+                appState.imageGen.setSeriesContinuous(forJobID: jobID)
+            } else {
+                appState.imageGen.addSeriesCycle(forJobID: jobID, delta: delta)
+            }
+        }
+        nsView.onSubtractSeries = { removeAll in
+            guard let jobID = appState.imageGen.activeJobID else { return }
+            appState.imageGen.subtractSeriesRemaining(forJobID: jobID, removeAll: removeAll)
+        }
+    }
+
+    @MainActor
+    private func applySeriesControlState(to nsView: ActiveJobStripNSView, appState: AppState) {
+        guard let jobID = appState.imageGen.activeJobID else {
+            nsView.updateSeriesControls(canAdd: false, canSubtract: false)
+            return
+        }
+        let state = appState.imageGen.actionBarState(for: jobID)
+        nsView.updateSeriesControls(canAdd: state.canAddSeries, canSubtract: state.canSubtractSeries)
     }
 
     @MainActor
@@ -415,6 +525,7 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
             guard let nsView, let appState else { return }
             let before = nsView.cachedContentHeight
             nsView.update(stripView: strip, colors: appState.theme.colors)
+            applySeriesControlState(to: nsView, appState: appState)
             guard abs(nsView.cachedContentHeight - before) > 1 else { return }
             let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: strip)
             appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, estimated, 28))

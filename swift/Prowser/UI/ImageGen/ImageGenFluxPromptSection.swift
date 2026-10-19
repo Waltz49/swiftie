@@ -4,87 +4,104 @@ import SwiftUI
 struct ImageGenFluxPromptSection: View {
     @Environment(AppState.self) private var appState
     @Binding var values: [String: Any]
+    @Bindable var fluxContext: ImageGenFluxPromptSubmitContext
+    @Bindable var refineCoordinator: FluxPromptRefineCoordinator
     let function: String
     let sourcePaths: [String]
+    let activeBrowsePath: String?
     var onValuesChanged: (() -> Void)?
+    var onQueueJobWithAI: (() -> Void)?
 
-    @State private var isExpanded = false
     @State private var systemPromptExpanded = true
     @State private var systemPrompt = ""
-    @State private var passImage = false
-    @State private var jobWithGenerate = false
-    @State private var isRefining = false
-    @State private var undoPrompt: String?
-    @State private var refineError = ""
 
     var body: some View {
-        if appState.workers.foregroundModelTasks.isAvailable {
+        if fluxContext.lmStudioMounted {
             ImageGenCollapsibleSection(
                 title: "AI Prompt Enhancement",
-                isExpanded: $isExpanded,
+                isExpanded: $fluxContext.sectionExpanded,
                 tooltip: "Refine prompts with a local LM Studio model."
             ) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Pass image to Prompt Generator", isOn: $passImage)
+                    Toggle("Pass image to Prompt Generator", isOn: $fluxContext.passImage)
                         .toggleStyle(.checkbox)
                         .font(.caption)
-                        .onChange(of: passImage) { _, enabled in
+                        .onChange(of: fluxContext.passImage) { _, enabled in
                             ImageGenPersistence.setPassImageToAI(enabled, config: appState.config)
                         }
 
                     HStack(spacing: 16) {
-                        Button(isRefining ? "Cancel" : "Gen Prompt") {
-                            if isRefining {
-                                appState.workers.foregroundModelTasks.cancel()
-                            } else {
-                                startRefine()
-                            }
+                        Button(refineCoordinator.isRefining ? "Cancel" : "Gen Prompt ⌥↩") {
+                            fluxContext.promptText = values["prompt"] as? String ?? ""
+                            refineCoordinator.requestGenPrompt(
+                                appState: appState,
+                                context: fluxContext,
+                                values: $values,
+                                onValuesChanged: onValuesChanged,
+                                queueJobWithAI: { onQueueJobWithAI?() }
+                            )
                         }
-                        .keyboardShortcut(.return, modifiers: [.option])
-                        .disabled(!isRefining && promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && sourcePaths.isEmpty)
+                        .disabled(genPromptDisabled)
 
-                        Button("Undo AI") {
-                            undoRefine()
+                        Button("Undo AI ⇧⌥↩") {
+                            refineCoordinator.undoRefine(values: $values, onValuesChanged: onValuesChanged)
                         }
-                        .keyboardShortcut(.return, modifiers: [.option, .shift])
-                        .disabled(undoPrompt == nil)
+                        .disabled(!refineCoordinator.undoAvailable || refineCoordinator.isRefining)
 
                         Spacer(minLength: 0)
                     }
 
                     systemPromptBlock
 
-                    Toggle("Job: Include AI Prompt Refinement in jobs", isOn: $jobWithGenerate)
+                    Toggle("Job: Include AI Prompt Refinement in jobs", isOn: $fluxContext.jobCheckbox)
                         .toggleStyle(.checkbox)
                         .font(.caption)
                         .padding(.leading, 18)
-                        .onChange(of: jobWithGenerate) { _, enabled in
+                        .onChange(of: fluxContext.jobCheckbox) { _, enabled in
                             ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
                             values["flux_prompt_job_with_generate"] = enabled
                             onValuesChanged?()
                         }
 
-                    if !refineError.isEmpty {
-                        Text(refineError)
+                    if !refineCoordinator.refineError.isEmpty {
+                        Text(refineCoordinator.refineError)
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                 }
             }
-            .onAppear { loadSettings() }
-            .onChange(of: isExpanded) { _, expanded in
-                ImageGenPersistence.saveFluxSystemPrompt(
-                    text: systemPrompt,
-                    expanded: expanded,
-                    config: appState.config
-                )
+            .onAppear {
+                loadSettings()
+                syncContextFromValues()
+            }
+            .onChange(of: fluxContext.sectionExpanded) { _, _ in
+                persistSectionState()
+            }
+            .onChange(of: function) { _, newFunction in
+                fluxContext.taskKind = newFunction
+            }
+            .onChange(of: sourcePaths) { _, paths in
+                fluxContext.sourcePaths = paths
+            }
+            .onChange(of: activeBrowsePath) { _, path in
+                fluxContext.activeBrowsePath = path
             }
             .onDisappear {
-                appState.workers.foregroundModelTasks.onFluxPromptChunk = nil
-                appState.workers.foregroundModelTasks.onFluxPromptReady = nil
-                appState.workers.foregroundModelTasks.onJobFinished = nil
+                refineCoordinator.teardown(appState: appState)
             }
         }
+    }
+
+    private var genPromptDisabled: Bool {
+        if refineCoordinator.isRefining { return false }
+        let prompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty { return false }
+        let paths = FluxPromptJob.resolveRefineImagePaths(
+            function: function,
+            sourcePaths: sourcePaths,
+            activeBrowsePath: activeBrowsePath
+        )
+        return paths.isEmpty
     }
 
     private var systemPromptBlock: some View {
@@ -113,11 +130,8 @@ struct ImageGenFluxPromptSection: View {
                     includeFavorite: false,
                     onTextChanged: { newText in
                         systemPrompt = newText
-                        ImageGenPersistence.saveFluxSystemPrompt(
-                            text: newText,
-                            expanded: isExpanded,
-                            config: appState.config
-                        )
+                        fluxContext.systemPromptOverride = newText
+                        persistSectionState()
                         onValuesChanged?()
                     }
                 )
@@ -129,64 +143,35 @@ struct ImageGenFluxPromptSection: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     .imageGenPromptSentenceCaseOnBlur($systemPrompt, perLine: true)
                     .onChange(of: systemPrompt) { _, text in
-                        ImageGenPersistence.saveFluxSystemPrompt(
-                            text: text,
-                            expanded: isExpanded,
-                            config: appState.config
-                        )
+                        fluxContext.systemPromptOverride = text
+                        persistSectionState()
                         onValuesChanged?()
                     }
             }
         }
     }
 
-    private var promptText: String {
-        values["prompt"] as? String ?? ""
-    }
-
     private func loadSettings() {
         systemPrompt = ImageGenPersistence.fluxSystemPromptText(config: appState.config)
-        isExpanded = ImageGenPersistence.fluxSystemPromptExpanded(config: appState.config)
-        passImage = ImageGenPersistence.passImageToAI(config: appState.config)
-        jobWithGenerate = ImageGenPersistence.fluxPromptJobWithGenerate(config: appState.config)
-        values["flux_prompt_job_with_generate"] = jobWithGenerate
+        fluxContext.systemPromptOverride = systemPrompt
+        fluxContext.sectionExpanded = ImageGenPersistence.fluxSystemPromptExpanded(config: appState.config)
+        fluxContext.passImage = ImageGenPersistence.passImageToAI(config: appState.config)
+        fluxContext.jobCheckbox = ImageGenPersistence.fluxPromptJobWithGenerate(config: appState.config)
+        fluxContext.taskKind = function
+        fluxContext.sourcePaths = sourcePaths
+        fluxContext.activeBrowsePath = activeBrowsePath
+        values["flux_prompt_job_with_generate"] = fluxContext.jobCheckbox
     }
 
-    private func startRefine() {
-        refineError = ""
-        undoPrompt = promptText
-        isRefining = true
-        let bridge = appState.workers.foregroundModelTasks
-        bridge.onFluxPromptChunk = { chunk in
-            let current = values["prompt"] as? String ?? ""
-            values["prompt"] = current + chunk
-            onValuesChanged?()
-        }
-        bridge.onFluxPromptReady = { refined in
-            values["prompt"] = refined
-            isRefining = false
-            onValuesChanged?()
-        }
-        bridge.onJobFinished = { kind, success, error in
-            guard kind == "flux_prompt" else { return }
-            isRefining = false
-            if !success, !error.isEmpty, error != "Cancelled" {
-                refineError = error
-            }
-        }
-        let imagePaths = passImage ? sourcePaths : []
-        do {
-            _ = try bridge.startFluxPrompt(prompt: promptText, imagePaths: imagePaths)
-        } catch {
-            isRefining = false
-            refineError = error.localizedDescription
-        }
+    private func syncContextFromValues() {
+        FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
     }
 
-    private func undoRefine() {
-        guard let undoPrompt else { return }
-        values["prompt"] = undoPrompt
-        self.undoPrompt = nil
-        onValuesChanged?()
+    private func persistSectionState() {
+        ImageGenPersistence.saveFluxSystemPrompt(
+            text: systemPrompt,
+            expanded: fluxContext.sectionExpanded,
+            config: appState.config
+        )
     }
 }

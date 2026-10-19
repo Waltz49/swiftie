@@ -28,6 +28,7 @@ final class FileOperationsService {
 
     func bind(_ appState: AppState) {
         self.appState = appState
+        ExternalEditorSession.shared.bind(appState: appState)
     }
 
     var canUndoFileOperation: Bool { undoStack.canUndo }
@@ -191,16 +192,7 @@ final class FileOperationsService {
             return
         }
 
-        let fileURL = URL(fileURLWithPath: path)
-        let config = NSWorkspace.OpenConfiguration()
-        config.activates = true
-        NSWorkspace.shared.open([fileURL], withApplicationAt: appURL, configuration: config) { _, error in
-            Task { @MainActor in
-                if let error {
-                    appState.status.show("Could not open editor: \(error.localizedDescription)")
-                }
-            }
-        }
+        ExternalEditorSession.shared.beginEdit(path: path, editorName: editorName, editorURL: appURL)
     }
 
     func rename(path: String, to newName: String) throws -> String {

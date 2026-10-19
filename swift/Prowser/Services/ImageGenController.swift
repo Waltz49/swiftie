@@ -7,7 +7,8 @@ import ImageIO
 final class ImageGenController {
     private let config: AppConfig
     private let modelTasks: MfluxGenerationTasks
-    private let foregroundTasks: FluxPromptTasksStub
+    private let fluxPromptTasks: FluxPromptModelTasks
+    private let foregroundTasks: FluxPromptModelTasks
     private let registry: ImageGenRegistry
     private weak var loraBridge: LoRABridge?
 
@@ -192,11 +193,13 @@ final class ImageGenController {
     init(
         config: AppConfig,
         modelTasks: MfluxGenerationTasks,
-        foregroundTasks: FluxPromptTasksStub,
+        fluxPromptTasks: FluxPromptModelTasks,
+        foregroundTasks: FluxPromptModelTasks,
         registry: ImageGenRegistry
     ) {
         self.config = config
         self.modelTasks = modelTasks
+        self.fluxPromptTasks = fluxPromptTasks
         self.foregroundTasks = foregroundTasks
         self.registry = registry
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
@@ -744,7 +747,7 @@ final class ImageGenController {
         cooldownDisplayTask?.cancel()
         cooldownSecondsRemaining = 0
         if jobAIStageActive {
-            foregroundTasks.cancel()
+            fluxPromptTasks.cancel()
             jobAIStageActive = false
         }
         modelTasks.cancel()
@@ -960,11 +963,39 @@ final class ImageGenController {
 
     func setActiveSeriesRefinement(image: Bool, text: Bool) {
         pendingValues["series_refinement"] = image
-        pendingValues["series_prompt_refinement"] = text
+        if text {
+            if !FluxPromptJob.ensureFluxPromptAIJobForSeries(
+                function: activeFunction,
+                values: &pendingValues,
+                config: config
+            ) {
+                return
+            }
+            pendingValues["series_prompt_refinement"] = true
+            if copiesDone > 0 {
+                let source = copyCycleValues.isEmpty ? pendingValues : copyCycleValues
+                FluxPromptJob.syncFluxPromptAIUserPromptForNextCopy(
+                    values: &pendingValues,
+                    sourceValues: source
+                )
+            }
+        } else {
+            pendingValues["series_prompt_refinement"] = false
+            FluxPromptJob.clearSeriesChainFluxPromptAIJob(&pendingValues)
+        }
         if var step = stepRunning {
             var values = JobStepQueue.stepValues(step)
             values["series_refinement"] = image
             values["series_prompt_refinement"] = text
+            if text {
+                _ = FluxPromptJob.ensureFluxPromptAIJobForSeries(
+                    function: activeFunction,
+                    values: &values,
+                    config: config
+                )
+            } else {
+                FluxPromptJob.clearSeriesChainFluxPromptAIJob(&values)
+            }
             step["values"] = values
             stepRunning = step
         }
@@ -1191,7 +1222,7 @@ final class ImageGenController {
     /// Port of ``ImageGenController._generation_worker_active``.
     private func generationWorkerActive() -> Bool {
         if jobAIStageActive { return true }
-        if modelTasks.isBusy || foregroundTasks.isBusy { return true }
+        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy { return true }
         if modelTasks.workerNeedsCleanup { return true }
         if cooldownSecondsRemaining > 0 { return true }
         return false
@@ -1469,12 +1500,33 @@ final class ImageGenController {
             return
         }
         appendContinuousPendingStepIfNeeded(&doc)
-        guard let step = JobStepQueue.popNextStep(from: &doc) else {
+        guard var step = JobStepQueue.popNextStep(from: &doc) else {
             stepPendingDoc = doc
             finishOrAbortQueuedJobStart()
             return
         }
         stepPendingDoc = doc
+        if step["series_prompt_refinement"] as? Bool == true {
+            var merged = JobStepQueue.mergeStepIntoValues(step)
+            let priorPrompt = pendingValues["prompt"] as? String ?? ""
+            var src = pendingValues
+            if !priorPrompt.isEmpty {
+                src["prompt"] = priorPrompt
+            }
+            FluxPromptJob.syncFluxPromptAIUserPromptForNextCopy(values: &merged, sourceValues: src)
+            if let meta = merged[JobStepQueue.fluxPromptAIJobKey] {
+                step[JobStepQueue.fluxPromptAIJobKey] = meta
+                var stepValues = JobStepQueue.stepValues(step)
+                stepValues[JobStepQueue.fluxPromptAIJobKey] = meta
+                step["values"] = stepValues
+            }
+        }
+        if JobStepQueue.stepNeedsAI(step) {
+            if !JobStepQueue.prepareStepAILaunch(&step) {
+                handleStepFailure("Could not prepare AI prompt refinement for the job.")
+                return
+            }
+        }
         stepRunning = step
         syncCopiesDoneDisplay()
         isProcessing = true
@@ -1500,7 +1552,7 @@ final class ImageGenController {
         )
         pendingValues = values
         if JobStepQueue.stepNeedsAI(step) {
-            if foregroundTasks.isAvailable {
+            if fluxPromptTasks.isAvailable {
                 await runJobAIStage(values: values)
             } else {
                 progressMessage = "AI prompt step skipped (not available)"
@@ -1518,9 +1570,13 @@ final class ImageGenController {
         progressMessage = "Refining prompt…"
         taskStatusHTML = progressMessage
         bumpQueueRevision()
+        guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] else {
+            jobAIStageActive = false
+            handleStepFailure("Could not prepare AI prompt refinement for the job.")
+            return
+        }
         do {
-            let prompt = values["prompt"] as? String ?? ""
-            let refined = try await startFluxPrompt(prompt: prompt, values: values)
+            let refined = try await startFluxPromptJob(meta: meta, values: values)
             var updated = values
             updated["prompt"] = refined
             pendingValues = updated
@@ -1549,27 +1605,40 @@ final class ImageGenController {
         }
     }
 
-    private func startFluxPrompt(prompt: String, values: [String: Any]) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
+    private func startFluxPromptJob(meta: [String: Any], values: [String: Any]) async throws -> String {
+        let systemPrompt = meta["system_prompt"] as? String ?? ""
+        let userPrompt = meta["user_prompt"] as? String ?? values["prompt"] as? String ?? ""
+        var imagePaths = (meta["image_paths"] as? [String]) ?? []
+        if !imagePaths.isEmpty, !ImageGenJobValuesSnapshot.jobValuesSnapshotted(values) {
+            let refreshed = ImageGenExifReferences.resolveSourceImagePaths(values)
+                .filter { FileManager.default.isReadableFile(atPath: $0) }
+            if !refreshed.isEmpty {
+                imagePaths = refreshed
+            }
+        }
+        return try await withCheckedThrowingContinuation { continuation in
             var resumed = false
-            foregroundTasks.onFluxPromptReady = { text in
+            fluxPromptTasks.onFluxPromptReady = { text in
                 guard !resumed else { return }
                 resumed = true
                 continuation.resume(returning: text)
             }
-            foregroundTasks.onJobFinished = { kind, success, error in
+            fluxPromptTasks.onJobFinished = { kind, success, error in
                 guard kind == "flux_prompt", !resumed else { return }
                 resumed = true
                 if success {
-                    continuation.resume(returning: prompt)
+                    continuation.resume(returning: userPrompt)
+                } else if error == "Cancelled" {
+                    continuation.resume(throwing: ImageGenError.pipelineFailed("Cancelled"))
                 } else {
                     continuation.resume(throwing: ImageGenError.pipelineFailed(error))
                 }
             }
             do {
-                _ = try foregroundTasks.startFluxPrompt(
-                    prompt: prompt,
-                    imagePaths: values["source_image_paths"] as? [String] ?? []
+                _ = try fluxPromptTasks.startFluxPromptJob(
+                    systemPrompt: systemPrompt,
+                    userPrompt: userPrompt,
+                    imagePaths: imagePaths
                 )
             } catch {
                 if !resumed {
@@ -1578,6 +1647,11 @@ final class ImageGenController {
                 }
             }
         }
+    }
+
+    func cancelFluxPromptRefine() {
+        foregroundTasks.cancel()
+        fluxPromptTasks.cancel()
     }
 
     private func launchGeneration(values: [String: Any]) async {
@@ -1992,7 +2066,7 @@ final class ImageGenController {
     private func applyQueueHoldAfterCurrentCopy() -> Bool {
         guard holdJobQueue else { return false }
         if quitAfterCurrentWorker, !deferredQuitWaitAllJobs { return false }
-        let copyInFlight = stepRunning != nil || jobAIStageActive || foregroundTasks.isBusy
+        let copyInFlight = stepRunning != nil || jobAIStageActive || fluxPromptTasks.isBusy || foregroundTasks.isBusy
         guard !copyInFlight else { return false }
         guard demoteActiveRemainingToQueue() else { return false }
         scheduleUnloadImageModelForQueueHold()
@@ -2545,7 +2619,7 @@ final class ImageGenController {
 
     private func maybeUnloadImageModelForQueueHold() {
         guard holdJobQueue, unloadModelsWhenQueueHeldEnabled() else { return }
-        if jobAIStageActive || modelTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
+        if jobAIStageActive || modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
             return
         }
         _ = modelTasks.unloadImageModel()
@@ -3215,7 +3289,7 @@ final class ImageGenController {
     // MARK: - Quit / shutdown
 
     func isRunning() -> Bool {
-        if modelTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
+        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
             return true
         }
         if copyBatchActive, !copyBatchCancelled {
@@ -3225,7 +3299,7 @@ final class ImageGenController {
     }
 
     func quitInterruptsActiveWorker() -> Bool {
-        if modelTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
+        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
             return true
         }
         // Expand/create prep (``buildPayload`` / placement) runs before ``modelTasks`` is busy.
@@ -3366,7 +3440,7 @@ final class ImageGenController {
     private func tryCompleteDeferredQuitAfterCurrentCopy() {
         guard quitAfterCurrentWorker else { return }
         if deferredQuitWaitAllJobs { return }
-        if jobAIStageActive || modelTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
+        if jobAIStageActive || modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
             if let appState = deferredQuitAppState {
                 if !windowForDeferredQuit {
                     deferredQuitDialog.show(imageGen: self, appState: appState)
@@ -3388,7 +3462,7 @@ final class ImageGenController {
     private func maybeQuitAfterCurrentWorker() {
         guard quitAfterCurrentWorker else { return }
         if jobAIStageActive { return }
-        if modelTasks.isBusy || foregroundTasks.isBusy {
+        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 maybeQuitAfterCurrentWorker()
@@ -3406,7 +3480,7 @@ final class ImageGenController {
 
     private func deferredQuitPipelineIdle() -> Bool {
         if jobAIStageActive { return false }
-        if modelTasks.isBusy || foregroundTasks.isBusy { return false }
+        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy { return false }
         return !hasPendingWork()
     }
 
@@ -3572,7 +3646,7 @@ final class ImageGenController {
         cooldownDisplayTask?.cancel()
         cooldownSecondsRemaining = 0
         if jobAIStageActive {
-            foregroundTasks.cancel()
+            fluxPromptTasks.cancel()
             jobAIStageActive = false
         }
         modelTasks.shutdown()

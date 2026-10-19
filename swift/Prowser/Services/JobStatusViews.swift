@@ -267,6 +267,9 @@ enum JobQueueLayout {
     static let inlineGapPx: CGFloat = 3
     static let actionBarHeight: CGFloat = 28
     static let actionButtonSize: CGFloat = 22
+    /// Active job strip icon column (+/−/trash); matches Python ``_StripIconButton`` 16px.
+    static let stripIconSize: CGFloat = 16
+    static let stripIconColumnWidth: CGFloat = 36
     static let stripBarHeight: CGFloat = 10
     static let stripBarMinWidth: CGFloat = 48
     static let progressBarFillHex = "#3478F6"

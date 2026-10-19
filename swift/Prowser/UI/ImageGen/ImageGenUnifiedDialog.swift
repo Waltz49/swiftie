@@ -41,6 +41,8 @@ struct ImageGenUnifiedDialog: View {
     @State private var infillCanvasHolder = ImageGenInfillCanvasHolder()
     private let functions = ["edit", "create", "expand", "infill"]
     private let session = ImageGenSessionState()
+    @State private var fluxContext = ImageGenFluxPromptSubmitContext()
+    @State private var fluxRefineCoordinator = FluxPromptRefineCoordinator()
 
     var body: some View {
         let _ = appState.imageGenUIRevision
@@ -83,6 +85,12 @@ struct ImageGenUnifiedDialog: View {
                     },
                     onInfillPixelmatorExportChanged: { meta in
                         adoptInfillPixelmatorExportMeta(meta)
+                    },
+                    fluxContext: fluxContext,
+                    fluxRefineCoordinator: fluxRefineCoordinator,
+                    activeBrowsePath: activeImagePath,
+                    onQueueJobWithAI: {
+                        Task { await submit(replace: false, forceFluxAIJob: true) }
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -116,8 +124,27 @@ struct ImageGenUnifiedDialog: View {
                 onCommandReturn: { Task { await primarySubmit() } },
                 onCommandW: { performClose() },
                 onEscape: { performClose() },
-                onOptionReturn: { false },
-                onShiftOptionReturn: { false },
+                onOptionReturn: {
+                    fluxContext.promptText = values["prompt"] as? String ?? ""
+                    if fluxRefineCoordinator.genShortcutActive(context: fluxContext) {
+                        fluxRefineCoordinator.requestGenPrompt(
+                            appState: appState,
+                            context: fluxContext,
+                            values: $values,
+                            onValuesChanged: { markDirtyIfNeeded() },
+                            queueJobWithAI: { Task { await submit(replace: false, forceFluxAIJob: true) } }
+                        )
+                        return true
+                    }
+                    return false
+                },
+                onShiftOptionReturn: {
+                    if fluxRefineCoordinator.undoShortcutActive(context: fluxContext) {
+                        fluxRefineCoordinator.undoRefine(values: $values, onValuesChanged: { markDirtyIfNeeded() })
+                        return true
+                    }
+                    return false
+                },
                 onOptionLeft: { stepSourceImage(delta: -1) },
                 onOptionRight: { stepSourceImage(delta: 1) },
                 onBracketKey: { keyCode in handleInfillBrushBracketKey(keyCode) }
@@ -399,6 +426,9 @@ struct ImageGenUnifiedDialog: View {
         }
         appState.imageGen.endImageGenDialogBuild()
         isLoading = false
+        await probeFluxPromptServices()
+        FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
+        ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&values)
         guard generation == loadGeneration else { return }
         schedulePostOpenWork(
             generation: generation,
@@ -932,6 +962,8 @@ struct ImageGenUnifiedDialog: View {
 
     private func performClose() {
         guard !dismissing else { return }
+        appState.imageGen.cancelFluxPromptRefine()
+        fluxRefineCoordinator.teardown(appState: appState)
         if replaceJobID != nil {
             performCancel()
             return
@@ -939,6 +971,16 @@ struct ImageGenUnifiedDialog: View {
         dismissing = true
         persistVisitedFunctions()
         closeDialog()
+    }
+
+    private func probeFluxPromptServices() async {
+        guard BundleCapabilities.lmStudioUIEnabled else {
+            fluxContext.lmStudioMounted = false
+            return
+        }
+        await appState.workers.fluxPromptTasks.probe(config: appState.config)
+        await appState.workers.foregroundModelTasks.probe(config: appState.config)
+        fluxContext.lmStudioMounted = appState.workers.foregroundModelTasks.isAvailable
     }
 
     private func performCancel() {
@@ -1076,6 +1118,43 @@ struct ImageGenUnifiedDialog: View {
         return exportMeta
     }
 
+    private func prepareRunValues(forceFluxAIJob: Bool) -> [String: Any]? {
+        var submitValues = prepareSubmitValues(values)
+        fluxContext.lmStudioMounted = appState.workers.foregroundModelTasks.isAvailable
+        fluxContext.promptText = values["prompt"] as? String ?? ""
+        fluxContext.taskKind = selectedFunction
+        fluxContext.sourcePaths = selectedFunction == "edit"
+            ? lockedEditSourcePaths
+            : (panelSourcePath.map { [$0] } ?? [])
+        fluxContext.activeBrowsePath = activeImagePath
+
+        let prompt = (submitValues["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if prompt.isEmpty,
+           !FluxPromptJob.allowEmptyPromptForFluxAIJob(context: fluxContext, force: forceFluxAIJob) {
+            errorMessage = "Enter image prompt before generating an image."
+            return nil
+        }
+        if !FluxPromptJob.applyFluxPromptJobToPrepareRunValues(
+            context: fluxContext,
+            config: appState.config,
+            values: &submitValues,
+            force: forceFluxAIJob
+        ) {
+            errorMessage = "Could not attach AI prompt data to the job."
+            return nil
+        }
+        let copies = JobStepQueue.normalizeCopies(submitValues["copies"] ?? 1)
+        if !FluxPromptJob.applyCopiesRandomSeedIfRequired(
+            values: &submitValues,
+            copyCount: copies,
+            context: fluxContext
+        ) {
+            return nil
+        }
+        _ = FluxPromptJob.applyPromptExitsAfterFluxJobResolution(values: &submitValues, config: appState.config)
+        return submitValues
+    }
+
     private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {
         var out = input
         ImageGenPromptSentenceCase.flushPromptValues(&out)
@@ -1144,7 +1223,7 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
-    private func submit(replace: Bool) async {
+    private func submit(replace: Bool, forceFluxAIJob: Bool = false) async {
         errorMessage = ""
         if let plugin = (pluginsByFunction[selectedFunction] ?? []).first(where: {
             ($0["plugin_id"] as? String) == selectedPluginID
@@ -1157,7 +1236,7 @@ struct ImageGenUnifiedDialog: View {
             return
         }
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
-        var submitValues = prepareSubmitValues(values)
+        guard var submitValues = prepareRunValues(forceFluxAIJob: forceFluxAIJob) else { return }
         submitValues["copies"] = copies
         if selectedFunction == "infill" {
             do {

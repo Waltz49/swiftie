@@ -31,8 +31,8 @@ enum ImageGenJobValuesSnapshot {
 
     /// Port of ``normalize_replaced_job_values`` in ``flux_prompt_job.py``.
     static func normalizeReplacedJobValues(_ values: inout [String: Any]) {
-        guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any],
-              !(meta["kind"] as? String ?? "").isEmpty
+        guard JobStepQueue.hasFluxPromptAIJob(values),
+              let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any]
         else { return }
         let prompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let user = (meta["user_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
