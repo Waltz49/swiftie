@@ -1128,12 +1128,18 @@ final class ImageGenController {
 
     func jobsHeaderStatusText() -> String {
         let rows = queueSnapshot()
-        if holdJobQueue {
-            if rows.isEmpty { return "" }
-            return "=\(rows.count) "
+        let activeIndex = rows.firstIndex(where: { $0.isActive })
+        let tail: [QueueRowSnapshot]
+        if let activeIndex {
+            tail = Array(rows[(activeIndex + 1)...])
+        } else {
+            tail = rows
         }
-        let waiting = rows.filter { !$0.isActive }.count
+        let waiting = tail.filter { !$0.held }.count
         if waiting <= 0 { return "" }
+        if holdJobQueue {
+            return "=\(waiting) "
+        }
         return "+\(waiting) "
     }
 
@@ -3015,6 +3021,8 @@ final class ImageGenController {
         guard activeJobID != nil else { return }
         let timing = currentTimingForDisplay()
         let loraLabel = await resolvedLoraStatusLabel(pluginID: activePluginID, values: pendingValues)
+        let withAITitle = pendingValues[JobStepQueue.fluxPromptAIJobKey] is [String: Any]
+            || pendingValues["series_prompt_refinement"] as? Bool == true
         let built = buildQueueStatusView(
             pluginID: activePluginID,
             function: activeFunction,
@@ -3022,7 +3030,8 @@ final class ImageGenController {
             copiesTotal: copiesTotal,
             running: isProcessing,
             omitLiveStepsRow: true,
-            withAI: jobAIStageActive,
+            withAI: withAITitle,
+            aiStageActive: jobAIStageActive,
             step: liveStepTotal > 0 ? liveStep : nil,
             stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
             elapsedSeconds: timing.elapsed,
@@ -3045,6 +3054,7 @@ final class ImageGenController {
         running: Bool = false,
         omitLiveStepsRow: Bool = false,
         withAI: Bool = false,
+        aiStageActive: Bool = false,
         step: Int? = nil,
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
@@ -3061,6 +3071,7 @@ final class ImageGenController {
             running: running,
             omitLiveStepsRow: omitLiveStepsRow,
             withAI: withAI,
+            aiStageActive: aiStageActive,
             step: step,
             stepTotal: stepTotal,
             elapsedSeconds: elapsedSeconds,

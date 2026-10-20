@@ -130,7 +130,10 @@ struct QueueJobStatusView {
             rows.append(.prompt(label: "Prompt:", value: trimmed))
         }
         if copiesTotal > 1 {
-            rows.append(.labelValue(label: "Copies:", value: "\(copiesTotal) images."))
+            let copiesValue = JobStepQueue.isSeriesContinuousCopies(copiesTotal)
+                ? JobStepQueue.seriesContinuousLabel
+                : "\(copiesTotal) images."
+            rows.append(.labelValue(label: "Copies:", value: copiesValue))
         }
         return QueueJobStatusView(rows: rows)
     }

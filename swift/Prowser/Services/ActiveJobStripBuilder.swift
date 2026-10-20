@@ -3,7 +3,7 @@ import Foundation
 /// Local active-job strip builder (Python ``build_active_job_strip_view`` without IPC).
 enum ActiveJobStripBuilder {
     private static let completingSlotText = "Completing..."
-    private static let continuousSeriesSlotText = "Continuous"
+    private static let continuousSeriesSlotText = JobStepQueue.seriesContinuousLabel
 
     static func build(
         elapsedSeconds: Double?,

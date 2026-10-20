@@ -4,6 +4,8 @@ import Foundation
 enum JobStepQueue {
     static let stepVersion = 1
     static let seriesContinuousCopies = 51
+    /// Job queue / strip display when copies ≥ ``seriesContinuousCopies`` (Python ``_CONTINUOUS_SERIES_SLOT_TEXT``).
+    static let seriesContinuousLabel = "Continuous"
     /// Port of ``ImageGenController._COPIES_MAX``.
     static let copiesMax = 200
     static let chainStateKey = "chain_state"

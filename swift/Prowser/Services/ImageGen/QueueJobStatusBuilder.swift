@@ -22,6 +22,7 @@ enum QueueJobStatusBuilder {
         running: Bool = false,
         omitLiveStepsRow: Bool = false,
         withAI: Bool = false,
+        aiStageActive: Bool = false,
         step: Int? = nil,
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
@@ -40,7 +41,7 @@ enum QueueJobStatusBuilder {
             )
         }
 
-        if withAI {
+        if aiStageActive {
             let view = buildAIStageView(
                 pluginID: pluginID,
                 values: values,
@@ -290,6 +291,9 @@ enum QueueJobStatusBuilder {
 
     /// Port of ``_series_queued_value``.
     private static func seriesQueuedValue(count: Int) -> String {
+        if JobStepQueue.isSeriesContinuousCopies(count) {
+            return JobStepQueue.seriesContinuousLabel
+        }
         let noun = count == 1 ? "image" : "images"
         return "\(count) \(noun)."
     }
