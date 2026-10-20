@@ -304,6 +304,9 @@ def run_with_stepwise_watcher(
         watcher.start()
     try:
         run()
+    except Exception:
+        stop_watcher.set()
+        raise
     finally:
         if stepwise_dir and not _generation_cancelled(stop_watcher):
             flush_stepwise_to_output(

@@ -152,6 +152,12 @@ def release_z_image_session(*, reason: str = "explicit") -> None:
     global _z_image_model, _z_image_loaded_key
     if _z_image_model is not None:
         perf_log_kv("z_image_session_release", reason=reason)
+    try:
+        from imagegen_plugins.conditioning_cache import clear_mlx_text_conditioning_cache
+
+        clear_mlx_text_conditioning_cache()
+    except Exception:
+        pass
     _z_image_model = None
     _z_image_loaded_key = None
     gc.collect()
@@ -185,10 +191,21 @@ def run_z_image_on_model(
     low_ram: bool,
     stepwise_dir: str | None,
     num_seeds: int = 1,
+    model_path: str = "",
+    quantize: int = 8,
+    lora_paths: list[str] | None = None,
+    lora_scales: list[float] | None = None,
+    bake_lora: bool = True,
+    negative_prompt: str | None = None,
 ) -> Any:
-    from mflux.models.z_image.latent_creator.z_image_latent_creator import (
-        ZImageLatentCreator,
-    )
+    import mlx.core as mx
+    from mflux.models.common.config.config import Config
+    from mflux.models.common.latent_creator.latent_creator import Img2Img, LatentCreator
+    from mflux.models.z_image.latent_creator import ZImageLatentCreator
+    from mflux.utils.exceptions import StopImageGenerationException
+    from mflux.utils.image_util import ImageUtil
+
+    from imagegen_plugins.mflux_conditioning import encode_z_image_cached
 
     _register_run_callbacks(
         model,
@@ -198,14 +215,99 @@ def run_z_image_on_model(
         latent_creator=ZImageLatentCreator,
         num_seeds=num_seeds,
     )
-    with PerfTimer("z_image_generate_image", seed=seed):
-        return model.generate_image(
-            seed=int(seed),
+    session_key = compute_z_image_model_key(
+        model_path,
+        int(quantize),
+        lora_paths,
+        lora_scales,
+        bake_lora=bake_lora,
+    )
+    guidance = 0.0
+    scheduler = "linear"
+    config = Config(
+        width=int(width),
+        height=int(height),
+        guidance=guidance,
+        scheduler=scheduler,
+        image_path=None,
+        image_strength=None,
+        model_config=model.model_config,
+        num_inference_steps=int(steps),
+    )
+    from workers.model_tasks_worker import abort_if_generation_cancelled
+
+    abort_if_generation_cancelled()
+    with PerfTimer("prompt_encode", pipeline="mflux_z_image_turbo"):
+        enc = encode_z_image_cached(
+            model,
+            pipeline_id="mflux_z_image_turbo",
+            session_key=session_key,
             prompt=prompt,
-            width=int(width),
-            height=int(height),
-            num_inference_steps=int(steps),
-            guidance=0.0,
+            negative_prompt=negative_prompt,
+            guidance=guidance,
+        )
+    with PerfTimer("z_image_generate_image", seed=seed):
+        latents = LatentCreator.create_for_txt2img_or_img2img(
+            seed=int(seed),
+            width=config.width,
+            height=config.height,
+            img2img=Img2Img(
+                vae=model.vae,
+                latent_creator=ZImageLatentCreator,
+                image_path=config.image_path,
+                sigmas=config.scheduler.sigmas,
+                init_time_step=config.init_time_step,
+                tiling_config=model.tiling_config,
+            ),
+        )
+        ctx = model.callbacks.start(seed=seed, prompt=prompt, config=config)
+        ctx.before_loop(latents)
+        predict = model._predict(model.transformer)
+        from workers.model_tasks_worker import GenerationCancelledError
+
+        for t in config.time_steps:
+            try:
+                sigma_t = config.scheduler.sigmas[t].reshape((1,))
+                timestep = mx.ones_like(sigma_t) - sigma_t
+                noise = predict(
+                    latents=latents,
+                    timestep=timestep,
+                    sigmas=config.scheduler.sigmas,
+                    text_encodings=enc.text_encodings,
+                    negative_encodings=enc.negative_encodings,
+                    guidance=config.guidance,
+                )
+                latents = config.scheduler.step(
+                    noise=noise, timestep=t, latents=latents
+                )
+                ctx.in_loop(t, latents)
+                mx.eval(latents)
+            except GenerationCancelledError:
+                raise
+            except KeyboardInterrupt:
+                ctx.interruption(t, latents)
+                raise StopImageGenerationException(
+                    f"Stopping image generation at step {t + 1}/{config.num_inference_steps}"
+                ) from None
+        ctx.after_loop(latents)
+        decoded = model._decode_latents(
+            latents=latents,
+            config=config,
+            prompt=prompt,
+            seed=int(seed),
+        )
+        return ImageUtil.to_image(
+            decoded_latents=decoded,
+            config=config,
+            seed=seed,
+            prompt=prompt,
+            quantization=model.bits,
+            lora_paths=model.lora_paths,
+            lora_scales=model.lora_scales,
+            image_path=config.image_path,
+            image_strength=config.image_strength,
+            generation_time=config.time_steps.format_dict["elapsed"],
+            negative_prompt=negative_prompt,
         )
 
 
@@ -260,4 +362,9 @@ def generate_z_image(
             height=height,
             low_ram=low_ram,
             stepwise_dir=stepwise_dir,
+            model_path=model_path,
+            quantize=int(quantize),
+            lora_paths=lora_paths_arg,
+            lora_scales=lora_scales_arg,
+            bake_lora=bake_lora,
         )

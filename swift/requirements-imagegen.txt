@@ -1,14 +1,18 @@
 # Image generation venv for Swift Prowser (~/.swift-prowser/venvs/imagegen).
-# Install: python3 -m venv ~/.swift-prowser/venvs/imagegen && \
-#   ~/.swift-prowser/venvs/imagegen/bin/pip install -r requirements-imagegen.txt
+# Installed via Settings → Image Generation → Install dependencies…
 #
-# MFLUX CLI tools are installed separately into the same venv (see MFLUX docs).
+# Covers optimized pipelines (persistent imagegen_generate_worker): MFLUX/MLX,
+# diffusers (SD15, SDXL, SANA), Z-Image SDNQ, and LoRA (peft). Model weights
+# are downloaded separately (Image → Manage models…).
 
 mflux
 torch
+torchvision
 diffusers
 transformers
 accelerate
+peft
+sdnq
 safetensors
 pillow
 piexif

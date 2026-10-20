@@ -321,7 +321,7 @@ final class ImageGenController {
         // Python defers the worker cancel one tick so the toolbar shows "Skipping copy..." first.
         Task { @MainActor [weak self] in
             guard let self, self.skipSeriesCopyRequested else { return }
-            self.modelTasks.cancel()
+            self.modelTasks.cancel(terminateWorker: false)
         }
     }
 
@@ -750,7 +750,7 @@ final class ImageGenController {
             fluxPromptTasks.cancel()
             jobAIStageActive = false
         }
-        modelTasks.cancel()
+        modelTasks.cancel(terminateWorker: true)
         finishCancelledBatchIfNeeded()
     }
 

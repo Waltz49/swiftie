@@ -20,7 +20,7 @@ enum ImageGenPipelineCatalog {
         workerScripts[pipelineID]
     }
 
-    static func usesBundledPythonWorker(pipelineID: String) -> Bool {
-        ImageGenPipelineRouting.bundledPythonWorkerPipelineIDs.contains(pipelineID)
+    static func hasWorkerScript(pipelineID: String) -> Bool {
+        workerScriptName(pipelineID: pipelineID) != nil
     }
 }

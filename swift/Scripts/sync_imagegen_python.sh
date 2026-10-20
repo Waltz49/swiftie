@@ -57,7 +57,8 @@ for f in ipc_json.py model_tasks_process_registry.py; do
   copy_file "workers/$f"
 done
 
-# Bundle-local stub (not copied from monorepo); preserved across sync.
+# Bundle-local workers (not copied from monorepo); preserved across sync:
+# model_tasks_worker.py, imagegen_generate_worker.py
 # ``utils.py`` at bundle root is headless-only (see swift/ImageGenPython/utils.py); not copied from monorepo.
 if [[ ! -f "$DEST/workers/model_tasks_worker.py" ]]; then
   cat > "$DEST/workers/model_tasks_worker.py" <<'PY'

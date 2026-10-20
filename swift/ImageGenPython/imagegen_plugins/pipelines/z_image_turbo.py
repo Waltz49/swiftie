@@ -168,7 +168,15 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "generator": gen,
     }
 
-    from workers.model_tasks_worker import PerfTimer
+    from workers.model_tasks_worker import PerfTimer, abort_if_generation_cancelled
+
+    def _on_step_end(
+        _pipe: Any, _step_index: int, _timestep: Any, callback_kwargs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        abort_if_generation_cancelled()
+        return callback_kwargs
+
+    gen_kwargs["callback_on_step_end"] = _on_step_end
 
     t0 = time.perf_counter()
     with PerfTimer("z_image_pipeline", model=hf_model_id):

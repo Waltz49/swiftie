@@ -151,10 +151,14 @@ final class SwiftImageGenRegistry: ImageGenRegistry {
     }
 
     private func pluginFastAvailable(_ plugin: ImageGenPluginDescriptor) -> Bool {
-        switch ImageGenPipelineRouting.executionKind(pipelineID: plugin.pipelineID, hfModelID: plugin.hfModelID) {
+        switch ImageGenPipelineRouting.executionKind(
+            pipelineID: plugin.pipelineID,
+            hfModelID: plugin.hfModelID,
+            config: config
+        ) {
         case .mfluxCLI:
             return MfluxToolchain.shared.isPipelineInstalled(plugin.pipelineID)
-        case .bundledPythonWorker, .sceneWorksPythonWorker:
+        case .optimizedPythonWorker:
             guard let config else { return false }
             return ImageGenPluginAvailability.venvPythonReady(config: config)
         case nil:
@@ -163,12 +167,19 @@ final class SwiftImageGenRegistry: ImageGenRegistry {
     }
 
     private func pluginIsAvailable(_ plugin: ImageGenPluginDescriptor) -> Bool {
-        switch ImageGenPipelineRouting.executionKind(pipelineID: plugin.pipelineID, hfModelID: plugin.hfModelID) {
+        switch ImageGenPipelineRouting.executionKind(
+            pipelineID: plugin.pipelineID,
+            hfModelID: plugin.hfModelID,
+            config: config
+        ) {
         case .mfluxCLI:
             return MfluxToolchain.shared.isAvailable
-        case .bundledPythonWorker, .sceneWorksPythonWorker:
+        case .optimizedPythonWorker:
             guard let config else { return false }
-            return ImageGenPluginAvailability.diffusersPipelineReady(config: config)
+            return ImageGenPluginAvailability.optimizedPipelineReady(
+                pipelineID: plugin.pipelineID,
+                config: config
+            )
         case nil:
             return false
         }

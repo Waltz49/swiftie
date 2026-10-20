@@ -126,13 +126,95 @@ def _klein_session_key(
     return (model_name, quant_key, str(model_path or ""), paths, scales)
 
 
-def _klein_model_unusable_after_low_ram(model: Any) -> bool:
+def _klein_model_needs_full_reload(model: Any) -> bool:
+    """Transformer evicted or session empty — must cold-load the full stack."""
+    return model is None or getattr(model, "transformer", None) is None
+
+
+def _klein_model_needs_text_encoder_rehydrate(model: Any) -> bool:
     """MemorySaver drops text_encoder before denoise; transformer may still be warm."""
-    if model is None or getattr(model, "transformer", None) is None:
-        return True
-    if getattr(model, "text_encoder", None) is None:
-        return True
-    return False
+    if _klein_model_needs_full_reload(model):
+        return False
+    return getattr(model, "text_encoder", None) is None
+
+
+def _rehydrate_flux2_klein_text_encoder(
+    model: Any,
+    *,
+    quantize: int | None,
+    model_path: str | None,
+) -> None:
+    """Reload text_encoder weights onto a warm Klein shell (skip transformer/vae)."""
+    from mflux.models.common.weights.loading.weight_applier import WeightApplier
+    from mflux.models.flux2.model.flux2_text_encoder.qwen3_text_encoder import Qwen3TextEncoder
+    from mflux.models.flux2.weights.flux2_weight_definition import Flux2KleinWeightDefinition
+
+    model.text_encoder = Qwen3TextEncoder(**model.model_config.text_encoder_overrides)
+    components = {c.name: c for c in Flux2KleinWeightDefinition.get_components()}
+    text_component = components["text_encoder"]
+
+    if is_sceneworks_packed_tier_path(model_path):
+        from mflux.models.common.weights.loading.loaded_weights import LoadedWeights, MetaData
+        from mflux.models.flux2.weights.flux2_weight_mapping import Flux2WeightMapping
+
+        from imagegen_plugins.sceneworks_klein_mlx_weights import (
+            load_sceneworks_klein_text_encoder_weights,
+            sceneworks_tier_quant_bits,
+        )
+
+        tier_path = Path(str(model_path)).expanduser()
+        bits = sceneworks_tier_quant_bits(tier_path)
+        te_weights = load_sceneworks_klein_text_encoder_weights(tier_path)
+        weights = LoadedWeights(
+            components={"text_encoder": te_weights},
+            meta_data=MetaData(quantization_level=bits, mflux_version=None),
+        )
+        WeightApplier.apply_and_quantize_single(
+            weights,
+            model.text_encoder,
+            text_component,
+            quantize_arg=None,
+        )
+    else:
+        from mflux.models.common.weights.loading.weight_loader import WeightLoader
+
+        path = model_path if model_path else model.model_config.model_name
+        weights = WeightLoader.load(
+            weight_definition=Flux2KleinWeightDefinition,
+            model_path=path,
+        )
+        quant = quantize if quantize is not None else getattr(model, "bits", None)
+        WeightApplier.apply_and_quantize_single(
+            weights,
+            model.text_encoder,
+            text_component,
+            quantize_arg=quant,
+        )
+    gc.collect()
+
+
+def _try_rehydrate_klein_session_model(
+    model: Any,
+    *,
+    kind: str,
+    model_name: str,
+    quantize: int | None,
+    model_path: str | None,
+) -> Any | None:
+    if not _klein_model_needs_text_encoder_rehydrate(model):
+        return None
+    perf_log_kv("model_load", kind=kind, cache="stale", model=model_name)
+    t0 = time.perf_counter()
+    _rehydrate_flux2_klein_text_encoder(model, quantize=quantize, model_path=model_path)
+    perf_log_kv(
+        "model_load",
+        kind=kind,
+        cache="rehydrate",
+        model=model_name,
+        quantize=quantize,
+        elapsed=time.perf_counter() - t0,
+    )
+    return model
 
 
 def _register_run_callbacks(
@@ -178,7 +260,16 @@ def get_flux2_klein_edit(
         model_name, quantize, lora_paths, lora_scales, model_path=model_path
     )
     if _session_model is not None and _session_key == key:
-        if _klein_model_unusable_after_low_ram(_session_model):
+        rehydrated = _try_rehydrate_klein_session_model(
+            _session_model,
+            kind="flux2_klein_edit",
+            model_name=model_name,
+            quantize=quantize,
+            model_path=model_path,
+        )
+        if rehydrated is not None:
+            return rehydrated
+        if _klein_model_needs_full_reload(_session_model):
             perf_log_kv("model_load", kind="flux2_klein_edit", cache="stale", model=model_name)
             release_flux2_klein_session(reason="stale_low_ram")
         else:
@@ -222,6 +313,12 @@ def release_flux2_klein_session(*, reason: str = "explicit") -> None:
     global _session_model, _session_key, _create_session_model, _create_session_key
     if _session_model is not None or _create_session_model is not None:
         perf_log_kv("klein_session_release", reason=reason)
+    try:
+        from imagegen_plugins.conditioning_cache import clear_mlx_text_conditioning_cache
+
+        clear_mlx_text_conditioning_cache()
+    except Exception:
+        pass
     _session_model = None
     _session_key = None
     _create_session_model = None
@@ -243,7 +340,16 @@ def get_flux2_klein_create(
         model_name, quantize, lora_paths, lora_scales, model_path=model_path
     )
     if _create_session_model is not None and _create_session_key == key:
-        if _klein_model_unusable_after_low_ram(_create_session_model):
+        rehydrated = _try_rehydrate_klein_session_model(
+            _create_session_model,
+            kind="flux2_klein_create",
+            model_name=model_name,
+            quantize=quantize,
+            model_path=model_path,
+        )
+        if rehydrated is not None:
+            return rehydrated
+        if _klein_model_needs_full_reload(_create_session_model):
             perf_log_kv(
                 "model_load", kind="flux2_klein_create", cache="stale", model=model_name
             )
@@ -293,6 +399,103 @@ def get_flux2_klein_create(
     return _create_session_model
 
 
+def _klein_create_denoise_loop(
+    model: Any,
+    *,
+    prompt: str,
+    seed: int,
+    config: Any,
+    guidance: float,
+    session_key: tuple[Any, ...],
+    pipeline_id: str = "mflux_flux2_klein_create",
+) -> Any:
+    from mflux.utils.exceptions import StopImageGenerationException
+    from mflux.utils.image_util import ImageUtil
+    from workers.model_tasks_worker import GenerationCancelledError
+
+    from imagegen_plugins.mflux_conditioning import encode_klein_pair_cached
+
+    with PerfTimer("prompt_encode", pipeline=pipeline_id):
+        cond = encode_klein_pair_cached(
+            model,
+            pipeline_id=pipeline_id,
+            session_key=session_key,
+            prompt=prompt,
+            negative_prompt=" ",
+            guidance=guidance,
+        )
+
+    with PerfTimer("latents_init", seed=seed):
+        latents, latent_ids, latent_height, latent_width = (
+            model._prepare_generation_latents(
+                seed=int(seed),
+                config=config,
+            )
+        )
+
+    ctx = model.callbacks.start(seed=seed, prompt=prompt, config=config)
+    ctx.before_loop(latents)
+    predict = model._predict(model.transformer)
+    total_steps = len(config.time_steps)
+    denoise_t0 = time.perf_counter()
+    for step_idx, t in enumerate(config.time_steps):
+        step_t0 = time.perf_counter()
+        try:
+            noise = predict(
+                latents=latents,
+                latent_ids=latent_ids,
+                prompt_embeds=cond.prompt_embeds,
+                text_ids=cond.text_ids,
+                negative_prompt_embeds=cond.negative_prompt_embeds,
+                negative_text_ids=cond.negative_text_ids,
+                guidance=guidance,
+                timestep=config.scheduler.timesteps[t],
+            )
+            latents = config.scheduler.step(
+                noise=noise,
+                timestep=t,
+                latents=latents,
+                sigmas=config.scheduler.sigmas,
+            )
+            ctx.in_loop(t, latents)
+            mx.eval(latents)
+        except GenerationCancelledError:
+            raise
+        except KeyboardInterrupt:
+            ctx.interruption(t, latents)
+            raise StopImageGenerationException(
+                f"Stopping image generation at step {t + 1}/{config.num_inference_steps}"
+            ) from None
+        perf_log_kv(
+            "denoise_step",
+            step=step_idx + 1,
+            total=total_steps,
+            elapsed=time.perf_counter() - step_t0,
+        )
+
+    perf_log_kv("denoise_total", steps=total_steps, elapsed=time.perf_counter() - denoise_t0)
+    ctx.after_loop(latents)
+
+    with PerfTimer("vae_decode", pipeline=pipeline_id):
+        packed_latents = latents.reshape(
+            latents.shape[0], latent_height, latent_width, latents.shape[-1]
+        ).transpose(0, 3, 1, 2)
+        decoded = model.vae.decode_packed_latents(packed_latents)
+    return ImageUtil.to_image(
+        decoded_latents=decoded,
+        config=config,
+        seed=seed,
+        prompt=prompt,
+        negative_prompt=None,
+        quantization=model.bits,
+        lora_paths=model.lora_paths,
+        lora_scales=model.lora_scales,
+        image_path=config.image_path,
+        image_strength=config.image_strength,
+        generation_time=config.time_steps.format_dict["elapsed"],
+    )
+
+
 def generate_flux2_klein_create(
     *,
     model_name: str,
@@ -324,15 +527,29 @@ def generate_flux2_klein_create(
             low_ram=low_ram,
             seed=seed,
         )
+        from mflux.models.common.config.config import Config
+
+        config = Config(
+            model_config=model.model_config,
+            num_inference_steps=int(steps),
+            height=int(height),
+            width=int(width),
+            guidance=float(guidance),
+            image_path=None,
+            image_strength=None,
+            scheduler="flow_match_euler_discrete",
+        )
+        session_key = _klein_session_key(
+            model_name, quantize, lora_paths, lora_scales, model_path=model_path
+        )
         with PerfTimer("klein_create_generate_image", seed=seed):
-            return model.generate_image(
-                seed=int(seed),
+            return _klein_create_denoise_loop(
+                model,
                 prompt=prompt,
-                width=int(width),
-                height=int(height),
+                seed=int(seed),
+                config=config,
                 guidance=float(guidance),
-                num_inference_steps=int(steps),
-                scheduler="flow_match_euler_discrete",
+                session_key=session_key,
             )
 
 
@@ -432,13 +649,19 @@ def generate_flux2_klein_edit(
             scheduler="flow_match_euler_discrete",
         )
 
+        session_key = _klein_session_key(
+            model_name, quantize, lora_paths, lora_scales, model_path=model_path
+        )
+        from imagegen_plugins.mflux_conditioning import encode_klein_pair_cached
+
         with PerfTimer("prompt_encode", pipeline="flux2_klein_edit"):
-            prompt_embeds, text_ids, negative_prompt_embeds, negative_text_ids = (
-                model._encode_prompt_pair(
-                    prompt=prompt,
-                    negative_prompt=" ",
-                    guidance=guidance,
-                )
+            cond = encode_klein_pair_cached(
+                model,
+                pipeline_id="mflux_flux2_klein_edit",
+                session_key=session_key,
+                prompt=prompt,
+                negative_prompt=" ",
+                guidance=guidance,
             )
 
         with PerfTimer("latents_init", seed=seed):
@@ -450,9 +673,6 @@ def generate_flux2_klein_edit(
                 )
             )
 
-        session_key = _klein_session_key(
-            model_name, quantize, lora_paths, lora_scales, model_path=model_path
-        )
         image_latents, image_latent_ids = _reference_conditioning(
             model,
             image_paths,
@@ -473,10 +693,10 @@ def generate_flux2_klein_edit(
                     image_latents=image_latents,
                     latent_ids=latent_ids,
                     image_latent_ids=image_latent_ids,
-                    prompt_embeds=prompt_embeds,
-                    text_ids=text_ids,
-                    negative_prompt_embeds=negative_prompt_embeds,
-                    negative_text_ids=negative_text_ids,
+                    prompt_embeds=cond.prompt_embeds,
+                    text_ids=cond.text_ids,
+                    negative_prompt_embeds=cond.negative_prompt_embeds,
+                    negative_text_ids=cond.negative_text_ids,
                     guidance=guidance,
                     timestep=config.scheduler.timesteps[t],
                 )
@@ -488,6 +708,8 @@ def generate_flux2_klein_edit(
                 )
                 ctx.in_loop(t, latents)
                 mx.eval(latents)
+            except GenerationCancelledError:
+                raise
             except KeyboardInterrupt:
                 ctx.interruption(t, latents)
                 raise StopImageGenerationException(

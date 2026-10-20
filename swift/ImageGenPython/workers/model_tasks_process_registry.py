@@ -25,6 +25,7 @@ _WORKER_MARKERS = (
     "workers.person_search_worker",
     "imagegen_plugins.lora_bridge",
     "imagegen_plugins.registry_bridge",
+    "workers.imagegen_generate_worker",
 )
 
 

@@ -240,7 +240,7 @@ Top-level **Move to** / **Copy to** menu (title follows `destination_menu_action
 
 ## Menus — Image (generation)
 
-WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and MFLUX CLI probe (`MfluxToolchain`). Generation runs via `mflux-generate-*`, not Python `model_tasks_worker`.
+WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and imagegen venv. Default generation uses persistent `workers.imagegen_generate_worker` (optimized pipelines); optional **MFLUX CLI** backend in Settings → Image Generation.
 
 - [x] Create an image from text… (`ImageGenUnifiedDialog` — intro, scroll fields, collapsible AI + custom size with pipeline dim limits)
 - [~] Fast create / preset submenu entries (`image_gen_menu.py` — ⇧⌥/ fast-open; per-function submenu partial)

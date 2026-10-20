@@ -2,9 +2,15 @@ import XCTest
 @testable import Prowser
 
 final class ImageGenPipelineRoutingTests: XCTestCase {
-    func testBundledPythonPipelinesDoNotRequireMfluxCLIAtStart() {
-        let pythonPipelines = ImageGenPipelineRouting.bundledPythonWorkerPipelineIDs
-        for pipeline in pythonPipelines {
+    private func config(withBackend backend: String) -> AppConfig {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let config = AppConfig(dataDirectory: dir)
+        config.updateSetting("imagegen_execution_backend", value: backend)
+        return config
+    }
+
+    func testDiffusersPipelinesUseOptimizedWorkerByDefault() {
+        for pipeline in ImageGenPipelineRouting.diffusersPipelineIDs {
             XCTAssertFalse(MfluxCLIPipeline.isSupported(pipelineID: pipeline), pipeline)
             XCTAssertTrue(
                 ImageGenPipelineRouting.usesPythonWorker(pipelineID: pipeline, hfModelID: ""),
@@ -12,13 +18,44 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
             )
             XCTAssertEqual(
                 ImageGenPipelineRouting.executionKind(pipelineID: pipeline, hfModelID: ""),
-                .bundledPythonWorker,
+                .optimizedPythonWorker,
                 pipeline
             )
         }
     }
 
-    func testMfluxCLIPipelines() {
+    func testMfluxPipelinesUseOptimizedWorkerByDefault() {
+        let mflux: [String] = [
+            "flux_schnell_mflux_play",
+            "mflux_z_image_turbo",
+            "mflux_fill_expand",
+            "mflux_fill_infill",
+            "mflux_flux2_klein_create",
+            "mflux_flux2_klein_edit",
+            "mflux_flux2_klein_expand",
+        ]
+        for pipeline in mflux {
+            XCTAssertTrue(MfluxCLIPipeline.isSupported(pipelineID: pipeline), pipeline)
+            XCTAssertTrue(
+                ImageGenPipelineRouting.usesPersistentPythonWorker(
+                    pipelineID: pipeline,
+                    hfModelID: "black-forest-labs/FLUX.1-schnell"
+                ),
+                pipeline
+            )
+            XCTAssertEqual(
+                ImageGenPipelineRouting.executionKind(
+                    pipelineID: pipeline,
+                    hfModelID: "black-forest-labs/FLUX.1-schnell"
+                ),
+                .optimizedPythonWorker,
+                pipeline
+            )
+        }
+    }
+
+    func testMfluxCLIPipelinesWhenBackendIsCLI() {
+        let config = config(withBackend: "mflux_cli")
         let cli: [String] = [
             "flux_schnell_mflux_play",
             "mflux_z_image_turbo",
@@ -29,15 +66,29 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
             "mflux_flux2_klein_expand",
         ]
         for pipeline in cli {
-            XCTAssertTrue(MfluxCLIPipeline.isSupported(pipelineID: pipeline), pipeline)
+            XCTAssertEqual(
+                ImageGenPipelineRouting.executionKind(
+                    pipelineID: pipeline,
+                    hfModelID: "black-forest-labs/FLUX.1-schnell",
+                    config: config
+                ),
+                .mfluxCLI,
+                pipeline
+            )
             XCTAssertFalse(
                 ImageGenPipelineRouting.usesPythonWorker(
                     pipelineID: pipeline,
-                    hfModelID: "black-forest-labs/FLUX.1-schnell"
+                    hfModelID: "black-forest-labs/FLUX.1-schnell",
+                    config: config
                 ),
                 pipeline
             )
         }
+    }
+
+    func testExecutionBackendFromConfig() {
+        XCTAssertEqual(ImageGenExecutionBackend.from(config: config(withBackend: "optimized")), .optimized)
+        XCTAssertEqual(ImageGenExecutionBackend.from(config: config(withBackend: "mflux_cli")), .mfluxCLI)
     }
 
     func testFillCLIReceivesPreparedImageDimensions() throws {
@@ -108,7 +159,7 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
         XCTAssertFalse(kleinEditArgs.contains("--image-path"))
     }
 
-    func testSceneWorksUsesPythonWorkerDespiteKleinPipeline() {
+    func testSceneWorksUsesOptimizedWorker() {
         let repo = ImageGenSceneWorksKlein.repoID
         XCTAssertTrue(
             ImageGenPipelineRouting.usesPythonWorker(
@@ -118,13 +169,11 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
         )
         XCTAssertEqual(
             ImageGenPipelineRouting.executionKind(pipelineID: "mflux_flux2_klein_create", hfModelID: repo),
-            .sceneWorksPythonWorker
+            .optimizedPythonWorker
         )
     }
 
     func testRealisticVisionPipelineIsSD15Python() {
-        XCTAssertTrue(
-            ImageGenPipelineRouting.bundledPythonWorkerPipelineIDs.contains("sd15_diffusers")
-        )
+        XCTAssertTrue(ImageGenPipelineRouting.diffusersPipelineIDs.contains("sd15_diffusers"))
     }
 }

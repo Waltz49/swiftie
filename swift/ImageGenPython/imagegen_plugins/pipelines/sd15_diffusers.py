@@ -377,9 +377,12 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     last_preview_at = time.monotonic()
 
+    from workers.model_tasks_worker import abort_if_generation_cancelled
+
     def _on_step_end(
         pipe_obj: Any, step_index: int, timestep: Any, callback_kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
+        abort_if_generation_cancelled()
         nonlocal last_preview_at
         step_num = step_index + 1
         preview_path: Optional[str] = None

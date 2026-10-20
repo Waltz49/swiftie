@@ -539,10 +539,12 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload.get("sdxl_lora_scales"),
     )
     from imagegen_plugins.pipelines.mflux_stepwise_progress import emit_mflux_progress
+    from workers.model_tasks_worker import abort_if_generation_cancelled
 
     def _on_step_end(
         pipe_obj: Any, step_index: int, timestep: Any, callback_kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
+        abort_if_generation_cancelled()
         step_num = step_index + 1
         preview_path: Optional[str] = None
         if progressive_vae_previews and step_num < steps:

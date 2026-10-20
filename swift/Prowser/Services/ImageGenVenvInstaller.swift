@@ -36,9 +36,22 @@ enum ImageGenVenvInstaller {
             if install.exitCode != 0 {
                 return InstallResult(success: false, message: install.stderr)
             }
+            let verify = try await run(venvPython, arguments: [
+                "-c",
+                "import mflux, diffusers, torch, peft, sdnq; print('ok')",
+            ])
+            if verify.exitCode != 0 {
+                return InstallResult(
+                    success: false,
+                    message: "Packages installed but import check failed:\n\(verify.stderr)"
+                )
+            }
             return InstallResult(
                 success: true,
-                message: "Imagegen venv ready at \(venv.path). Install MFLUX CLIs into the same venv if needed."
+                message:
+                    "Imagegen venv ready at \(venv.path). "
+                    + "Optimized generation uses this environment (mflux, diffusers, peft, sdnq). "
+                    + "Download model weights from Image → Manage models… when needed."
             )
         } catch {
             return InstallResult(success: false, message: error.localizedDescription)

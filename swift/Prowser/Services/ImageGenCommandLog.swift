@@ -13,12 +13,23 @@ enum ImageGenCommandLog {
 
     static func printInvocation(executablePath: String, arguments: [String]) {
         let line = ([executablePath] + arguments).map(shellQuote).joined(separator: " ")
-        let message = "[imagegen] \(line)"
+        appendImageGenLine("[imagegen] \(line)")
+    }
+
+    static func appendWorkerLine(_ text: String) {
+        appendImageGenLine(text)
+    }
+
+    private static func appendImageGenLine(_ message: String) {
         lock.lock()
         let url = sessionLogFileURL
         lock.unlock()
         guard let url else { return }
         SessionViewLog.appendLine(message, logFileURL: url)
+    }
+
+    static func printPythonModuleInvocation(executablePath: String, module: String) {
+        printInvocation(executablePath: executablePath, arguments: PythonLocator.moduleArguments(module))
     }
 
     private static func shellQuote(_ value: String) -> String {

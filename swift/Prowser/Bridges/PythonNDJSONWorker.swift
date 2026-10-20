@@ -3,6 +3,7 @@ import Foundation
 /// Long-lived stdin/stdout NDJSON worker (Python ``workers.ipc_json`` protocol).
 actor PythonNDJSONWorker {
     typealias ProgressHandler = @Sendable ([String: Any]) -> Void
+    typealias StderrLineHandler = @Sendable (String) -> Void
 
     /// First launch can block on Python imports before the ``ready`` line (e.g. LoRA bridge).
     private static let startupReadyTimeout: TimeInterval = 90
@@ -18,6 +19,8 @@ actor PythonNDJSONWorker {
     private var pending: [String: PendingRequest] = [:]
     private var shuttingDown = false
     private var lineBuffer = Data()
+    private var stderrLineBuffer = Data()
+    private var onStderrLine: StderrLineHandler?
 
     private struct PendingRequest {
         var continuation: CheckedContinuation<[String: Any], Error>
@@ -59,6 +62,10 @@ actor PythonNDJSONWorker {
         process?.isRunning == true && isReady
     }
 
+    func setStderrLineHandler(_ handler: StderrLineHandler?) {
+        onStderrLine = handler
+    }
+
     func startIfNeeded() async throws {
         if running { return }
         guard let environment else { throw BridgeError.pythonUnavailable }
@@ -70,6 +77,7 @@ actor PythonNDJSONWorker {
         isReady = false
         shuttingDown = false
         lineBuffer = Data()
+        stderrLineBuffer = Data()
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: environment.executable)
@@ -103,10 +111,22 @@ actor PythonNDJSONWorker {
                 await worker.appendStdout(chunk)
             }
         }
+        let procRef = proc
         stderrDrainTask = Task.detached {
             while !Task.isCancelled {
                 let chunk = stderr.availableData
-                if chunk.isEmpty { break }
+                if chunk.isEmpty {
+                    if !procRef.isRunning {
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    continue
+                }
+                await worker.appendStderr(chunk)
+            }
+            let trailing = stderr.readDataToEndOfFile()
+            if !trailing.isEmpty {
+                await worker.appendStderr(trailing)
             }
         }
 
@@ -130,6 +150,26 @@ actor PythonNDJSONWorker {
             try await Task.sleep(for: .milliseconds(100))
         }
         if !isReady { throw BridgeError.notReady }
+    }
+
+    /// Write a command without waiting for a response (e.g. ``cancel`` while ``generate`` is in flight).
+    func writeCommand(_ command: [String: Any]) async throws {
+        try await startIfNeeded()
+        try await waitForReady()
+        guard let stdinHandle else { throw BridgeError.workerNotRunning }
+
+        var payload = command
+        if (payload["job_id"] as? String)?.isEmpty != false {
+            payload["job_id"] = UUID().uuidString
+        }
+
+        let lineData = try JSONSerialization.data(withJSONObject: payload)
+        guard var line = String(data: lineData, encoding: .utf8) else {
+            throw BridgeError.encodingFailed
+        }
+        line.append("\n")
+        guard let bytes = line.data(using: .utf8) else { throw BridgeError.encodingFailed }
+        try stdinHandle.write(contentsOf: bytes)
     }
 
     func send(
@@ -167,6 +207,24 @@ actor PythonNDJSONWorker {
         }
     }
 
+    /// Stop the worker subprocess and fail in-flight requests (port of Python ``force_terminate_worker``).
+    func terminateForCancel() async {
+        readTask?.cancel()
+        readTask = nil
+        stderrDrainTask?.cancel()
+        stderrDrainTask = nil
+        if let process, process.isRunning {
+            process.terminate()
+        }
+        process = nil
+        stdinHandle = nil
+        isReady = false
+        for (_, request) in pending {
+            request.continuation.resume(throwing: BridgeError.workerMessage("Cancelled"))
+        }
+        pending.removeAll()
+    }
+
     func shutdown() async {
         await shutdownInternal()
     }
@@ -192,6 +250,18 @@ actor PythonNDJSONWorker {
         pending.removeAll()
     }
 
+    private func appendStderr(_ chunk: Data) {
+        stderrLineBuffer.append(chunk)
+        while let newlineIndex = stderrLineBuffer.firstIndex(of: 0x0A) {
+            let lineData = stderrLineBuffer[..<newlineIndex]
+            stderrLineBuffer.removeSubrange(...newlineIndex)
+            guard let line = String(data: lineData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !line.isEmpty else { continue }
+            onStderrLine?(line)
+        }
+    }
+
     private func appendStdout(_ chunk: Data) {
         lineBuffer.append(chunk)
         while let newlineIndex = lineBuffer.firstIndex(of: 0x0A) {
@@ -213,12 +283,21 @@ actor PythonNDJSONWorker {
             return
         }
         let jobID = message["job_id"] as? String ?? ""
-        guard !jobID.isEmpty, let request = pending[jobID] else { return }
 
         if type == "progress" {
-            request.onProgress?(message)
+            if !jobID.isEmpty, let request = pending[jobID] {
+                Self.deliverProgress(message, handler: request.onProgress)
+                return
+            }
+            // ``emit_mflux_progress`` / diffusers workers omit job_id; route to active generate requests.
+            for request in pending.values where request.onProgress != nil {
+                Self.deliverProgress(message, handler: request.onProgress)
+            }
             return
         }
+
+        guard !jobID.isEmpty, let request = pending[jobID] else { return }
+
         if type == "error" {
             pending.removeValue(forKey: jobID)
             let text = message["message"] as? String ?? "Worker error"
@@ -231,6 +310,17 @@ actor PythonNDJSONWorker {
             }
             pending.removeValue(forKey: jobID)
             request.continuation.resume(returning: message)
+        }
+    }
+
+    /// Progress arrives on the stdout reader task; UI updates must run on the main actor.
+    private nonisolated static func deliverProgress(
+        _ message: [String: Any],
+        handler: ProgressHandler?
+    ) {
+        guard let handler else { return }
+        Task { @MainActor in
+            handler(message)
         }
     }
 }

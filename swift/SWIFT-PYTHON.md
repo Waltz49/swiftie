@@ -14,7 +14,7 @@ When **not** launched with `--min` / `PROWSER_MIN_BUNDLE`, the app can expose **
 | **`LoRAService`** | Disk-first LoRA registry (`lora_catalog.json`), settings grid, run-dialog choices, submit-time path resolution (Swift) |
 | **`lora_ops_worker.py`** | Import LoRA, Check LoRAs probes, find-origin (torch / HF; requires venv) |
 | **Profile venv** (`~/.swift-prowser/venvs/imagegen` by default) | `python3 -m venv` + `requirements-imagegen.txt` |
-| **`MfluxGenerationTasks`** | MFLUX CLI and bundled Python pipeline workers |
+| **`MfluxGenerationTasks`** | Optimized `workers.imagegen_generate_worker` (default) or MFLUX CLI per settings |
 | **`ImageGenMfluxPrep`** | Mask/pad/expand prep before CLI |
 
 Configure in **Preferences → Image Generation**:

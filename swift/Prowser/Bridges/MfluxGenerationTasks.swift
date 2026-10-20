@@ -3,10 +3,11 @@ import Foundation
 import Darwin
 #endif
 
-/// Runs one MFLUX CLI job at a time (replaces Python `model_tasks_worker` for generate).
+/// Runs one image generation job at a time (optimized Python worker or MFLUX CLI).
 @MainActor
 final class MfluxGenerationTasks {
     private weak var config: AppConfig?
+    private let generationWorker = ImageGenGenerationWorker()
 
     private(set) var isReady = true
     private(set) var isBusy = false
@@ -26,17 +27,24 @@ final class MfluxGenerationTasks {
 
     var isAvailable: Bool { MfluxToolchain.shared.isAvailable }
 
-    var workerNeedsCleanup: Bool { false }
+    var workerNeedsCleanup: Bool {
+        generationWorker.unloadInFlight
+    }
 
     func bind(config: AppConfig) {
         self.config = config
+        generationWorker.bind(config: config)
     }
 
     func startGenerate(payload: [String: Any]) throws -> String {
         guard !isBusy else { throw BridgeError.busy }
         let pipelineID = payload["pipeline_id"] as? String ?? ""
         let hfModelID = payload["hf_model_id"] as? String ?? ""
-        if ImageGenPipelineRouting.usesPythonWorker(pipelineID: pipelineID, hfModelID: hfModelID) {
+        if ImageGenPipelineRouting.usesPythonWorker(
+            pipelineID: pipelineID,
+            hfModelID: hfModelID,
+            config: config
+        ) {
             guard let config,
                   FileManager.default.isExecutableFile(atPath: config.imagegenVenvPythonPath()),
                   PythonLocator.resolve(profilePath: nil, config: config) != nil else {
@@ -63,22 +71,33 @@ final class MfluxGenerationTasks {
         return jobID
     }
 
-    func cancel() {
+    func cancel(terminateWorker: Bool = false) {
         guard isBusy else { return }
         cancelled = true
         stepwiseWatcher?.stop()
         terminateTrackedProcess(force: false)
+        let jobID = activeJobID
+        Task {
+            await generationWorker.requestCancel(
+                activeJobID: jobID,
+                terminateWorker: terminateWorker
+            )
+        }
         // Keep the task busy until the terminated process has actually unwound. Advancing
         // synchronously here lets its stale completion overwrite the next copy/job's state.
     }
 
     @discardableResult
-    func unloadImageModel() -> Bool { true }
+    func unloadImageModel() -> Bool {
+        Task { await generationWorker.unloadImageModel() }
+        return true
+    }
 
     func shutdown() {
         guard isBusy else {
             runTask?.cancel()
             runTask = nil
+            Task { await generationWorker.shutdown() }
             return
         }
         cancelled = true
@@ -90,6 +109,7 @@ final class MfluxGenerationTasks {
         if !jobID.isEmpty {
             finishJob(jobID: jobID, success: false, outputPath: "", error: "Cancelled")
         }
+        Task { await generationWorker.shutdown() }
     }
 
     /// SIGTERM (and SIGKILL when ``force``), port of Python ``ModelTasksController._terminate_worker`` / ``force_terminate_worker``.
@@ -125,9 +145,10 @@ final class MfluxGenerationTasks {
             }
             let pipelineID = runPayload["pipeline_id"] as? String ?? ""
             let hfModelID = runPayload["hf_model_id"] as? String ?? payload["hf_model_id"] as? String ?? ""
-            let usePythonWorker = ImageGenPipelineRouting.usesPythonWorker(
+            let usePythonWorker = ImageGenPipelineRouting.usesPersistentPythonWorker(
                 pipelineID: pipelineID,
-                hfModelID: hfModelID
+                hfModelID: hfModelID,
+                config: config
             )
             guard jobID == activeJobID, !cancelled else {
                 finishJob(jobID: jobID, success: false, outputPath: "", error: "Cancelled")
@@ -165,8 +186,13 @@ final class MfluxGenerationTasks {
             }
 
             if usePythonWorker {
-                guard let config,
-                      let pyEnv = PythonLocator.resolve(profilePath: nil, config: config) else {
+                if let config, config.bool(forKey: "debug_mode", default: false) {
+                    let pipeline = runPayload["pipeline_id"] as? String ?? ""
+                    config.debugLog(
+                        "[imagegen] optimized worker pipeline=\(pipeline) steps=\(steps)"
+                    )
+                }
+                guard let config else {
                     throw MfluxCLIError.processFailed(
                         "Python environment not configured (Settings → Image Generation)."
                     )
@@ -191,55 +217,25 @@ final class MfluxGenerationTasks {
                 } else {
                     runPayload["show_progressive_images"] = ImageGenPipelineModes.showProgressiveImages(config: config)
                 }
-                let workerRun = try await ImageGenPipelineWorkerRunner.run(
-                    pipelineID: pipelineID,
+                if config.bool(forKey: "debug_mode", default: false) {
+                    runPayload["debug_mode"] = true
+                }
+                let workerDoc = try await generationWorker.runGenerate(
                     payload: runPayload,
-                    environment: pyEnv,
-                    onProcessStarted: { [weak self] proc in
-                        guard let self, self.activeJobID == jobID else {
-                            if proc.isRunning { proc.terminate() }
-                            return
-                        }
-                        self.process = proc
-                        if self.cancelled, proc.isRunning {
-                            proc.terminate()
-                        }
-                    },
-                    onProgress: { message in
-                        Task { @MainActor in
-                            progressHandler(message)
-                        }
-                    }
+                    jobID: jobID,
+                    onProgress: progressHandler
                 )
-                await stepwiseWatcher?.flushAndStop()
-                process = nil
                 if cancelled {
-                    stepwiseWatcher = nil
                     finishJob(jobID: jobID, success: false, outputPath: finalOutputPath, error: "Cancelled")
                     return
                 }
-                guard workerRun.exitStatus == 0 else {
-                    stepwiseWatcher = nil
-                    throw MfluxCLIError.processFailed(
-                        workerFailureMessage(
-                            stdout: workerRun.stdoutText,
-                            stderr: workerRun.stderrText,
-                            status: workerRun.exitStatus
-                        )
-                    )
-                }
-                if let workerDoc = parseWorkerJSON(workerRun.stdoutText),
-                   let out = workerDoc["output_path"] as? String,
-                   !out.isEmpty {
+                if let out = workerDoc["output_path"] as? String, !out.isEmpty {
                     lastGenerateResult = workerDoc
                 } else if FileManager.default.fileExists(atPath: finalOutputPath) {
                     lastGenerateResult = ["output_path": finalOutputPath, "success": true]
                 } else {
-                    stepwiseWatcher = nil
                     throw MfluxCLIError.processFailed("Python worker returned no output path.")
                 }
-                stepwiseWatcher?.emitFinalStepProgress()
-                stepwiseWatcher = nil
             } else {
                 guard let executable = MfluxToolchain.shared.executableURL(forPipeline: pipelineID) else {
                     throw MfluxCLIError.unsupportedPipeline(pipelineID)
@@ -315,11 +311,11 @@ final class MfluxGenerationTasks {
             stepwiseWatcher?.stop()
             stepwiseWatcher = nil
             process = nil
-            if jobID == activeJobID, cancelled {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if jobID == activeJobID, cancelled || message == "Cancelled" {
                 finishJob(jobID: jobID, success: false, outputPath: "", error: "Cancelled")
                 return
             }
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             finishJob(jobID: jobID, success: false, outputPath: "", error: message)
         }
     }

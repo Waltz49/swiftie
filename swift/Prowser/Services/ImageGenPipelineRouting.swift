@@ -1,12 +1,19 @@
 import Foundation
 
-/// How a registry ``pipeline_id`` is executed in the Swift app (MFLUX CLI vs vendored Python worker).
+/// How a registry ``pipeline_id`` is executed in the Swift app.
 enum ImageGenPipelineRouting {
     enum ExecutionKind: Equatable {
         case mfluxCLI
-        case bundledPythonWorker
-        case sceneWorksPythonWorker
+        case optimizedPythonWorker
     }
+
+    /// Diffusers / torch-backed pipelines (venv + diffusers import).
+    static let diffusersPipelineIDs: Set<String> = [
+        "sana_sprint_600m",
+        "z_image_turbo_sdnq",
+        "sd15_diffusers",
+        "sdxl_diffusers",
+    ]
 
     /// Unique ``pipeline_id`` values from vendored ``imagegen_plugins`` registrations.
     static let registeredPipelineIDs: Set<String> = [
@@ -23,44 +30,66 @@ enum ImageGenPipelineRouting {
         "mflux_flux2_klein_expand",
     ]
 
-    /// Pipelines that must run ``ImageGenPipelineWorkerRunner`` (not ``mflux-generate*``).
-    static let bundledPythonWorkerPipelineIDs: Set<String> = [
-        "sana_sprint_600m",
-        "z_image_turbo_sdnq",
-        "sd15_diffusers",
-        "sdxl_diffusers",
-    ]
+    @MainActor
+    static func executionBackend(config: AppConfig?) -> ImageGenExecutionBackend {
+        guard let config else { return .optimized }
+        return ImageGenExecutionBackend.from(config: config)
+    }
 
-    static func executionKind(pipelineID: String, hfModelID: String) -> ExecutionKind? {
+    @MainActor
+    static func executionKind(
+        pipelineID: String,
+        hfModelID: String,
+        config: AppConfig? = nil
+    ) -> ExecutionKind? {
         let pipeline = pipelineID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !pipeline.isEmpty else { return nil }
+
         if ImageGenSceneWorksKlein.isSceneWorksRepo(hfModelID) {
             guard pipeline.hasPrefix("mflux_flux2_klein") else { return nil }
-            return .sceneWorksPythonWorker
+            return .optimizedPythonWorker
         }
-        if bundledPythonWorkerPipelineIDs.contains(pipeline) {
-            return .bundledPythonWorker
-        }
-        if MfluxCLIPipeline.isSupported(pipelineID: pipeline) {
+
+        let backend = executionBackend(config: config)
+        if backend == .mfluxCLI, MfluxCLIPipeline.isSupported(pipelineID: pipeline) {
             return .mfluxCLI
+        }
+
+        if ImageGenPipelineCatalog.workerScriptName(pipelineID: pipeline) != nil {
+            return .optimizedPythonWorker
         }
         return nil
     }
 
-    static func usesPythonWorker(pipelineID: String, hfModelID: String) -> Bool {
-        switch executionKind(pipelineID: pipelineID, hfModelID: hfModelID) {
-        case .bundledPythonWorker, .sceneWorksPythonWorker:
+    @MainActor
+    static func usesPythonWorker(
+        pipelineID: String,
+        hfModelID: String,
+        config: AppConfig? = nil
+    ) -> Bool {
+        switch executionKind(pipelineID: pipelineID, hfModelID: hfModelID, config: config) {
+        case .optimizedPythonWorker:
             return true
         case .mfluxCLI, nil:
             return false
         }
     }
 
+    @MainActor
+    static func usesPersistentPythonWorker(
+        pipelineID: String,
+        hfModelID: String,
+        config: AppConfig? = nil
+    ) -> Bool {
+        executionKind(pipelineID: pipelineID, hfModelID: hfModelID, config: config) == .optimizedPythonWorker
+    }
+
     /// Every registered pipeline must have a worker script and a routing kind.
-    static func validateVendoredCatalog(bundleRoot: URL) -> [String] {
+    @MainActor
+    static func validateVendoredCatalog(bundleRoot: URL, config: AppConfig? = nil) -> [String] {
         var issues: [String] = []
         for pipelineID in registeredPipelineIDs.sorted() {
-            if executionKind(pipelineID: pipelineID, hfModelID: "black-forest-labs/FLUX.1-schnell") == nil {
+            if executionKind(pipelineID: pipelineID, hfModelID: "black-forest-labs/FLUX.1-schnell", config: config) == nil {
                 issues.append("No execution kind for pipeline \(pipelineID)")
             }
             if ImageGenPipelineCatalog.workerScriptName(pipelineID: pipelineID) == nil {

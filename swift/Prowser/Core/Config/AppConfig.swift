@@ -869,6 +869,7 @@ final class AppConfig {
             "imagegen_low_ram": true,
             "imagegen_include_triggers_in_exif": false,
             "imagegen_unload_models_when_queue_held": false,
+            "imagegen_execution_backend": "optimized",
             "use_prompt_filter_exits": false,
             "text_ai_exit": "",
             "image_ai_exit": "",

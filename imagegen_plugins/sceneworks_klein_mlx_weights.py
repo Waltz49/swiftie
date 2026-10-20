@@ -97,6 +97,16 @@ def _load_sceneworks_component(component_path: Path, *, mapping_getter) -> dict:
     return WeightMapper.apply_mapping(raw, mapping)
 
 
+def load_sceneworks_klein_text_encoder_weights(tier_path: Path) -> dict:
+    """Mapped text_encoder weights for one SceneWorks MLX tier (for TE-only rehydrate)."""
+    from mflux.models.flux2.weights.flux2_weight_mapping import Flux2WeightMapping
+
+    return _load_sceneworks_component(
+        tier_path.expanduser() / "text_encoder",
+        mapping_getter=Flux2WeightMapping.get_text_encoder_mapping,
+    )
+
+
 def _load_sceneworks_tier_weights(tier_path: Path, *, bits: int):
     from mflux.models.common.weights.loading.loaded_weights import LoadedWeights, MetaData
     from mflux.models.flux2.weights.flux2_weight_mapping import Flux2WeightMapping

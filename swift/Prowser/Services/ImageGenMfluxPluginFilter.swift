@@ -1,6 +1,6 @@
 import Foundation
 
-/// Marks registry plugins unavailable when this app runs generation only via MFLUX CLI.
+/// Marks registry plugins unavailable when generation backends are not installed.
 @MainActor
 enum ImageGenMfluxPluginFilter {
     static func applyingMfluxAvailability(
@@ -12,17 +12,19 @@ enum ImageGenMfluxPluginFilter {
             let pipeline = plugin["pipeline_id"] as? String ?? ""
             let hfModel = plugin["hf_model_id"] as? String ?? ""
             let registryOK = plugin["available"] as? Bool ?? true
-            let kind = ImageGenPipelineRouting.executionKind(pipelineID: pipeline, hfModelID: hfModel)
+            let kind = ImageGenPipelineRouting.executionKind(
+                pipelineID: pipeline,
+                hfModelID: hfModel,
+                config: config
+            )
             var runtimeOK = false
             switch kind {
-            case .sceneWorksPythonWorker:
-                if let config, ImageGenPluginAvailability.diffusersPipelineReady(config: config) {
-                    let tier = ImageGenSceneWorksKlein.normalizeMLXTier(plugin["mlx_tier"])
-                    runtimeOK = ImageGenSceneWorksKlein.tierIsLocal(repoID: hfModel, tier: tier)
-                }
-            case .bundledPythonWorker:
+            case .optimizedPythonWorker:
                 if let config {
-                    runtimeOK = ImageGenPluginAvailability.diffusersPipelineReady(config: config)
+                    runtimeOK = ImageGenPluginAvailability.optimizedPipelineReady(
+                        pipelineID: pipeline,
+                        config: config
+                    )
                 }
             case .mfluxCLI:
                 runtimeOK = MfluxToolchain.shared.isPipelineInstalled(pipeline)
@@ -32,9 +34,9 @@ enum ImageGenMfluxPluginFilter {
             copy["available"] = registryOK && runtimeOK
             if registryOK && !runtimeOK {
                 switch kind {
-                case .bundledPythonWorker, .sceneWorksPythonWorker:
+                case .optimizedPythonWorker:
                     copy["unavailable_reason"] =
-                        "Requires imagegen venv with diffusers (Preferences → Image Generation)."
+                        "Requires imagegen venv with pipeline dependencies (Settings → Image Generation)."
                 case .mfluxCLI, nil:
                     copy["unavailable_reason"] = "Requires MFLUX CLI for this model (Settings → Image Generation)."
                 }
@@ -53,12 +55,16 @@ enum ImageGenMfluxPluginFilter {
             let pipeline = plugin["pipeline_id"] as? String ?? ""
             let registryOK = plugin["available"] as? Bool ?? true
             let hfModel = plugin["hf_model_id"] as? String ?? ""
-            let kind = ImageGenPipelineRouting.executionKind(pipelineID: pipeline, hfModelID: hfModel)
+            let kind = ImageGenPipelineRouting.executionKind(
+                pipelineID: pipeline,
+                hfModelID: hfModel,
+                config: config
+            )
             let runtimeOK: Bool
             switch kind {
             case .mfluxCLI:
                 runtimeOK = MfluxToolchain.shared.isPipelineInstalled(pipeline)
-            case .bundledPythonWorker, .sceneWorksPythonWorker:
+            case .optimizedPythonWorker:
                 if let config {
                     runtimeOK = ImageGenPluginAvailability.venvPythonReady(config: config)
                 } else {
@@ -68,7 +74,6 @@ enum ImageGenMfluxPluginFilter {
                 runtimeOK = false
             }
             copy["available"] = registryOK && runtimeOK
-            copy.removeValue(forKey: "unavailable_reason")
             return copy
         }
     }

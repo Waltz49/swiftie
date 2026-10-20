@@ -71,6 +71,24 @@ struct ImageGenerationSettingsSection: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 200)
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("MFLUX generation backend")
+                    .font(.headline)
+                Picker("MFLUX generation backend", selection: stringBinding("imagegen_execution_backend", default: "optimized")) {
+                    Text("Optimized").tag("optimized")
+                    Text("MFLUX CLI").tag("mflux_cli")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(
+                    "Optimized runs pipelines in the imagegen venv and reuses loaded models between jobs. "
+                        + "MFLUX CLI starts a separate tool per job (compatibility or debugging)."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
             Toggle("Low RAM mode", isOn: boolBinding("imagegen_low_ram", default: true))
             Toggle("Include triggers in final exif data", isOn: boolBinding("imagegen_include_triggers_in_exif"))
             Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))
@@ -89,7 +107,8 @@ struct ImageGenerationSettingsSection: View {
             Text("Imagegen Python environment")
                 .font(.headline)
             Text(
-                "Bundled imagegen modules ship inside the app. Install torch/diffusers/MFLUX into a venv under your profile (system python3 -m venv)."
+                "Bundled imagegen modules ship inside the app. Install dependencies into a venv under your profile "
+                    + "(mflux, torch, diffusers, peft, sdnq, and related libraries). Model weights are downloaded separately."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
