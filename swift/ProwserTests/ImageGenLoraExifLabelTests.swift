@@ -58,6 +58,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         XCTAssertTrue(comment.contains("LoRA: My LoRA [1] + Other [0.5]"))
     }
 
+    @MainActor
     func testParseExifLoraContinuationNBSPForImportRest() {
         let nbsp = String(repeating: "\u{00a0}", count: 6)
         let comment = """
@@ -73,6 +74,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         XCTAssertEqual(parsed["lora"] as? String, "First [1] + Second [0.5]")
     }
 
+    @MainActor
     func testMergingPluginDefaultsPreservesCopies() {
         let defaults: [String: Any] = ["copies": 1, "steps": 4, "width": 512]
         let values: [String: Any] = ["copies": 5, "steps": 20, "width": 1024, "prompt": "keep"]
@@ -83,6 +85,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         XCTAssertEqual(merged["prompt"] as? String, "keep")
     }
 
+    @MainActor
     func testImportRestResolvesGeneratedExifModelLabel() {
         let plugins: [[String: Any]] = [[
             "plugin_id": "flux_schnell_mflux",

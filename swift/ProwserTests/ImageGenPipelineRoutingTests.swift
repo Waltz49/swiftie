@@ -1,10 +1,10 @@
 import XCTest
 @testable import Prowser
 
+@MainActor
 final class ImageGenPipelineRoutingTests: XCTestCase {
     private func config(withBackend backend: String) -> AppConfig {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let config = AppConfig(dataDirectory: dir)
+        let config = ProwserTestSupport.ephemeralAppConfig()
         config.updateSetting("imagegen_execution_backend", value: backend)
         return config
     }

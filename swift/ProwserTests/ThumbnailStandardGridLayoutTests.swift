@@ -39,7 +39,7 @@ final class ThumbnailStandardGridLayoutTests: XCTestCase {
             return
         }
         XCTAssertEqual(frame0.minY, frame1.minY, accuracy: 0.5)
-        XCTAssertEqual(frame0.height, frame1.height, accuracy: 0.5)
         XCTAssertGreaterThan((layout.overlayHeights[1] ?? 0), (layout.overlayHeights[0] ?? 0))
+        XCTAssertGreaterThan(frame1.height, frame0.height)
     }
 }

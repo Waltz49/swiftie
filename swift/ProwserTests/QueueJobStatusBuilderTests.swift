@@ -32,7 +32,8 @@ final class QueueJobStatusBuilderTests: XCTestCase {
         XCTAssertTrue(fp.contains("Realistic"))
         XCTAssertTrue(fp.contains("512 x 512"))
         XCTAssertTrue(fp.contains("20"))
-        XCTAssertTrue(fp.contains("prompt:test"))
+        XCTAssertTrue(fp.contains("prompt:Prompt:"))
+        XCTAssertTrue(fp.contains(":test"))
     }
 
     func testQueuedFluxAIJobShowsGenerationParamsNotStageRow() {

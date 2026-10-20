@@ -4,7 +4,7 @@ import XCTest
 final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     @MainActor
     func testFluxSchnellPayloadMatchesGolden() async throws {
-        let config = AppConfig(dataDirectory: FileManager.default.temporaryDirectory)
+        let config = ProwserTestSupport.ephemeralAppConfig()
         config.setValue(false, forKey: "debug_mode")
         config.setValue(true, forKey: "imagegen_low_ram")
         var imagegen: [String: Any] = [:]
@@ -37,7 +37,7 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         let goldenURL = Bundle.module.url(
             forResource: "flux_schnell_mflux",
             withExtension: "json",
-            subdirectory: "Fixtures/ImageGenPayloadGolden"
+            subdirectory: "ImageGenPayloadGolden"
         )
         guard let goldenURL,
               let data = try? Data(contentsOf: goldenURL),
@@ -52,7 +52,7 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     func testInfillPayloadSetsCanonicalFromPixelmatorDocPath() throws {
         let fm = FileManager.default
         let dataDir = fm.temporaryDirectory.appendingPathComponent("infill-payload-\(UUID().uuidString)")
-        let config = AppConfig(dataDirectory: dataDir)
+        let config = ProwserTestSupport.ephemeralAppConfig(profileRoot: dataDir)
         let tempRoot = config.temporaryFilesDirectory.path
         let libraryDir = fm.temporaryDirectory.appendingPathComponent("infill-canonical-lib-\(UUID().uuidString)").path
         try fm.createDirectory(atPath: libraryDir, withIntermediateDirectories: true)
@@ -109,7 +109,7 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
             XCTFail("missing plugin")
             return
         }
-        let config = AppConfig(dataDirectory: dir)
+        let config = ProwserTestSupport.ephemeralAppConfig(profileRoot: dir)
         let snapshot = try await ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
             plugin: plugin,
             values: [

@@ -234,6 +234,10 @@ enum ImageGenInfillPathSemantics {
     static func isWorkingTempPath(_ path: String, tempRoot: String) -> Bool {
         let ap = URL(fileURLWithPath: path).standardizedFileURL.path
         if ap.isEmpty { return false }
+        let normRoot = URL(fileURLWithPath: tempRoot).standardizedFileURL.path
+        if !normRoot.isEmpty, ap == normRoot || ap.hasPrefix(normRoot + "/") {
+            return true
+        }
         let pixelmatorDir = (tempRoot as NSString).appendingPathComponent("pixelmator")
         let normPixel = URL(fileURLWithPath: pixelmatorDir).standardizedFileURL.path
         if ap == normPixel || ap.hasPrefix(normPixel + "/") { return true }

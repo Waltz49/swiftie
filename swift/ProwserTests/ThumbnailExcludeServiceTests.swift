@@ -1,6 +1,7 @@
 import XCTest
 @testable import Prowser
 
+@MainActor
 final class ThumbnailExcludeServiceTests: XCTestCase {
     func testPathMatchesExcludeRuleIsCaseInsensitive() {
         let imagePath = "/Volumes/Photos/Vacation/IMG_0001.jpg"

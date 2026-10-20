@@ -76,6 +76,14 @@ let packageTargets: [Target] = [
             .linkedFramework("Accelerate"),
         ]
     ),
+    .testTarget(
+        name: "ProwserTests",
+        dependencies: ["Prowser"],
+        path: "ProwserTests",
+        resources: [
+            .copy("Fixtures/ImageGenPayloadGolden"),
+        ]
+    ),
 ]
 
 let package = Package(

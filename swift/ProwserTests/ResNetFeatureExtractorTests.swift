@@ -9,7 +9,12 @@ final class ResNetFeatureExtractorTests: XCTestCase {
         }
         let profile = ProfilePaths(profilePath: "/tmp/nerb")
         let extractor = ResNetFeatureExtractor(resnetModel: "resnet101", profile: profile)
-        let vec = try extractor.extractFeature(path: path)
+        let vec: [Float]
+        do {
+            vec = try extractor.extractFeature(path: path)
+        } catch ResNetFeatureExtractorError.modelNotInstalled {
+            throw XCTSkip("ResNet Core ML model not installed")
+        }
         XCTAssertEqual(vec.count, 2048)
         var sumSq: Float = 0
         var nonzero = 0

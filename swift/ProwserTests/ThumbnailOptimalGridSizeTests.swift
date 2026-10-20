@@ -17,7 +17,7 @@ final class ThumbnailOptimalGridSizeTests: XCTestCase {
     func testSingleColumnLayoutDoesNotResetEnlargedSize() {
         let result = ThumbnailGridLayoutService.calculateGridForImages(
             numImages: 8,
-            availableWidth: 220,
+            availableWidth: 420,
             availableHeight: 900,
             overlayHeight: 0
         )

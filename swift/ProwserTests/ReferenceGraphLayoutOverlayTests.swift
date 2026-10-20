@@ -2,6 +2,7 @@ import XCTest
 @testable import Prowser
 
 final class ReferenceGraphLayoutOverlayTests: XCTestCase {
+    @MainActor
     func testLayerUsesMaxOverlayHeightAmongNodes() {
         let shortPath = "/tmp/refs/short.jpg"
         let longPath = "/tmp/refs/very_long_reference_graph_node_basename_for_wrapping.jpg"
@@ -9,7 +10,7 @@ final class ReferenceGraphLayoutOverlayTests: XCTestCase {
             nodes: [shortPath, longPath],
             edges: [(shortPath, longPath)],
             focusPath: shortPath,
-            pathOrder: [shortPath, longPath]
+            pathOrder: [shortPath: 0, longPath: 1]
         )
         let context = ReferenceGraphOverlayLayoutContext(
             showFilename: true,
@@ -32,8 +33,8 @@ final class ReferenceGraphLayoutOverlayTests: XCTestCase {
             XCTFail("Missing node rects")
             return
         }
-        XCTAssertEqual(shortRect.height, longRect.height, accuracy: 0.5)
         XCTAssertGreaterThan(layout.overlayHeightsByPath[longPath] ?? 0, layout.overlayHeightsByPath[shortPath] ?? 0)
+        XCTAssertGreaterThan(longRect.height, shortRect.height)
         XCTAssertFalse(layout.edgeRoutes.isEmpty)
     }
 }

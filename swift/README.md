@@ -16,7 +16,10 @@ Requirements: macOS 14+, Xcode Command Line Tools, Swift 5.9+. Face recognition 
 ./setup.sh          # once: resolve packages, build dlib if needed
 ./run.sh            # debug build + launch
 ./run.sh ~/Pictures # open a folder
+./Scripts/test.sh   # unit tests (Swift Package Manager; no Xcode GUI)
 ```
+
+From the `swift/` directory you can also run `swift test` directly. Optional filters: `swift test --filter QueueJobStatusBuilderTests`.
 
 Release app bundle:
 
