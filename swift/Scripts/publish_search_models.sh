@@ -36,13 +36,24 @@ UPLOAD_ONLY=false
 ONLY="all"
 
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
-  echo ""
-  echo "Options:"
-  echo "  --only resnet18|resnet50|resnet101|clip_b32|clip_l14|all   (default: all)"
-  echo "  --build-only   Export zips locally, do not rsync"
-  echo "  --upload-only  Rsync existing ModelArtifacts only"
-  echo "  -h, --help"
+  cat <<EOF
+$(basename "$0") — export Core ML search models and upload to your HTTPS host.
+
+Uses Python (venv_model_export) to build ModelArtifacts/*.zip from upstream weights,
+then rsyncs to REMOTE (edit at top of this script). Prereq: setup_model_export_venv.sh
+
+Usage: $(basename "$0") [options]
+
+Environment:
+  VENV      Model-export venv (default: repo venv_model_export)
+  PYTHON    Python binary when not using VENV activate
+
+Options:
+  --only MODEL   resnet18|resnet50|resnet101|clip_b32|clip_l14|all (default: all)
+  --build-only   Export zips locally; do not rsync
+  --upload-only  Rsync existing ModelArtifacts only
+  -h, --help     Show this help
+EOF
 }
 
 while [[ $# -gt 0 ]]; do

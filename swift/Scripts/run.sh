@@ -40,6 +40,25 @@ ensure_native_dlib() {
     fi
 }
 
+usage() {
+    cat <<EOF
+$(basename "$0") — debug-build and launch Swift Prowser.
+
+Default launch uses \`open\` so the app is a foreground GUI process (keyboard focus).
+Use --foreground to run the binary in the terminal (stderr debug logs).
+
+Builds Vendor/dlib-install when missing (same as build_app.sh). Passes remaining
+arguments to Prowser (e.g. a folder path, -p profile, --debug).
+
+Usage: $(basename "$0") [options] [Prowser arguments...]
+
+Options:
+  --foreground    Run .build/debug/Prowser in this shell instead of open
+  --skip-dlib     Do not build Vendor/dlib-install (face encoding stub only)
+  -h, --help      Show this help
+EOF
+}
+
 cd "$SWIFT_ROOT"
 
 ARGS=()
@@ -52,6 +71,10 @@ for arg in "$@"; do
             ;;
         --skip-dlib)
             SKIP_DLIB=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
             ;;
         *)
             ARGS+=("$arg")

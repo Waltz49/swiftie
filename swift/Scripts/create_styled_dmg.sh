@@ -16,15 +16,39 @@ VOL_ICON_ICNS="${VOL_ICON_ICNS:-$SWIFT_ROOT/Prowser/Resources/Assets/Prowser.icn
 BG_IMAGE="$DMG_ASSETS_DIR/background.png"
 SOURCE_ICON_HEIC="$DMG_ASSETS_DIR/source_folder.heic"
 
+usage() {
+    cat <<EOF
+$(basename "$0") — create a styled macOS DMG for Swift Prowser (installer layout).
+
+Requires: hdiutil, SetFile (Xcode CLT), Finder (AppleScript for icon positions).
+
+Usage: $(basename "$0") <App.app> <output.dmg>
+
+Environment (optional):
+  VOLUME_NAME         DMG volume label (default: swift-prowser-<app version>)
+  DMG_ASSETS_DIR      Background and assets (default: Scripts/DmgAssets)
+  SOURCE_PREBLESSED   Template folder for DMG "source" (default: Scripts/source_preblessed)
+  VOL_ICON_ICNS       Volume icon (default: Prowser/Resources/Assets/Prowser.icns)
+
+Options:
+  -h, --help          Show this help
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+esac
+
 APP_PATH="${1:-}"
 DMG_PATH="${2:-}"
 
-usage() {
-    echo "Usage: $0 <App.app> <output.dmg>" >&2
+if [[ -z "$APP_PATH" || -z "$DMG_PATH" ]]; then
+    usage >&2
     exit 1
-}
-
-[[ -n "$APP_PATH" && -n "$DMG_PATH" ]] || usage
+fi
 
 APP_PATH="$(cd "$(dirname "$APP_PATH")" && pwd)/$(basename "$APP_PATH")"
 DMG_PATH="$(cd "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")"

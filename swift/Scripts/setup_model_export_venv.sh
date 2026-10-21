@@ -9,6 +9,39 @@
 
 set -euo pipefail
 
+usage() {
+  cat <<EOF
+$(basename "$0") — create venv_model_export for Core ML search-model export.
+
+Uses Python 3.12 or 3.13 (coremltools does not support 3.14). Installs torch,
+transformers, huggingface_hub, and coremltools into repo-root venv_model_export/.
+
+Usage: $(basename "$0")
+
+Environment:
+  MODEL_EXPORT_PYTHON   Python binary to use (default: first python3.12 or python3.13 on PATH)
+
+Options:
+  -h, --help            Show this help
+
+Then run: ./swift/Scripts/publish_search_models.sh
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "error: unknown argument: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VENV_DIR="$REPO_ROOT/venv_model_export"
 

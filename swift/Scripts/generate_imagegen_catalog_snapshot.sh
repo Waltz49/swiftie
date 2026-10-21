@@ -1,5 +1,37 @@
 #!/usr/bin/env bash
+# Regenerate Prowser/Resources/ImageGenPluginCatalogSnapshot.json from ImageGenPython.
 set -euo pipefail
+
+usage() {
+    cat <<EOF
+$(basename "$0") — write ImageGenPluginCatalogSnapshot.json from vendored Python plugins.
+
+Runs discover_plugins() under swift/ImageGenPython and overwrites
+Prowser/Resources/ImageGenPluginCatalogSnapshot.json (field layouts, defaults, availability).
+
+Usage: $(basename "$0")
+
+Options:
+  -h, --help    Show this help
+
+Prereq: sync_imagegen_python.sh (ImageGenPython bundle populated).
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "error: unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/ImageGenPython"
 PYTHONPATH=. python3 <<'PY'

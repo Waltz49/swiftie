@@ -14,8 +14,14 @@ TARGET_DIR=""
 
 print_help() {
     cat <<EOF
-Usage: $0 [-f] <target_directory>
-Copies sources needed to build and run Prowser (minimal tree for DMG source/).
+$(basename "$0") — copy a minimal Swift Prowser source tree (e.g. DMG "source" folder).
+
+Copies package sources, scripts, and assets needed to build Prowser without the full monorepo.
+
+Usage: $(basename "$0") [-f] <target_directory>
+
+Arguments:
+  target_directory    Destination directory (created if missing)
 
 Options:
   -h, --help    Show this help
@@ -35,6 +41,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -*)
             echo "error: unknown option: $1" >&2
+            print_help >&2
             exit 1
             ;;
         *)

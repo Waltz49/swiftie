@@ -2,6 +2,36 @@
 # Setup script for Native Image Browser
 set -euo pipefail
 
+usage() {
+    cat <<EOF
+$(basename "$0") — create venv_image_browser and install Python dependencies for prowser.py.
+
+Creates venv_image_browser/, upgrades pip, and installs packages from minimal_requirements.txt
+(PySide6, Pillow, mflux, etc.). Requires Python 3.14 (see PYTHON_CMD in this script).
+
+Usage: $(basename "$0")
+
+Options:
+  -h, --help    Show this help
+
+After setup: ./run.sh or: source venv_image_browser/bin/activate && python prowser.py
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "error: unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
 PYTHON_CMD="python3.14"
 
 echo "Setting up Native Image Browser..."

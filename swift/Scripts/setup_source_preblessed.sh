@@ -9,6 +9,39 @@
 #   2. Run: ./Scripts/setup_source_preblessed.sh
 set -euo pipefail
 
+usage() {
+    cat <<EOF
+$(basename "$0") — configure Scripts/source_preblessed for DMG source-folder layout.
+
+Creates the folder if needed, applies optional custom icon, copies background.png,
+and writes Finder .DS_Store (icon view, 640×480 window) via AppleScript.
+
+Usage: $(basename "$0")
+
+Environment:
+  SOURCE_FOLDER   Folder to configure (default: Scripts/source_preblessed)
+
+Options:
+  -h, --help      Show this help
+
+Used by: Scripts/create_styled_dmg.sh
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "error: unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_FOLDER="${SOURCE_FOLDER:-$SCRIPT_DIR/source_preblessed}"
 BG_IMAGE="$SCRIPT_DIR/DmgAssets/background.png"

@@ -3,6 +3,39 @@
 # Does not modify files under the repo root (read-only source).
 set -euo pipefail
 
+usage() {
+    cat <<EOF
+$(basename "$0") — sync image-generation Python from monorepo root into swift/ImageGenPython/.
+
+Read-only rsync/cp from the parent repo (imagegen_plugins, workers, config, etc.).
+Does not modify Python sources outside swift/ImageGenPython/.
+
+Usage: $(basename "$0")
+
+Environment:
+  SYNC_IMAGEGEN_MINIMAL=1   Skip chat_plugins and theme (Swift app has no chat UI)
+
+Options:
+  -h, --help                Show this help
+
+After sync: generate_imagegen_catalog_snapshot.sh to refresh the Swift JSON catalog.
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "error: unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SWIFT_PKG="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$SWIFT_PKG/.." && pwd)"

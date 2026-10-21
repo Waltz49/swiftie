@@ -26,6 +26,12 @@ OPEN_ONLY=0
 
 usage() {
     cat <<EOF
+$(basename "$0") — Full Disk Access helper for ad-hoc / dev Prowser builds.
+
+Automates TCC reset (optional), copies the .app path to the clipboard, opens
+System Settings → Full Disk Access, and shows step-by-step instructions.
+macOS cannot grant FDA from a script; you must toggle the app in Settings.
+
 Usage: $(basename "$0") [options]
 
 Options:

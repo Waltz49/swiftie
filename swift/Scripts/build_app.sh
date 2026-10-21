@@ -13,8 +13,9 @@
 #   ./Scripts/build_app.sh --nerb          # embed -p /tmp/nerb (PROWSER_PROFILE)
 #   ./Scripts/build_app.sh --reg           # default opener for jpg/jpeg/png/webp
 #   ./Scripts/build_app.sh --skip-dlib     # skip Vendor/dlib-install (face stub only)
+#   ./Scripts/build_app.sh --bench         # also build Tools/FaceDetectBench CLI
 #
-# Builds ProwserDlibBridgeCore + Swift app via `swift build`. When
+# Builds ProwserDlibBridgeCore + Swift app via `swift build --product Prowser`. When
 # Vendor/dlib-install/lib/libdlib.a is missing, runs build_dlib_macos.sh first
 # (requires git + cmake). Face .dat models are still downloaded on first use.
 set -euo pipefail
@@ -27,6 +28,7 @@ APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$
 OUTPUT="${HOME}/tmp/prowser_swift.app"
 CONFIG=release
 SKIP_BUILD=0
+BUILD_BENCH=0
 SKIP_DLIB=0
 CREATE_DMG=0
 DMG_OUTPUT="/tmp/Prowser-swift-${APP_VERSION}.dmg"
@@ -249,12 +251,18 @@ ensure_native_dlib() {
 
 usage() {
     cat <<EOF
+$(basename "$0") — build Swift Prowser as a macOS .app bundle.
+
+Compiles via \`swift build --product Prowser\`, packages Mach-O + resources into a bundle,
+and optionally creates a DMG, registers file types, or runs FDA setup.
+
 Usage: $(basename "$0") [options]
 
 Options:
   -o, --output PATH       App bundle path (default: ~/tmp/prowser_swift.app)
   --debug                 Build debug configuration instead of release
   --skip-build            Package existing .build artifacts (no swift build)
+  --bench                 Also build FaceDetectBench CLI (not packaged in .app)
   --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
   --dmg [PATH]            Also create styled LZMA (ULMO) installer DMG (default: /tmp/Prowser-swift-${APP_VERSION}.dmg)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
@@ -277,6 +285,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-build)
             SKIP_BUILD=1
+            shift
+            ;;
+        --bench)
+            BUILD_BENCH=1
             shift
             ;;
         --skip-dlib)
@@ -327,15 +339,23 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     ensure_native_dlib
     echo "Building Prowser ($CONFIG)..."
     if [[ "$CONFIG" == "release" ]]; then
-        swift build -c release -Xswiftc -Osize -Xlinker -dead_strip
+        swift build -c release --product Prowser -Xswiftc -Osize -Xlinker -dead_strip
     else
-        swift build -c "$CONFIG"
+        swift build -c "$CONFIG" --product Prowser
+    fi
+    if [[ "$BUILD_BENCH" -eq 1 ]]; then
+        echo "Building FaceDetectBench ($CONFIG)..."
+        if [[ "$CONFIG" == "release" ]]; then
+            swift build -c release --product FaceDetectBench -Xswiftc -Osize -Xlinker -dead_strip
+        else
+            swift build -c "$CONFIG" --product FaceDetectBench
+        fi
     fi
 else
     echo "Skipping build; packaging existing $CONFIG artifacts..."
 fi
 
-BUILD_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+BUILD_DIR="$(swift build -c "$CONFIG" --product Prowser --show-bin-path)"
 BINARY="$BUILD_DIR/Prowser"
 RESOURCE_BUNDLE="$BUILD_DIR/Prowser_Prowser.bundle"
 

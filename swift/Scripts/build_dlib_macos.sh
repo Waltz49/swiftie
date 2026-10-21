@@ -16,10 +16,31 @@ INSTALL="$VENDOR/dlib-install"
 DLIB_VERSION="19.24.6"
 DLIB_SRC="$VENDOR/dlib-src"
 
+usage() {
+  cat <<EOF
+$(basename "$0") — build a trimmed static dlib for ProwserDlibBridge (maintainer / CI).
+
+Output: swift/Vendor/dlib-install/{include,lib/libdlib.a}
+Fetches dlib v${DLIB_VERSION} under Vendor/dlib-src when needed.
+
+Usage: $(basename "$0") [options]
+
+Options:
+  --clean       Remove Vendor/dlib-build, dlib-install, and dlib-src before building
+  -h, --help    Show this help
+EOF
+}
+
 CLEAN=0
 for arg in "$@"; do
   case "$arg" in
     --clean) CLEAN=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "error: unknown argument: $arg" >&2
+      usage >&2
+      exit 1
+      ;;
   esac
 done
 

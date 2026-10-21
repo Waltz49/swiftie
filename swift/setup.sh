@@ -2,6 +2,36 @@
 # Setup Swift Prowser for development / building from source.
 set -euo pipefail
 
+usage() {
+    cat <<EOF
+$(basename "$0") — prepare the Swift Prowser package for local development.
+
+Resolves SwiftPM dependencies and builds Vendor/dlib-install when cmake and git are available
+(native face recognition). macOS and Xcode Command Line Tools are required.
+
+Usage: $(basename "$0")
+
+Options:
+  -h, --help    Show this help
+
+Next: ./run.sh [folder]  or  ./Scripts/build_app.sh
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "error: unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
