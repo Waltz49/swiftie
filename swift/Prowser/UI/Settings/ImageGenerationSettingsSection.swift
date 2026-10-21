@@ -153,12 +153,20 @@ struct ImageGenerationSettingsSection: View {
 
     private func installImagegenVenv() {
         persistImagegenVenvPath()
+        let dialog = ImageGenVenvInstallOutputDialogController.beginNewSession()
+        let venvPath = appState.config.imagegenVenvURL().path
+        dialog.append("Installing imagegen dependencies into:\n\(venvPath)\n\n")
         venvInstallInProgress = true
         venvInstallMessage = ""
         Task {
-            let result = await ImageGenVenvInstaller.install(config: appState.config)
+            let result = await ImageGenVenvInstaller.install(config: appState.config) { chunk in
+                Task { @MainActor in
+                    dialog.append(chunk)
+                }
+            }
             venvInstallInProgress = false
             venvInstallMessage = result.message
+            dialog.append("\n--- \(result.success ? "Success" : "Failed") ---\n\(result.message)\n")
             if result.success {
                 imagegenVenvPath = appState.config.imagegenVenvURL().path
                 settingsChanged()
