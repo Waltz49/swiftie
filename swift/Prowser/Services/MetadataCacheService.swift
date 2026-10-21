@@ -48,12 +48,20 @@ final class MetadataCacheService {
     }
 
     func pixelSize(path: String) -> (width: Int, height: Int)? {
-        if let cached = cache[path], cached.pixelWidth > 0, cached.pixelHeight > 0 {
-            return (cached.pixelWidth, cached.pixelHeight)
+        if let cached = cachedPixelSize(path: path) {
+            return cached
         }
         guard let dims = loadPixelSize(path: path) else { return nil }
         storePixelSize(path: path, width: dims.width, height: dims.height)
         return dims
+    }
+
+    /// Pixel dimensions already in the metadata cache (no image file I/O).
+    func cachedPixelSize(path: String) -> (width: Int, height: Int)? {
+        if let cached = cache[path], cached.pixelWidth > 0, cached.pixelHeight > 0 {
+            return (cached.pixelWidth, cached.pixelHeight)
+        }
+        return nil
     }
 
     /// Store original dimensions captured while generating a thumbnail

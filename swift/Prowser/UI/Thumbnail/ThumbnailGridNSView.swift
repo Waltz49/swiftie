@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import ImageIO
 import SwiftUI
 
 @MainActor
@@ -2263,19 +2262,11 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     private func dimensionText(for path: String) -> String? {
         if let cached = imageDimensionCache[path] { return cached }
-        if let dims = appState?.metadataCache.pixelSize(path: path), dims.width > 0, dims.height > 0 {
-            let text = "\(dims.width)x\(dims.height)"
-            imageDimensionCache[path] = text
-            return text
-        }
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0 else {
+        guard let dims = appState?.metadataCache.cachedPixelSize(path: path),
+              dims.width > 0, dims.height > 0 else {
             return nil
         }
-        let text = "\(width)x\(height)"
+        let text = "\(dims.width)x\(dims.height)"
         imageDimensionCache[path] = text
         return text
     }
