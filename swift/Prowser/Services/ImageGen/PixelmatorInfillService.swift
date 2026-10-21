@@ -124,7 +124,7 @@ enum PixelmatorInfillService {
     }
 
     private static func runExportAppleScript(exportDir: String) -> Bool {
-        guard let url = ProwserResourceBundle.bundle.url(
+        guard let url = ProwserResourceBundle.url(
             forResource: "applescript_pixelmator_export",
             withExtension: "applescript"
         ),

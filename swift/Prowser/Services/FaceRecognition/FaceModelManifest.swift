@@ -35,7 +35,7 @@ enum FaceModelManifest {
     }
 
     private static func loadBundled() -> Catalog? {
-        guard let url = Bundle.main.url(forResource: "dlib_face_models", withExtension: "json"),
+        guard let url = ProwserResourceBundle.url(forResource: "dlib_face_models", withExtension: "json"),
               let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(Catalog.self, from: data)
     }

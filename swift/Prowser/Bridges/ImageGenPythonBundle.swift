@@ -6,7 +6,7 @@ enum ImageGenPythonBundle {
 
     /// Root directory containing `imagegen_plugins/`, placed on `PYTHONPATH`.
     static func rootURL() -> URL? {
-        if let resource = Bundle.main.resourceURL?
+        if let resource = ProwserResourceBundle.bundle.resourceURL?
             .appendingPathComponent(bundleResourceName, isDirectory: true),
            FileManager.default.fileExists(atPath: resource.appendingPathComponent("imagegen_plugins").path) {
             return resource

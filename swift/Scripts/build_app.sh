@@ -45,18 +45,85 @@ create_dmg() {
     open "$dmg_path"
 }
 
+# SPM copies Prowser/Resources symlinks as-is; relative targets break inside a .app on another Mac.
+materialize_resource_bundle_symlinks() {
+    local bundle="$1"
+    local req="$bundle/requirements-imagegen.txt"
+    local ig="$bundle/ImageGenPython"
+
+    if [[ -L "$req" ]] || [[ ! -f "$req" ]]; then
+        rm -f "$req"
+        cp "$SWIFT_ROOT/requirements-imagegen.txt" "$req"
+    fi
+    if [[ -L "$ig" ]] || [[ ! -d "$ig/imagegen_plugins" ]]; then
+        rm -rf "$ig"
+        ditto "$SWIFT_ROOT/ImageGenPython" "$ig"
+    fi
+    rm -rf "$bundle/Prowser_Prowser.bundle.packaging_verify_hidden"
+}
+
 verify_portable_resource_bundle() {
     local app_path="$1"
     local embedded="$app_path/Contents/Resources/Prowser_Prowser.bundle"
+    local main_resources="$app_path/Contents/Resources"
 
     if [[ ! -d "$embedded" ]]; then
         echo "error: missing embedded resource bundle: $embedded" >&2
         exit 1
     fi
+
+    local rel
+    local -a required_files=(
+        requirements-imagegen.txt
+        image_recognition_models.json
+        dlib_face_models.json
+        waltzremote_search_models.cer
+        ImageGenPluginCatalogSnapshot.json
+        applescript_pixelmator_export.applescript
+        Prowser.icns
+        copy.png
+    )
+    for rel in "${required_files[@]}"; do
+        if [[ ! -r "$embedded/$rel" ]]; then
+            echo "error: missing readable $rel in $embedded" >&2
+            exit 1
+        fi
+    done
+    if [[ ! -d "$embedded/ImageGenPython/imagegen_plugins" ]]; then
+        echo "error: missing ImageGenPython tree in $embedded" >&2
+        exit 1
+    fi
+    if [[ ! -r "$main_resources/Prowser.icns" ]]; then
+        echo "error: missing Dock/Finder icon at $main_resources/Prowser.icns" >&2
+        exit 1
+    fi
+
     /usr/bin/swift -e 'import Foundation
-let path = CommandLine.arguments[1]
-guard Bundle(path: path) != nil else {
+let embeddedPath = CommandLine.arguments[1]
+guard let embedded = Bundle(path: embeddedPath) else {
     fputs("error: Bundle(path:) failed for resource bundle\n", stderr)
+    exit(1)
+}
+let checks: [(String, String?)] = [
+    ("image_recognition_models", "json"),
+    ("dlib_face_models", "json"),
+    ("waltzremote_search_models", "cer"),
+    ("ImageGenPluginCatalogSnapshot", "json"),
+    ("applescript_pixelmator_export", "applescript"),
+    ("requirements-imagegen", "txt"),
+    ("copy", "png"),
+    ("Prowser", "icns"),
+]
+for (name, ext) in checks {
+    guard let url = embedded.url(forResource: name, withExtension: ext),
+          FileManager.default.isReadableFile(atPath: url.path) else {
+        fputs("error: Bundle lookup failed for \(name).\(ext ?? "")\n", stderr)
+        exit(1)
+    }
+}
+let ig = embedded.resourceURL!.appendingPathComponent("ImageGenPython/imagegen_plugins")
+guard FileManager.default.fileExists(atPath: ig.path) else {
+    fputs("error: ImageGenPython/imagegen_plugins missing\n", stderr)
     exit(1)
 }
 ' "$embedded"
@@ -297,13 +364,17 @@ if [[ "$CONFIG" == "release" ]]; then
 fi
 # Packaged apps load this via ProwserResourceBundle (Contents/Resources), not SPM's .build fallback.
 ditto --norsrc --noextattr --noqtn "$RESOURCE_BUNDLE" "$APP_RESOURCES/Prowser_Prowser.bundle"
-verify_portable_resource_bundle "$OUTPUT"
+materialize_resource_bundle_symlinks "$APP_RESOURCES/Prowser_Prowser.bundle"
 
 cp "$INFO_PLIST_SRC" "$OUTPUT/Contents/Info.plist"
 ICON_SRC="$SWIFT_ROOT/Prowser/Resources/Assets/Prowser.icns"
 if [[ -f "$ICON_SRC" ]]; then
     cp "$ICON_SRC" "$APP_RESOURCES/Prowser.icns"
+else
+    echo "error: missing app icon at $ICON_SRC" >&2
+    exit 1
 fi
+verify_portable_resource_bundle "$OUTPUT"
 
 PLIST="$OUTPUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundlePackageType APPL" "$PLIST" 2>/dev/null \

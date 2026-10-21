@@ -26,7 +26,7 @@ enum ImageRecognitionModelDownloadSession {
 
     private final class SessionDelegate: NSObject, URLSessionDelegate, URLSessionDownloadDelegate, @unchecked Sendable {
         private lazy var pinnedCertificateData: Data? = {
-            guard let url = Bundle.main.url(forResource: "waltzremote_search_models", withExtension: "cer") else {
+            guard let url = ProwserResourceBundle.url(forResource: "waltzremote_search_models", withExtension: "cer") else {
                 return nil
             }
             return try? Data(contentsOf: url)

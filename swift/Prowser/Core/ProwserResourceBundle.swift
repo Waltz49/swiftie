@@ -22,4 +22,17 @@ enum ProwserResourceBundle {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return Bundle(url: url)
     }
+
+    /// Resource lookup for packaged `.app` and `swift run` (never use `Bundle.main` for SPM-copied assets).
+    static func url(
+        forResource name: String,
+        withExtension ext: String?,
+        subdirectory: String? = nil
+    ) -> URL? {
+        if let subdirectory,
+           let url = bundle.url(forResource: name, withExtension: ext, subdirectory: subdirectory) {
+            return url
+        }
+        return bundle.url(forResource: name, withExtension: ext)
+    }
 }

@@ -73,7 +73,7 @@ enum ModelManifest {
     }
 
     private static func loadBundledCatalog() -> Catalog? {
-        guard let url = Bundle.main.url(forResource: "image_recognition_models", withExtension: "json") else {
+        guard let url = ProwserResourceBundle.url(forResource: "image_recognition_models", withExtension: "json") else {
             return nil
         }
         guard let data = try? Data(contentsOf: url) else { return nil }

@@ -10,11 +10,9 @@ enum ImageGenCatalogSnapshot {
     private static var cachedPlugins: [[String: Any]]?
     private static var cachedPluginByID: [String: [String: Any]] = [:]
 
-    private static var resourceBundle: Bundle { ProwserResourceBundle.bundle }
-
     static func loadPlugins() -> [[String: Any]] {
         if let cachedPlugins { return cachedPlugins }
-        guard let url = resourceBundle.url(forResource: resourceName, withExtension: "json"),
+        guard let url = ProwserResourceBundle.url(forResource: resourceName, withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let plugins = root["plugins"] as? [[String: Any]] else {

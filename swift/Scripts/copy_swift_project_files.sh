@@ -128,6 +128,9 @@ copy_file "$REPO_ROOT/LICENSE" "$TARGET_DIR/LICENSE"
 copy_tree "$SWIFT_ROOT/Prowser" "$TARGET_DIR/Prowser"
 copy_tree "$SWIFT_ROOT/ProwserDlibBridge" "$TARGET_DIR/ProwserDlibBridge"
 copy_tree "$SWIFT_ROOT/ProwserDlibBridgeCore" "$TARGET_DIR/ProwserDlibBridgeCore"
+# Symlinks under Prowser/Resources point at these package-root paths.
+copy_file "$SWIFT_ROOT/requirements-imagegen.txt" "$TARGET_DIR/requirements-imagegen.txt"
+copy_tree "$SWIFT_ROOT/ImageGenPython" "$TARGET_DIR/ImageGenPython"
 
 mkdir -p "$TARGET_DIR/Scripts" "$TARGET_DIR/Vendor"
 for script in run.sh build_app.sh build_dlib_macos.sh; do
@@ -158,6 +161,8 @@ REQUIRED=(
     setup.sh
     run.sh
     Prowser/App/ProwserApp.swift
+    requirements-imagegen.txt
+    ImageGenPython/imagegen_plugins/__init__.py
 )
 
 missing=0
