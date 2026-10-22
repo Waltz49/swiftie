@@ -427,6 +427,7 @@ struct ImageGenUnifiedDialog: View {
         appState.imageGen.endImageGenDialogBuild()
         isLoading = false
         await probeFluxPromptServices()
+        FluxPromptJob.restoreFluxPromptAIJobIntoEditor(values: &values, context: fluxContext)
         FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
         ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&values)
         guard generation == loadGeneration else { return }

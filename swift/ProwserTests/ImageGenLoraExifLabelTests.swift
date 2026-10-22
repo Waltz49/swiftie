@@ -92,6 +92,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
             "display_name": "FLUX.1 Schnell MFLUX",
             "model_label": "FLUX.1 Schnell MFLUX",
             "hf_model_id": "black-forest-labs/FLUX.1-schnell",
+            "pipeline_id": "flux_schnell_mflux_play",
             "available": true,
         ]]
 
@@ -102,5 +103,41 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
             ),
             "flux_schnell_mflux"
         )
+    }
+
+    @MainActor
+    func testImportRestResolvesSceneWorksGeneratedExifModelLabel() {
+        let plugins: [[String: Any]] = [[
+            "plugin_id": "sceneworks_klein_9b_kv_mlx_create",
+            "display_name": "SceneWorks/flux2-klein-9b-kv-mlx",
+            "model_label": "flux2-klein-9b-kv-mlx",
+            "hf_model_id": "SceneWorks/flux2-klein-9b-kv-mlx",
+            "pipeline_id": "mflux_flux2_klein_create",
+            "available": true,
+        ]]
+
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: "FLUX 2 Klein 9B KV MLX",
+                plugins: plugins
+            ),
+            "sceneworks_klein_9b_kv_mlx_create"
+        )
+
+        let comment = """
+        Image Model:
+        FLUX 2 Klein 9B KV MLX
+        Seed: 1335284087
+        Steps: 4
+        LoRA: F2K9B_BallgagV2_2020E10 [1]
+        Guidance: 7
+
+        Prompt:
+        test
+        """
+        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        XCTAssertEqual(parsed["model"] as? String, "FLUX 2 Klein 9B KV MLX")
+        XCTAssertEqual(parsed["lora"] as? String, "F2K9B_BallgagV2_2020E10 [1]")
+        XCTAssertEqual(parsed["seed"] as? Int, 1_335_284_087)
     }
 }

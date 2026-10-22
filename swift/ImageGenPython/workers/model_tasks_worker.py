@@ -527,6 +527,9 @@ def run_imagegen_worker_event_loop(
                     continue
                 if handle_imagegen_command(cmd) is _SHUTDOWN:
                     break
+                # Swift ``PythonNDJSONWorker.send`` waits for a result line per job_id.
+                if command == "unload_image" and job_id:
+                    emit_fn({"type": "result", "job_id": job_id, "success": True})
             except GenerationCancelledError:
                 target_job = _active_job_id or job_id
                 emit_fn({"type": "error", "job_id": target_job, "message": "Cancelled"})

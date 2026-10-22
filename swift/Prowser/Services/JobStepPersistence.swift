@@ -217,6 +217,7 @@ struct ImageGenQueuedJob: Identifiable {
         if !fullPrompt.isEmpty, (values["prompt"] as? String ?? "").isEmpty {
             values["prompt"] = fullPrompt
         }
+        values = ImageGenModelDisplay.sanitizeJobValues(pluginID: pluginID, values: values)
     }
 
     var document: [String: Any] {

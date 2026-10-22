@@ -19,6 +19,9 @@ final class AppConfig {
     /// True while the settings window is open (edits stay in memory until OK).
     var isSettingsSessionActive: Bool { settingsDraft != nil }
 
+    /// Incremented on each settings mutation so SwiftUI bindings that read via `bool(forKey:)` stay in sync.
+    private(set) var settingsEditRevision = 0
+
     func applyLaunchDebugFlag(_ enabled: Bool) {
         sessionDebugEnabled = enabled
     }
@@ -704,11 +707,13 @@ final class AppConfig {
             mutate(&draft)
             draft.removeValue(forKey: "debug_mode")
             settingsDraft = draft
+            settingsEditRevision += 1
             return
         }
         mutate(&settings)
         settings.removeValue(forKey: "debug_mode")
         saveSettings()
+        settingsEditRevision += 1
     }
 
     func setImagegenLoraModelKey(_ modelKey: String) {

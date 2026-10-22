@@ -226,6 +226,40 @@ enum FluxPromptJob {
         return (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Port of ``effective_job_prompt_for_tooltip`` (job cards, tooltips, editor restore).
+    static func effectiveJobPromptForTooltip(_ values: [String: Any]) -> String {
+        FluxPromptJobValues.effectiveJobPromptForTooltip(values)
+    }
+
+    /// Keep ``values["prompt"]`` aligned with pre-AI user text for queued job persistence.
+    static func preserveOriginalPromptInAIJobValues(_ values: inout [String: Any]) {
+        guard JobStepQueue.hasFluxPromptAIJob(values) else { return }
+        let original = FluxPromptJobValues.fluxPromptAIUserPrompt(values)
+        if !original.isEmpty {
+            values["prompt"] = original
+        }
+    }
+
+    /// Restore dialog prompt + AI system prompt from queued job AI metadata before edit.
+    static func restoreFluxPromptAIJobIntoEditor(
+        values: inout [String: Any],
+        context: ImageGenFluxPromptSubmitContext
+    ) {
+        guard JobStepQueue.hasFluxPromptAIJob(values),
+              let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any]
+        else { return }
+        let original = FluxPromptJobValues.fluxPromptAIUserPrompt(values)
+        if !original.isEmpty {
+            values["prompt"] = original
+            context.promptText = original
+        }
+        let system = (meta["system_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !system.isEmpty {
+            context.systemPromptOverride = system
+        }
+        syncJobCheckboxFromValues(values: values, context: context)
+    }
+
     static func buildFluxPromptAIJobMetaFromJob(
         function: String,
         values: [String: Any],

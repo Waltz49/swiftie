@@ -61,6 +61,11 @@ final class ImageGenController {
     private var aspectPadTempPaths: [String] = []
     private var stepRunning: [String: Any]?
     private var stepPendingDoc: [String: Any]?
+    /// Refined prompt for the in-flight copy only (Python ``_launch_refined_prompt``).
+    private var launchRefinedPrompt = ""
+    private var lastCompletedOutputPath = ""
+    private var lastCompletedPrompt = ""
+    private var lastCompletedValues: [String: Any] = [:]
     private var jobAIStageActive = false
     private var cooldownTask: Task<Void, Never>?
     private var cooldownDisplayTask: Task<Void, Never>?
@@ -79,6 +84,8 @@ final class ImageGenController {
     private var queuePersistSuppressed = false
     private var startupQueueHold = false
     private var startupQueueReleaseToken = 0
+    private var deferTryStartQueuedJobTask: Task<Void, Never>?
+    private let gpuCleanupPollMs = 2_000
     private var copyBatchCancelled = false
     private var pendingCancelJobID = ""
     private var suppressTaskFailureUI = false
@@ -358,7 +365,7 @@ final class ImageGenController {
         submitValues["copies"] = normalizedCopies
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: normalizedCopies)
-        let prompt = submitValues["prompt"] as? String ?? ""
+        let prompt = FluxPromptJob.effectiveJobPromptForTooltip(submitValues)
         steps = JobStepQueue.ensureStepsHavePrompt(steps, prompt: prompt, jobValues: submitValues)
         var job = ImageGenQueuedJob(
             pluginID: pluginID,
@@ -451,7 +458,7 @@ final class ImageGenController {
             statusHTML: taskStatusHTML.isEmpty ? progressMessage : taskStatusHTML,
             statusView: activeStatusView,
             thumbnailPaths: activeJobCardThumbnailPaths(),
-            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            fullPrompt: effectiveDisplayFullPrompt(),
             referencesInvalid: false,
             pluginUnavailable: false,
             statusLabel: progressMessage,
@@ -533,7 +540,7 @@ final class ImageGenController {
         queue.jobs[index].values = submitValues
         queue.jobs[index].copiesTotal = copies
         queue.jobs[index].steps = steps
-        queue.jobs[index].fullPrompt = submitValues["prompt"] as? String ?? ""
+        queue.jobs[index].fullPrompt = FluxPromptJob.effectiveJobPromptForTooltip(submitValues)
         queue.jobs[index].statusHTML = "Queued"
         queue.jobs[index].pluginUnavailable = false
         queue.jobs[index].inError = false
@@ -1215,8 +1222,8 @@ final class ImageGenController {
             if !generationWorkerActive() {
                 _ = yieldActiveBatchIfNotNextToRun()
             }
-        } else if !newHeld, activeJobID == nil, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed {
-            Task { await startNextQueuedJobIfIdle() }
+        } else if !newHeld, !generationWorkerActive() {
+            deferTryStartNextQueuedJob()
         }
         return true
     }
@@ -1381,7 +1388,10 @@ final class ImageGenController {
 
     private func startNextQueuedJobIfIdle() async {
         if !isEnabled { return }
-        if modelTasks.isBusy { return }
+        if modelTasks.isBusy {
+            deferTryStartNextQueuedJob(delayMs: gpuCleanupPollMs)
+            return
+        }
         if activeJobID != nil { return }
         if holdJobQueue { return }
         if startupQueueHold { return }
@@ -1471,6 +1481,7 @@ final class ImageGenController {
         activeJobCardThumbnailPathsCache = cardPaths
         activeStatusView = job.statusView
         activeDisplayIndex = 0
+        resetStepChainState()
         let continuous = JobStepQueue.isSeriesContinuousCopies(job.copiesTotal)
         let continuousTemplate = continuous && !steps.isEmpty ? steps[0] : nil
         stepPendingDoc = JobStepQueue.buildPendingJobDoc(
@@ -1512,21 +1523,12 @@ final class ImageGenController {
             return
         }
         stepPendingDoc = doc
-        if step["series_prompt_refinement"] as? Bool == true {
-            var merged = JobStepQueue.mergeStepIntoValues(step)
-            let priorPrompt = pendingValues["prompt"] as? String ?? ""
-            var src = pendingValues
-            if !priorPrompt.isEmpty {
-                src["prompt"] = priorPrompt
-            }
-            FluxPromptJob.syncFluxPromptAIUserPromptForNextCopy(values: &merged, sourceValues: src)
-            if let meta = merged[JobStepQueue.fluxPromptAIJobKey] {
-                step[JobStepQueue.fluxPromptAIJobKey] = meta
-                var stepValues = JobStepQueue.stepValues(step)
-                stepValues[JobStepQueue.fluxPromptAIJobKey] = meta
-                step["values"] = stepValues
-            }
-        }
+        step = JobStepQueue.resolveStepBeforeRun(
+            step: step,
+            priorOutputPath: lastCompletedOutputPath,
+            priorPrompt: lastCompletedPrompt,
+            priorValues: lastCompletedValues.isEmpty ? nil : lastCompletedValues
+        )
         if JobStepQueue.stepNeedsAI(step) {
             if !JobStepQueue.prepareStepAILaunch(&step) {
                 handleStepFailure("Could not prepare AI prompt refinement for the job.")
@@ -1583,17 +1585,9 @@ final class ImageGenController {
         }
         do {
             let refined = try await startFluxPromptJob(meta: meta, values: values)
-            var updated = values
-            updated["prompt"] = refined
-            pendingValues = updated
-            if var step = stepRunning {
-                var stepValues = JobStepQueue.stepValues(step)
-                stepValues["prompt"] = refined
-                step["values"] = stepValues
-                stepRunning = step
-            }
+            launchRefinedPrompt = refined.trimmingCharacters(in: .whitespacesAndNewlines)
             jobAIStageActive = false
-            await launchGeneration(values: updated)
+            await launchGeneration(values: values)
         } catch {
             jobAIStageActive = false
             let message = error.localizedDescription
@@ -1668,9 +1662,14 @@ final class ImageGenController {
         activeOutputPath = outputPath
         progressiveBrowseOpened = false
         do {
+            var generationValues = values
+            let refined = launchRefinedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !refined.isEmpty {
+                generationValues["prompt"] = refined
+            }
             var payload = try await registry.buildPayload(
                 pluginID: activePluginID,
-                values: values,
+                values: generationValues,
                 outputPath: outputPath
             )
             if let plugin = ImageGenPluginCatalog.plugin(pluginID: activePluginID),
@@ -1683,13 +1682,12 @@ final class ImageGenController {
                 aspectPadTempPaths.append(contentsOf: padTemps)
             }
             let canonicalFromPayload = payload.removeValue(forKey: "_canonical_source_image_paths") as? [String]
-            var cycleValues = values
+            var cycleValues = generationValues
             if let canonical = canonicalFromPayload?.filter({ FileManager.default.isReadableFile(atPath: $0) }),
                !canonical.isEmpty {
                 cycleValues["_canonical_source_image_paths"] = canonical
                 cycleValues["source_image_path"] = canonical[0]
                 cycleValues["source_image_paths"] = canonical
-                pendingValues = cycleValues
             }
             if let steps = payload["steps"] as? Int {
                 cycleValues["steps"] = steps
@@ -1697,7 +1695,6 @@ final class ImageGenController {
                 cycleValues["steps"] = steps.intValue
             }
             ImageGenLoraWorkerPayloadEnrich.mergeLoraFields(from: payload, into: &cycleValues)
-            pendingValues = cycleValues
             copyCycleValues = cycleValues
             copyCyclePluginID = activePluginID
             if stepRunning != nil {
@@ -1712,6 +1709,7 @@ final class ImageGenController {
             }
             generationStartTime = Date()
             stepProgressStartTime = Date()
+            launchRefinedPrompt = ""
             await refreshActiveJobStatusView()
             await refreshActiveStripView()
             _ = try modelTasks.startGenerate(payload: payload)
@@ -1808,7 +1806,13 @@ final class ImageGenController {
 
     private func completeSuccessfulGenerationUnit() async {
         guard !copyBatchCancelled else { return }
-        completeRunningStepAfterCopy()
+        completeRunningStepAfterCopy(outputPath: activeOutputPath ?? "")
+        if seriesContinues() {
+            syncNextCopyChainFromCompletedCycle(
+                completedCopyValues: copyCycleExifValues,
+                outputPath: activeOutputPath ?? ""
+            )
+        }
         if finishCurrentUnitAndMaybeQuit() {
             return
         }
@@ -2291,11 +2295,71 @@ final class ImageGenController {
             persistQueue()
         }
         bumpQueueRevision()
-        Task { await startNextQueuedJobIfIdle() }
+        deferTryStartNextQueuedJob(delayMs: gpuCleanupPollMs)
     }
 
     private func processNextIfIdle() {
         Task { await startNextQueuedJobIfIdle() }
+    }
+
+    /// Port of ``ImageGenController._defer_try_start_next_queued_job``.
+    private func deferTryStartNextQueuedJob(delayMs: Int = 0) {
+        if queueAdvanceSuppressed || holdJobQueue || startupQueueHold { return }
+        if queue.jobs.isEmpty { return }
+        if activeJobID != nil { return }
+        deferTryStartQueuedJobTask?.cancel()
+        deferTryStartQueuedJobTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if delayMs > 0 {
+                try? await Task.sleep(for: .milliseconds(delayMs))
+            }
+            guard !Task.isCancelled else { return }
+            await self.startNextQueuedJobIfIdle()
+        }
+    }
+
+    /// Port of ``ImageGenController._resume_active_job_after_hold``.
+    private func resumeActiveJobAfterHold() {
+        if holdJobQueue || queueAdvanceSuppressed { return }
+        guard let activeJobID, !activeJobID.isEmpty else {
+            deferTryStartNextQueuedJob()
+            return
+        }
+        if generationWorkerActive() {
+            let pollMs = gpuCleanupPollMs
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(pollMs))
+                self?.resumeActiveJobAfterHold()
+            }
+            return
+        }
+        if copyBatchActive, !copyBatchCancelled,
+           pendingBatchCopies() > 0 || stepRunning != nil || jobAIStageActive {
+            if stepRunning == nil, pendingBatchCopies() > 0 {
+                resumeRestoredActiveJobIfIdle()
+                return
+            }
+            if let step = stepRunning, JobStepQueue.stepNeedsAI(step) {
+                let displayPrompt = (stepPendingDoc?["display"] as? [String: Any])?["full_prompt"] as? String ?? ""
+                let statusViewPrompt = JobStepQueue.promptFromStatusView(activeStatusView)
+                let values = JobStepQueue.generationValues(
+                    from: step,
+                    jobValues: pendingValues,
+                    displayFullPrompt: displayPrompt,
+                    statusViewPrompt: statusViewPrompt
+                )
+                pendingValues = values
+                Task { await runJobAIStage(values: values) }
+                return
+            }
+            if stepRunning != nil {
+                resumeRestoredActiveJobIfIdle()
+                return
+            }
+            scheduleCopyCooldownThen { await self.promoteAndRunNextStep() }
+            return
+        }
+        resumeRestoredActiveJobIfIdle()
     }
 
     private func isMultistepSeriesJob() -> Bool {
@@ -2460,7 +2524,7 @@ final class ImageGenController {
             values: pendingValues,
             copiesTotal: copiesTotal,
             statusHTML: taskStatusHTML,
-            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            fullPrompt: effectiveDisplayFullPrompt(),
             thumbnailPaths: activeThumbnailPaths,
             steps: stepPendingDoc?["steps"] as? [[String: Any]] ?? [],
             jobNumber: resolvedActiveJobNumber(),
@@ -2483,7 +2547,7 @@ final class ImageGenController {
             runningStep: stepRunning,
             pendingDoc: stepPendingDoc,
             outputPath: activeOutputPath ?? "",
-            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            fullPrompt: effectiveDisplayFullPrompt(),
             thumbnailPaths: activeThumbnailPaths,
             jobNumber: resolvedActiveJobNumber(),
             held: activeJobHeld()
@@ -2980,7 +3044,9 @@ final class ImageGenController {
         queue.jobs[index].pluginID = pluginID
         queue.jobs[index].function = function
         queue.jobs[index].pluginUnavailable = false
-        queue.jobs[index].values = values
+        var queueValues = values
+        FluxPromptJob.preserveOriginalPromptInAIJobValues(&queueValues)
+        queue.jobs[index].values = queueValues
         queue.jobs[index].copiesTotal = copiesTotal
         queue.jobs[index].fullPrompt = JobStepQueue.resolvedFullPrompt(
             stored: queue.jobs[index].fullPrompt,
@@ -3374,6 +3440,8 @@ final class ImageGenController {
         copyBatchCancelled = true
         cooldownTask?.cancel()
         cooldownDisplayTask?.cancel()
+        deferTryStartQueuedJobTask?.cancel()
+        deferTryStartQueuedJobTask = nil
         cooldownSecondsRemaining = 0
         queue.jobs.removeAll()
         activeJobID = nil
@@ -3545,7 +3613,7 @@ final class ImageGenController {
                 pluginID: activePluginID,
                 function: activeFunction,
                 steps: [],
-                fullPrompt: pendingValues["prompt"] as? String ?? "",
+                fullPrompt: effectiveDisplayFullPrompt(),
                 thumbnailPaths: activeThumbnailPaths,
                 stepsDone: copiesDone
             )
@@ -3571,7 +3639,7 @@ final class ImageGenController {
             runningStep: stepRunning,
             pendingDoc: stepPendingDoc,
             outputPath: activeOutputPath ?? "",
-            fullPrompt: pendingValues["prompt"] as? String ?? "",
+            fullPrompt: effectiveDisplayFullPrompt(),
             thumbnailPaths: activeThumbnailPaths,
             jobNumber: resolvedActiveJobNumber(),
             held: activeJobHeld()
@@ -3592,18 +3660,60 @@ final class ImageGenController {
         return file
     }
 
+    private func effectiveDisplayFullPrompt(stored: String = "") -> String {
+        let steps = stepPendingDoc?["steps"] as? [[String: Any]] ?? []
+        return JobStepQueue.resolvedFullPrompt(
+            stored: stored,
+            values: pendingValues,
+            steps: steps,
+            statusView: activeStatusView
+        )
+    }
+
     private func syncChainStateToPendingDoc() {
         guard stepPendingDoc != nil else { return }
         stepPendingDoc = JobStepQueue.syncChainStateToPendingDoc(
             stepPendingDoc,
             outputPath: activeOutputPath ?? "",
-            prompt: pendingValues["prompt"] as? String ?? "",
+            prompt: effectiveDisplayFullPrompt(),
             priorValues: pendingValues
         )
     }
 
     /// Port of ``ImageGenController._complete_running_step_after_copy``.
-    private func completeRunningStepAfterCopy() {
+    private func syncNextCopyChainFromCompletedCycle(
+        completedCopyValues: [String: Any],
+        outputPath: String
+    ) {
+        let trimmedPath = outputPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPath.isEmpty, FileManager.default.isReadableFile(atPath: trimmedPath) {
+            lastCompletedOutputPath = trimmedPath
+        }
+        let prompt = (completedCopyValues["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty {
+            lastCompletedPrompt = prompt
+        }
+        lastCompletedValues = completedCopyValues
+        clearCopyCycleExifSnapshot()
+    }
+
+    private func resetStepChainState() {
+        lastCompletedOutputPath = ""
+        lastCompletedPrompt = ""
+        lastCompletedValues = [:]
+        launchRefinedPrompt = ""
+    }
+
+    private func completeRunningStepAfterCopy(outputPath: String = "") {
+        if let step = stepRunning {
+            let completed = JobStepQueue.mergeStepIntoValues(step)
+            lastCompletedValues = completed
+            lastCompletedPrompt = (completed["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let trimmedPath = outputPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPath.isEmpty, FileManager.default.isReadableFile(atPath: trimmedPath) {
+            lastCompletedOutputPath = trimmedPath
+        }
         stepRunning = nil
         JobStepPersistence.saveActiveRunning(nil, config: config)
         if var doc = stepPendingDoc {
@@ -3782,17 +3892,17 @@ final class ImageGenController {
         guard startupQueueHold else { return }
         startupQueueHold = false
         guard !holdJobQueue else { return }
-        if activeJobID != nil, !modelTasks.isBusy {
+        if activeJobID != nil, !generationWorkerActive() {
             resumeRestoredActiveJobIfIdle()
             return
         }
-        processNextIfIdle()
+        deferTryStartNextQueuedJob()
     }
 
     private func resumeRestoredActiveJobIfIdle() {
         guard !holdJobQueue, !startupQueueHold else { return }
-        guard activeJobID != nil, !modelTasks.isBusy else {
-            processNextIfIdle()
+        guard activeJobID != nil, !generationWorkerActive() else {
+            deferTryStartNextQueuedJob()
             return
         }
         if let step = stepRunning {
@@ -3822,19 +3932,18 @@ final class ImageGenController {
 
     private func resumeAfterHoldReleased() {
         if queueAdvanceSuppressed { return }
-        if let activeJobID, queuedJob(byID: activeJobID) == nil, activeBatchHasRemainingWork() {
-            _ = demoteActiveRemainingToQueue()
+        // Running jobs are not in ``queue.jobs``; do not demote on hold release (Python ``_resume_after_hold_released``).
+        if let activeJobID, !activeJobID.isEmpty {
+            Task { @MainActor in
+                resumeActiveJobAfterHold()
+            }
+            return
         }
-        if !modelTasks.isBusy {
-            processNextIfIdle()
+        if !generationWorkerActive() {
+            Task { await startNextQueuedJobIfIdle() }
+        } else {
+            deferTryStartNextQueuedJob(delayMs: gpuCleanupPollMs)
         }
-    }
-
-    private func activeBatchHasRemainingWork() -> Bool {
-        if copyBatchCancelled { return false }
-        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return true }
-        if JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning) { return true }
-        return pendingBatchCopies() > 0
     }
 
     private func resumeDeferredQuitQueueAdvance() {

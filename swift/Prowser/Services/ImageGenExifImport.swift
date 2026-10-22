@@ -212,29 +212,34 @@ enum ImageGenExifImport {
         return path
     }
 
+    /// Lowercase match token; align ``FLUX 2`` (generation EXIF) with ``FLUX.2`` (HF menu labels).
     private static func normalizeExifModelToken(_ text: String) -> String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var token = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        token = token.replacingOccurrences(of: "flux.2", with: "flux 2")
+        token = token.replacingOccurrences(of: "flux.1", with: "flux 1")
+        return token
     }
 
     private static func exifModelMatchKeys(plugin: [String: Any]) -> Set<String> {
         var keys = Set<String>()
+        func insertToken(_ raw: String) {
+            let token = normalizeExifModelToken(raw)
+            if !token.isEmpty { keys.insert(token) }
+        }
         for key in ["display_name", "plugin_id", "model_label"] {
             if let raw = plugin[key] as? String {
-                let token = normalizeExifModelToken(raw)
-                if !token.isEmpty { keys.insert(token) }
+                insertToken(raw)
             }
         }
         if let hfID = plugin["hf_model_id"] as? String {
-            let token = normalizeExifModelToken(hfID)
-            if !token.isEmpty {
-                keys.insert(token)
-                if let last = hfID.split(separator: "/").last {
-                    keys.insert(normalizeExifModelToken(String(last)))
-                }
-                let presented = normalizeExifModelToken(
-                    ImageGenExifCommentFormatting.menuLabelForHFModelId(hfID)
-                )
-                if !presented.isEmpty { keys.insert(presented) }
+            insertToken(hfID)
+            if let last = hfID.split(separator: "/").last {
+                insertToken(String(last))
+            }
+            insertToken(ImageGenExifCommentFormatting.menuLabelForHFModelId(hfID))
+            let pipelineID = plugin["pipeline_id"] as? String ?? ""
+            if !pipelineID.isEmpty {
+                insertToken(ImageGenModelDisplay.modelDisplayName(pipelineID: pipelineID, hfModelID: hfID))
             }
         }
         return keys

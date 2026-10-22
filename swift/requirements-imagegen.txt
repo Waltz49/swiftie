@@ -1,6 +1,8 @@
 # Image generation venv for Swift Prowser (~/.swift-prowser/venvs/imagegen).
 # Installed via Settings → Image Generation → Install dependencies…
 #
+# Use Python 3.11–3.13 to create the venv (not 3.14: Pillow/mflux import paths fail on 3.14).
+#
 # Covers optimized pipelines (persistent imagegen_generate_worker): MFLUX/MLX,
 # diffusers (SD15, SDXL, SANA), Z-Image SDNQ, and LoRA (peft). Model weights
 # are downloaded separately (Image → Manage models…).
@@ -14,6 +16,7 @@ accelerate
 peft
 sdnq
 safetensors
-pillow
+# Pillow 13.0.0 imports numbers._IntegralLike at runtime (removed in recent CPython).
+pillow>=12,<13
 piexif
 huggingface-hub

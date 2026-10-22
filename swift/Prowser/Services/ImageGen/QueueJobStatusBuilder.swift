@@ -189,11 +189,10 @@ enum QueueJobStatusBuilder {
                 effective[key] = value
             }
         }
-        let hf = (effective["hf_model_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelID = hf.contains("/") ? hf : plugin.hfModelID
+        let modelID = ImageGenModelDisplay.generationModelID(plugin: plugin, effective: effective)
         var fields = StatusFields()
         if !modelID.isEmpty {
-            fields.model = ImageGenExifCommentFormatting.menuLabelForHFModelId(modelID)
+            fields.model = ImageGenModelDisplay.modelDisplayName(pipelineID: plugin.pipelineID, hfModelID: modelID)
         }
         if let loraLabel, !loraLabel.isEmpty {
             fields.lora = loraLabel
@@ -207,7 +206,7 @@ enum QueueJobStatusBuilder {
             fields.steps = "\(steps)"
         }
         fields.quant = quantizeStatusValue(plugin: plugin, values: effective) ?? ""
-        let rawPrompt = (effective["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawPrompt = FluxPromptJobValues.effectiveJobPromptForTooltip(effective)
         if !rawPrompt.isEmpty {
             fields.prompt = normalizePromptForDisplay(truncate(rawPrompt))
             fields.promptLabel = ImageGenPipelineModeMetadata.mode(pipelineID: plugin.pipelineID).promptStatusLabel
@@ -308,7 +307,7 @@ enum QueueJobStatusBuilder {
     }
 
     private static func resolvedFullPrompt(values: [String: Any]) -> String {
-        (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        FluxPromptJobValues.effectiveJobPromptForTooltip(values)
     }
 
     private static func normalizePromptForDisplay(_ text: String) -> String {

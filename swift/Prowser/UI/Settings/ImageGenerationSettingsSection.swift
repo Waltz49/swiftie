@@ -14,6 +14,7 @@ struct ImageGenerationSettingsSection: View {
     @State private var venvInstallInProgress = false
 
     var body: some View {
+        let _ = appState.config.settingsEditRevision
         Group {
 
             CollapsibleSettingsSection(

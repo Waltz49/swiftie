@@ -305,6 +305,35 @@ enum ThumbnailDragAutoScroll {
         return speeds[speeds.count - 1].percentPerSecond
     }
 
+    /// Pointer in scroll viewport coordinates (Y=0 at top of visible document).
+    /// Port of Python `viewport.mapFromGlobal` in `_update_auto_scroll`.
+    static func pointerInScrollViewport(
+        scrollView: NSScrollView,
+        mouseInWindow: NSPoint
+    ) -> (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat)? {
+        guard let documentView = scrollView.documentView else { return nil }
+        let visible = scrollView.documentVisibleRect
+        guard visible.width > 0, visible.height > 0 else { return nil }
+        let mouseInDocument = documentView.convert(mouseInWindow, from: nil)
+        return (
+            mouseInDocument.x - visible.origin.x,
+            mouseInDocument.y - visible.origin.y,
+            visible.width,
+            visible.height
+        )
+    }
+
+    /// Python stops autoscroll only when X leaves the viewport; Y may extend past the top/bottom edge.
+    static func pointerHorizontallyInScrollViewport(
+        scrollView: NSScrollView,
+        mouseInWindow: NSPoint
+    ) -> Bool {
+        guard let pointer = pointerInScrollViewport(scrollView: scrollView, mouseInWindow: mouseInWindow) else {
+            return false
+        }
+        return pointer.x >= 0 && pointer.x <= pointer.width
+    }
+
     /// Signed points to scroll this tick. Negative moves toward the top of a flipped grid.
     /// Zero when the pointer is outside the horizontal viewport or outside the edge band.
     static func scrollStep(

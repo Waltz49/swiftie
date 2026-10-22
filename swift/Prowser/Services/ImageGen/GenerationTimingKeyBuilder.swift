@@ -18,8 +18,7 @@ enum GenerationTimingKeyBuilder {
     }
 
     private static func makeKey(plugin: ImageGenPluginDescriptor, values: [String: Any]) -> GenerationTimingKey? {
-        let hf = (values["hf_model_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelID = hf.contains("/") ? hf : plugin.hfModelID
+        let modelID = ImageGenModelDisplay.generationModelID(plugin: plugin, effective: values)
         guard !modelID.isEmpty else { return nil }
 
         let steps = intValue(values["steps"]) ?? 0

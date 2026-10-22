@@ -12,10 +12,9 @@ enum ImageGenGenerationExifService {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else {
             return (values["prompt"] as? String) ?? ""
         }
-        let hf = (values["hf_model_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelID = hf.contains("/") ? hf : plugin.hfModelID
-        let menuFromHF = ImageGenExifCommentFormatting.menuLabelForHFModelId(modelID)
-        let modelName = menuFromHF.isEmpty ? plugin.displayName : menuFromHF
+        let modelID = ImageGenModelDisplay.generationModelID(plugin: plugin, effective: values)
+        let display = ImageGenModelDisplay.modelDisplayName(pipelineID: plugin.pipelineID, hfModelID: modelID)
+        let modelName = display.isEmpty ? plugin.displayName : display
         let seed = extractUsedSeed(workerResult: workerResult, values: values)
         let quant: Int? = {
             guard plugin.reportsQuantization else { return nil }

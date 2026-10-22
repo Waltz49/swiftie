@@ -57,10 +57,11 @@ enum JobStepQueue {
         steps: [[String: Any]],
         statusView: QueueJobStatusView?
     ) -> String {
+        let stepValues = steps.first.map { mergeStepIntoValues($0) } ?? [:]
         let candidates = [
             stored,
-            values["prompt"] as? String ?? "",
-            steps.first.map { mergeStepIntoValues($0)["prompt"] as? String ?? "" } ?? "",
+            FluxPromptJobValues.effectiveJobPromptForTooltip(values),
+            FluxPromptJobValues.effectiveJobPromptForTooltip(stepValues),
             promptFromStatusView(statusView),
         ]
         for candidate in candidates {
@@ -383,16 +384,74 @@ enum JobStepQueue {
         return stepValues(step)[fluxPromptAIJobKey] as? [String: Any]
     }
 
+    /// Port of ``resolve_step_before_run``.
+    static func resolveStepBeforeRun(
+        step: [String: Any],
+        priorOutputPath: String = "",
+        priorPrompt: String = "",
+        priorValues: [String: Any]? = nil
+    ) -> [String: Any] {
+        var resolved = step
+        var values = stepValues(resolved)
+
+        if resolved["series_refinement"] as? Bool == true,
+           !priorOutputPath.isEmpty,
+           FileManager.default.isReadableFile(atPath: priorOutputPath) {
+            let merged = FluxPromptJobValues.applyRefinementSourceForNextCopy(
+                values: values,
+                outputPath: priorOutputPath
+            )
+            values = merged
+            resolved["values"] = jsonSafeDict(values)
+        }
+
+        if resolved["series_prompt_refinement"] as? Bool == true {
+            var merged = mergeStepIntoValues(resolved)
+            var src = priorValues ?? merged
+            if !priorPrompt.isEmpty {
+                var updated = src
+                updated["prompt"] = priorPrompt
+                src = updated
+            }
+            FluxPromptJobValues.syncFluxPromptAIUserPromptForNextCopy(values: &merged, sourceValues: src)
+            if let meta = fluxPromptAIJobMeta(merged) {
+                resolved[fluxPromptAIJobKey] = meta
+                values = stepValues(resolved)
+                values[fluxPromptAIJobKey] = meta
+                resolved["values"] = jsonSafeDict(values)
+            }
+        }
+
+        if stepNeedsAI(resolved) {
+            if let meta = fluxPromptAIJobMeta(resolved) ?? fluxPromptAIJobMeta(step) {
+                let prompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !prompt.isEmpty {
+                    let user = (meta["user_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if user.isEmpty || user == prompt {
+                        var updated = meta
+                        updated["user_prompt"] = prompt
+                        resolved[fluxPromptAIJobKey] = updated
+                    }
+                }
+            }
+        }
+
+        return resolved
+    }
+
     /// Port of ``prepare_step_ai_launch``.
     static func prepareStepAILaunch(_ step: inout [String: Any]) -> Bool {
         guard var meta = fluxPromptAIJobMeta(step) else { return false }
         var values = stepValues(step)
         let prompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !prompt.isEmpty {
-            meta["user_prompt"] = prompt
-            step[fluxPromptAIJobKey] = meta
-            values[fluxPromptAIJobKey] = meta
-            step["values"] = jsonSafeDict(values)
+            let user = (meta["user_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if user.isEmpty || user == prompt {
+                meta["user_prompt"] = prompt
+                step[fluxPromptAIJobKey] = meta
+                values[fluxPromptAIJobKey] = meta
+                step["values"] = jsonSafeDict(values)
+            }
         }
         return fluxPromptAIJobMeta(step) != nil
     }

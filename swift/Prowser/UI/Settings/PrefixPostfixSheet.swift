@@ -7,13 +7,25 @@ struct PrefixPostfixSheet: View {
     @State private var entries: [PrefixPostfixEntry] = []
     @State private var editingEntry: PrefixPostfixEntry?
 
+    private static let addRulesKey = "imagegen_add_chat_prefix_postfix"
+
     var body: some View {
+        let _ = appState.config.settingsEditRevision
         VStack(alignment: .leading, spacing: 12) {
-            Text("Prefix and Postfix text")
-                .font(.title2)
-            Text("Rules applied when sending chat or image prompts (enable in Settings → General → Image Generation).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 12) {
+                Text("Prefix and Postfix text")
+                    .font(.system(size: 15, weight: .regular))
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Add prefix/postfix strings")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(SettingsDialogChrome.rowTitle)
+                    Text("Apply prefix/postfix rules to image prompts.")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(SettingsDialogChrome.secondaryText)
+                }
+                SettingsPreferenceSwitch(isOn: addPrefixPostfixRulesBinding)
+            }
 
             Table(entries) {
                 TableColumn("T") { entry in
@@ -78,6 +90,17 @@ struct PrefixPostfixSheet: View {
                 }
             )
         }
+    }
+
+    private var addPrefixPostfixRulesBinding: Binding<Bool> {
+        SettingsSupport.boolBinding(
+            config: appState.config,
+            key: Self.addRulesKey,
+            default: true,
+            onChange: {
+                appState.config.applySettingsChange(emit: appState.eventBus)
+            }
+        )
     }
 
     private enum EntryKey {

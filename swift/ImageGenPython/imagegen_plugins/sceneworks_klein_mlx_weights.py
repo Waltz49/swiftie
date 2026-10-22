@@ -177,7 +177,7 @@ def init_flux2_klein_from_sceneworks_tier(
     )
     WeightApplier._set_weights(weights, models, components)
     model.bits = bits
-    Flux2Initializer._apply_lora(model, lora_paths, lora_scales, bake_lora=True)
+    Flux2Initializer._apply_lora(model, lora_paths, lora_scales, bake_lora=True, weights=weights)
     return model
 
 

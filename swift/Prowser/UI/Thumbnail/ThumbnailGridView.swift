@@ -6,15 +6,38 @@ import SwiftUI
 final class ThumbnailClipView: NSClipView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
         ThumbnailDragAutoScrollAppKit.suppressBuiltInDragAutoScroll(on: ThumbnailClipView.self)
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
         ThumbnailDragAutoScrollAppKit.suppressBuiltInDragAutoScroll(on: ThumbnailClipView.self)
     }
 
     override func autoscroll(with event: NSEvent) -> Bool { false }
+
+    private var thumbnailGrid: ThumbnailGridNSView? {
+        documentView as? ThumbnailGridNSView
+    }
+
+    /// Python ``view_manager`` event filter: viewport drag events hit the clip when the canvas does not fill it.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        thumbnailGrid?.forwardDraggingEntered(sender) ?? []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        thumbnailGrid?.forwardDraggingUpdated(sender) ?? []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        thumbnailGrid?.forwardDraggingExited(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        thumbnailGrid?.forwardPerformDragOperation(sender) ?? false
+    }
 }
 
 enum ThumbnailDragAutoScrollAppKit {
