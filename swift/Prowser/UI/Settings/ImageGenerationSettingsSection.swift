@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct ImageGenerationSettingsSection: View {
     @Environment(AppState.self) private var appState
+    @Binding var pythonEnvironmentExpanded: Bool
     @State private var showExitScripts = false
     @State private var showPrefixPostfix = false
     @State private var imageOutputEnabled = false
@@ -14,24 +15,28 @@ struct ImageGenerationSettingsSection: View {
 
     var body: some View {
         Group {
+
+            CollapsibleSettingsSection(
+                title: "Python Environment",
+                stateKey: "python_environment",
+                isExpanded: $pythonEnvironmentExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    imagegenVenvSection()
+                    pathField(
+                        title: "Python executable",
+                        subtitle: "Optional override; defaults to imagegen venv python3.",
+                        key: "python_executable"
+                    )
+                    pathField(
+                        title: "MFLUX venv path",
+                        subtitle: "Optional; defaults to imagegen venv for mflux-generate-* CLIs.",
+                        key: "mflux_venv_path"
+                    )
+                }
+            }
+            
             imageCreationDirectorySection()
-
-            Divider()
-
-            imagegenVenvSection()
-
-            pathField(
-                title: "Python executable",
-                subtitle: "Optional override; defaults to imagegen venv python3.",
-                key: "python_executable"
-            )
-            pathField(
-                title: "MFLUX venv path",
-                subtitle: "Optional; defaults to imagegen venv for mflux-generate-* CLIs.",
-                key: "mflux_venv_path"
-            )
-
-            Divider()
 
             HStack {
                 Text("Max generation dimension")
@@ -104,8 +109,6 @@ struct ImageGenerationSettingsSection: View {
     @ViewBuilder
     private func imagegenVenvSection() -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Imagegen Python environment")
-                .font(.headline)
             Text(
                 "Bundled imagegen modules ship inside the app. Install dependencies into a venv under your profile "
                     + "(mflux, torch, diffusers, peft, sdnq, and related libraries). Model weights are downloaded separately."

@@ -124,7 +124,7 @@ struct DirectoriesSettingsTab: View {
                 }
 
                 CollapsibleSettingsSection(
-                    title: "Temporary Files",
+                    title: "Temporary Files' Directory",
                     stateKey: "image_creation_temp_files",
                     isExpanded: $filesExpanded
                 ) {
@@ -141,7 +141,7 @@ struct DirectoriesSettingsTab: View {
                             persistTemporaryFiles()
                         }
                     }
-                    Text("Work files for wallpaper, convert, resize, and similar operations.")
+                    Text("Directory to use for wallpaper, conversions, resize, and other operations.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

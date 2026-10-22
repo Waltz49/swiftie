@@ -17,7 +17,7 @@ struct SlideshowSettingsTab: View {
             onCollapseAll: { setAllGroupsExpanded(false) }
         ) {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Slideshow").font(.title2)
+                Text("Slideshow (S key)").font(.title2)
 
                 CollapsibleSettingsSection(
                     title: "Slideshow Configuration (startup defaults)",
@@ -78,21 +78,21 @@ struct SlideshowSettingsTab: View {
                 }
 
                 SlideshowPresetEditor(
-                    title: "Preset 0 (key 0)",
-                    configKey: "slideshow_preset_0",
-                    presetKey: "0",
-                    stateKey: "preset_0",
-                    isExpanded: $preset0Expanded
-                )
-                SlideshowPresetEditor(
                     title: "Preset 9 (key 9)",
                     configKey: "slideshow_preset_9",
                     presetKey: "9",
                     stateKey: "preset_9",
                     isExpanded: $preset9Expanded
                 )
+                SlideshowPresetEditor(
+                    title: "Preset 0 (key 0)",
+                    configKey: "slideshow_preset_0",
+                    presetKey: "0",
+                    stateKey: "preset_0",
+                    isExpanded: $preset0Expanded
+                )
 
-                CollapsibleSettingsSection(title: "Playback", stateKey: "playback", isExpanded: $playbackExpanded) {
+                CollapsibleSettingsSection(title: "Playback Order", stateKey: "playback", isExpanded: $playbackExpanded) {
                     SettingsPreferencePanel {
                         SettingsPreferenceToggleRow(
                             title: "Back and forth",

@@ -98,6 +98,8 @@ struct ThemeSettingsTab: View {
         let merged = cachedEditPresetID == editID ? cachedMerged : appState.theme.mergedColorOverrides(for: editID)
         let browse = cachedEditPresetID == editID ? cachedBrowse : appState.theme.browseTransparency(for: editID)
 
+        Text("General text and background colors are deprecated and should not be used.")
+        
         CollapsibleSettingsSection(
             title: "Text & background",
             stateKey: "text_background",

@@ -18,8 +18,8 @@ struct ExcludesSettingsTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Exclude Directories").font(.title2)
-                Text("Used to exclude files in specific directories from the thumbnail view when pressing ⌘X.")
+                Text("Exclude Files from Specified Directories").font(.title2)
+                Text("In thumbnail view, press press ⌘X to exclude images from these directories.")
                     .foregroundStyle(.secondary)
 
                 ForEach(0..<Self.slotCount, id: \.self) { index in

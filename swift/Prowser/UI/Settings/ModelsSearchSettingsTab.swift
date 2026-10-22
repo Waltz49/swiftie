@@ -44,7 +44,7 @@ struct ModelsSearchSettingsTab: View {
                         tag: "openai/clip-vit-large-patch14",
                         selection: $clipModel
                     )
-                    Text("Larger CLIP uses more memory and time on 16 GB Macs.")
+                    Text("Larger model uses more memory and time, but is recommended.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -66,8 +66,7 @@ struct ModelsSearchSettingsTab: View {
                     }
                     Text(
                         "Search models download automatically on first use (after you approve). "
-                            + "Default: \(ImageRecognitionDownloadDefaults.defaultBaseURL). "
-                            + "Local fallback: …/image_recognition/models/_mirror/."
+                            + "\nDefault: \(ImageRecognitionDownloadDefaults.defaultBaseURL). "
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -156,7 +155,7 @@ struct ModelsSearchSettingsTab: View {
                         purpose: "Download the selected CLIP model for text search.",
                         parentWindow: Self.preferencesWindow
                     )
-                    statusMessage = "CLIP model ready."
+                    statusMessage = "CLIP (Search by text) model ready."
                 }
                 appState.refreshImageRecognitionForCurrentSettings()
             } catch ModelDownloadError.userDeclined {

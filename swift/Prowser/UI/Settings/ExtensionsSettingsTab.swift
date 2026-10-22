@@ -21,9 +21,9 @@ struct ExtensionsSettingsTab: View {
                     }
                 }
 
-                Text("Adding many extensions may affect performance. Only enable extensions you need to access.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(SettingsDialogChrome.secondaryText)
+                /// Text("Adding many extensions may affect performance. Only enable extensions you need to access.")
+                ///     .font(.system(size: 11))
+                ///     .foregroundStyle(SettingsDialogChrome.secondaryText)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)

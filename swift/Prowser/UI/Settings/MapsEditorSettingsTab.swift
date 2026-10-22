@@ -10,6 +10,9 @@ struct MapsEditorSettingsTab: View {
                 Text("Maps and Editor").font(.title2)
 
                 SettingsSection(title: "Map Application") {
+                    Text("Used for \"Show GPS Location on Map\" and ⌘G key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Picker("Open GPS locations in", selection: mapAppBinding) {
                         Text("Apple Maps").tag("apple_maps")
                         Text("Google Maps").tag("google_maps")
@@ -19,6 +22,9 @@ struct MapsEditorSettingsTab: View {
                 }
 
                 SettingsSection(title: "External Image Editor") {
+                    Text("Used for Edit menu and menu and with ⌘E key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     HStack {
                         TextField("Application name", text: editorBinding)
                             .textFieldStyle(.roundedBorder)
@@ -33,9 +39,6 @@ struct MapsEditorSettingsTab: View {
                             ))
                         }
                     }
-                    Text("Used for Edit in … context menu and ⌘E.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
             .padding(20)
