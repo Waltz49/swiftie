@@ -67,6 +67,8 @@ final class ImageGenController {
     private var lastCompletedPrompt = ""
     private var lastCompletedValues: [String: Any] = [:]
     private var jobAIStageActive = false
+    private var jobAICharsReceived = 0
+    private var jobAILastProgressBucket = -1
     private var cooldownTask: Task<Void, Never>?
     private var cooldownDisplayTask: Task<Void, Never>?
     private var cooldownBeforeNextJob = false
@@ -1575,9 +1577,16 @@ final class ImageGenController {
 
     private func runJobAIStage(values: [String: Any]) async {
         jobAIStageActive = true
+        startJobAIProgressTracking()
+        rebuildActiveStripViewLocally()
+        publishActiveStrip(preferLiveFields: true)
         progressMessage = "Refining prompt…"
         taskStatusHTML = progressMessage
         bumpQueueRevision()
+        await refreshActiveJobStatusView()
+        fluxPromptTasks.onFluxPromptChunk = { [weak self] chunk in
+            self?.handleFluxPromptChunkForJobAI(chunk)
+        }
         guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] else {
             jobAIStageActive = false
             handleStepFailure("Could not prepare AI prompt refinement for the job.")
@@ -2715,6 +2724,31 @@ final class ImageGenController {
         resetLiveQueueProgress()
         stepProgressStartTime = nil
         frozenElapsedSeconds = nil
+        jobAICharsReceived = 0
+        jobAILastProgressBucket = -1
+    }
+
+    private func startJobAIProgressTracking() {
+        resetActiveJobProgressTracking()
+        stepProgressStartTime = Date()
+        liveStep = 0
+        liveStepTotal = AIRefineProgress.progressTotal
+    }
+
+    private func handleFluxPromptChunkForJobAI(_ chunk: String) {
+        guard jobAIStageActive else { return }
+        jobAICharsReceived += chunk.count
+        let rawStep = AIRefineProgress.stepFromChars(charsReceived: jobAICharsReceived)
+        let bucket = AIRefineProgress.bucket(step: rawStep)
+        guard bucket > jobAILastProgressBucket else { return }
+        jobAILastProgressBucket = bucket
+        if liveStepTotal > 0 {
+            liveStep = AIRefineProgress.displayStep(step: rawStep)
+        }
+        _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
+        rebuildActiveStripViewLocally()
+        publishActiveStrip(preferLiveFields: true)
+        Task { await refreshActiveJobStatusView() }
     }
 
     private func beginGenerationProgressTracking(values: [String: Any]) async {
