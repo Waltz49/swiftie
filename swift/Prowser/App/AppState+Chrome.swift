@@ -18,6 +18,17 @@ extension AppState {
         }
     }
 
+    /// True when the pointer is over the visible right-sidebar jobs pane (not the floating panel).
+    func isPointerOverVisibleJobsSidebarPane(windowPoint: NSPoint) -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        guard jobsDisplayMode == .pane else { return false }
+        guard config.bool(forKey: "jobs_visible", default: true) else { return false }
+        guard let view = jobsSidebarPaneHitTestView, let window = view.window else { return false }
+        guard BrowserWindowIdentity.isTaggedMainBrowserWindow(window) else { return false }
+        let pointInView = view.convert(windowPoint, from: nil)
+        return view.bounds.contains(pointInView)
+    }
+
     func updateStatusBarPeek(nearBottom: Bool) {
         guard !fileData.currentViewMode.hidesSlideshowChrome else {
             if statusBarPeekActive {

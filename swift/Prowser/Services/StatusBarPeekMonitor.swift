@@ -34,7 +34,10 @@ final class StatusBarPeekMonitor {
             appState.updateStatusBarPeek(nearBottom: false)
             return
         }
-        let nearBottom = event.locationInWindow.y <= peekZoneHeight
+        var nearBottom = event.locationInWindow.y <= peekZoneHeight
+        if nearBottom, appState.isPointerOverVisibleJobsSidebarPane(windowPoint: event.locationInWindow) {
+            nearBottom = false
+        }
         appState.updateStatusBarPeek(nearBottom: nearBottom)
     }
 }

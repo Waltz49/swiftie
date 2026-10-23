@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SidebarPaneDescriptor {
@@ -131,6 +132,11 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         section
             .frame(height: paneHeight, alignment: .top)
             .clipped()
+            .background {
+                if descriptor.isJobsPane {
+                    JobsSidebarPanePeekExclusionAnchor()
+                }
+            }
     }
 
     @ViewBuilder
@@ -216,5 +222,38 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             appState: appState,
             contentHeight: descriptor.preferredFitContentHeight()
         )
+    }
+}
+
+/// Registers the jobs sidebar pane frame for status bar peek hit testing.
+private struct JobsSidebarPanePeekExclusionAnchor: NSViewRepresentable {
+    @Environment(AppState.self) private var appState
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.appState = appState
+        context.coordinator.registeredView = nsView
+        appState.jobsSidebarPaneHitTestView = nsView
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        if coordinator.registeredView === nsView {
+            coordinator.appState?.jobsSidebarPaneHitTestView = nil
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        weak var appState: AppState?
+        weak var registeredView: NSView?
     }
 }

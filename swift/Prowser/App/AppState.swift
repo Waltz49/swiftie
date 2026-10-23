@@ -62,6 +62,8 @@ final class AppState {
     /// Latest AppKit measurement from ``JobQueuePanelHostView`` (cards + action bar; not strip).
     var jobsQueuePanelIntrinsicHeight: CGFloat = 0
     weak var jobsQueuePanelMeasureHost: JobQueuePanelHostView?
+    /// Full jobs sidebar pane bounds for status bar peek suppression (see ``StatusBarPeekMonitor``).
+    weak var jobsSidebarPaneHitTestView: NSView?
     var jobsQueueStripMeasureRefresh: (@MainActor () -> Void)?
     var jobsPaneRefitDeferred = false
     var jobsPaneResizeDebounce: DispatchWorkItem?
