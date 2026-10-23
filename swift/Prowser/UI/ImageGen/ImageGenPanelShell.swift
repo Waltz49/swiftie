@@ -215,6 +215,7 @@ struct ImageGenPanelShell: View {
                 existingSourcePaths: effectiveSourcePaths,
                 showNegativePrompt: hasNegativePrompt,
                 promptLabel: "Image Prompt",
+                promptStreamSession: fluxRefineCoordinator?.promptStreamSession,
                 onValuesChanged: onValuesChanged,
                 onSourcePathsImported: function == "edit" ? { paths in
                     let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)

@@ -138,15 +138,17 @@ struct ImageGenFluxPromptSection: View {
             }
 
             if systemPromptExpanded {
-                TextEditor(text: $systemPrompt)
-                    .frame(minHeight: 72, maxHeight: 120)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                    .imageGenPromptSentenceCaseOnBlur($systemPrompt, perLine: true)
-                    .onChange(of: systemPrompt) { _, text in
-                        fluxContext.systemPromptOverride = text
-                        persistSectionState()
-                        onValuesChanged?()
-                    }
+                ImageGenPromptPlainTextEdit(
+                    text: $systemPrompt,
+                    minLines: ImageGenPromptLayout.systemPromptMinLines,
+                    maxLines: ImageGenPromptLayout.systemPromptMaxLines,
+                    sentenceCasePerLine: true
+                )
+                .onChange(of: systemPrompt) { _, text in
+                    fluxContext.systemPromptOverride = text
+                    persistSectionState()
+                    onValuesChanged?()
+                }
             }
         }
     }

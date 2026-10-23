@@ -13,10 +13,11 @@ struct ImageGenCreateSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Create Image").font(.title2)
 
-            TextField("Prompt", text: $prompt, axis: .vertical)
-                .imageGenPromptSentenceCaseOnBlur($prompt)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3...8)
+            ImageGenPromptPlainTextEdit(
+                text: $prompt,
+                minLines: ImageGenPromptLayout.createSheetMinLines,
+                maxLines: ImageGenPromptLayout.createSheetMaxLines
+            )
 
             HStack {
                 Stepper("Width: \(width)", value: $width, in: 512...1536, step: 64)

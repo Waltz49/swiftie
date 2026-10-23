@@ -13,6 +13,7 @@ struct ImageGenPromptSection: View {
     var existingSourcePaths: [String] = []
     var showNegativePrompt: Bool = false
     var promptLabel: String = "Image Prompt"
+    var promptStreamSession: ImageGenPromptStreamSession?
     var onValuesChanged: (() -> Void)?
     var onSourcePathsImported: (([String]) -> Void)?
     var onPluginImported: ((String) -> Void)?
@@ -37,14 +38,17 @@ struct ImageGenPromptSection: View {
                 )
             }
 
-            TextField("Prompt", text: promptBinding, axis: .vertical)
-                .lineLimit(3...8)
-                .imageGenPromptSentenceCaseOnBlur(promptBinding)
+            ImageGenPromptPlainTextEdit(
+                text: promptBinding,
+                streamSession: promptStreamSession
+            )
 
             if showNegativePrompt {
-                TextField("Negative prompt", text: negativePromptBinding, axis: .vertical)
-                    .lineLimit(2...5)
-                    .imageGenPromptSentenceCaseOnBlur(negativePromptBinding)
+                ImageGenPromptPlainTextEdit(
+                    text: negativePromptBinding,
+                    minLines: ImageGenPromptLayout.negativeMinLines,
+                    maxLines: ImageGenPromptLayout.negativeMaxLines
+                )
             }
 
             if showImportButtons {

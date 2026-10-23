@@ -8,6 +8,7 @@ final class FluxPromptRefineCoordinator {
     var isRefining = false
     var undoAvailable = false
     var refineError = ""
+    let promptStreamSession = ImageGenPromptStreamSession()
 
     private var promptBeforeAI = ""
     private var streamingStarted = false
@@ -89,6 +90,7 @@ final class FluxPromptRefineCoordinator {
         userCancelled = false
         isRefining = true
         streamingStarted = false
+        promptStreamSession.begin()
         startDotAnimation(values: values, onValuesChanged: onValuesChanged)
 
         let override = context.systemPromptOverride.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -224,6 +226,7 @@ final class FluxPromptRefineCoordinator {
         isRefining = false
         streamingStarted = false
         userCancelled = false
+        promptStreamSession.end()
         onValuesChanged?()
     }
 
