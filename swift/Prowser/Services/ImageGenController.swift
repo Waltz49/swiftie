@@ -57,6 +57,8 @@ final class ImageGenController {
     /// (Python ``_copy_cycle_values`` / ``_copy_cycle_plugin``).
     private var copyCycleValues: [String: Any] = [:]
     private var copyCyclePluginID = ""
+    /// Prompt actually sent to the image worker (refined when applicable); used for EXIF only.
+    private var copyCycleWorkerPrompt = ""
     /// Klein-edit aspect/screen-size pad temps from ``build_payload`` (Python ``_aspect_pad_temp_paths``).
     private var aspectPadTempPaths: [String] = []
     private var stepRunning: [String: Any]?
@@ -1634,10 +1636,12 @@ final class ImageGenController {
             }
             fluxPromptTasks.onJobFinished = { kind, success, error in
                 guard kind == "flux_prompt", !resumed else { return }
-                resumed = true
                 if success {
-                    continuation.resume(returning: userPrompt)
-                } else if error == "Cancelled" {
+                    // Refined text is delivered via onFluxPromptReady (Python ``flux_prompt_ready``).
+                    return
+                }
+                resumed = true
+                if error == "Cancelled" {
                     continuation.resume(throwing: ImageGenError.pipelineFailed("Cancelled"))
                 } else {
                     continuation.resume(throwing: ImageGenError.pipelineFailed(error))
@@ -1704,7 +1708,15 @@ final class ImageGenController {
                 cycleValues["steps"] = steps.intValue
             }
             ImageGenLoraWorkerPayloadEnrich.mergeLoraFields(from: payload, into: &cycleValues)
+            if let workerPrompt = payload["prompt"] as? String {
+                let trimmed = workerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    cycleValues["prompt"] = workerPrompt
+                }
+            }
             copyCycleValues = cycleValues
+            copyCycleWorkerPrompt = (cycleValues["prompt"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             copyCyclePluginID = activePluginID
             if stepRunning != nil {
                 persistStepState()
@@ -3202,7 +3214,12 @@ final class ImageGenController {
 
     /// Python ``_copy_cycle_exif_values`` / ``_copy_cycle_exif_plugin``.
     private var copyCycleExifValues: [String: Any] {
-        copyCycleValues.isEmpty ? pendingValues : copyCycleValues
+        var base = copyCycleValues.isEmpty ? pendingValues : copyCycleValues
+        let worker = copyCycleWorkerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !worker.isEmpty {
+            base["prompt"] = worker
+        }
+        return base
     }
 
     private var copyCycleExifPluginID: String {
@@ -3212,6 +3229,7 @@ final class ImageGenController {
     private func clearCopyCycleExifSnapshot() {
         copyCycleValues = [:]
         copyCyclePluginID = ""
+        copyCycleWorkerPrompt = ""
     }
 
     /// Python ``_cleanup_infill_batch_assets``.
