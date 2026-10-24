@@ -35,7 +35,7 @@ final class ImageGenController {
     private var stepProgressStartTime: Date?
     private var stepProgressCompletedAt: Date?
     private var frozenElapsedSeconds: Double?
-    private var stepSecondsPerStep: Double?
+    private var generationStepTiming = JobGenerationStepTimingState()
     private var historicalAvgTotalSeconds: Double?
     private var generationTimingKey: GenerationTimingKey?
     private var liveStep = 0
@@ -2726,7 +2726,7 @@ final class ImageGenController {
         liveStep = 0
         liveStepTotal = 0
         liveEstimateSeconds = nil
-        stepSecondsPerStep = nil
+        generationStepTiming.reset()
         generationTimingKey = nil
         historicalAvgTotalSeconds = nil
         stepProgressCompletedAt = nil
@@ -2769,7 +2769,7 @@ final class ImageGenController {
         generationStartTime = now
         liveStep = 0
         liveEstimateSeconds = nil
-        stepSecondsPerStep = nil
+        generationStepTiming.reset()
         stepProgressCompletedAt = nil
         if let steps = values["steps"] as? Int {
             liveStepTotal = steps
@@ -2791,8 +2791,9 @@ final class ImageGenController {
 
     private func updateLiveStepProgress(step: Int, stepTotal: Any?) {
         let total = intFromAny(stepTotal) ?? liveStepTotal
-        if step > 0, stepProgressStartTime != nil, let elapsed = liveGenerationElapsedSeconds() {
-            stepSecondsPerStep = elapsed / Double(step)
+        let previousStep = liveStep
+        if step > previousStep {
+            generationStepTiming.recordStepAdvance(from: previousStep, to: step)
         }
         liveStep = step
         liveStepTotal = total
@@ -2824,22 +2825,6 @@ final class ImageGenController {
         return Date().timeIntervalSince(start)
     }
 
-    private static func estimateRemainingSeconds(
-        elapsed: Double,
-        completedSteps: Int,
-        totalSteps: Int,
-        secondsPerStep: Double?
-    ) -> Double? {
-        guard completedSteps > 0,
-              totalSteps > 0,
-              completedSteps < totalSteps,
-              let secondsPerStep,
-              secondsPerStep > 0 else {
-            return nil
-        }
-        return max(0, Double(totalSteps) * secondsPerStep - elapsed)
-    }
-
     @discardableResult
     private func snapshotLiveTiming(inCooldown: Bool = false) -> (elapsed: Double?, estimate: Double?) {
         if inCooldown {
@@ -2853,15 +2838,15 @@ final class ImageGenController {
             return (nil, nil)
         }
         var estimate: Double?
-        if liveStep > 0, liveStepTotal > 0 {
-            estimate = Self.estimateRemainingSeconds(
+        if liveStepTotal > 0, !jobAIStageActive {
+            estimate = JobGenerationTimeEstimate.remainingSeconds(
                 elapsed: elapsed,
-                completedSteps: liveStep,
+                completedStep: liveStep,
                 totalSteps: liveStepTotal,
-                secondsPerStep: stepSecondsPerStep
+                historicalAvgTotalSeconds: historicalAvgTotalSeconds,
+                firstStepDuration: generationStepTiming.firstStepDuration,
+                interStepDurations: generationStepTiming.interStepDurations
             )
-        } else if let average = historicalAvgTotalSeconds, average > 0 {
-            estimate = max(0, average - elapsed)
         }
         liveEstimateSeconds = estimate
         return (elapsed, estimate)
