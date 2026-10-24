@@ -146,15 +146,19 @@ struct ImageGenLoraPicker: View {
         let isActive = rowIsSelected(presetID)
         HStack(spacing: 8) {
             if choices.stackMode {
-                Toggle("", isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { draftSelected.contains(presetID) },
                     set: { on in
                         if on { draftSelected.insert(presetID) }
                         else { draftSelected.remove(presetID) }
                     }
-                ))
-                .labelsHidden()
+                )) {
+                    Text(choice.label)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
                 .toggleStyle(.checkbox)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Button {
                     draftSingleID = presetID
@@ -166,10 +170,16 @@ struct ImageGenLoraPicker: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(choice.label)
                 .accessibilityAddTraits(draftSingleID == presetID ? .isSelected : [])
+                Button {
+                    draftSingleID = presetID
+                } label: {
+                    Text(choice.label)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
             }
-            Text(choice.label)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
             AppNumericSpinBox(
                 value: scaleBinding(for: presetID),
                 in: Self.scaleMin...Self.scaleMax,
