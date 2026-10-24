@@ -65,8 +65,12 @@ struct ImageGenPromptActionButtons: View {
     }
 
     private func copyText() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        if let utf8 = ImageGenPromptTextEncoding.utf8Data(from: text) {
+            pasteboard.setData(utf8, forType: NSPasteboard.PasteboardType("public.utf8-plain-text"))
+        }
         appState.status.show("Copied to clipboard.")
     }
 

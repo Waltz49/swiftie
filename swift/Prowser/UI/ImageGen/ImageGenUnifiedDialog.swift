@@ -387,6 +387,10 @@ struct ImageGenUnifiedDialog: View {
                 selectedFunction = job.function
                 selectedPluginID = job.pluginID
                 values = job.values
+                values["prompt"] = ImageGenDialogPromptPersistence.primeEditorPrompt(
+                    jobValues: values,
+                    fullPrompt: job.fullPrompt
+                )
                 visitedFunctions.insert(selectedFunction)
             } else {
                 let targetFunction = selectedFunction
@@ -1199,7 +1203,7 @@ struct ImageGenUnifiedDialog: View {
         ) {
             return nil
         }
-        _ = FluxPromptJob.applyPromptExitsAfterFluxJobResolution(values: &submitValues, config: appState.config)
+        // Image AI exits run at worker payload build time; do not mutate queued job/dialog prompt text.
         return submitValues
     }
 

@@ -117,7 +117,8 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView, !textView.hasMarkedText() else { return }
+            guard let textView else { return }
+            if textView.hasMarkedText() { return }
             isEditing = true
             let newValue = textView.string
             if text != newValue {
@@ -149,7 +150,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         func applyExternalText(_ newText: String, host: ImageGenPromptPlainTextHostView) {
             guard let textView else { return }
-            if isEditing { return }
+            if isEditing || textView.hasMarkedText() { return }
 
             let streamActive = streamSession?.isActive == true
             if streamActive, !wasStreamActive {
@@ -181,15 +182,9 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             host: ImageGenPromptPlainTextHostView
         ) {
             let old = streamLastText.isEmpty ? textView.string : streamLastText
-            if newText.hasPrefix(old), newText.count >= old.count {
-                let delta = String(newText[old.index(newText.startIndex, offsetBy: old.count)...])
-                if !delta.isEmpty {
-                    appendStreaming(delta, textView: textView, host: host)
-                } else if newText != textView.string {
-                    preserveSelectionSetString(newText, on: textView)
-                    host.refreshHeightAndScrollPolicy()
-                }
-            } else {
+            if let delta = ImageGenPromptTextEncoding.suffix(afterPrefix: old, in: newText), !delta.isEmpty {
+                appendStreaming(delta, textView: textView, host: host)
+            } else if newText != textView.string {
                 preserveSelectionSetString(newText, on: textView)
                 host.refreshHeightAndScrollPolicy()
                 scrollToEndIfFollowing(textView: textView, host: host)
@@ -206,8 +201,8 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             let userScrolled = host.userScrolledDuringStream
             let preservedY = scrollView.contentView.bounds.origin.y
 
-            let end = (textView.string as NSString).length
-            textView.insertText(delta, replacementRange: NSRange(location: end, length: 0))
+            let range = ImageGenPromptTextEncoding.utf16EndInsertionRange(in: textView.string)
+            textView.insertText(delta, replacementRange: range)
             host.refreshHeightAndScrollPolicy()
 
             if userScrolled {
@@ -220,14 +215,14 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         private func scrollToEndIfFollowing(textView: NSTextView, host: ImageGenPromptPlainTextHostView) {
             guard !host.userScrolledDuringStream else { return }
-            let length = (textView.string as NSString).length
+            let length = ImageGenPromptTextEncoding.utf16Length(of: textView.string)
             textView.scrollRangeToVisible(NSRange(location: max(0, length - 1), length: 1))
         }
 
         private func preserveSelectionSetString(_ newText: String, on textView: NSTextView) {
             let selected = textView.selectedRange()
             textView.string = newText
-            let len = (newText as NSString).length
+            let len = ImageGenPromptTextEncoding.utf16Length(of: newText)
             if selected.location <= len {
                 textView.setSelectedRange(selected)
             } else {
@@ -263,6 +258,10 @@ final class ImageGenPromptPlainTextHostView: NSView {
         textView.drawsBackground = true
         textView.backgroundColor = .textBackgroundColor
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
         textView.textContainerInset = NSSize(width: 4, height: 5)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -385,7 +384,7 @@ final class ImageGenPromptPlainTextHostView: NSView {
         }
         layoutManager.ensureLayout(for: textContainer)
 
-        if (textView.string as NSString).length == 0 {
+        if ImageGenPromptTextEncoding.utf16Length(of: textView.string) == 0 {
             return 1
         }
 

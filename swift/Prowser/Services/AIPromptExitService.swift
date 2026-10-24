@@ -4,6 +4,21 @@ import Foundation
 @MainActor
 enum AIPromptExitService {
     private static let exitTimeoutSeconds: TimeInterval = 30
+    private static let loremPlaceholderRegex = try! NSRegularExpression(
+        pattern: #"\{\{.*?\}\}"#,
+        options: [.dotMatchesLineSeparators]
+    )
+
+    /// Inverse of expand-lorem exit scripts when priming dialog fields (Python ``restore_lorem_placeholders_for_dialog``).
+    nonisolated static func restoreLoremPlaceholdersForDialog(_ text: String) -> String {
+        if text.isEmpty || !text.contains("{{") { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return loremPlaceholderRegex.stringByReplacingMatches(
+            in: text,
+            range: range,
+            withTemplate: "[L]"
+        )
+    }
 
     static func applyTextAIExit(_ text: String, config: AppConfig) -> String {
         guard promptFilterExitsEnabled(config: config) else { return text }

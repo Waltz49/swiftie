@@ -58,6 +58,10 @@ enum JobStepQueue {
         statusView: QueueJobStatusView?
     ) -> String {
         let stepValues = steps.first.map { mergeStepIntoValues($0) } ?? [:]
+        let valuesPrompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !valuesPrompt.isEmpty {
+            return values["prompt"] as? String ?? valuesPrompt
+        }
         let candidates = [
             stored,
             FluxPromptJobValues.effectiveJobPromptForTooltip(values),
