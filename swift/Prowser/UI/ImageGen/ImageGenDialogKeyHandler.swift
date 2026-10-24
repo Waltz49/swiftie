@@ -8,6 +8,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
     let onCommandLeft: () -> Void
     let onCommandRight: () -> Void
     let onCommandReturn: () -> Void
+    /// ⌥⌘↩ — queue at head on unified dialog (Python ``_submit_generate_at_queue_head``).
+    var onCommandOptionReturn: (() -> Bool)? = nil
     let onCommandW: () -> Void
     let onEscape: () -> Void
     let onOptionReturn: () -> Bool
@@ -47,6 +49,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
         private var onCommandLeft: (() -> Void)?
         private var onCommandRight: (() -> Void)?
         private var onCommandReturn: (() -> Void)?
+        private var onCommandOptionReturn: (() -> Bool)?
         private var onCommandW: (() -> Void)?
         private var onEscape: (() -> Void)?
         private var onOptionReturn: (() -> Bool)?
@@ -63,6 +66,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                 onCommandLeft = settings.onCommandLeft
                 onCommandRight = settings.onCommandRight
                 onCommandReturn = settings.onCommandReturn
+                onCommandOptionReturn = settings.onCommandOptionReturn
                 onCommandW = settings.onCommandW
                 onEscape = settings.onEscape
                 onOptionReturn = settings.onOptionReturn
@@ -78,6 +82,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
             onCommandLeft = settings.onCommandLeft
             onCommandRight = settings.onCommandRight
             onCommandReturn = settings.onCommandReturn
+            onCommandOptionReturn = settings.onCommandOptionReturn
             onCommandW = settings.onCommandW
             onEscape = settings.onEscape
             onOptionReturn = settings.onOptionReturn
@@ -111,9 +116,14 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                     if modsNoKeypad == .option {
                         if self.onOptionReturn?() == true { return nil }
                     }
-                    if flags == .command {
-                        self.onCommandReturn?()
-                        return nil
+                    if flags.contains(.command) {
+                        if modsNoKeypad.contains(.option), !modsNoKeypad.contains(.shift) {
+                            if self.onCommandOptionReturn?() == true { return nil }
+                        }
+                        if flags == .command {
+                            self.onCommandReturn?()
+                            return nil
+                        }
                     }
                 }
 

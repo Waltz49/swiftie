@@ -363,7 +363,8 @@ final class ImageGenController {
         pluginID: String,
         function: String,
         values: [String: Any],
-        copies: Int? = nil
+        copies: Int? = nil,
+        queueAtHead: Bool = false
     ) async throws {
         let normalizedCopies = JobStepQueue.normalizeCopies(copies ?? values["copies"] ?? 1)
         var submitValues = values
@@ -384,9 +385,21 @@ final class ImageGenController {
         job.jobNumber = ImageGenJobNumber.allocate(config: config)
         job.thumbnailPaths = JobCardThumbnailPaths.paths(pluginID: pluginID, values: submitValues)
         job.referencesInvalid = JobCardThumbnailPaths.referencesInvalid(pluginID: pluginID, values: submitValues)
-        queue.jobs.append(job)
-        let index = queue.jobs.count - 1
-        await refreshQueuedJobStatus(at: index)
+        if queueAtHead {
+            queue.jobs.insert(job, at: 0)
+            if let activeJobID, !activeJobID.isEmpty {
+                activeDisplayIndex = min(activeDisplayIndex + 1, queue.jobs.count)
+                queue.activeDisplayIndex = activeDisplayIndex
+            }
+            await refreshQueuedJobStatus(at: 0)
+            if !generationWorkerActive() {
+                _ = yieldActiveIfSupersededByReorder()
+            }
+        } else {
+            queue.jobs.append(job)
+            let index = queue.jobs.count - 1
+            await refreshQueuedJobStatus(at: index)
+        }
         persistQueue()
         bumpQueueRevision()
         if !isProcessing && !holdJobQueue {

@@ -123,6 +123,10 @@ struct ImageGenUnifiedDialog: View {
                 onCommandLeft: { cycleFunction(delta: -1) },
                 onCommandRight: { cycleFunction(delta: 1) },
                 onCommandReturn: { Task { await primarySubmit() } },
+                onCommandOptionReturn: {
+                    Task { await submitGenerateAtQueueHead() }
+                    return true
+                },
                 onCommandW: { performClose() },
                 onEscape: { performClose() },
                 onOptionReturn: {
@@ -255,9 +259,12 @@ struct ImageGenUnifiedDialog: View {
                 primaryLabel,
                 id: "primary",
                 isDefault: true,
-                help: "Start making the image\nwith these settings.\nAlso saves settings to the EXIF user comment."
+                help: generateActionHelp
             ) {
-                Task { await submit(replace: false) }
+                let atHead = NSEvent.modifierFlags
+                    .intersection(.deviceIndependentFlagsMask)
+                    .contains(.option)
+                Task { await submit(replace: false, queueAtHead: atHead) }
             }
         )
         return buttons
@@ -295,6 +302,11 @@ struct ImageGenUnifiedDialog: View {
 
     private var primaryLabel: String {
         showReplaceUpdate ? "Generate" : "Generate ⌘↩"
+    }
+
+    private var generateActionHelp: String {
+        let base = "Start making the image\nwith these settings.\nAlso saves settings to the EXIF user comment."
+        return base + "\n⌥-click or ⌥⌘↩ to queue next."
     }
 
     private var activeImagePath: String? {
@@ -1073,6 +1085,11 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
+    /// Python ``ImageGenUnifiedDialog._submit_generate_at_queue_head`` (⌥⌘↩).
+    private func submitGenerateAtQueueHead() async {
+        await submit(replace: false, queueAtHead: true)
+    }
+
     private func resolvedSubmitSourcePath(for function: String) -> String? {
         let locked: String?
         switch function {
@@ -1254,7 +1271,7 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
-    private func submit(replace: Bool, forceFluxAIJob: Bool = false) async {
+    private func submit(replace: Bool, forceFluxAIJob: Bool = false, queueAtHead: Bool = false) async {
         errorMessage = ""
         if let plugin = (pluginsByFunction[selectedFunction] ?? []).first(where: {
             ($0["plugin_id"] as? String) == selectedPluginID
@@ -1304,7 +1321,8 @@ struct ImageGenUnifiedDialog: View {
                     pluginID: selectedPluginID,
                     function: selectedFunction,
                     values: submitValues,
-                    copies: copies
+                    copies: copies,
+                    queueAtHead: queueAtHead
                 )
                 let notice = ImageGenSubmitNotice.text(for: selectedFunction)
                 submitNotice = notice
