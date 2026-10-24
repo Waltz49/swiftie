@@ -21,6 +21,8 @@ enum TimingConstants {
     static let largeFolderAutomaticBackgroundSweepThreshold = 1000
     /// Qt default `SH_ToolTip_WakeUpDelay` used by `IconGraphicTooltipFilter`.
     static let graphicButtonTooltipDelayMs = 700
+    /// Force-dismiss graphic button tooltips if hover-exit handling misses (stuck tooltip safety net).
+    static let graphicButtonTooltipMaxVisibleSeconds: TimeInterval = 5
     /// Idle before background CLIP/CNN indexing (`BACKGROUND_CLIP_IDLE_TIMEOUT_SECONDS` is 5 in Python).
     /// Temporarily 10s for easier idle-background testing.
     static let backgroundClipIdleSeconds: TimeInterval = 5

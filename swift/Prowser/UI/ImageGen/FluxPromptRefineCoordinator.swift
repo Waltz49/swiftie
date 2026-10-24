@@ -42,6 +42,12 @@ final class FluxPromptRefineCoordinator {
         onValuesChanged?()
     }
 
+    /// After Replace/Update (or loading a queue job), prior refine undo must not revert past the job baseline.
+    func clearRefineUndoState() {
+        promptBeforeAI = ""
+        undoAvailable = false
+    }
+
     func startRefine(
         appState: AppState,
         context: ImageGenFluxPromptSubmitContext,

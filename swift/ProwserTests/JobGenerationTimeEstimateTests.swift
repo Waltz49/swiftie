@@ -33,9 +33,23 @@ final class JobGenerationTimeEstimateTests: XCTestCase {
             totalSteps: 20,
             historicalAvgTotalSeconds: 120,
             firstStepDuration: 4,
-            interStepDurations: []
+            interStepDurations: [],
+            partialStepElapsed: 0
         )
         XCTAssertEqual(remaining, 72)
+    }
+
+    func testDiffusionEstimateCountsDownWithinStep() {
+        let remaining = JobGenerationTimeEstimate.remainingSeconds(
+            elapsed: 50,
+            completedStep: 2,
+            totalSteps: 20,
+            historicalAvgTotalSeconds: 120,
+            firstStepDuration: 4,
+            interStepDurations: [],
+            partialStepElapsed: 2
+        )
+        XCTAssertEqual(remaining, 70)
     }
 
     func testRollingDiffusionUsesMeanInterStepDurations() {
@@ -47,7 +61,8 @@ final class JobGenerationTimeEstimateTests: XCTestCase {
             totalSteps: 20,
             historicalAvgTotalSeconds: 120,
             firstStepDuration: 4,
-            interStepDurations: durations
+            interStepDurations: durations,
+            partialStepElapsed: 0
         )
         XCTAssertEqual(remaining, mean * 16)
     }

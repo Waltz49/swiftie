@@ -75,16 +75,14 @@ final class MfluxGenerationTasks {
         guard isBusy else { return }
         cancelled = true
         stepwiseWatcher?.stop()
-        terminateTrackedProcess(force: false)
+        terminateTrackedProcess(force: terminateWorker)
         let jobID = activeJobID
-        Task {
+        Task { @MainActor in
             await generationWorker.requestCancel(
                 activeJobID: jobID,
                 terminateWorker: terminateWorker
             )
         }
-        // Keep the task busy until the terminated process has actually unwound. Advancing
-        // synchronously here lets its stale completion overwrite the next copy/job's state.
     }
 
     @discardableResult

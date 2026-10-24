@@ -19,6 +19,9 @@ final class GraphicButtonTooltipPopup: NSObject {
     private let iconView: NSImageView
     private let textField: NSTextField
     private var showTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
+    private var forceHideTask: Task<Void, Never>?
+    private weak var activeAnchorView: NSView?
     private var activeToken: UUID?
 
     private override init() {
@@ -96,6 +99,7 @@ final class GraphicButtonTooltipPopup: NSObject {
         anchorView: NSView?
     ) {
         showTask?.cancel()
+        stopMonitoring()
         panel.orderOut(nil)
         activeToken = token
         let delayNs = UInt64(TimingConstants.graphicButtonTooltipDelayMs) * 1_000_000
@@ -108,10 +112,73 @@ final class GraphicButtonTooltipPopup: NSObject {
 
     func hide(token: UUID) {
         guard activeToken == token else { return }
+        dismiss()
+    }
+
+    private func dismiss() {
         showTask?.cancel()
         showTask = nil
+        stopMonitoring()
         activeToken = nil
+        activeAnchorView = nil
         panel.orderOut(nil)
+    }
+
+    private func stopMonitoring() {
+        pollTask?.cancel()
+        pollTask = nil
+        forceHideTask?.cancel()
+        forceHideTask = nil
+    }
+
+    private func startMonitoring(token: UUID, anchorView: NSView?) {
+        stopMonitoring()
+        activeAnchorView = anchorView
+        pollTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard !Task.isCancelled else { return }
+                pollDismissIfNeeded(token: token)
+                if !panel.isVisible { return }
+            }
+        }
+        let maxNs = UInt64(TimingConstants.graphicButtonTooltipMaxVisibleSeconds * 1_000_000_000)
+        forceHideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: maxNs)
+            guard !Task.isCancelled, activeToken == token else { return }
+            dismiss()
+        }
+    }
+
+    private func pollDismissIfNeeded(token: UUID) {
+        guard panel.isVisible, activeToken == token else {
+            stopMonitoring()
+            return
+        }
+        guard let host = activeAnchorView else { return }
+        if !hostEffectiveVisible(host) || !hostUnderCursor(host) {
+            hide(token: token)
+        }
+    }
+
+    /// Python `_host_effective_visible` — suppress tips when the anchor is hidden or faded out.
+    private func hostEffectiveVisible(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let node = current {
+            if node.isHidden || node.alphaValue < 0.01 {
+                return false
+            }
+            current = node.superview
+        }
+        guard let window = view.window, window.isVisible else { return false }
+        return true
+    }
+
+    private func hostUnderCursor(_ view: NSView) -> Bool {
+        guard let window = view.window else { return false }
+        let locationInWindow = window.mouseLocationOutsideOfEventStream
+        let pointInView = view.convert(locationInWindow, from: nil)
+        return view.bounds.contains(pointInView)
     }
 
     private func present(text: String, icon: NSImage, colors: ThemeColors, anchorView: NSView?) {
@@ -154,6 +221,9 @@ final class GraphicButtonTooltipPopup: NSObject {
         )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.orderFrontRegardless()
+        if let token = activeToken {
+            startMonitoring(token: token, anchorView: anchorView)
+        }
     }
 
     /// Python `position_tooltip_near_cursor`: below-right of the cursor, flipped/clamped to the host window.
@@ -199,8 +269,8 @@ final class GraphicButtonTooltipPopup: NSObject {
     }
 
     @objc private func handleAppResign() {
-        if let token = activeToken {
-            hide(token: token)
+        if activeToken != nil {
+            dismiss()
         } else {
             showTask?.cancel()
             showTask = nil

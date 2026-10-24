@@ -332,7 +332,8 @@ final class ImageGenController {
         // Python defers the worker cancel one tick so the toolbar shows "Skipping copy..." first.
         Task { @MainActor [weak self] in
             guard let self, self.skipSeriesCopyRequested else { return }
-            self.modelTasks.cancel(terminateWorker: false)
+            // Match Python ``cancel_task``: cooperative cancel then kill worker (not only step boundary).
+            self.modelTasks.cancel(terminateWorker: true)
         }
     }
 
@@ -656,14 +657,29 @@ final class ImageGenController {
         activeFunction = function
         pendingValues = submitValues
         let future = max(0, copies - copiesDone - inProgress)
+        let pendingSteps = try JobStepQueue.materializePendingStepsFromUpdate(
+            pluginID: pluginID,
+            templateValues: submitValues,
+            count: future
+        )
         if var doc = stepPendingDoc {
-            let steps = try JobStepQueue.materializePendingStepsFromUpdate(
-                pluginID: pluginID,
-                templateValues: submitValues,
-                count: future
-            )
-            doc["steps"] = steps
+            doc["steps"] = pendingSteps
+            if let display = doc["display"] as? [String: Any] {
+                var displayCopy = display
+                displayCopy["full_prompt"] = FluxPromptJob.effectiveJobPromptForTooltip(submitValues)
+                doc["display"] = displayCopy
+            }
             stepPendingDoc = doc
+        }
+        if let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) {
+            var jobSteps: [[String: Any]] = []
+            if let running = stepRunning {
+                jobSteps.append(running)
+            }
+            jobSteps.append(contentsOf: pendingSteps)
+            if !jobSteps.isEmpty {
+                queue.jobs[index].steps = jobSteps
+            }
         }
         await syncActiveJobQueueRow(
             pluginID: pluginID,
@@ -1564,20 +1580,27 @@ final class ImageGenController {
         )
         pendingValues = values
         if JobStepQueue.stepNeedsAI(step) {
-            if fluxPromptTasks.isAvailable {
-                await runJobAIStage(values: values)
-            } else {
-                progressMessage = "AI prompt step skipped (not available)"
-                taskStatusHTML = progressMessage
-                bumpQueueRevision()
-                await launchGeneration(values: values)
-            }
+            await runJobAIStage(values: values)
             return
         }
         await launchGeneration(values: values)
     }
 
+    /// Job AI uses ``fluxPromptTasks`` (not dialog foreground). Probe before run — probe only ran from the image-gen dialog previously.
+    private func ensureFluxPromptTasksReadyForJobAI() async -> Bool {
+        if fluxPromptTasks.isAvailable { return true }
+        await fluxPromptTasks.probe(config: config)
+        return fluxPromptTasks.isAvailable
+    }
+
     private func runJobAIStage(values: [String: Any]) async {
+        guard await ensureFluxPromptTasksReadyForJobAI() else {
+            handleStepFailure(
+                "LM Studio is not available for AI prompt refinement.\n\n"
+                    + "Open LM Studio, load a text model, and enable the local API server."
+            )
+            return
+        }
         jobAIStageActive = true
         startJobAIProgressTracking()
         rebuildActiveStripViewLocally()
@@ -2845,7 +2868,8 @@ final class ImageGenController {
                 totalSteps: liveStepTotal,
                 historicalAvgTotalSeconds: historicalAvgTotalSeconds,
                 firstStepDuration: generationStepTiming.firstStepDuration,
-                interStepDurations: generationStepTiming.interStepDurations
+                interStepDurations: generationStepTiming.interStepDurations,
+                partialStepElapsed: liveStep >= 2 ? generationStepTiming.partialStepElapsed() : nil
             )
         }
         liveEstimateSeconds = estimate

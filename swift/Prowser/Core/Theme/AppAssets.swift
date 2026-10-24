@@ -133,7 +133,7 @@ final class NSAssetIconButton: NSButton {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -151,6 +151,27 @@ final class NSAssetIconButton: NSButton {
         isHovered = false
         applyIcon()
         GraphicButtonTooltipPopup.shared.hide(token: tooltipToken)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else {
+            if isHovered {
+                isHovered = false
+                applyIcon()
+            }
+            GraphicButtonTooltipPopup.shared.hide(token: tooltipToken)
+            return
+        }
+        super.mouseMoved(with: event)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            isHovered = false
+            GraphicButtonTooltipPopup.shared.hide(token: tooltipToken)
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     private func showGraphicTooltip() {

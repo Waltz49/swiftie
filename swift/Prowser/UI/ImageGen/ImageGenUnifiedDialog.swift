@@ -24,6 +24,7 @@ struct ImageGenUnifiedDialog: View {
     @State private var submitNotice = ""
     @State private var isDirty = false
     @State private var baselineValues: [String: Any] = [:]
+    @State private var baselineSelectedPluginID = ""
     @State private var visitedFunctions: Set<String> = []
     @State private var pluginSwitchGuard = false
     @State private var importedPluginSwitchID: String?
@@ -374,35 +375,7 @@ struct ImageGenUnifiedDialog: View {
                 selectedFunction = job.function
                 selectedPluginID = job.pluginID
                 values = job.values
-                baselineValues = job.values
                 visitedFunctions.insert(selectedFunction)
-                let tempRoot = appState.config.temporaryFilesDirectory.path
-                if selectedFunction == "edit" {
-                    let paths = ImageGenJobDialogRestore.editSourcePaths(from: job.values, tempRoot: tempRoot)
-                    lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(paths)
-                    appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
-                    if !lockedEditSourcePaths.isEmpty {
-                        values["source_image_paths"] = lockedEditSourcePaths
-                        values["source_image_path"] = lockedEditSourcePaths[0]
-                    }
-                }
-                if selectedFunction == "expand" {
-                    let expandPaths = ImageGenJobDialogRestore.editSourcePaths(from: job.values, tempRoot: tempRoot)
-                    if let path = expandPaths.first {
-                        lockedExpandSourcePath = path
-                        values["source_image_path"] = path
-                        values["source_image_paths"] = [path]
-                    }
-                }
-                if selectedFunction == "infill",
-                   let path = ImageGenJobDialogRestore.infillSourcePath(from: job.values, tempRoot: tempRoot) {
-                    lockedInfillSourcePath = path
-                    values["source_image_path"] = path
-                    values["source_image_paths"] = [path]
-                }
-                if selectedFunction == "infill" {
-                    restoreInfillMaskFromJobValues(job.values)
-                }
             } else {
                 let targetFunction = selectedFunction
                 try await ensurePluginsLoaded(function: targetFunction, availability: .fast)
@@ -420,17 +393,18 @@ struct ImageGenUnifiedDialog: View {
                         : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
                 }
             }
-            isDirty = false
         } catch {
             errorMessage = error.localizedDescription
         }
         appState.imageGen.endImageGenDialogBuild()
         isLoading = false
         await probeFluxPromptServices()
-        FluxPromptJob.restoreFluxPromptAIJobIntoEditor(values: &values, context: fluxContext)
-        FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
-        ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&values)
         guard generation == loadGeneration else { return }
+        if pendingRequest.replaceJobID != nil {
+            adoptQueueJobEditorBaseline()
+        } else {
+            commitEditorBaseline()
+        }
         schedulePostOpenWork(
             generation: generation,
             pendingRequest: pendingRequest,
@@ -676,8 +650,11 @@ struct ImageGenUnifiedDialog: View {
             }
         }
 
-        baselineValues = values
-        isDirty = false
+        if replaceJobID != nil {
+            markDirtyIfNeeded()
+        } else {
+            commitEditorBaseline()
+        }
         return true
     }
 
@@ -812,8 +789,11 @@ struct ImageGenUnifiedDialog: View {
         guard selectedPluginID == newPluginID else { return }
         session.setValues(values, for: selectedFunction)
         session.setPluginID(newPluginID, for: selectedFunction)
-        baselineValues = values
-        isDirty = false
+        if replaceJobID != nil {
+            markDirtyIfNeeded()
+        } else {
+            commitEditorBaseline()
+        }
     }
 
     private func removeLorasInapplicableToSelectedPlugin(_ pluginID: String) async {
@@ -893,8 +873,7 @@ struct ImageGenUnifiedDialog: View {
             values["source_image_paths"] = sourcePaths
             values["source_image_path"] = sourcePaths[0]
         }
-        baselineValues = values
-        isDirty = false
+        commitEditorBaseline()
     }
 
     private func prepareImportedPluginSelection(_ pluginID: String) {
@@ -943,8 +922,55 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
+    private func commitEditorBaseline() {
+        baselineValues = values
+        baselineSelectedPluginID = selectedPluginID
+        isDirty = false
+    }
+
+    /// Queue-job load and Replace/Update: baseline matches committed job + editor chrome (Python ``_after_successful_submit`` for replace).
+    private func adoptQueueJobEditorBaseline() {
+        ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&values)
+        syncLockedSourcePathsFromJobValues(values)
+        if selectedFunction == "infill" {
+            restoreInfillMaskFromJobValues(values)
+        }
+        FluxPromptJob.restoreFluxPromptAIJobIntoEditor(values: &values, context: fluxContext)
+        FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
+        fluxRefineCoordinator.clearRefineUndoState()
+        commitEditorBaseline()
+    }
+
+    private func syncLockedSourcePathsFromJobValues(_ jobValues: [String: Any]) {
+        let tempRoot = appState.config.temporaryFilesDirectory.path
+        if selectedFunction == "edit" {
+            let paths = ImageGenJobDialogRestore.editSourcePaths(from: jobValues, tempRoot: tempRoot)
+            lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(paths)
+            appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
+            if !lockedEditSourcePaths.isEmpty {
+                values["source_image_paths"] = lockedEditSourcePaths
+                values["source_image_path"] = lockedEditSourcePaths[0]
+            }
+        }
+        if selectedFunction == "expand" {
+            let expandPaths = ImageGenJobDialogRestore.editSourcePaths(from: jobValues, tempRoot: tempRoot)
+            if let path = expandPaths.first {
+                lockedExpandSourcePath = path
+                values["source_image_path"] = path
+                values["source_image_paths"] = [path]
+            }
+        }
+        if selectedFunction == "infill",
+           let path = ImageGenJobDialogRestore.infillSourcePath(from: jobValues, tempRoot: tempRoot) {
+            lockedInfillSourcePath = path
+            values["source_image_path"] = path
+            values["source_image_paths"] = [path]
+        }
+    }
+
     private func markDirtyIfNeeded() {
         isDirty = !ImageGenPersistence.snapshotsEqual(values, baselineValues)
+            || selectedPluginID != baselineSelectedPluginID
     }
 
     /// Python ``ImageGenUnifiedDialog._on_queue_replace_job_state_changed`` (visibility + copies mirror).
@@ -988,7 +1014,11 @@ struct ImageGenUnifiedDialog: View {
         guard !dismissing else { return }
         dismissing = true
         if isDirty {
+            if !baselineSelectedPluginID.isEmpty {
+                selectedPluginID = baselineSelectedPluginID
+            }
             session.setValues(baselineValues, for: selectedFunction)
+            session.setPluginID(baselineSelectedPluginID, for: selectedFunction)
             persistVisitedFunctions(excluding: selectedFunction)
         } else {
             persistVisitedFunctions()
@@ -1286,17 +1316,20 @@ struct ImageGenUnifiedDialog: View {
                     errorMessage = appState.imageGen.lastError
                 }
             }
-            session.setValues(submitValues, for: selectedFunction)
-            session.setPluginID(selectedPluginID, for: selectedFunction)
             values = submitValues
+            if replace {
+                adoptQueueJobEditorBaseline()
+            } else {
+                commitEditorBaseline()
+            }
+            session.setValues(values, for: selectedFunction)
+            session.setPluginID(selectedPluginID, for: selectedFunction)
             ImageGenPersistence.savePluginDialogSettings(
                 function: selectedFunction,
                 pluginID: selectedPluginID,
                 values: submitValues,
                 config: appState.config
             )
-            baselineValues = submitValues
-            isDirty = false
             if closeOnGenerate {
                 dismissing = true
                 skipWorkingFileCleanupOnClose = true

@@ -8,7 +8,8 @@ enum JobGenerationTimeEstimate {
         totalSteps: Int,
         historicalAvgTotalSeconds: Double?,
         firstStepDuration: Double?,
-        interStepDurations: [Double]
+        interStepDurations: [Double],
+        partialStepElapsed: Double? = nil
     ) -> Double? {
         guard totalSteps > 0 else { return nil }
         let step = max(0, completedStep)
@@ -33,7 +34,9 @@ enum JobGenerationTimeEstimate {
         }
 
         guard let secondsPerStep, secondsPerStep > 0 else { return nil }
-        return max(0, secondsPerStep * Double(stepsRemaining))
+        let gross = secondsPerStep * Double(stepsRemaining)
+        let intoCurrentStep = max(0, partialStepElapsed ?? 0)
+        return max(0, gross - intoCurrentStep)
     }
 }
 
@@ -50,6 +53,11 @@ struct JobGenerationStepTimingState {
         interStepDurations = []
         diffusionStepStartTime = nil
         lastStepBoundaryTime = nil
+    }
+
+    func partialStepElapsed(now: Date = Date()) -> Double? {
+        guard let lastStepBoundaryTime else { return nil }
+        return now.timeIntervalSince(lastStepBoundaryTime)
     }
 
     mutating func recordStepAdvance(from previousStep: Int, to newStep: Int, now: Date = Date()) {
