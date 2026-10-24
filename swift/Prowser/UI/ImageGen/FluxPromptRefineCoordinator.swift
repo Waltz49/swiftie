@@ -180,6 +180,16 @@ final class FluxPromptRefineCoordinator {
         }
         context.promptText = values.wrappedValue["prompt"] as? String ?? ""
         if appState.imageGen.hasPendingWork() {
+            if appState.imageGen.fluxPromptRefineShouldBypassPendingWorkDialog() {
+                startRefine(
+                    appState: appState,
+                    context: context,
+                    values: values,
+                    useForeground: true,
+                    onValuesChanged: onValuesChanged
+                )
+                return
+            }
             let choice = StyledMessageDialog.present(
                 title: "AI Prompt Error",
                 message: "Wait for the job queue to finish or cancel queued jobs before refining a prompt with AI.",

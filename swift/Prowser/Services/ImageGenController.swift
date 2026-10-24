@@ -3458,6 +3458,13 @@ final class ImageGenController {
         !queue.jobs.isEmpty || isRunning() || activeJobID != nil
     }
 
+    /// Gen Prompt skips the pending-work dialog and runs foreground refinement when the queue cannot advance.
+    func fluxPromptRefineShouldBypassPendingWorkDialog() -> Bool {
+        if holdJobQueue { return true }
+        let rows = queueSnapshot()
+        return !rows.isEmpty && rows.allSatisfy(\.held)
+    }
+
     /// Return true when terminate may proceed without showing a dialog.
     func quitGateAllowsImmediateTerminate() -> Bool {
         if terminateQuitConfirmed {
