@@ -1,19 +1,22 @@
 import Foundation
 
+private enum LoremDialogPlaceholderRegex {
+    nonisolated(unsafe) static let value = try! NSRegularExpression(
+        pattern: #"\{\{.*?\}\}"#,
+        options: [.dotMatchesLineSeparators]
+    )
+}
+
 /// Port of `imagegen_plugins/ai_prompt_exit.py` (`apply_text_ai_exit`).
 @MainActor
 enum AIPromptExitService {
     private static let exitTimeoutSeconds: TimeInterval = 30
-    private static let loremPlaceholderRegex = try! NSRegularExpression(
-        pattern: #"\{\{.*?\}\}"#,
-        options: [.dotMatchesLineSeparators]
-    )
 
     /// Inverse of expand-lorem exit scripts when priming dialog fields (Python ``restore_lorem_placeholders_for_dialog``).
     nonisolated static func restoreLoremPlaceholdersForDialog(_ text: String) -> String {
         if text.isEmpty || !text.contains("{{") { return text }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return loremPlaceholderRegex.stringByReplacingMatches(
+        return LoremDialogPlaceholderRegex.value.stringByReplacingMatches(
             in: text,
             range: range,
             withTemplate: "[L]"

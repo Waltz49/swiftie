@@ -20,6 +20,16 @@ enum ImageGenPluginAvailability {
         FileManager.default.isExecutableFile(atPath: config.imagegenVenvPythonPath())
     }
 
+    /// Call when imagegen venv / profile settings change (registry `reloadSettings`).
+    static func invalidateCachedRuntimeProbes() {
+        lastVenvCheck = nil
+        lastMfluxCheck = nil
+        diffusersProbeTask?.cancel()
+        diffusersProbeTask = nil
+        mfluxProbeTask?.cancel()
+        mfluxProbeTask = nil
+    }
+
     /// Cached or optimistic (venv executable only); never blocks on subprocess import probes.
     static func diffusersPipelineReady(config: AppConfig) -> Bool {
         let python = config.imagegenVenvPythonPath()
@@ -54,8 +64,8 @@ enum ImageGenPluginAvailability {
 
     /// Run import probes off the main thread (coalesced). Safe to call before `.full` plugin assembly.
     static func ensureFullRuntimeProbes(config: AppConfig) async {
-        async let diffusers: Void = { _ = await ensureDiffusersRuntimeReady(config: config) }()
-        async let mflux: Void = { _ = await ensureMfluxRuntimeReady(config: config) }()
+        async let diffusers = ensureDiffusersRuntimeReady(config: config)
+        async let mflux = ensureMfluxRuntimeReady(config: config)
         _ = await (diffusers, mflux)
     }
 

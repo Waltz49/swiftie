@@ -18,6 +18,7 @@ final class SwiftImageGenRegistry: ImageGenRegistry {
         self.config = config
         configGeneration += 1
         assembledCache.removeAll()
+        ImageGenPluginAvailability.invalidateCachedRuntimeProbes()
     }
 
     var isAvailable: Bool {
@@ -91,9 +92,6 @@ final class SwiftImageGenRegistry: ImageGenRegistry {
         savedByFunction: [String: [String: Any]],
         availability: ImageGenPluginListAvailability
     ) async throws -> [String: [[String: Any]]] {
-        if availability == .full, let config {
-            await ImageGenPluginAvailability.ensureFullRuntimeProbes(config: config)
-        }
         var out: [String: [[String: Any]]] = [:]
         for function in functions {
             let saved = savedByFunction[function]

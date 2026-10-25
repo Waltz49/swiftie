@@ -680,7 +680,8 @@ struct ImageGenUnifiedDialog: View {
         } else {
             commitEditorBaseline()
         }
-        if !functionsWithFullAvailability.contains(newFunction) {
+        // Initial bootstrap uses `schedulePostOpenWork` for `.full`; only user-driven switches need this.
+        if !oldFunction.isEmpty, !functionsWithFullAvailability.contains(newFunction) {
             let generation = loadGeneration
             Task { @MainActor in
                 await Task.yield()
