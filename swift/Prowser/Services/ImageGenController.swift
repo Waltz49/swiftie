@@ -260,6 +260,9 @@ final class ImageGenController {
             }
             guard token == self.startupQueueReleaseToken else { return }
             self.releaseStartupQueueHold()
+            if let swiftRegistry = self.registry as? SwiftImageGenRegistry {
+                swiftRegistry.prewarmDialogPluginLists()
+            }
         }
     }
 

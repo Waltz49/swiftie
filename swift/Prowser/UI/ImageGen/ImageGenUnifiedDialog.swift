@@ -31,6 +31,7 @@ struct ImageGenUnifiedDialog: View {
     @State private var suppressCloseOnGeneratePersist = false
     @State private var loadGeneration = 0
     @State private var postOpenWorkGeneration = 0
+    @State private var functionsWithFullAvailability: Set<String> = []
     /// Prevents duplicate persist/close when the user closes via the window button after ⌘W/Close.
     @State private var dismissing = false
     @State private var skipWorkingFileCleanupOnClose = false
@@ -364,6 +365,7 @@ struct ImageGenUnifiedDialog: View {
         skipWorkingFileCleanupOnClose = false
         loadGeneration += 1
         postOpenWorkGeneration += 1
+        functionsWithFullAvailability = []
         let generation = loadGeneration
         let pendingRequest = request
         let pendingAutoGenerate = pendingRequest.autoGenerate
@@ -396,7 +398,7 @@ struct ImageGenUnifiedDialog: View {
                 let targetFunction = selectedFunction
                 try await ensurePluginsLoaded(function: targetFunction, availability: .fast)
                 lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
-                await switchFunction(from: "", to: targetFunction)
+                await switchFunction(from: "", to: targetFunction, pluginsAlreadyLoaded: true)
                 bootstrapEditSourcePaths(from: pendingRequest, force: true)
                 if targetFunction == "infill", pendingRequest.function == "infill" {
                     refreshInfillFromMenuRequest()
@@ -414,7 +416,7 @@ struct ImageGenUnifiedDialog: View {
         }
         appState.imageGen.endImageGenDialogBuild()
         isLoading = false
-        await probeFluxPromptServices()
+        await Task.yield()
         guard generation == loadGeneration else { return }
         if pendingRequest.replaceJobID != nil {
             adoptQueueJobEditorBaseline()
@@ -488,36 +490,40 @@ struct ImageGenUnifiedDialog: View {
            let existing = pluginsByFunction[function], !existing.isEmpty {
             return
         }
+        if availability == .full, functionsWithFullAvailability.contains(function) {
+            return
+        }
         let plugins = try await appState.workers.imageGenRegistry.listPlugins(
             function: function,
             savedValues: savedDialogValues(function: function),
             availability: availability
         )
         pluginsByFunction[function] = plugins
+        if availability == .full {
+            functionsWithFullAvailability.insert(function)
+        }
     }
 
-    private func refreshAllPluginsFullAvailability(generation: Int) async {
+    private func refreshPluginAvailability(function: String, generation: Int) async {
         guard generation == loadGeneration else { return }
-        var savedByFunction: [String: [String: Any]] = [:]
-        for function in functions {
-            if let saved = savedDialogValues(function: function) {
-                savedByFunction[function] = saved
-            }
-        }
         do {
-            let grouped = try await appState.workers.imageGenRegistry.listPluginsGrouped(
-                functions: functions,
-                savedByFunction: savedByFunction,
-                availability: .full
-            )
-            guard generation == loadGeneration else { return }
-            for function in functions {
-                if let plugins = grouped[function] {
-                    pluginsByFunction[function] = plugins
-                }
-            }
+            try await ensurePluginsLoaded(function: function, availability: .full)
         } catch {
             // Keep fast availability lists if full probes fail.
+        }
+    }
+
+    private func prefetchOtherFunctionsFast(
+        excluding: String,
+        generation: Int,
+        workToken: Int
+    ) async {
+        for function in functions where function != excluding {
+            guard workToken == postOpenWorkGeneration, generation == loadGeneration else { return }
+            if pluginsByFunction[function]?.isEmpty != false {
+                try? await ensurePluginsLoaded(function: function, availability: .fast)
+            }
+            await Task.yield()
         }
     }
 
@@ -528,9 +534,6 @@ struct ImageGenUnifiedDialog: View {
     ) {
         postOpenWorkGeneration += 1
         let workToken = postOpenWorkGeneration
-        let targetFunction = pendingRequest.function.isEmpty
-            ? session.lastFunction(config: appState.config)
-            : pendingRequest.function
         Task { @MainActor in
             await Task.yield()
             guard workToken == postOpenWorkGeneration else { return }
@@ -543,15 +546,17 @@ struct ImageGenUnifiedDialog: View {
                 appState.imageGenDialogRequest.autoGenerate = false
                 scheduleAutoGenerate()
             }
-            let unloaded = functions.filter { function in
-                function != targetFunction && (pluginsByFunction[function] ?? []).isEmpty
-            }
-            for function in unloaded {
-                guard workToken == postOpenWorkGeneration, generation == loadGeneration else { return }
-                try? await ensurePluginsLoaded(function: function, availability: .fast)
-            }
+            guard workToken == postOpenWorkGeneration, generation == loadGeneration else { return }
+            await probeFluxPromptServices()
+            guard workToken == postOpenWorkGeneration, generation == loadGeneration else { return }
+            let fullFunction = selectedFunction
+            await refreshPluginAvailability(function: fullFunction, generation: generation)
             guard workToken == postOpenWorkGeneration else { return }
-            await refreshAllPluginsFullAvailability(generation: generation)
+            await prefetchOtherFunctionsFast(
+                excluding: fullFunction,
+                generation: generation,
+                workToken: workToken
+            )
         }
     }
 
@@ -574,8 +579,12 @@ struct ImageGenUnifiedDialog: View {
     }
 
     @discardableResult
-    private func switchFunction(from oldFunction: String, to newFunction: String) async -> Bool {
-        if pluginsByFunction[newFunction]?.isEmpty != false {
+    private func switchFunction(
+        from oldFunction: String,
+        to newFunction: String,
+        pluginsAlreadyLoaded: Bool = false
+    ) async -> Bool {
+        if !pluginsAlreadyLoaded, pluginsByFunction[newFunction]?.isEmpty != false {
             do {
                 try await ensurePluginsLoaded(function: newFunction, availability: .fast)
             } catch {
@@ -670,6 +679,13 @@ struct ImageGenUnifiedDialog: View {
             markDirtyIfNeeded()
         } else {
             commitEditorBaseline()
+        }
+        if !functionsWithFullAvailability.contains(newFunction) {
+            let generation = loadGeneration
+            Task { @MainActor in
+                await Task.yield()
+                await refreshPluginAvailability(function: newFunction, generation: generation)
+            }
         }
         return true
     }
@@ -1021,9 +1037,10 @@ struct ImageGenUnifiedDialog: View {
             fluxContext.lmStudioMounted = false
             return
         }
-        await appState.workers.fluxPromptTasks.probe(config: appState.config)
-        await appState.workers.foregroundModelTasks.probe(config: appState.config)
-        fluxContext.lmStudioMounted = appState.workers.foregroundModelTasks.isAvailable
+        let ok = await LmStudioCaptionService.shared.probeServicesIfNeeded(config: appState.config)
+        appState.workers.fluxPromptTasks.markAvailable(ok)
+        appState.workers.foregroundModelTasks.markAvailable(ok)
+        fluxContext.lmStudioMounted = ok
     }
 
     private func performCancel() {

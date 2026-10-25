@@ -20,6 +20,10 @@ final class LmStudioCaptionService {
     private(set) var sessionState: SessionState = .unknown
     private var activeTask: Task<Void, Never>?
 
+    private static let probeCacheTTL: TimeInterval = 30
+    private var lastProbeCache: (hostKey: String, ok: Bool, checked: Date)?
+    private var inFlightProbe: Task<Bool, Never>?
+
     private static let logTag = "imagegen_plugins.lmstudio_caption"
 
     var isCaptionInProgress: Bool { activeTask != nil }
@@ -35,8 +39,31 @@ final class LmStudioCaptionService {
     }
 
     func probeServices(config: AppConfig) async {
-        let reachable = await networkProbe(config: config)
-        sessionState = reachable ? .available : .unavailable
+        _ = await probeServicesIfNeeded(config: config)
+    }
+
+    /// Single coalesced LM Studio reachability probe (shared by flux + foreground task bridges).
+    func probeServicesIfNeeded(config: AppConfig) async -> Bool {
+        let hostKey = captionHost(config: config).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let cached = lastProbeCache,
+           cached.hostKey == hostKey,
+           Date().timeIntervalSince(cached.checked) < Self.probeCacheTTL {
+            sessionState = cached.ok ? .available : .unavailable
+            return cached.ok
+        }
+        if let inFlightProbe {
+            return await inFlightProbe.value
+        }
+        let task = Task { @MainActor in
+            let reachable = await networkProbe(config: config)
+            sessionState = reachable ? .available : .unavailable
+            lastProbeCache = (hostKey, reachable, Date())
+            return reachable
+        }
+        inFlightProbe = task
+        let ok = await task.value
+        inFlightProbe = nil
+        return ok
     }
 
     func cancelCaption() {

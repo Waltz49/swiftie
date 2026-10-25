@@ -6,8 +6,7 @@ final class FluxPromptLMStudioService {
     private var activeTask: Task<Void, Never>?
 
     func probe(config: AppConfig) async -> Bool {
-        await caption.probeServices(config: config)
-        return caption.isUIAvailable
+        await caption.probeServicesIfNeeded(config: config)
     }
 
     func cancel() {

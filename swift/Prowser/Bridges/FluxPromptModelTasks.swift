@@ -28,8 +28,7 @@ final class FluxPromptModelTasks {
 
     func probe(config: AppConfig) async {
         bind(config: config)
-        let ok = await service.probe(config: config)
-        isReady = ok
+        isReady = await service.probe(config: config)
     }
 
     func cancel() {
