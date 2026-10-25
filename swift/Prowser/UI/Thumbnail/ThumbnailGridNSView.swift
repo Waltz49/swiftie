@@ -1710,6 +1710,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     size: NSSize(width: cgImage.width, height: cgImage.height)
                 )
                 self.thumbnails[path] = image
+                self.ensureImageDimensionsCached(for: path)
                 if let paintIndex = self.imagePaths.firstIndex(of: path) {
                     self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
                 }
@@ -1935,7 +1936,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard thumbnailLoadingActive else { return }
         guard appState?.fileData.currentViewMode == .thumbnail else { return }
         if isBackground, backgroundLoadingSuspended { return }
-        if thumbnails[path] != nil { return }
+        if thumbnails[path] != nil {
+            ensureImageDimensionsCached(for: path)
+            return
+        }
         if loadingPaths.contains(path) { return }
         loadingPaths.insert(path)
         let pixelSize = thumbnailGenerationPixelSize()
@@ -1962,6 +1966,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                     return
                 }
                 self.thumbnails[path] = image
+                self.noteImageDimensionsAvailable(for: path)
                 if let paintIndex = self.imagePaths.firstIndex(of: path) {
                     self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
                 } else {
@@ -2280,6 +2285,27 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             let drawY = y + (lineHeight - font.boundingRectForFont.height) / 2
             (line as NSString).draw(at: NSPoint(x: drawX, y: drawY), withAttributes: attrs)
             y += lineHeight
+        }
+    }
+
+    private func ensureImageDimensionsCached(for path: String) {
+        guard showImageSize else { return }
+        guard appState?.metadataCache.cachedPixelSize(path: path) == nil else { return }
+        appState?.metadataCache.ensurePixelSizeCached(path: path)
+        noteImageDimensionsAvailable(for: path)
+    }
+
+    private func noteImageDimensionsAvailable(for path: String) {
+        guard showImageSize else { return }
+        guard let dims = appState?.metadataCache.cachedPixelSize(path: path),
+              dims.width > 0, dims.height > 0 else {
+            return
+        }
+        let text = "\(dims.width)x\(dims.height)"
+        if imageDimensionCache[path] == text { return }
+        imageDimensionCache[path] = text
+        if let paintIndex = imagePaths.firstIndex(of: path) {
+            setNeedsDisplay(thumbnailRect(for: paintIndex))
         }
     }
 

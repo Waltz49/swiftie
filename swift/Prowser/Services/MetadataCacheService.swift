@@ -56,6 +56,12 @@ final class MetadataCacheService {
         return dims
     }
 
+    /// Lightweight header read when dimensions are not yet in the metadata cache.
+    func ensurePixelSizeCached(path: String) {
+        guard cachedPixelSize(path: path) == nil else { return }
+        _ = pixelSize(path: path)
+    }
+
     /// Pixel dimensions already in the metadata cache (no image file I/O).
     func cachedPixelSize(path: String) -> (width: Int, height: Int)? {
         if let cached = cache[path], cached.pixelWidth > 0, cached.pixelHeight > 0 {
@@ -176,7 +182,9 @@ final class MetadataCacheService {
     private func entry(for path: String) -> Entry? {
         guard let mtime = readMtime(for: path) else { return nil }
         if let cached = cache[path], abs(cached.mtime - mtime) < 0.001 {
-            return cached
+            if cached.pixelWidth > 0, cached.pixelHeight > 0 {
+                return cached
+            }
         }
         let size = readSize(for: path) ?? 0
         let props = loadImageIOProps(path: path)
@@ -232,9 +240,9 @@ final class MetadataCacheService {
         ) as? [CFString: Any] else {
             return nil
         }
-        let rawWidth = props[kCGImagePropertyPixelWidth] as? Int ?? 0
-        let rawHeight = props[kCGImagePropertyPixelHeight] as? Int ?? 0
-        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        let rawWidth = imageIOInt(props[kCGImagePropertyPixelWidth]) ?? 0
+        let rawHeight = imageIOInt(props[kCGImagePropertyPixelHeight]) ?? 0
+        let orientation = imageIOInt(props[kCGImagePropertyOrientation]) ?? 1
         let width: Int
         let height: Int
         if (5...8).contains(orientation) {
@@ -245,6 +253,16 @@ final class MetadataCacheService {
             height = rawHeight
         }
         return (width, height, exifTimestamp(from: props))
+    }
+
+    private func imageIOInt(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        if let int = value as? Int {
+            return int
+        }
+        return nil
     }
 
     private func exifTimestamp(from props: [CFString: Any]) -> Int? {

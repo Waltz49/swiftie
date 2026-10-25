@@ -569,6 +569,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                         width: result.originalWidth,
                         height: result.originalHeight
                     )
+                } else {
+                    appState.metadataCache.ensurePixelSizeCached(path: path)
                 }
                 completion(image)
             }

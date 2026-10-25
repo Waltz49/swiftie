@@ -779,14 +779,24 @@ private actor ThumbnailDecodePool {
         )
     }
 
+    private static func imageIOInt(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        if let int = value as? Int {
+            return int
+        }
+        return nil
+    }
+
     private static func originalPixelSize(from source: CGImageSource, ignoreExifRotation: Bool) -> (width: Int, height: Int) {
         let propertyOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
         guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, propertyOptions as CFDictionary) as? [CFString: Any],
-              let rawWidth = props[kCGImagePropertyPixelWidth] as? Int,
-              let rawHeight = props[kCGImagePropertyPixelHeight] as? Int else {
+              let rawWidth = imageIOInt(props[kCGImagePropertyPixelWidth]),
+              let rawHeight = imageIOInt(props[kCGImagePropertyPixelHeight]) else {
             return (0, 0)
         }
-        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        let orientation = imageIOInt(props[kCGImagePropertyOrientation]) ?? 1
         if !ignoreExifRotation, (5...8).contains(orientation) {
             return (rawHeight, rawWidth)
         }

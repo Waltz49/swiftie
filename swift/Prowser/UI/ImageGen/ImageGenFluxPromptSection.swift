@@ -20,8 +20,11 @@ struct ImageGenFluxPromptSection: View {
             ImageGenCollapsibleSection(
                 title: "AI Prompt Enhancement",
                 isExpanded: $fluxContext.sectionExpanded,
-                tooltip: "Refine prompts with a local LM Studio model."
+                tooltip: "Refine prompts with a local LM Studio model.",
+                headerTrailingLeadingGap: ImageGenCollapsibleSectionMetrics.headerTrailingLeadingGap
             ) {
+                fluxPromptJobHeaderToggle
+            } content: {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Pass image to Prompt Generator", isOn: $fluxContext.passImage)
                         .toggleStyle(.checkbox)
@@ -53,16 +56,6 @@ struct ImageGenFluxPromptSection: View {
 
                     systemPromptBlock
 
-                    Toggle("Job: Include AI Prompt Refinement in jobs", isOn: $fluxContext.jobCheckbox)
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
-                        .padding(.leading, 18)
-                        .onChange(of: fluxContext.jobCheckbox) { _, enabled in
-                            ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
-                            values["flux_prompt_job_with_generate"] = enabled
-                            onValuesChanged?()
-                        }
-
                     if !refineCoordinator.refineError.isEmpty {
                         Text(refineCoordinator.refineError)
                             .font(.caption)
@@ -70,6 +63,7 @@ struct ImageGenFluxPromptSection: View {
                     }
                 }
             }
+            .padding(.top, 16)
             .onAppear {
                 loadSettings()
                 syncContextFromValues()
@@ -90,6 +84,24 @@ struct ImageGenFluxPromptSection: View {
                 refineCoordinator.teardown(appState: appState)
             }
         }
+    }
+
+    private var fluxPromptJobHeaderToggle: some View {
+        HStack(spacing: 8) {
+            SettingsPreferenceSwitch(isOn: $fluxContext.jobCheckbox)
+                .onChange(of: fluxContext.jobCheckbox) { _, enabled in
+                    ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
+                    values["flux_prompt_job_with_generate"] = enabled
+                    onValuesChanged?()
+                }
+            Text("Job: Include AI Prompt Refinement in jobs")
+                .font(.caption)
+                .foregroundStyle(.primary)
+        }
+        .help(
+            "When enabled, Generate runs AI prompt refinement as the first stage "
+                + "of the image job (queued or immediate)."
+        )
     }
 
     private var genPromptDisabled: Bool {

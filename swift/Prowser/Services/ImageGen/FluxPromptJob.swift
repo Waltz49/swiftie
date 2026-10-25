@@ -107,20 +107,6 @@ enum FluxPromptJob {
         ]
     }
 
-    static func fluxPromptAIJobUIActive(context: ImageGenFluxPromptSubmitContext, lmStudioMounted: Bool) -> Bool {
-        guard lmStudioMounted, context.sectionExpanded else { return false }
-        return true
-    }
-
-    static func stripFluxPromptAIJobIfUIInactive(
-        context: ImageGenFluxPromptSubmitContext,
-        lmStudioMounted: Bool,
-        values: inout [String: Any]
-    ) {
-        if fluxPromptAIJobUIActive(context: context, lmStudioMounted: lmStudioMounted) { return }
-        clearFluxPromptAIJob(&values)
-    }
-
     @discardableResult
     static func attachFluxPromptAIJobToValues(
         context: ImageGenFluxPromptSubmitContext,
@@ -129,7 +115,7 @@ enum FluxPromptJob {
         force: Bool = false
     ) -> Bool {
         clearFluxPromptAIJob(&values)
-        guard fluxPromptAIJobUIActive(context: context, lmStudioMounted: context.lmStudioMounted) else {
+        guard context.lmStudioMounted else {
             return false
         }
         if !force, !context.jobCheckbox { return false }
@@ -144,7 +130,7 @@ enum FluxPromptJob {
         values: inout [String: Any],
         force: Bool = false
     ) -> Bool {
-        if !fluxPromptAIJobUIActive(context: context, lmStudioMounted: context.lmStudioMounted) {
+        if !context.lmStudioMounted {
             if force { return false }
             clearFluxPromptAIJob(&values)
             return true
@@ -160,7 +146,7 @@ enum FluxPromptJob {
         context: ImageGenFluxPromptSubmitContext,
         force: Bool = false
     ) -> Bool {
-        guard fluxPromptAIJobUIActive(context: context, lmStudioMounted: context.lmStudioMounted) else {
+        guard context.lmStudioMounted else {
             return false
         }
         if force || context.jobCheckbox {
@@ -354,7 +340,7 @@ enum FluxPromptJob {
         if values["series_prompt_refinement"] as? Bool == true { return true }
         if JobStepQueue.hasFluxPromptAIJob(values) { return true }
         guard let context else { return false }
-        guard fluxPromptAIJobUIActive(context: context, lmStudioMounted: context.lmStudioMounted) else {
+        guard context.lmStudioMounted else {
             return false
         }
         return context.jobCheckbox
