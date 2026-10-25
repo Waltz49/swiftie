@@ -360,6 +360,9 @@ enum FluxPromptJob {
         return context.jobCheckbox
     }
 
+    private static let copiesRandomSeedMessage =
+        "Copies greater than 1 require Random seed to be enabled so each image uses a different seed."
+
     /// Port of ``prompt_enable_random_seed_for_copies``.
     private enum CopiesRandomSeedDialogChoice: Int {
         case cancel = 0
@@ -370,7 +373,7 @@ enum FluxPromptJob {
     private static func promptEnableRandomSeedForCopies(parentWindow: NSWindow?) -> CopiesRandomSeedDialogChoice? {
         let index = StyledMessageDialog.present(
             title: "Random seed required",
-            message: "Copies greater than 1 require Random seed to be enabled so each image uses a different seed.",
+            message: copiesRandomSeedMessage,
             style: .warning,
             icon: .warning,
             buttons: [
@@ -382,8 +385,8 @@ enum FluxPromptJob {
             escapeButtonIndex: CopiesRandomSeedDialogChoice.cancel.rawValue,
             parentWindow: parentWindow
         )
-        guard let index else { return nil }
-        return CopiesRandomSeedDialogChoice(rawValue: index)
+        guard let index, let choice = CopiesRandomSeedDialogChoice(rawValue: index) else { return nil }
+        return choice
     }
 
     /// Port of ``apply_copies_random_seed_choice``.
@@ -391,13 +394,16 @@ enum FluxPromptJob {
         values: inout [String: Any],
         choice: CopiesRandomSeedDialogChoice?
     ) -> Bool {
-        guard let choice, choice != .cancel else { return false }
-        if choice == .singleWithSeed {
+        switch choice {
+        case nil, .cancel:
+            return false
+        case .singleWithSeed:
             values["copies"] = 1
             return true
+        case .multiWithRandomSeeds:
+            values["random_seed"] = true
+            return true
         }
-        values["random_seed"] = true
-        return true
     }
 
     /// Port of ``apply_copies_random_seed_if_required`` / ``validate_copies_require_random_seed``.

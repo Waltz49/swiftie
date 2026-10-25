@@ -1220,6 +1220,7 @@ struct ImageGenUnifiedDialog: View {
         ) {
             return nil
         }
+        // Python ``sync_random_seed_setting`` / ``sync_copies_setting`` on the dialog values binding.
         if let randomSeed = submitValues["random_seed"] as? Bool {
             values["random_seed"] = randomSeed
         }
@@ -1311,8 +1312,8 @@ struct ImageGenUnifiedDialog: View {
                 : "The selected model is not available."
             return
         }
-        let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
         guard var submitValues = prepareRunValues(forceFluxAIJob: forceFluxAIJob) else { return }
+        let copies = JobStepQueue.normalizeCopies(submitValues["copies"] ?? 1)
         submitValues["copies"] = copies
         if selectedFunction == "infill" {
             do {
