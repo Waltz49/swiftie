@@ -189,14 +189,15 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         let allocHeight = max(totalHeight - splitterTotal, CGFloat(displayedCount) * SidebarPaneLayout.headerHeight)
         let updated = model.layoutSizes(totalHeight: allocHeight, appState: appState)
         model.applySizes(updated, appState: appState, persist: false)
-        refitJobsPane(appState: appState)
+        refitJobsPaneIfNeeded(appState: appState)
     }
 
-    /// `scaledSizes` drift goes to the last pane; re-pin jobs to content. In ALL+multi-job
-    /// mode ``ensureJobsPaneFitsContent`` is grow-only when pinned, so user height is kept.
-    private func refitJobsPane(appState: AppState) {
+    /// Python ``_update_splitter_sizes`` only syncs jobs geometry for compact/shrink-wrap, not every scale pass.
+    private func refitJobsPaneIfNeeded(appState: AppState) {
         guard model.side == .right, appState.jobsDisplayMode == .pane else { return }
-        appState.scheduleJobsPaneGeometryRefit()
+        if appState.jobsQueueSizeMode == .strip || appState.shouldShrinkWrapJobsClient() {
+            appState.scheduleJobsPaneGeometryRefit()
+        }
     }
 
     private func togglePane(_ descriptor: SidebarPaneDescriptor) {

@@ -52,6 +52,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var documentWidthConstraint: NSLayoutConstraint?
     private var documentHeightConstraint: NSLayoutConstraint?
     private var stackTrailingConstraint: NSLayoutConstraint?
+    private var scrollViewBottomConstraint: NSLayoutConstraint?
+    private var scrollViewHeightConstraint: NSLayoutConstraint?
     private var lastStackScrollbarReserve: CGFloat = 0
     private var pendingScrollWidth: CGFloat?
     private var scrollWidthReconfigureScheduled = false
@@ -101,11 +103,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         addSubview(scrollView)
         let stackTrailing = stackView.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -4)
         stackTrailingConstraint = stackTrailing
+        let scrollBottom = scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        scrollViewBottomConstraint = scrollBottom
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrollBottom,
             stackView.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 4),
             stackTrailing,
             stackView.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 4),
@@ -225,6 +229,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             updateDocumentHeight()
         }
         refreshActionBarState()
+        syncQueueScrollGeometry()
         invalidateIntrinsicContentSize()
     }
 
@@ -466,8 +471,78 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         return max(lastConfiguredScrollWidth, 260)
     }
 
+    /// Port of Python ``ScrollBarAlwaysOff`` / ``_scroll_fits_all_job_rows`` for viewport width.
+    private func shouldTreatVerticalScrollerAsOff() -> Bool {
+        guard let appState = paneContextMenuAppState else { return false }
+        let mode = appState.jobsQueueSizeMode
+        switch mode {
+        case .one:
+            return true
+        case .strip:
+            return true
+        case .all:
+            if appState.imageGen.queue.jobs.count <= 1 {
+                return true
+            }
+            return scrollFitsAllJobRowsInViewport()
+        }
+    }
+
+    private func usesAutoFitQueueScrollHeight() -> Bool {
+        guard let appState = paneContextMenuAppState else { return false }
+        let mode = appState.jobsQueueSizeMode
+        if mode == .one { return !rows.isEmpty }
+        if mode == .all, appState.imageGen.queue.jobs.count <= 1 { return !rows.isEmpty }
+        return false
+    }
+
+    /// Port of ``JobQueuePanelWidget._scroll_fits_all_job_rows``.
+    private func scrollFitsAllJobRowsInViewport() -> Bool {
+        guard !rows.isEmpty else { return false }
+        let stackH = measuredCardStackHeight()
+        guard stackH > 0 else { return false }
+        let clipH = scrollView.contentView.bounds.height
+        guard clipH > 1 else { return true }
+        let slack = JobQueueLayout.paneFitBottomSlack
+        return stackH <= clipH - slack + 1
+    }
+
+    func syncVerticalScrollBarPolicy() {
+        let scrollerOff = shouldTreatVerticalScrollerAsOff()
+        scrollView.hasVerticalScroller = !scrollerOff
+        if scrollerOff {
+            scrollView.verticalScrollElasticity = .none
+        } else {
+            scrollView.verticalScrollElasticity = .automatic
+        }
+        syncStackTrailingInsetForScrollbar()
+    }
+
+    /// Port of ``_apply_one_job_scroll_height`` for sidebar ONE / single-row auto-fit.
+    private func applyAutoFitScrollHeightIfNeeded() {
+        guard usesAutoFitQueueScrollHeight() else {
+            scrollViewHeightConstraint?.isActive = false
+            scrollViewBottomConstraint?.isActive = true
+            return
+        }
+        let target = max(measuredCardStackHeight(), 40)
+        if scrollViewHeightConstraint == nil {
+            scrollViewHeightConstraint = scrollView.heightAnchor.constraint(equalToConstant: target)
+            scrollViewHeightConstraint?.priority = .required
+        }
+        scrollViewBottomConstraint?.isActive = false
+        scrollViewHeightConstraint?.constant = target
+        scrollViewHeightConstraint?.isActive = true
+    }
+
+    func syncQueueScrollGeometry() {
+        syncVerticalScrollBarPolicy()
+        applyAutoFitScrollHeightIfNeeded()
+    }
+
     /// Port of Python ``get_viewport_width`` scrollbar fudge when content scrolls vertically.
     private func verticalScrollbarReservedWidth() -> CGFloat {
+        guard !shouldTreatVerticalScrollerAsOff() else { return 0 }
         guard scrollView.hasVerticalScroller, contentNeedsVerticalScroller() else { return 0 }
         let controlSize = scrollView.verticalScroller?.controlSize ?? .regular
         let style = scrollView.verticalScroller?.scrollerStyle ?? .legacy
@@ -475,6 +550,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     private func contentNeedsVerticalScroller() -> Bool {
+        if shouldTreatVerticalScrollerAsOff() { return false }
         let clipH = scrollView.contentView.bounds.height
         guard clipH > 1 else { return false }
         let docH = documentHeightConstraint?.constant ?? documentView.frame.height
@@ -561,13 +637,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         documentWidthConstraint?.constant = docW
         documentHeightConstraint?.constant = contentHeight
         documentView.frame = NSRect(x: 0, y: 0, width: docW, height: contentHeight)
-        syncStackTrailingInsetForScrollbar()
+        syncQueueScrollGeometry()
         stackView.layoutSubtreeIfNeeded()
     }
 
     override func layout() {
         super.layout()
-        syncStackTrailingInsetForScrollbar()
+        syncQueueScrollGeometry()
         let width = effectiveScrollWidth()
         jobsPaneDebug(
             "layout bounds=\(bounds) inWindow=\(window == nil ? "nil" : "\(convert(bounds, to: nil))") "
@@ -1179,7 +1255,7 @@ final class JobCardNSView: NSView {
         syncStoredFullPrompt(row.fullPrompt)
         let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
-        let useInline = Self.useInlineRefs(
+        let useInline = resolveInlineRefs(
             scrollWidth: scrollWidth,
             paths: refs,
             referencesInvalid: row.referencesInvalid
@@ -1248,10 +1324,15 @@ final class JobCardNSView: NSView {
         dismissPromptTooltipIfContentChanged()
     }
 
-    /// Python ``JobCard._use_inline_refs_layout``: wide pane and 1–2 (valid) references.
-    private static func useInlineRefs(scrollWidth: CGFloat, paths: [String], referencesInvalid: Bool) -> Bool {
+    /// Python ``JobCard._use_inline_refs_layout`` with hysteresis so scroller width cannot flip layout.
+    private func resolveInlineRefs(scrollWidth: CGFloat, paths: [String], referencesInvalid: Bool) -> Bool {
         let count = JobReferenceThumbsNSView.cellCount(paths: paths, referencesInvalid: referencesInvalid)
-        return scrollWidth > JobQueueLayout.inlineRefsMinScrollWidth && count >= 1 && count <= 2
+        guard count >= 1, count <= 2 else { return false }
+        let enter = JobQueueLayout.inlineRefsMinScrollWidth + 8
+        let exit = JobQueueLayout.inlineRefsMinScrollWidth - 8
+        if scrollWidth > enter { return true }
+        if scrollWidth < exit { return false }
+        return lastInlineRefs
     }
 
     /// Place the reference thumbs beside (single column) or below (wrapping rows) the status.
@@ -1330,7 +1411,7 @@ final class JobCardNSView: NSView {
         let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
         refsView.configure(paths: refs, referencesInvalid: row.referencesInvalid, colors: colors)
-        let useInline = Self.useInlineRefs(
+        let useInline = resolveInlineRefs(
             scrollWidth: scrollWidth,
             paths: refs,
             referencesInvalid: row.referencesInvalid
@@ -1420,7 +1501,7 @@ final class JobCardNSView: NSView {
         if !statusWidget.hasRenderedView() { return false }
         let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
-        let useInline = Self.useInlineRefs(
+        let useInline = resolveInlineRefs(
             scrollWidth: scrollWidth,
             paths: refs,
             referencesInvalid: row.referencesInvalid
@@ -1692,6 +1773,7 @@ final class JobQueuePanelHostView: NSView {
 
     override func layout() {
         super.layout()
+        panel.syncQueueScrollGeometry()
         guard let appState = panel.paneContextMenuAppState else { return }
         let width = panel.layoutViewportWidth()
         let mode = appState.jobsQueueSizeMode
@@ -1801,6 +1883,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
             scrollWidth: scrollWidth,
             imageGenUIRevision: appState.imageGenUIRevision
         )
+        panel.syncQueueScrollGeometry()
     }
 
     @MainActor

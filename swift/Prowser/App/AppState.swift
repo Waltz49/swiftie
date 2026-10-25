@@ -58,6 +58,8 @@ final class AppState {
     var jobsPanelAlwaysOnTop = false
     var measuredJobsCardStackHeight: CGFloat = 0
     var measuredActiveJobStripHeight: CGFloat = 0
+    /// Last strip structure used for pane refit; avoids 500ms progress ticks resizing the jobs pane.
+    var lastStripHeightRefitStructureKey: String?
     var isAdjustingJobsPaneGeometry = false
     /// Latest AppKit measurement from ``JobQueuePanelHostView`` (cards + action bar; not strip).
     var jobsQueuePanelIntrinsicHeight: CGFloat = 0

@@ -307,7 +307,18 @@ extension AppState {
 
     func updateMeasuredActiveJobStripHeight(_ height: CGFloat) {
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: height)
-        guard abs(measuredActiveJobStripHeight - height) > tolerance else { return }
+        let structureKey = imageGen.activeStripView.structureKey()
+        var refitTolerance = tolerance
+        if imageGen.isProcessing {
+            if structureKey == lastStripHeightRefitStructureKey {
+                refitTolerance = max(tolerance, 12)
+            } else {
+                lastStripHeightRefitStructureKey = structureKey
+            }
+        } else {
+            lastStripHeightRefitStructureKey = nil
+        }
+        guard abs(measuredActiveJobStripHeight - height) > refitTolerance else { return }
         measuredActiveJobStripHeight = height
         guard shouldScheduleJobsPaneRefitForContentChange() else { return }
         scheduleJobsPaneGeometryRefit()
@@ -317,7 +328,6 @@ extension AppState {
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: cardStackHeight)
         guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
         measuredJobsCardStackHeight = cardStackHeight
-        bumpImageGenUI()
         guard shouldScheduleJobsPaneRefitForContentChange(allowGrowWhenAllMultiPinned: true) else { return }
         scheduleJobsPaneGeometryRefit()
     }
