@@ -360,6 +360,46 @@ enum FluxPromptJob {
         return context.jobCheckbox
     }
 
+    /// Port of ``prompt_enable_random_seed_for_copies``.
+    private enum CopiesRandomSeedDialogChoice: Int {
+        case cancel = 0
+        case singleWithSeed = 1
+        case multiWithRandomSeeds = 2
+    }
+
+    private static func promptEnableRandomSeedForCopies(parentWindow: NSWindow?) -> CopiesRandomSeedDialogChoice? {
+        let index = StyledMessageDialog.present(
+            title: "Random seed required",
+            message: "Copies greater than 1 require Random seed to be enabled so each image uses a different seed.",
+            style: .warning,
+            icon: .warning,
+            buttons: [
+                StyledMessageDialog.Button("Cancel", role: .dismissive),
+                StyledMessageDialog.Button("Single with seed", role: .dismissive),
+                StyledMessageDialog.Button("Multi with random seeds"),
+            ],
+            defaultButtonIndex: CopiesRandomSeedDialogChoice.multiWithRandomSeeds.rawValue,
+            escapeButtonIndex: CopiesRandomSeedDialogChoice.cancel.rawValue,
+            parentWindow: parentWindow
+        )
+        guard let index else { return nil }
+        return CopiesRandomSeedDialogChoice(rawValue: index)
+    }
+
+    /// Port of ``apply_copies_random_seed_choice``.
+    private static func applyCopiesRandomSeedChoice(
+        values: inout [String: Any],
+        choice: CopiesRandomSeedDialogChoice?
+    ) -> Bool {
+        guard let choice, choice != .cancel else { return false }
+        if choice == .singleWithSeed {
+            values["copies"] = 1
+            return true
+        }
+        values["random_seed"] = true
+        return true
+    }
+
     /// Port of ``apply_copies_random_seed_if_required`` / ``validate_copies_require_random_seed``.
     static func applyCopiesRandomSeedIfRequired(
         values: inout [String: Any],
@@ -369,21 +409,10 @@ enum FluxPromptJob {
         if copyCount <= 1 { return true }
         if values["random_seed"] as? Bool ?? false { return true }
         if multiCopyFixedSeedAllowed(values: values, context: context) { return true }
-        let choice = StyledMessageDialog.present(
-            title: "Randomize seed",
-            message: "Multiple copies usually need Randomize seed enabled so each image differs.\n\nEnable Randomize seed for this job?",
-            style: .informational,
-            buttons: [
-                StyledMessageDialog.Button("Cancel", role: .dismissive),
-                StyledMessageDialog.Button("Enable"),
-            ],
-            defaultButtonIndex: 1,
-            escapeButtonIndex: 0,
-            parentWindow: NSApp.keyWindow
+        return applyCopiesRandomSeedChoice(
+            values: &values,
+            choice: promptEnableRandomSeedForCopies(parentWindow: NSApp.keyWindow)
         )
-        guard choice == 1 else { return false }
-        values["random_seed"] = true
-        return true
     }
 
     static func applyPromptExitsAfterFluxJobResolution(values: inout [String: Any], config: AppConfig) -> Bool {

@@ -1220,6 +1220,13 @@ struct ImageGenUnifiedDialog: View {
         ) {
             return nil
         }
+        if let randomSeed = submitValues["random_seed"] as? Bool {
+            values["random_seed"] = randomSeed
+        }
+        let resolvedCopies = JobStepQueue.normalizeCopies(submitValues["copies"] ?? copies)
+        if resolvedCopies != JobStepQueue.normalizeCopies(values["copies"] ?? 1) {
+            values["copies"] = resolvedCopies
+        }
         // Image AI exits run at worker payload build time; do not mutate queued job/dialog prompt text.
         return submitValues
     }
