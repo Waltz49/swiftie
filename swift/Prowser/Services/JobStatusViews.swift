@@ -158,6 +158,7 @@ struct ActiveJobStripStatusView: Equatable {
     var cooldownCountText: String
     var showSkipIcon: Bool
     var showCancelIcon: Bool
+    var progressTooltipText: String
 
     init(
         rows: [ActiveJobStripRowKind] = [],
@@ -165,7 +166,8 @@ struct ActiveJobStripStatusView: Equatable {
         cooldownText: String = "",
         cooldownCountText: String = "",
         showSkipIcon: Bool = false,
-        showCancelIcon: Bool = false
+        showCancelIcon: Bool = false,
+        progressTooltipText: String = ""
     ) {
         self.rows = rows
         self.mode = mode
@@ -173,6 +175,7 @@ struct ActiveJobStripStatusView: Equatable {
         self.cooldownCountText = cooldownCountText
         self.showSkipIcon = showSkipIcon
         self.showCancelIcon = showCancelIcon
+        self.progressTooltipText = progressTooltipText
     }
 
     var isEmpty: Bool { rows.isEmpty && cooldownText.isEmpty }
@@ -240,7 +243,8 @@ struct ActiveJobStripStatusView: Equatable {
             cooldownText: dict["cooldown_text"] as? String ?? "",
             cooldownCountText: dict["cooldown_count_text"] as? String ?? "",
             showSkipIcon: dict["show_skip_icon"] as? Bool ?? false,
-            showCancelIcon: dict["show_cancel_icon"] as? Bool ?? false
+            showCancelIcon: dict["show_cancel_icon"] as? Bool ?? false,
+            progressTooltipText: dict["progress_tooltip_text"] as? String ?? ""
         )
     }
 }

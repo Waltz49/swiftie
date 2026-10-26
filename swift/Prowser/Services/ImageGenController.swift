@@ -81,6 +81,7 @@ final class ImageGenController {
     private var stripLiveSinks: [ObjectIdentifier: @MainActor (ActiveJobStripStatusView) -> Void] = [:]
     private var liveStatusTask: Task<Void, Never>?
     private var activeStatusView: QueueJobStatusView?
+    private var lastResolvedLoraStatusLabel: String?
     private var quitAfterCurrentWorker = false
     private var deferredQuitWaitAllJobs = false
     private var queueAdvanceSuppressed = false
@@ -2687,7 +2688,7 @@ final class ImageGenController {
         }
         let timing = currentTimingForDisplay()
         let elapsed = timing.elapsed ?? wallClockElapsedSeconds(inCooldown: cooldownSecondsRemaining > 0) ?? 0
-        activeStripView = ActiveJobStripBuilder.build(
+        var strip = ActiveJobStripBuilder.build(
             elapsedSeconds: elapsed,
             estimateSeconds: timing.estimate,
             step: liveStep,
@@ -2698,6 +2699,32 @@ final class ImageGenController {
             totalSeries: copiesTotal > 1 ? copiesTotal : nil,
             totalQueueJobs: includeQueueJobsRow ? queueSnapshot().count : nil
         )
+        strip.progressTooltipText = activeStripProgressTooltipText()
+        activeStripView = strip
+    }
+
+    private func activeStripProgressTooltipText() -> String {
+        let pluginID = copyCycleExifPluginID.isEmpty ? activePluginID : copyCycleExifPluginID
+        let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID)
+        let values = copyCycleValues.isEmpty ? pendingValues : copyCycleExifValues
+        return JobGenerationTooltipText.make(
+            plugin: plugin,
+            values: values,
+            finalPrompt: resolvedActiveWorkerPrompt(values: values),
+            loraLabel: lastResolvedLoraStatusLabel
+        )
+    }
+
+    private func resolvedActiveWorkerPrompt(values: [String: Any]) -> String {
+        let worker = copyCycleWorkerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !worker.isEmpty { return worker }
+        let refined = launchRefinedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !refined.isEmpty { return refined }
+        let fromValues = FluxPromptJobValues.effectiveJobPromptForTooltip(values)
+        if !fromValues.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return fromValues
+        }
+        return effectiveDisplayFullPrompt()
     }
 
     private func wireBridgeCallbacks() {
@@ -3172,6 +3199,7 @@ final class ImageGenController {
         guard activeJobID != nil else { return }
         let timing = currentTimingForDisplay()
         let loraLabel = await resolvedLoraStatusLabel(pluginID: activePluginID, values: pendingValues)
+        lastResolvedLoraStatusLabel = loraLabel
         let withAITitle = pendingValues[JobStepQueue.fluxPromptAIJobKey] is [String: Any]
             || pendingValues["series_prompt_refinement"] as? Bool == true
         let built = buildQueueStatusView(
@@ -3193,6 +3221,10 @@ final class ImageGenController {
         let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
         activeThumbnailPaths = cardPaths
         activeJobCardThumbnailPathsCache = cardPaths
+        if isProcessing || cooldownSecondsRemaining > 0 {
+            activeStripView.progressTooltipText = activeStripProgressTooltipText()
+            publishActiveStrip(preferLiveFields: true)
+        }
     }
 
     private func buildQueueStatusView(

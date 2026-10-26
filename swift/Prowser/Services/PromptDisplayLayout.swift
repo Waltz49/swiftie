@@ -151,3 +151,109 @@ enum JobPromptTooltipText {
             .joined(separator: " ")
     }
 }
+
+/// Multi-line hover text for active-job progress bars (model, LoRAs, worker prompt).
+enum JobGenerationTooltipText {
+    static func make(
+        plugin: ImageGenPluginDescriptor?,
+        values: [String: Any],
+        finalPrompt: String,
+        loraLabel: String?,
+        loraCatalogLC: [String: Any] = [:]
+    ) -> String {
+        var lines: [String] = []
+        if let plugin {
+            let modelID = ImageGenModelDisplay.generationModelID(plugin: plugin, effective: values)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var headerParts: [String] = []
+            if !modelID.isEmpty {
+                headerParts.append(modelID)
+            }
+            if let width = intValue(values["width"]),
+               let height = intValue(values["height"]),
+               width > 0, height > 0 {
+                headerParts.append("\(width)x\(height)")
+            }
+            if !headerParts.isEmpty {
+                lines.append(headerParts.joined(separator: "   "))
+            }
+        }
+        lines.append(contentsOf: loraTooltipLines(
+            values: values,
+            pipelineID: plugin?.pipelineID ?? "",
+            loraHostID: plugin?.loraHostID,
+            loraCatalogLC: loraCatalogLC,
+            resolvedLabel: loraLabel
+        ))
+        let prompt = finalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty {
+            if !lines.isEmpty {
+                lines.append("")
+            }
+            lines.append(prompt)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func loraTooltipLines(
+        values: [String: Any],
+        pipelineID: String,
+        loraHostID: String?,
+        loraCatalogLC: [String: Any],
+        resolvedLabel: String?
+    ) -> [String] {
+        if let resolvedLabel {
+            let trimmed = resolvedLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                let parts = trimmed
+                    .split(separator: "+", omittingEmptySubsequences: false)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                if !parts.isEmpty {
+                    return parts.map { "• \($0)" }
+                }
+            }
+        }
+        guard let loraHostID else { return [] }
+        let stack = ImageGenExifCommentFormatting.effectiveLoraIDsFromValues(
+            values: values,
+            pipelineID: pipelineID,
+            loraHostID: loraHostID
+        )
+        if !stack.isEmpty {
+            return stack.enumerated().map { index, presetID in
+                let name = LoRACatalog.getEntry(loraID: presetID, lc: loraCatalogLC)?.displayName ?? presetID
+                let scale = ImageGenExifCommentFormatting.loraScaleForExif(
+                    values: values,
+                    presetID: presetID,
+                    index: index
+                )
+                let weight = ImageGenExifCommentFormatting.formatExifLoraWeight(scale)
+                return "• \(name) [\(weight)]"
+            }
+        }
+        for (pathsKey, scalesKey) in [
+            ("mflux_lora_paths", "mflux_lora_scales"),
+            ("sdxl_lora_paths", "sdxl_lora_scales"),
+            ("sd15_lora_paths", "sd15_lora_scales"),
+        ] {
+            if let combined = ImageGenExifCommentFormatting.loraNameForExifFromPathsAndScales(
+                paths: values[pathsKey],
+                scales: values[scalesKey]
+            ) {
+                return combined
+                    .split(separator: "+", omittingEmptySubsequences: false)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { "• \($0)" }
+            }
+        }
+        return []
+    }
+
+    private static func intValue(_ any: Any?) -> Int? {
+        if let n = any as? Int { return n }
+        if let n = any as? NSNumber { return n.intValue }
+        return nil
+    }
+}

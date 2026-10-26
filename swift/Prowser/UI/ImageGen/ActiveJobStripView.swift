@@ -18,6 +18,7 @@ struct ActiveJobStripView: View {
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
+        .allowsHitTesting(true)
     }
 }
 
@@ -32,6 +33,7 @@ final class ActiveJobStripNSView: NSView {
         let prefix: NSTextField
         let postfix: NSTextField
         let bar: StripProgressBarNSView
+        let tooltipHost: StripProgressTooltipHostNSView
     }
 
     private let frameView = NSView()
@@ -49,6 +51,7 @@ final class ActiveJobStripNSView: NSView {
     private var lastStructureKey = ""
     private var lastColorsID = ""
     private var barHandles: [BarHandle] = []
+    private var stripProgressTooltipText = ""
     private(set) var cachedContentHeight: CGFloat = 0
     private var contentHeightReportScheduled = false
     private var lastLayoutWidth: CGFloat = 0
@@ -171,6 +174,7 @@ final class ActiveJobStripNSView: NSView {
         let colorsKey = colors.themeID
         if structureKey == lastStructureKey && colorsKey == lastColorsID {
             updateLiveFields(stripView)
+            syncProgressBarTooltips(stripView.progressTooltipText)
             return
         }
         lastStructureKey = structureKey
@@ -216,10 +220,12 @@ final class ActiveJobStripNSView: NSView {
                 showPendingStart: showPendingStart
             )
         }
+        syncProgressBarTooltips(stripView.progressTooltipText)
     }
 
     private func rebuild(stripView: ActiveJobStripStatusView, colors: ThemeColors) {
         applyTheme(colors)
+        stripProgressTooltipText = stripView.progressTooltipText
         rowsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         cooldownRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         cooldownSkipView = nil
@@ -284,6 +290,15 @@ final class ActiveJobStripNSView: NSView {
             invalidateIntrinsicContentSize()
         }
         scheduleContentHeightReport()
+        syncProgressBarTooltips(stripProgressTooltipText)
+    }
+
+    private func syncProgressBarTooltips(_ text: String) {
+        stripProgressTooltipText = text
+        for handle in barHandles {
+            handle.tooltipHost.progressTooltipText = text
+            handle.tooltipHost.themeColors = colors
+        }
     }
 
     private func makeLabel(_ text: String, muted: Bool) -> NSTextField {
@@ -304,11 +319,15 @@ final class ActiveJobStripNSView: NSView {
         slotText: String,
         showPendingStart: Bool
     ) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
         row.distribution = .fill
         row.spacing = 4
+        row.translatesAutoresizingMaskIntoConstraints = false
         let lbl = makeLabel(label, muted: true)
         lbl.widthAnchor.constraint(equalToConstant: JobQueueLayout.labelWidth).isActive = true
         row.addArrangedSubview(lbl)
@@ -331,8 +350,26 @@ final class ActiveJobStripNSView: NSView {
         post.widthAnchor.constraint(equalToConstant: 48).isActive = true
         row.addArrangedSubview(post)
 
-        barHandles.append(BarHandle(prefix: pre, postfix: post, bar: bar))
-        return row
+        let tooltipHost = StripProgressTooltipHostNSView()
+        tooltipHost.progressTooltipText = stripProgressTooltipText
+        tooltipHost.themeColors = colors
+        tooltipHost.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(row)
+        container.addSubview(tooltipHost)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            row.topAnchor.constraint(equalTo: container.topAnchor),
+            row.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            tooltipHost.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            tooltipHost.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            tooltipHost.topAnchor.constraint(equalTo: container.topAnchor),
+            tooltipHost.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        barHandles.append(BarHandle(prefix: pre, postfix: post, bar: bar, tooltipHost: tooltipHost))
+        return container
     }
 
     func updateSeriesControls(canAdd: Bool, canSubtract: Bool) {
