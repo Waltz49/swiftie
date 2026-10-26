@@ -5,6 +5,7 @@ import Foundation
 enum DirectoryRefreshService {
     static func shouldWatchDirectory(appState: AppState) -> Bool {
         if appState.specificFilesActive { return false }
+        if appState.referenceGraphActive { return false }
         guard let directory = appState.fileData.currentDirectory else { return false }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDir), isDir.boolValue else {
@@ -116,6 +117,7 @@ enum DirectoryRefreshService {
             efficientRefreshWithChanges(
                 appState: appState,
                 displayed: displayed,
+                scanned: scanned,
                 added: added,
                 removed: removed
             )
@@ -143,6 +145,7 @@ enum DirectoryRefreshService {
     private static func efficientRefreshWithChanges(
         appState: AppState,
         displayed: [String],
+        scanned: [String],
         added: Set<String>,
         removed: Set<String>
     ) {
@@ -163,8 +166,41 @@ enum DirectoryRefreshService {
             return
         }
 
-        guard let directory = appState.fileData.currentDirectory else { return }
-        appState.loadDirectory(directory, saveHistory: false)
+        let diskSet = Set(scanned)
+        let displayedSet = Set(displayed)
+        let preserveCurrent = appState.fileData.currentImagePath
+        let browseMode = appState.fileData.currentViewMode == .browse
+        let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
+
+        let newList: [String]
+        if (sortMode == .custom || sortMode == .random), !displayed.isEmpty {
+            let displayedFiltered = displayed.filter { diskSet.contains($0) }
+            let newFiles = scanned.filter { added.contains($0) }
+            let combined = displayedFiltered + newFiles
+            newList = DisplayOrderService.applyDisplayOrder(combined, appState: appState)
+        } else {
+            newList = DisplayOrderService.applyDisplayOrder(scanned, appState: appState)
+        }
+
+        if Set(newList) == displayedSet, newList == displayed {
+            return
+        }
+
+        appState.fileData.setDisplayedImages(newList)
+        if let preserveCurrent, newList.contains(preserveCurrent) {
+            appState.fileData.setCurrentImagePath(preserveCurrent)
+        } else if let first = newList.first {
+            appState.fileData.setCurrentImagePath(first)
+        }
+
+        noteIdleBackgroundScanScopeChanged(appState: appState)
+
+        if !browseMode {
+            appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+            if sortMode == .duplicates {
+                appState.applyCurrentSort()
+            }
+        }
     }
 
     /// Remove deleted paths from the displayed list and advance the active image (Python `remove_thumbnails_for_files`).

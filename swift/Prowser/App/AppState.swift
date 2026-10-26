@@ -424,6 +424,13 @@ final class AppState {
             DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
         }
 
+        // Re-arm watcher when the displayed set may no longer match a single-directory listing
+        // (search levels, filter rescan, incremental disk refresh, etc.). `directoryLoaded`
+        // callers already invoke `watchCurrentDirectory()` where needed.
+        _ = eventBus.subscribe(.displayedImagesChanged) { [weak self] _ in
+            self?.watchCurrentDirectory()
+        }
+
         _ = eventBus.subscribe(.filesChangedOnDisk) { [weak self] event in
             guard let self, case .string(let directory) = event.payload else { return }
             guard let current = self.fileData.currentDirectory,
@@ -1205,6 +1212,7 @@ final class AppState {
         }
     }
 
+    /// Start or stop directory filesystem watching based on current mode (Python `sync_directory_watcher`).
     func watchCurrentDirectory() {
         if DirectoryRefreshService.shouldWatchDirectory(appState: self) {
             directoryWatcher.watch(directory: fileData.currentDirectory)

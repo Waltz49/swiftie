@@ -114,6 +114,7 @@ extension AppState {
         referenceGraphActive = false
         referenceGraphData = nil
         referenceGraphFocusPath = nil
+        watchCurrentDirectory()
     }
 
     /// Python ``set_reference_graph_presentation``: build the DAG for a specific-files level.

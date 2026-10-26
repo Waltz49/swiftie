@@ -11,13 +11,20 @@ final class DirectoryWatcher {
     var onRefresh: (() -> Void)?
 
     func watch(directory: String?) {
+        guard let directory else {
+            stop()
+            return
+        }
+        let path = URL(fileURLWithPath: directory).standardizedFileURL.path
+        if watchedPath == path, source != nil {
+            return
+        }
         stop()
-        guard let directory else { return }
-        let fd = open(directory, O_EVTONLY)
+        let fd = open(path, O_EVTONLY)
         if fd < 0 { return }
 
         watchedFD = fd
-        watchedPath = directory
+        watchedPath = path
         let queue = DispatchQueue.main
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
