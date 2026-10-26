@@ -26,6 +26,18 @@ enum InformationFormatting {
         return String(format: "%.1f GB", Double(sizeBytes) / (1024.0 * 1024.0 * 1024.0))
     }
 
+    /// Last path segment for brief status messages (Python `folder_basename_for_display`).
+    static func folderBasenameForDisplay(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let stripped = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+        let segment = (stripped as NSString).lastPathComponent
+        if !segment.isEmpty, segment != "/" {
+            return segment
+        }
+        return normalizePathForDisplay(trimmed)
+    }
+
     static func normalizePathForDisplay(_ path: String) -> String {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }

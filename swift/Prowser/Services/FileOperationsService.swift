@@ -552,14 +552,7 @@ final class FileOperationsService {
         reportBatchTransferOutcome(
             outcome,
             copyOnly: shouldCopy,
-            targetDirectory: expanded,
-            successStatus: { count in
-                if shouldCopy {
-                    "Copied \(count) file(s) to destination \(slot)"
-                } else {
-                    "Moved \(count) file(s) to destination \(slot)"
-                }
-            }
+            targetDirectory: expanded
         )
     }
 
@@ -764,10 +757,7 @@ final class FileOperationsService {
         reportBatchTransferOutcome(
             outcome,
             copyOnly: shouldCopy,
-            targetDirectory: lastDrop,
-            successStatus: { _ in
-                shouldCopy ? "Copied to last drop location" : "Moved to last drop location"
-            }
+            targetDirectory: lastDrop
         )
     }
 
@@ -880,6 +870,7 @@ final class FileOperationsService {
         guard let appState else { return }
         var restored = 0
         var errors: [String] = []
+        var restoredDetails: [(path: String, sourceDirectory: String, renamed: Bool)] = []
 
         for entry in entries {
             guard FileManager.default.fileExists(atPath: entry.targetPath) else {
@@ -911,6 +902,11 @@ final class FileOperationsService {
                     to: URL(fileURLWithPath: restorePath)
                 )
                 restored += 1
+                restoredDetails.append((
+                    path: restorePath,
+                    sourceDirectory: sourceDir,
+                    renamed: restorePath != entry.sourcePath
+                ))
                 appState.metadataCache.invalidate(path: entry.targetPath)
                 appState.metadataCache.invalidate(path: restorePath)
             } catch {
@@ -919,12 +915,45 @@ final class FileOperationsService {
         }
 
         if restored > 0 {
-            let suffix = errors.isEmpty ? "" : ", \(errors.count) error(s)"
-            appState.status.showFileOperation("Undo: Moved \(restored) file(s) back\(suffix)")
+            appState.status.showFileOperation(undoMoveStatusMessage(restoredDetails: restoredDetails, errorCount: errors.count))
             refreshAfterChange()
         } else {
-            appState.status.showFileOperation("Could not undo move operation")
+            appState.status.showFileOperation(undoMoveFailureMessage(errors: errors, entryCount: entries.count))
         }
+    }
+
+    private func undoMoveStatusMessage(
+        restoredDetails: [(path: String, sourceDirectory: String, renamed: Bool)],
+        errorCount: Int
+    ) -> String {
+        let errorSuffix = errorCount > 0 ? ", \(errorCount) error(s)" : ""
+        guard let first = restoredDetails.first else {
+            return "Could not undo move operation"
+        }
+        let folderName = InformationFormatting.folderBasenameForDisplay(first.sourceDirectory)
+        let folderSuffix = folderName.isEmpty ? "" : " to \(folderName)"
+        if restoredDetails.count == 1 {
+            let name = (first.path as NSString).lastPathComponent
+            if first.renamed {
+                return "Undo: Moved \(name) back\(folderSuffix) (renamed to avoid overwrite)\(errorSuffix)"
+            }
+            return "Undo: Moved \(name) back\(folderSuffix)\(errorSuffix)"
+        }
+        let uniqueFolders = Set(restoredDetails.map(\.sourceDirectory))
+        if uniqueFolders.count == 1 {
+            return "Undo: Moved \(restoredDetails.count) file(s) back\(folderSuffix)\(errorSuffix)"
+        }
+        return "Undo: Moved \(restoredDetails.count) file(s) back\(errorSuffix)"
+    }
+
+    private func undoMoveFailureMessage(errors: [String], entryCount: Int) -> String {
+        if entryCount == 1, let name = errors.first {
+            return "Could not undo move: \(name)"
+        }
+        if !errors.isEmpty {
+            return "Could not undo move: \(errors.count) of \(entryCount) file(s)"
+        }
+        return "Could not undo move operation"
     }
 
     private func restoreDeletedFiles(_ entries: [DeletedFileUndoEntry]) {
@@ -933,19 +962,52 @@ final class FileOperationsService {
             ($0.originalIndex ?? Int.max) < ($1.originalIndex ?? Int.max)
         }
         var restored = 0
+        var restoredPaths: [String] = []
+        var restoredOriginals: [String] = []
         for entry in ordered {
-            if TrashRestore.restore(entry: entry) != nil {
+            if let path = TrashRestore.restore(entry: entry) {
                 restored += 1
+                restoredPaths.append(path)
+                restoredOriginals.append(entry.originalPath)
             }
         }
+        let failedCount = ordered.count - restored
         if restored > 0 {
             appState.clearDeletedPlaceholders(for: ordered.map(\.originalPath))
-            appState.status.showFileOperation("Restored \(restored) file(s) from Trash")
+            appState.status.showFileOperation(
+                restoreFromTrashStatusMessage(
+                    restoredPaths: restoredPaths,
+                    restoredOriginals: restoredOriginals,
+                    failedCount: failedCount
+                )
+            )
             refreshAfterChange()
             appState.refreshMenuState()
         } else {
-            appState.status.showFileOperation("Could not restore deleted files")
+            if ordered.count == 1, let name = ordered.first?.originalPath {
+                let base = (name as NSString).lastPathComponent
+                appState.status.showFileOperation("Could not restore \(base) from Trash")
+            } else {
+                appState.status.showFileOperation("Could not restore \(ordered.count) file(s) from Trash")
+            }
         }
+    }
+
+    private func restoreFromTrashStatusMessage(
+        restoredPaths: [String],
+        restoredOriginals: [String],
+        failedCount: Int
+    ) -> String {
+        let failureSuffix = failedCount > 0 ? " (\(failedCount) could not be restored)" : ""
+        if restoredPaths.count == 1, let path = restoredPaths.first {
+            let name = (path as NSString).lastPathComponent
+            let original = restoredOriginals.first
+            if let original, path != original {
+                return "Restored: \(name) (renamed to avoid overwrite)"
+            }
+            return "Restored: \(name)"
+        }
+        return "Restored \(restoredPaths.count) file(s) from Trash\(failureSuffix)"
     }
 
     private func backfillTrashPath(for entry: DeletedFileUndoEntry) {
@@ -1129,11 +1191,34 @@ final class FileOperationsService {
         return true
     }
 
+    private func batchTransferStatusMessage(
+        copyOnly: Bool,
+        outcome: FileBatchTransferOutcome,
+        targetDirectory: String
+    ) -> String {
+        let destName = InformationFormatting.folderBasenameForDisplay(targetDirectory)
+        let verb = copyOnly ? "Copied" : "Moved"
+        let destSuffix = destName.isEmpty ? "" : " to \(destName)"
+        if outcome.successCount == 1,
+           let first = outcome.transfers.first?.source {
+            let name = (first as NSString).lastPathComponent
+            var msg = "\(verb) \(name)\(destSuffix)"
+            if outcome.skippedCount > 0 {
+                msg += ", skipped \(outcome.skippedCount)"
+            }
+            return msg
+        }
+        var msg = "\(verb) \(outcome.successCount) file(s)\(destSuffix)"
+        if outcome.skippedCount > 0 {
+            msg += ", skipped \(outcome.skippedCount)"
+        }
+        return msg
+    }
+
     private func reportBatchTransferOutcome(
         _ outcome: FileBatchTransferOutcome,
         copyOnly: Bool,
-        targetDirectory: String,
-        successStatus: (Int) -> String
+        targetDirectory: String
     ) {
         guard let appState else { return }
 
@@ -1146,12 +1231,13 @@ final class FileOperationsService {
         }
 
         if outcome.successCount > 0 {
-            if outcome.skippedCount > 0 {
-                let verb = copyOnly ? "Copied" : "Moved"
-                appState.status.show("\(verb) \(outcome.successCount) file(s), skipped \(outcome.skippedCount)")
-            } else {
-                appState.status.show(successStatus(outcome.successCount))
-            }
+            appState.status.show(
+                batchTransferStatusMessage(
+                    copyOnly: copyOnly,
+                    outcome: outcome,
+                    targetDirectory: targetDirectory
+                )
+            )
             return
         }
 
