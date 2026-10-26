@@ -98,6 +98,21 @@ struct ImageGenerationSettingsSection: View {
             Toggle("Low RAM mode", isOn: boolBinding("imagegen_low_ram", default: true))
             Toggle("Include triggers in final exif data", isOn: boolBinding("imagegen_include_triggers_in_exif"))
             Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))
+            if BundleCapabilities.lmStudioUIEnabled {
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle(
+                        "Unload LMStudio models before generation",
+                        isOn: boolBinding("imagegen_unload_lmstudio_models_before_generation", default: true)
+                    )
+                    Text(
+                        "Frees memory for image models before each generation job. "
+                            + "LM Studio can reload the saved caption model on next use."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .sheet(isPresented: $showExitScripts) { ExitScriptsSheet() }
         .sheet(isPresented: $showPrefixPostfix) { PrefixPostfixSheet() }

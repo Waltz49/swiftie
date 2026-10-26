@@ -1772,6 +1772,20 @@ final class ImageGenController {
             launchRefinedPrompt = ""
             await refreshActiveJobStatusView()
             await refreshActiveStripView()
+            if BundleCapabilities.lmStudioUIEnabled,
+               config.bool(forKey: "imagegen_unload_lmstudio_models_before_generation", default: true) {
+                let lmBusy = fluxPromptTasks.isBusy
+                    || foregroundTasks.isBusy
+                    || LmStudioCaptionService.shared.isCaptionInProgress
+                await LmStudioCaptionService.shared.unloadAllModelsBeforeImageGeneration(
+                    config: config,
+                    skipUnload: lmBusy
+                )
+                if !lmBusy {
+                    fluxPromptTasks.markAvailable(false)
+                    foregroundTasks.markAvailable(false)
+                }
+            }
             _ = try modelTasks.startGenerate(payload: payload)
             if let activeJobID {
                 popQueuedJob(jobID: activeJobID)

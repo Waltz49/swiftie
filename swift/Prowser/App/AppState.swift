@@ -178,6 +178,8 @@ final class AppState {
     }
     /// Live column count from the thumbnail grid layout (source of truth for keyboard navigation).
     var thumbnailGridColumns = 1
+    /// Trailing inset for the thumbnail top cover band when the grid shows a vertical scroller.
+    var thumbnailVerticalScrollbarReserve: CGFloat = 0
     /// Visual row map for duplicate-section thumbnail ↑/↓ (from live grid layout).
     var thumbnailSectionedRowLayout: ThumbnailSectionedLayout.RowLayout?
     /// Bumped when on-disk image content changes so list/thumbnail views reload affected thumbs.

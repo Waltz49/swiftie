@@ -400,6 +400,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             )
             needsDisplay = true
             gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1, sectionedRowLayout: nil)
+            syncTopCoverScrollbarReserveIfNeeded()
             return
         }
         if let graph = referenceGraph {
@@ -502,6 +503,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
         let layoutMs = (CFAbsoluteTimeGetCurrent() - layoutStart) * 1000
         ThumbnailGridPerfDiagnostics.recordLayout(durationMs: layoutMs)
+        syncTopCoverScrollbarReserveIfNeeded()
     }
 
     private func reloadReferenceGraphLayout(graph: ReferenceGraph, viewportWidth: CGFloat) {
@@ -576,6 +578,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         needsDisplay = true
         scheduleLoadVisibleThumbnails(debounced: false)
         gridDelegate?.thumbnailGridDidUpdateLayout(columns: 1, sectionedRowLayout: nil)
+        syncTopCoverScrollbarReserveIfNeeded()
     }
 
     /// Called when the user scrolls; prioritize viewport thumbnails over off-screen batches.
@@ -1585,6 +1588,14 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let controlSize = scrollView.verticalScroller?.controlSize ?? .regular
         let style = scrollView.verticalScroller?.scrollerStyle ?? .legacy
         return NSScroller.scrollerWidth(for: controlSize, scrollerStyle: style)
+    }
+
+    /// Keeps SwiftUI top cover band aligned with layout scrollbar reserve (does not cover scroller).
+    func syncTopCoverScrollbarReserveIfNeeded() {
+        guard let appState else { return }
+        let reserve = verticalScrollbarReservedWidth()
+        guard abs(appState.thumbnailVerticalScrollbarReserve - reserve) > 0.5 else { return }
+        appState.thumbnailVerticalScrollbarReserve = reserve
     }
 
     private func viewportSizeForLayout() -> NSSize {

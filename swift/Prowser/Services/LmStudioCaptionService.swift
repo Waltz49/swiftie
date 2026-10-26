@@ -71,6 +71,67 @@ final class LmStudioCaptionService {
         activeTask = nil
     }
 
+    /// Port of Python ``unload_all_lmstudio_models`` (frees RAM before image generation).
+    func unloadAllModelsBeforeImageGeneration(config: AppConfig, skipUnload: Bool) async {
+        sessionState = .unavailable
+        lastProbeCache = nil
+        if skipUnload {
+            if config.bool(forKey: "debug_mode", default: false) {
+                NSLog("[%@] skipping model unload while LM Studio prediction is active", Self.logTag)
+            }
+            return
+        }
+        let host = captionHost(config: config)
+        guard let nativeBase = nativeAPIBaseURL(host: host) else {
+            return
+        }
+        var loadedIDs: [String] = []
+        if let openAIBase = apiBaseURL(host: host) {
+            loadedIDs = (try? await fetchLoadedModelIDs(baseURL: openAIBase, config: config)) ?? []
+        }
+        if loadedIDs.isEmpty {
+            let modelsURL = nativeBase.appending(path: "models")
+            SessionViewLog.logLMStudioCall(
+                method: "GET \(modelsURL.path)",
+                payload: ["url": modelsURL.absoluteString, "reason": "image_gen_unload"],
+                config: config
+            )
+            if let (data, response) = try? await URLSession.shared.data(from: modelsURL),
+               let http = response as? HTTPURLResponse,
+               (200 ..< 300).contains(http.statusCode) {
+                logHTTPResponseData(data, status: http.statusCode, config: config)
+                loadedIDs = parseLoadedNativeModelIDs(from: data)
+            }
+        }
+        if loadedIDs.isEmpty {
+            if config.bool(forKey: "debug_mode", default: false) {
+                NSLog("[%@] image_gen_unload: no loaded LM Studio instances found", Self.logTag)
+            }
+            return
+        }
+        if let first = loadedIDs.first {
+            persistLastModelKey(first, config: config)
+        }
+        let unloadURL = nativeBase.appending(path: "models/unload")
+        for instanceID in loadedIDs {
+            let body: [String: Any] = ["instance_id": instanceID]
+            SessionViewLog.logLMStudioCall(
+                method: "POST /api/v1/models/unload",
+                payload: body,
+                config: config
+            )
+            var request = URLRequest(url: unloadURL)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { continue }
+            request.httpBody = httpBody
+            if let (unloadData, unloadResponse) = try? await URLSession.shared.data(for: request),
+               let unloadHTTP = unloadResponse as? HTTPURLResponse {
+                logHTTPResponseData(unloadData, status: unloadHTTP.statusCode, config: config)
+            }
+        }
+    }
+
     /// OpenAI-compatible streaming chat (flux prompt refinement, grammar, etc.).
     func streamChatCompletion(
         systemPrompt: String,
@@ -876,6 +937,40 @@ final class LmStudioCaptionService {
             return []
         }
         return models.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+    }
+
+    private func parseLoadedNativeModelIDs(from data: Data) -> [String] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        if let catalog = json["models"] as? [[String: Any]] {
+            var instanceIDs: [String] = []
+            for model in catalog {
+                guard let instances = model["loaded_instances"] as? [[String: Any]] else { continue }
+                for instance in instances {
+                    if let id = instance["id"] as? String, !id.isEmpty {
+                        instanceIDs.append(id)
+                    }
+                }
+            }
+            if !instanceIDs.isEmpty {
+                return instanceIDs
+            }
+        }
+        if let models = json["data"] as? [[String: Any]] {
+            let loaded = models.filter { entry in
+                (entry["state"] as? String)?.lowercased() == "loaded"
+            }
+            let ids = loaded.compactMap { entry -> String? in
+                if let id = entry["id"] as? String, !id.isEmpty { return id }
+                if let id = entry["instance_id"] as? String, !id.isEmpty { return id }
+                return nil
+            }
+            if !ids.isEmpty {
+                return ids
+            }
+        }
+        return parseModelIDs(from: data)
     }
 
     /// LM Studio is picky about `image_url.url` — try OpenAI JPEG data URIs, then PNG, then PNG-labeled JPEG (issue #1027).

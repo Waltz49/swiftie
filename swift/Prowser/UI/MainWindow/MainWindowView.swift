@@ -114,6 +114,7 @@ struct ContentStackView: View {
                         .fill(appState.theme.colors.thumbnailGridBackground)
                         .frame(height: ThumbnailLayout.topCoverBandHeight)
                         .frame(maxWidth: .infinity)
+                        .padding(.trailing, appState.thumbnailVerticalScrollbarReserve)
                         .allowsHitTesting(false)
                 }
                 .opacity(fileData.currentViewMode == .thumbnail ? 1 : 0)
