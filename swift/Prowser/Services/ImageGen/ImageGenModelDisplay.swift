@@ -36,7 +36,13 @@ enum ImageGenModelDisplay {
             return "SANA Sprint 0.6B 1024px"
         }
         if pipelineID == "mflux_z_image_turbo" || pipelineID == "z_image_turbo_sdnq" {
-            return "Z-Image Turbo"
+            if hf == LoRAHFModelIDs.zImageTurboMflux4Bit || hf.lowercased().contains("mflux-4bit") {
+                return LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurboMflux4Bit)
+            }
+            if hf == LoRAHFModelIDs.zImageTurbo || hf.isEmpty {
+                return LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurbo)
+            }
+            return LoRAHFModelIDs.displayName(for: hf)
         }
         if pipelineID == "sd15_diffusers" {
             if hf.contains("/") {

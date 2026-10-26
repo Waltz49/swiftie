@@ -504,6 +504,130 @@
     },
     {
       "available": true,
+      "display_name": "Z-Image Turbo (4-bit)",
+      "field_layout": [
+        {
+          "spec": {
+            "default": "",
+            "key": "prompt",
+            "kind": "text",
+            "label": "Image Prompt",
+            "required": true
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 1024,
+            "key": "width",
+            "kind": "int_slider",
+            "label": "Width",
+            "max_value": 1440,
+            "min_value": 256,
+            "required": false,
+            "reset_default": 1024,
+            "step": 16
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 1024,
+            "key": "height",
+            "kind": "int_slider",
+            "label": "Height",
+            "max_value": 1440,
+            "min_value": 256,
+            "required": false,
+            "reset_default": 1024,
+            "step": 16
+          },
+          "type": "field"
+        },
+        {
+          "children": [
+            {
+              "spec": {
+                "default": 0,
+                "key": "seed",
+                "kind": "seed",
+                "label": "Seed",
+                "required": false
+              },
+              "type": "field"
+            },
+            {
+              "spec": {
+                "bool_label_override": "Randomize",
+                "default": true,
+                "key": "random_seed",
+                "kind": "bool",
+                "label": "Random seed",
+                "required": false
+              },
+              "type": "field"
+            }
+          ],
+          "label": null,
+          "layout": "seed_row",
+          "type": "group"
+        },
+        {
+          "spec": {
+            "default": 9,
+            "key": "steps",
+            "kind": "int_slider",
+            "label": "Steps",
+            "max_value": 20,
+            "min_value": 1,
+            "required": false,
+            "reset_default": 9,
+            "step": 1
+          },
+          "type": "field"
+        },
+        {
+          "spec": {
+            "default": 1,
+            "key": "copies",
+            "kind": "int_slider",
+            "label": "Copies",
+            "max_value": 30,
+            "min_value": 1,
+            "required": false,
+            "reset_default": 1,
+            "step": 1
+          },
+          "type": "field"
+        }
+      ],
+      "function": "create",
+      "hf_model_id": "filipstrand/Z-Image-Turbo-mflux-4bit",
+      "lora_host_id": "z_image_turbo",
+      "max_generation_dimension": 1440,
+      "merged_defaults": {
+        "aspect_ratio_lock": false,
+        "copies": 1,
+        "guidance_scale": 0.0,
+        "height": 1024,
+        "hf_model_id": "filipstrand/Z-Image-Turbo-mflux-4bit",
+        "mflux_lora_stack": [],
+        "mflux_quantize": 4,
+        "negative_prompt": "",
+        "prompt": "",
+        "random_seed": true,
+        "seed": 0,
+        "steps": 9,
+        "width": 1024
+      },
+      "model_comment": "Fast, photorealistic, LoRA support, Low RAM suggested",
+      "model_label": "Z-Image Turbo (4-bit)",
+      "pipeline_id": "mflux_z_image_turbo",
+      "plugin_id": "z_image_turbo_mflux_4bit",
+      "quantize_status_key": "mflux_quantize"
+    },
+    {
+      "available": true,
       "display_name": "Z-Image Turbo",
       "field_layout": [
         {
@@ -597,12 +721,12 @@
                   6,
                   8
                 ],
-                "default": 4,
+                "default": 8,
                 "key": "mflux_quantize",
                 "kind": "choice",
                 "label": "Quantization",
                 "required": false,
-                "reset_default": 4
+                "reset_default": 8
               },
               "type": "field"
             }
@@ -637,7 +761,7 @@
         "height": 1024,
         "hf_model_id": "Tongyi-MAI/Z-Image-Turbo",
         "mflux_lora_stack": [],
-        "mflux_quantize": 4,
+        "mflux_quantize": 8,
         "negative_prompt": "",
         "prompt": "",
         "random_seed": true,
@@ -645,10 +769,10 @@
         "steps": 9,
         "width": 1024
       },
-      "model_comment": "Fast, photorealistic, LoRA support, Low RAM suggested",
+      "model_comment": "Fast, photorealistic, LoRA support, runtime quantize",
       "model_label": "Z-Image Turbo",
       "pipeline_id": "mflux_z_image_turbo",
-      "plugin_id": "z_image_turbo_mflux_4bit",
+      "plugin_id": "z_image_turbo_mflux",
       "quantize_status_key": "mflux_quantize"
     },
     {

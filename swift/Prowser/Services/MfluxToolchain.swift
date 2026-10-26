@@ -195,8 +195,10 @@ enum MfluxCLIPipeline {
             )
         }
         copy["mflux_quantize"] = quantize
-        // mflux-generate-z-image-turbo already targets Z-Image Turbo; do not pass --model.
-        return try buildFluxSchnellArgs(payload: copy, includeModel: false)
+        let hfModel = (copy["hf_model_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let includeModel = hfModel.lowercased().contains("filipstrand")
+            || hfModel.lowercased().contains("mflux-4bit")
+        return try buildFluxSchnellArgs(payload: copy, includeModel: includeModel)
     }
 
     private static func buildFillArgs(payload: [String: Any]) throws -> [String] {

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Z-Image-Turbo via MFLUX (runtime quantize; LoRA support)."""
+"""Z-Image-Turbo MFLUX 4-bit weights (filipstrand); fixed quantize, LoRA support."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Tuple
 
-from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO
+from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_MFLUX_4BIT
 from imagegen_plugins.image_gen_field_blocks import (
     copies_slider_block,
     dim_slider_block,
     seed_row_block,
-    steps_quant_row_block,
+    steps_slider_block,
 )
 from imagegen_plugins.image_gen_fields import FieldNode, FieldSpec
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from imagegen_plugins.image_gen_registry import ImageGenModelPlugin as _Plugin
 
 
-def z_image_turbo_mflux_field_layout(
+def z_image_turbo_mflux_4bit_field_layout(
     plugin: "_Plugin",
     values: dict[str, Any],
     effective_max_side: int,
@@ -47,28 +47,27 @@ def z_image_turbo_mflux_field_layout(
         w_spec,
         h_spec,
         seed_row_block(values),
-        steps_quant_row_block(
+        steps_slider_block(
             values,
             steps_min=mode.steps_min,
             steps_max=mode.steps_max,
             steps_default=mode.steps_default,
             pipeline_id=plugin.pipeline_id,
-            default_q=8,
             model_defaults=model_defaults,
         ),
         copies_slider_block(values, model_defaults=model_defaults),
     )
 
 
-Z_IMAGE_TURBO_PLUGIN = ImageGenModelPlugin(
+Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN = ImageGenModelPlugin(
     plugin_id="z_image_turbo_mflux_4bit",
     pipeline_id="mflux_z_image_turbo",
-    display_name="Z-Image Turbo",
-    hf_model_id=Z_IMAGE_TURBO,
+    display_name="Z-Image Turbo (4-bit)",
+    hf_model_id=Z_IMAGE_TURBO_MFLUX_4BIT,
     lora_host_id=HOST_Z_IMAGE_TURBO,
     model_comment="Fast, photorealistic, LoRA support, Low RAM suggested",
     max_generation_dimension=1440,
-    field_layout_builder=z_image_turbo_mflux_field_layout,
+    field_layout_builder=z_image_turbo_mflux_4bit_field_layout,
     model_defaults={
         "prompt": "",
         "width": 1024,
@@ -82,4 +81,4 @@ Z_IMAGE_TURBO_PLUGIN = ImageGenModelPlugin(
 )
 
 # Back-compat export name for older registrations.
-Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN = Z_IMAGE_TURBO_PLUGIN
+Z_IMAGE_TURBO_PLUGIN = Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN

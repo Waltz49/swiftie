@@ -49,6 +49,7 @@ SDXL_DIFFUSERS_ALLOW_PATTERNS: tuple[str, ...] = (
 )
 
 Z_IMAGE_TURBO = "Tongyi-MAI/Z-Image-Turbo"
+Z_IMAGE_TURBO_MFLUX_4BIT = "filipstrand/Z-Image-Turbo-mflux-4bit"
 # Legacy diffusers/SDNQ repo id (align_z_image_dims + optional SDNQ plugin).
 Z_IMAGE_TURBO_SDNQ_INT8 = "Disty0/Z-Image-Turbo-SDNQ-int8"
 
@@ -72,6 +73,7 @@ LORA_PROBE_MODEL_ORDER: tuple[str, ...] = (
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
     Z_IMAGE_TURBO,
     SD15_BASE_V1_5,
     REALISTIC_VISION_V4_NOVAE,
@@ -91,6 +93,7 @@ LORA_MODEL_DISPLAY_NAMES: dict[str, str] = {
     REALISTIC_VISION_V4_NOVAE: "Realistic Vision V4.0",
     ANYTHING_FURRY: "Anything Furry",
     SDXL_BASE_1_0: "SDXL 1.0 Base",
+    Z_IMAGE_TURBO_MFLUX_4BIT: "Z-Image Turbo (4-bit)",
     Z_IMAGE_TURBO: "Z-Image Turbo",
     Z_IMAGE_TURBO_SDNQ_INT8: "Z-Image Turbo (SDNQ)",
 }
@@ -101,18 +104,19 @@ LEGACY_Z_IMAGE_SDNQ_PIPELINE_ID = "z_image_turbo_sdnq"
 LEGACY_Z_IMAGE_MFLUX_HF_IDS: frozenset[str] = frozenset(
     {
         "Disty0/Z-Image-Turbo-SDNQ-int8",
-        "filipstrand/Z-Image-Turbo-mflux-4bit",
+        "Tongyi-MAI/Z-Image-Turbo-mflux",
     }
 )
 
-
-Z_IMAGE_TURBO_PLUGIN_ID = "z_image_turbo_mflux_4bit"
+Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID = "z_image_turbo_mflux_4bit"
+Z_IMAGE_TURBO_PLUGIN_ID = "z_image_turbo_mflux"
 Z_IMAGE_TURBO_DEFAULT_QUANTIZE = 8
+Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE = 4
 
 
 def migrate_legacy_z_image_plugin_id(plugin_id: str) -> str:
     if plugin_id == LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID:
-        return Z_IMAGE_TURBO_PLUGIN_ID
+        return Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID
     return plugin_id
 
 
@@ -125,7 +129,7 @@ def migrate_legacy_imagegen_block(imagegen: dict) -> bool:
     if isinstance(by_fn, dict):
         for fn, pid in list(by_fn.items()):
             if pid == LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID:
-                by_fn[fn] = Z_IMAGE_TURBO_PLUGIN_ID
+                by_fn[fn] = Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID
                 changed = True
     dialogs = imagegen.get("dialogs")
     if not isinstance(dialogs, dict):
@@ -137,15 +141,17 @@ def migrate_legacy_imagegen_block(imagegen: dict) -> bool:
         if isinstance(plugin_settings, dict) and LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID in plugin_settings:
             legacy = dict(plugin_settings.pop(LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID))
             if "mflux_quantize" not in legacy:
-                legacy["mflux_quantize"] = Z_IMAGE_TURBO_DEFAULT_QUANTIZE
-            target = plugin_settings.get(Z_IMAGE_TURBO_PLUGIN_ID)
+                legacy["mflux_quantize"] = Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE
+            target = plugin_settings.get(Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID)
             if not isinstance(target, dict) or not target:
-                plugin_settings[Z_IMAGE_TURBO_PLUGIN_ID] = legacy
+                plugin_settings[Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID] = legacy
             changed = True
         stacks = entry.get("lora_stacks")
         if isinstance(stacks, dict) and LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID in stacks:
-            if Z_IMAGE_TURBO_PLUGIN_ID not in stacks:
-                stacks[Z_IMAGE_TURBO_PLUGIN_ID] = stacks[LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID]
+            if Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID not in stacks:
+                stacks[Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN_ID] = stacks[
+                    LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID
+                ]
             stacks.pop(LEGACY_Z_IMAGE_SDNQ_PLUGIN_ID, None)
             changed = True
     return changed
@@ -158,14 +164,17 @@ def migrate_legacy_z_image_job_values(values: dict) -> dict:
     if pipeline_id == LEGACY_Z_IMAGE_SDNQ_PIPELINE_ID:
         out["pipeline_id"] = "mflux_z_image_turbo"
     hf = str(out.get("hf_model_id") or "").strip()
-    is_legacy_z_image = (
-        pipeline_id == LEGACY_Z_IMAGE_SDNQ_PIPELINE_ID
-        or hf in LEGACY_Z_IMAGE_MFLUX_HF_IDS
-    )
-    if is_legacy_z_image and (hf in LEGACY_Z_IMAGE_MFLUX_HF_IDS or not hf):
-        out["hf_model_id"] = Z_IMAGE_TURBO
-    if "mflux_quantize" not in out and pipeline_id == LEGACY_Z_IMAGE_SDNQ_PIPELINE_ID:
-        out["mflux_quantize"] = 8
+    if pipeline_id == LEGACY_Z_IMAGE_SDNQ_PIPELINE_ID or hf == Z_IMAGE_TURBO_SDNQ_INT8:
+        out["pipeline_id"] = "mflux_z_image_turbo"
+        out["hf_model_id"] = Z_IMAGE_TURBO_MFLUX_4BIT
+        if "mflux_quantize" not in out:
+            out["mflux_quantize"] = Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE
+    elif hf in LEGACY_Z_IMAGE_MFLUX_HF_IDS:
+        out["hf_model_id"] = Z_IMAGE_TURBO_MFLUX_4BIT
+        if "mflux_quantize" not in out:
+            out["mflux_quantize"] = Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE
+    elif hf == Z_IMAGE_TURBO_MFLUX_4BIT and "mflux_quantize" not in out:
+        out["mflux_quantize"] = Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE
     return out
 
 

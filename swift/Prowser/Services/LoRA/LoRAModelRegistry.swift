@@ -32,7 +32,16 @@ enum LoRAModelRegistry {
         .init(modelKey: LoRAHFModelIDs.realisticVisionV4NoVAE, displayName: LoRAHFModelIDs.realisticVisionV4NoVAE, availableIn: ["create"]),
         .init(modelKey: LoRAHFModelIDs.anythingFurry, displayName: LoRAHFModelIDs.anythingFurry, availableIn: ["create"]),
         .init(modelKey: LoRAHFModelIDs.sdxlBase10, displayName: LoRAHFModelIDs.sdxlBase10, availableIn: ["create"]),
-        .init(modelKey: LoRAHFModelIDs.zImageTurbo, displayName: LoRAHFModelIDs.zImageTurbo, availableIn: ["create"]),
+        .init(
+            modelKey: LoRAHFModelIDs.zImageTurboMflux4Bit,
+            displayName: LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurboMflux4Bit),
+            availableIn: ["create"]
+        ),
+        .init(
+            modelKey: LoRAHFModelIDs.zImageTurbo,
+            displayName: LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurbo),
+            availableIn: ["create"]
+        ),
     ]
 
     static func modelsForSettings() -> [RegistryModel] {
@@ -50,7 +59,9 @@ enum LoRAModelRegistry {
         ].contains(mk) { return LoRAHostRegistry.flux2Klein }
         if LoRAHFModelIDs.sd15LoraModelKeys.contains(mk) { return LoRAHostRegistry.sd15 }
         if LoRAHFModelIDs.sdxlLoraModelKeys.contains(mk) { return LoRAHostRegistry.sdxl }
-        if mk == LoRAHFModelIDs.zImageTurbo { return LoRAHostRegistry.zImageTurbo }
+        if mk == LoRAHFModelIDs.zImageTurboMflux4Bit || mk == LoRAHFModelIDs.zImageTurbo {
+            return LoRAHostRegistry.zImageTurbo
+        }
         return nil
     }
 
@@ -66,7 +77,9 @@ enum LoRAModelRegistry {
                 LoRAHFModelIDs.flux2Klein9BKV, LoRAHFModelIDs.sceneworksFlux2Klein9BKVMLX,
             ]
         }
-        if entry.hostID == LoRAHostRegistry.zImageTurbo { return [LoRAHFModelIDs.zImageTurbo] }
+        if entry.hostID == LoRAHostRegistry.zImageTurbo {
+            return [LoRAHFModelIDs.zImageTurboMflux4Bit, LoRAHFModelIDs.zImageTurbo]
+        }
         return []
     }
 

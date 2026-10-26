@@ -16,7 +16,12 @@ import time
 from typing import Any, Dict, Optional
 
 from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
-from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO
+from imagegen_plugins.hf_model_ids import (
+    Z_IMAGE_TURBO,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
+    Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE,
+    Z_IMAGE_TURBO_DEFAULT_QUANTIZE,
+)
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.image_gen_pipeline_modes import MFLUX_QUANT_CHOICES
 from imagegen_plugins.pipelines.mflux_schnell import _MFLUX_ALLOWED_QUANT
@@ -40,8 +45,17 @@ def mflux_is_installed() -> bool:
     return _installed()
 
 
+def _default_quantize_for_hf_model(hf_model_id: str) -> int:
+    model = (hf_model_id or "").strip().lower()
+    if Z_IMAGE_TURBO_MFLUX_4BIT.lower() in model or "mflux-4bit" in model:
+        return Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE
+    return Z_IMAGE_TURBO_DEFAULT_QUANTIZE
+
+
 def _resolve_mflux_quantize(payload: Dict[str, Any]) -> int:
-    q = int(payload.get("mflux_quantize", 8))
+    hf_model_id = str(payload.get("hf_model_id") or _DEFAULT_HF_MODEL_ID)
+    default_q = _default_quantize_for_hf_model(hf_model_id)
+    q = int(payload.get("mflux_quantize", default_q))
     if q not in _MFLUX_ALLOWED_QUANT:
         raise ValueError(
             f"mflux_quantize must be one of {sorted(MFLUX_QUANT_CHOICES)}, got {q}"

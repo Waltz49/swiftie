@@ -25,6 +25,9 @@ from imagegen_plugins.hf_model_ids import (
     SD15_LORA_MODEL_KEYS,
     SDXL_BASE_1_0,
     Z_IMAGE_TURBO,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
+    Z_IMAGE_TURBO_DEFAULT_QUANTIZE,
+    Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE,
     lora_model_display_name,
 )
 from imagegen_plugins.lora_catalog import (
@@ -117,6 +120,7 @@ _PROBEABLE_MODEL_KEYS = frozenset(
         FLUX2_KLEIN_9B,
         FLUX2_KLEIN_9B_KV,
         SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        Z_IMAGE_TURBO_MFLUX_4BIT,
         Z_IMAGE_TURBO,
         SDXL_BASE_1_0,
         *SD15_LORA_MODEL_KEYS,
@@ -1708,6 +1712,7 @@ def _probe_z_image_turbo(
     *,
     hf_model: str,
     model_key: str,
+    quantize: int,
     lora_path: str,
     lora_scale: float,
     cancel_check: Callable[[], bool],
@@ -1723,7 +1728,6 @@ def _probe_z_image_turbo(
         compute_z_image_model_key,
         release_z_image_session,
     )
-    from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_DEFAULT_QUANTIZE
     from imagegen_plugins.pipelines.mflux_z_image_turbo import run_mflux_z_image_generate
     from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
 
@@ -1742,7 +1746,7 @@ def _probe_z_image_turbo(
         if with_lora:
             key = compute_z_image_model_key(
                 str(hf_model),
-                Z_IMAGE_TURBO_DEFAULT_QUANTIZE,
+                int(quantize),
                 lora_paths,
                 lora_scales,
             )
@@ -1759,7 +1763,7 @@ def _probe_z_image_turbo(
             steps=probe_steps,
             seed=42,
             model=hf_model,
-            quantize=Z_IMAGE_TURBO_DEFAULT_QUANTIZE,
+            quantize=int(quantize),
             mflux_output_path=output_path,
             low_ram=probe_low_ram,
             lora_paths=lora_paths,
@@ -1780,7 +1784,7 @@ def _probe_z_image_turbo(
             baseline_cache=baseline_cache,
             generate=_generate,
             seed=42,
-            quantization=4,
+            quantization=int(quantize),
             activity_callback=activity_callback,
         )
     except Exception as e:
@@ -1971,7 +1975,7 @@ def _release_probe_model(model_key: str) -> None:
             from imagegen_plugins.mflux_flux2_klein_session import release_flux2_klein_session
 
             release_flux2_klein_session(reason="lora_check_model_done")
-        elif model_key == Z_IMAGE_TURBO:
+        elif model_key in (Z_IMAGE_TURBO_MFLUX_4BIT, Z_IMAGE_TURBO):
             from imagegen_plugins.mflux_z_image_session import release_z_image_session
 
             release_z_image_session(reason="lora_check_model_done")
@@ -2135,10 +2139,25 @@ def probe_lora_on_model(
             baseline_cache=cache,
             activity_callback=activity_callback,
         )
+    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
+        return _probe_z_image_turbo(
+            hf_model=Z_IMAGE_TURBO_MFLUX_4BIT,
+            model_key=model_key,
+            quantize=Z_IMAGE_TURBO_MFLUX_4BIT_DEFAULT_QUANTIZE,
+            lora_path=weights_path,
+            lora_scale=lora_scale,
+            cancel_check=cancel_check,
+            prompt=render_prompt,
+            entry=entry,
+            baseline_cache=cache,
+            lora_label=lora_label,
+            activity_callback=activity_callback,
+        )
     if model_key == Z_IMAGE_TURBO:
         return _probe_z_image_turbo(
             hf_model=Z_IMAGE_TURBO,
             model_key=model_key,
+            quantize=Z_IMAGE_TURBO_DEFAULT_QUANTIZE,
             lora_path=weights_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,

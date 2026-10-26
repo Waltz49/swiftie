@@ -48,9 +48,9 @@ enum ImageGenExifCommentFormatting {
         "stable-diffusion-v1-5/stable-diffusion-v1-5": "SD 1.5 Base",
         "stablediffusionapi/anythingfurry": "Anything Furry",
         "stabilityai/stable-diffusion-xl-base-1.0": "SDXL 1.0 Base",
-        "Disty0/Z-Image-Turbo-SDNQ-int8": "Z-Image Turbo",
-        "Tongyi-MAI/Z-Image-Turbo": "Z-Image Turbo",
-        "filipstrand/Z-Image-Turbo-mflux-4bit": "Z-Image Turbo",
+        "Disty0/Z-Image-Turbo-SDNQ-int8": "Z-Image Turbo (4-bit)",
+        LoRAHFModelIDs.zImageTurbo: LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurbo),
+        LoRAHFModelIDs.zImageTurboMflux4Bit: LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurboMflux4Bit),
     ]
 
     private static let promptSectionSkipHeadings: Set<String> = [
@@ -248,12 +248,22 @@ enum ImageGenExifCommentFormatting {
 
     // MARK: - Model / LoRA labels
 
-    /// Any Z-Image Turbo variant, including “(4 bit)” / 4-bit / 8-bit labels, is “Z-Image Turbo”.
+    /// Display / EXIF model line for a plugin or parsed comment (preserves 4-bit vs runtime).
     static func presentedModelName(_ modelName: String) -> String {
+        modelNameForExifPluginResolution(modelName)
+    }
+
+    static func modelNameForExifPluginResolution(_ modelName: String) -> String {
         let trimmed = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
+        if let label = hfModelDisplayNames[trimmed] {
+            return label
+        }
+        if isZImageTurbo4BitIdentity(trimmed) {
+            return LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurboMflux4Bit)
+        }
         if isZImageTurboIdentity(trimmed) {
-            return "Z-Image Turbo"
+            return LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurbo)
         }
         return trimmed
     }
@@ -261,59 +271,48 @@ enum ImageGenExifCommentFormatting {
     static func menuLabelForHFModelId(_ modelId: String) -> String {
         let id = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty, id.lowercased() != "none" else { return "" }
-        if isZImageTurboIdentity(id) {
-            return "Z-Image Turbo"
-        }
         if let label = hfModelDisplayNames[id] {
             return label
         }
+        if isZImageTurbo4BitIdentity(id) {
+            return LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurboMflux4Bit)
+        }
+        if isZImageTurboIdentity(id) {
+            return LoRAHFModelIDs.displayName(for: LoRAHFModelIDs.zImageTurbo)
+        }
         if let slash = id.lastIndex(of: "/") {
-            return presentedModelName(String(id[id.index(after: slash)...]))
+            return modelNameForExifPluginResolution(String(id[id.index(after: slash)...]))
         }
         return id
     }
 
-    private static func isZImageTurboIdentity(_ raw: String) -> Bool {
+    static func isZImageTurbo4BitIdentity(_ raw: String) -> Bool {
+        let folded = normalizeZImageToken(raw)
+        if folded.contains("z image turbo sdnq") { return true }
+        if folded.contains("z image turbo mflux 4bit") { return true }
+        if folded.contains("mflux 4bit") { return true }
+        if folded.contains("filipstrand") { return true }
+        if raw.lowercased().contains("z_image_turbo_mflux_4bit") { return true }
+        guard folded.contains("z image turbo") else { return false }
+        return folded.contains("4 bit") || folded.contains("4bit")
+    }
+
+    static func isZImageTurboIdentity(_ raw: String) -> Bool {
+        let folded = normalizeZImageToken(raw)
+        return folded.contains("z image turbo")
+    }
+
+    private static func normalizeZImageToken(_ raw: String) -> String {
         let folded = raw.lowercased()
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
-        let compact = folded.split { character in
+        return folded.split { character in
             character.isWhitespace || character == "(" || character == ")" || character == "/" || character == "."
         }.joined(separator: " ")
-        return compact.contains("z image turbo")
     }
 
-    /// Rewrite the Image Model line when an older comment still says Z-Image Turbo (4 bit) or similar.
     private static func canonicalizeDisplayedZImageTurboModel(_ text: String) -> String {
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        var inModelBlock = false
-        var replaced = false
-        for index in lines.indices {
-            let stripped = lines[index].trimmingCharacters(in: .whitespaces)
-            let lower = stripped.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-            if lower == "image model" {
-                inModelBlock = true
-                continue
-            }
-            if lower.hasPrefix("prompt") || lower.hasPrefix("references") {
-                inModelBlock = false
-            }
-            guard inModelBlock, !replaced, !stripped.isEmpty else { continue }
-            if stripped.range(
-                of: #"^\s*(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\s*:"#,
-                options: .regularExpression
-            ) != nil {
-                continue
-            }
-            if isExifLoraContinuationLine(lines[index]) { continue }
-            let presented = presentedModelName(stripped)
-            if presented != stripped {
-                let indent = lines[index].prefix { $0 == " " || $0 == "\t" }
-                lines[index] = String(indent) + presented
-            }
-            replaced = true
-        }
-        return lines.joined(separator: "\n")
+        text
     }
 
     /// Port of ``lora_name_for_exif_from_values`` (catalog names via Python bridge when needed).

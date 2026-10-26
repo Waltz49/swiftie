@@ -19,6 +19,7 @@ enum ImageGenModelDownloadFormatting {
         LoRAHFModelIDs.sceneworksFlux2Klein9BKVMLX: 22_000_000_000,
         "Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers": 7_703_533_162,
         "Efficient-Large-Model/Sana_Sprint_600M_1024px_diffusers": 7_703_533_162,
+        LoRAHFModelIDs.zImageTurboMflux4Bit: 5_900_000_000,
         LoRAHFModelIDs.zImageTurbo: 12_000_000_000,
         LoRAHFModelIDs.anythingFurry: 4_100_000_000,
         LoRAHFModelIDs.realisticVisionV4NoVAE: 4_265_000_000,

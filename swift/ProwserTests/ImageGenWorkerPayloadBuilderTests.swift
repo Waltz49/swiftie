@@ -95,6 +95,25 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     }
 
     @MainActor
+    func testZImagePayloadUsesPluginHfModelIDWithoutQuantRouting() throws {
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        for pluginID in ["z_image_turbo_mflux_4bit", "z_image_turbo_mflux"] {
+            guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else {
+                XCTFail("missing \(pluginID)")
+                continue
+            }
+            let payload = try ImageGenWorkerPayloadBuilder.build(
+                plugin: plugin,
+                values: ["prompt": "z", "width": 1024, "height": 1024, "steps": 9],
+                outputPath: "/tmp/z.png",
+                config: config,
+                applyImageExit: false
+            )
+            XCTAssertEqual(payload["hf_model_id"] as? String, plugin.hfModelID, pluginID)
+        }
+    }
+
+    @MainActor
     func testEditSnapshotReplacesStaleCanonicalSourcePaths() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("edit-snapshot-\(UUID().uuidString)")

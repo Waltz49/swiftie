@@ -140,4 +140,64 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         XCTAssertEqual(parsed["lora"] as? String, "F2K9B_BallgagV2_2020E10 [1]")
         XCTAssertEqual(parsed["seed"] as? Int, 1_335_284_087)
     }
+
+    @MainActor
+    func testImportRestResolvesZImageTurbo4BitExifLabel() {
+        let plugins: [[String: Any]] = [
+            [
+                "plugin_id": "z_image_turbo_mflux_4bit",
+                "display_name": "Z-Image Turbo (4-bit)",
+                "model_label": "Z-Image Turbo (4-bit)",
+                "hf_model_id": LoRAHFModelIDs.zImageTurboMflux4Bit,
+                "pipeline_id": "mflux_z_image_turbo",
+                "available": true,
+            ],
+            [
+                "plugin_id": "z_image_turbo_mflux",
+                "display_name": "Z-Image Turbo",
+                "model_label": "Z-Image Turbo",
+                "hf_model_id": LoRAHFModelIDs.zImageTurbo,
+                "pipeline_id": "mflux_z_image_turbo",
+                "available": true,
+            ],
+        ]
+
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: "Z-Image Turbo (4-bit)",
+                plugins: plugins
+            ),
+            "z_image_turbo_mflux_4bit"
+        )
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: "Z-Image Turbo",
+                plugins: plugins
+            ),
+            "z_image_turbo_mflux"
+        )
+
+        let comment = """
+        Image Model:
+        Z-Image Turbo (4-bit)
+        Seed: 1
+        Steps: 9
+
+        Prompt:
+        cat
+        """
+        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
+    }
+
+    func testMigrateLegacySDNQPluginIDTo4Bit() {
+        XCTAssertEqual(
+            ImageGenLegacyMigration.migrateLegacyImageGenPluginID("z_image_turbo_sdnq_int8"),
+            "z_image_turbo_mflux_4bit"
+        )
+        XCTAssertEqual(
+            ImageGenLegacyMigration.migrateLegacyImageGenPluginID("z_image_turbo_mflux_4bit"),
+            "z_image_turbo_mflux_4bit"
+        )
+    }
 }

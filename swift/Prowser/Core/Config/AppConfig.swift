@@ -258,6 +258,7 @@ final class AppConfig {
         settingsDraft = nil
         settingsSnapshot = nil
         migrateRestoreStateIfNeeded()
+        migrateImageGenLegacyIfNeeded()
         mergeMissingDefaults()
     }
 
@@ -653,6 +654,13 @@ final class AppConfig {
         let defaults = Self.defaultSettings()
         for (key, value) in defaults where settings[key] == nil {
             settings[key] = value
+        }
+    }
+
+    private func migrateImageGenLegacyIfNeeded() {
+        guard var imagegen = settings["imagegen"] as? [String: Any] else { return }
+        if ImageGenLegacyMigration.migrateImageGenBlock(&imagegen) {
+            settings["imagegen"] = imagegen
         }
     }
 

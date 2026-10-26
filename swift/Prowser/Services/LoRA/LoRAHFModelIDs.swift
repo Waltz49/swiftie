@@ -14,6 +14,7 @@ enum LoRAHFModelIDs {
     static let realisticVisionV4NoVAE = "SG161222/Realistic_Vision_V4.0_noVAE"
     static let anythingFurry = "stablediffusionapi/anythingfurry"
     static let sdxlBase10 = "stabilityai/stable-diffusion-xl-base-1.0"
+    static let zImageTurboMflux4Bit = "filipstrand/Z-Image-Turbo-mflux-4bit"
     static let zImageTurbo = "Tongyi-MAI/Z-Image-Turbo"
 
     static let sd15LoraModelKeys: [String] = [sd15BaseV15, realisticVisionV4NoVAE, anythingFurry]
@@ -22,7 +23,7 @@ enum LoRAHFModelIDs {
     static let probeModelOrder: [String] = [
         flux1Schnell, flux1Dev, flux1FillDev,
         flux2Klein4B, flux2Klein9B, flux2Klein9BKV, sceneworksFlux2Klein9BKVMLX,
-        zImageTurbo,
+        zImageTurboMflux4Bit, zImageTurbo,
         sd15BaseV15,
         realisticVisionV4NoVAE, anythingFurry,
         sdxlBase10,
@@ -46,6 +47,7 @@ enum LoRAHFModelIDs {
             realisticVisionV4NoVAE: "Realistic Vision V4.0",
             anythingFurry: "Anything Furry",
             sdxlBase10: "SDXL 1.0 Base",
+            zImageTurboMflux4Bit: "Z-Image Turbo (4-bit)",
             zImageTurbo: "Z-Image Turbo",
         ]
         return map[modelKey] ?? modelKey

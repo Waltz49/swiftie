@@ -66,8 +66,17 @@ enum ImageGenPluginCatalog {
             pluginID: "z_image_turbo_mflux_4bit",
             pipelineID: "mflux_z_image_turbo",
             function: "create",
+            displayName: "Z-Image Turbo (4-bit)",
+            hfModelID: LoRAHFModelIDs.zImageTurboMflux4Bit,
+            loraHostID: "z_image_turbo",
+            reportsQuantization: false
+        ),
+        .init(
+            pluginID: "z_image_turbo_mflux",
+            pipelineID: "mflux_z_image_turbo",
+            function: "create",
             displayName: "Z-Image Turbo",
-            hfModelID: "Tongyi-MAI/Z-Image-Turbo",
+            hfModelID: LoRAHFModelIDs.zImageTurbo,
             loraHostID: "z_image_turbo"
         ),
         .init(

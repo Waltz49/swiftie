@@ -58,7 +58,9 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
             return hf_model_id.split("/")[-1].replace("_", " ")
         return "SANA Sprint 0.6B 1024px"
     if pipeline_id == "mflux_z_image_turbo":
-        return "Z-Image Turbo"
+        from imagegen_plugins.hf_model_ids import lora_model_display_name
+
+        return lora_model_display_name(hf_model_id or "")
     if pipeline_id == "sd15_diffusers":
         if hf_model_id and "/" in hf_model_id:
             return hf_model_id.split("/")[-1].replace("_", " ")

@@ -176,4 +176,22 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
     func testRealisticVisionPipelineIsSD15Python() {
         XCTAssertTrue(ImageGenPipelineRouting.diffusersPipelineIDs.contains("sd15_diffusers"))
     }
+
+    func testZImageCLIIncludesModelForFilipstrandOnly() throws {
+        let base: [String: Any] = [
+            "pipeline_id": "mflux_z_image_turbo",
+            "prompt": "test",
+            "output_path": "/tmp/output.png",
+            "mflux_quantize": 4,
+        ]
+        let filipstrand = base.merging(["hf_model_id": LoRAHFModelIDs.zImageTurboMflux4Bit]) { $1 }
+        let tongyi = base.merging(["hf_model_id": LoRAHFModelIDs.zImageTurbo]) { $1 }
+
+        let filipArgs = try MfluxCLIPipeline.buildArguments(payload: filipstrand)
+        XCTAssertTrue(filipArgs.contains("--model"))
+        XCTAssertTrue(filipArgs.contains(LoRAHFModelIDs.zImageTurboMflux4Bit))
+
+        let tongyiArgs = try MfluxCLIPipeline.buildArguments(payload: tongyi)
+        XCTAssertFalse(tongyiArgs.contains("--model"))
+    }
 }

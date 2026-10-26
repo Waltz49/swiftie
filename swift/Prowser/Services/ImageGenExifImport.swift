@@ -248,10 +248,35 @@ enum ImageGenExifImport {
     static func resolvePluginID(forExifModel modelText: String, plugins: [[String: Any]]) -> String? {
         let token = normalizeExifModelToken(modelText)
         guard !token.isEmpty else { return nil }
+        if let zImage = resolveZImagePluginID(forExifModel: modelText, token: token, plugins: plugins) {
+            return zImage
+        }
         for plugin in plugins where plugin["available"] as? Bool ?? true {
             if exifModelMatchKeys(plugin: plugin).contains(token) {
                 return plugin["plugin_id"] as? String
             }
+        }
+        return nil
+    }
+
+    private static func resolveZImagePluginID(
+        forExifModel modelText: String,
+        token: String,
+        plugins: [[String: Any]]
+    ) -> String? {
+        let pluginAvailable = { (id: String) -> Bool in
+            plugins.contains { row in
+                (row["plugin_id"] as? String) == id && (row["available"] as? Bool ?? true)
+            }
+        }
+        if token.contains("z_image_turbo_sdnq") || token.contains("sdnq_int8") {
+            return pluginAvailable("z_image_turbo_mflux_4bit") ? "z_image_turbo_mflux_4bit" : nil
+        }
+        if ImageGenExifCommentFormatting.isZImageTurbo4BitIdentity(modelText) {
+            return pluginAvailable("z_image_turbo_mflux_4bit") ? "z_image_turbo_mflux_4bit" : nil
+        }
+        if ImageGenExifCommentFormatting.isZImageTurboIdentity(modelText) {
+            return pluginAvailable("z_image_turbo_mflux") ? "z_image_turbo_mflux" : nil
         }
         return nil
     }
