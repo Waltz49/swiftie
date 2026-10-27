@@ -16,6 +16,7 @@ struct ProwserApp: App {
         .commands {
             if let appState = appDelegate.appState, appDelegate.isPrimary {
                 ProwserCommands(appState: appState)
+                ProwserFilterCommands(appState: appState)
                 ProwserImageCommands(appState: appState)
                 ProwserHelpCommands(appState: appState)
             }

@@ -53,6 +53,21 @@ enum MenuBarTitles {
         }
     }
 
+    /// ``ProwserFilterCommands`` is registered after ``ProwserCommands``; place Filter immediately after Search.
+    @MainActor
+    static func placeFilterMenuAfterSearch() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+        let canonicalTitles = mainMenu.items.map { canonicalMenuTitle($0.title) }
+        guard let searchIndex = canonicalTitles.firstIndex(of: "Search") else { return }
+        guard let filterIndex = canonicalTitles.firstIndex(of: "Filter") else { return }
+        let desiredIndex = searchIndex + 1
+        guard filterIndex != desiredIndex else { return }
+        let item = mainMenu.items[filterIndex]
+        mainMenu.removeItem(at: filterIndex)
+        let insertIndex = filterIndex < desiredIndex ? desiredIndex - 1 : desiredIndex
+        mainMenu.insertItem(item, at: insertIndex)
+    }
+
     /// SwiftUI registers ``ProwserImageCommands`` after ``ProwserCommands`` (Tools lives there).
     /// Python ``menu_manager.setup_actions`` adds Image before Tools when imagegen UI is enabled.
     @MainActor

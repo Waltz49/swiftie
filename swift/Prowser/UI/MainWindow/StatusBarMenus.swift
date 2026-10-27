@@ -26,52 +26,9 @@ enum StatusBarMenus {
 
     static func showFilterMenu(appState: AppState, relativeTo view: NSView) {
         let menu = NSMenu()
-        let saved = appState.config.getSavedFilters()
-        let current = appState.filterSettings.filterPattern
-        let currentNormalized = normalizeForComparison(current)
-
-        menu.addItem(makeAction(title: "Edit...", handler: {
-            appState.presentFilterEditSheet()
-        }))
-
-        menu.addItem(.separator())
-
-        let noFilter = makeAction(title: "No Filter (*)", handler: {
-            appState.applyFilenameFilterPattern("*")
-        })
-        noFilter.state = (current == "*" || currentNormalized == "*") ? .on : .off
-        menu.addItem(noFilter)
-
-        var filtersToShow: [String] = []
-        var seen = Set<String>()
-
-        if currentNormalized != "*", !saved.contains(where: { normalizeForComparison($0) == currentNormalized }) {
-            filtersToShow.append(currentNormalized)
-            seen.insert(currentNormalized)
+        FilterPresetMenu.appendItems(to: menu, appState: appState) { title, handler in
+            makeAction(title: title, handler: handler)
         }
-
-        for pattern in saved {
-            let normalized = normalizeForComparison(pattern)
-            guard !normalized.isEmpty, normalized != "*", !seen.contains(normalized) else { continue }
-            filtersToShow.append(normalized)
-            seen.insert(normalized)
-        }
-
-        if !filtersToShow.isEmpty {
-            menu.addItem(.separator())
-        }
-
-        for pattern in filtersToShow {
-            let display = displayPattern(pattern)
-            let item = makeAction(title: display, handler: {
-                appState.applyFilenameFilterPattern(FilterPatternFormatting.normalizeForMatching(pattern))
-            })
-            if normalizeForComparison(pattern) == currentNormalized {
-                item.state = .on
-            }
-            menu.addItem(item)
-        }
-
         popUp(menu, relativeTo: view)
     }
 
@@ -136,19 +93,6 @@ enum StatusBarMenus {
         menu.popUp(positioning: nil, at: point, in: view)
     }
 
-    private static func normalizeForComparison(_ pattern: String) -> String {
-        var value = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.hasSuffix("*") { value = String(value.dropLast()) }
-        if value.isEmpty { return "*" }
-        return value
-    }
-
-    private static func displayPattern(_ pattern: String) -> String {
-        if pattern.contains("*") || pattern.contains("?") || pattern.contains("[") {
-            return pattern
-        }
-        return pattern + "*"
-    }
 }
 
 @MainActor
