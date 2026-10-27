@@ -41,6 +41,39 @@ final class ImageGenPromptStreamSession {
     func end() { isActive = false }
 }
 
+// MARK: - Text view
+
+/// Prompt field with standard ⌘Z / ⌘⇧Z undo when the global keyboard monitor passes key events through.
+@MainActor
+final class ImageGenPromptNSTextView: NSTextView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), !flags.contains(.control), !flags.contains(.option),
+              event.charactersIgnoringModifiers?.lowercased() == "z"
+        else {
+            return super.performKeyEquivalent(with: event)
+        }
+        if flags.contains(.shift) {
+            if undoManager?.canRedo == true {
+                undoManager?.redo()
+                return true
+            }
+        } else if undoManager?.canUndo == true {
+            undoManager?.undo()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if let scrollView = enclosingScrollView {
+            scrollView.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
+}
+
 // MARK: - SwiftUI
 
 struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
@@ -114,6 +147,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             self.host = host
             self.textView = host.textView
             host.textView.delegate = self
+            host.textView.undoManager?.levelsOfUndo = 100
         }
 
         func textDidChange(_ notification: Notification) {
@@ -236,8 +270,8 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
 @MainActor
 final class ImageGenPromptPlainTextHostView: NSView {
-    let scrollView = NSScrollView()
-    let textView = NSTextView()
+    let scrollView = ImageGenNonForwardingScrollView()
+    let textView = ImageGenPromptNSTextView()
 
     private var heightConstraint: NSLayoutConstraint?
     private var minLines = ImageGenPromptLayout.defaultMinLines
@@ -259,9 +293,12 @@ final class ImageGenPromptPlainTextHostView: NSView {
         textView.backgroundColor = .textBackgroundColor
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.isAutomaticTextReplacementEnabled = false
+        textView.isContinuousSpellCheckingEnabled = true
+        textView.isGrammarCheckingEnabled = true
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
+        textView.allowsUndo = true
         textView.textContainerInset = NSSize(width: 4, height: 5)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -324,6 +361,10 @@ final class ImageGenPromptPlainTextHostView: NSView {
     override func layout() {
         super.layout()
         refreshHeightAndScrollPolicy()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        scrollView.scrollWheel(with: event)
     }
 
     func configure(

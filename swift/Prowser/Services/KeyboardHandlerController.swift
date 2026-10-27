@@ -520,10 +520,25 @@ final class KeyboardHandlerController {
         if isTextNavigationCommand(event) { return false }
         if dialogOwns, isDialogSaveCommand(event) { return false }
 
-        if performStandardEditingShortcut(event) {
-            return true
+        if isStandardEditingShortcut(event) {
+            // When sendAction fails, pass the event through so NSTextView can undo/redo.
+            return performStandardEditingShortcut(event)
         }
         return true
+    }
+
+    private static func isStandardEditingShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.option), !flags.contains(.control) else { return false }
+        let shifted = flags.contains(.shift)
+        let expected: NSEvent.ModifierFlags = shifted ? [.command, .shift] : .command
+        guard flags == expected else { return false }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "a", "c", "x", "v", "z":
+            return true
+        default:
+            return false
+        }
     }
 
     private static func isWindowChromeCommand(_ event: NSEvent) -> Bool {

@@ -206,42 +206,42 @@ struct ImageGenPanelShell: View {
                 EmptyView()
             }
 
-            ImageGenPromptSection(
-                function: function,
-                values: $values,
-                selectedPluginID: $selectedPluginID,
-                plugins: plugins,
-                sourcePath: effectiveSourcePath,
-                existingSourcePaths: effectiveSourcePaths,
-                showNegativePrompt: hasNegativePrompt,
-                promptLabel: "Image Prompt",
-                promptStreamSession: fluxRefineCoordinator?.promptStreamSession,
-                onValuesChanged: onValuesChanged,
-                onSourcePathsImported: function == "edit" ? { paths in
-                    let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)
-                    guard !normalized.isEmpty else { return }
-                    localSourcePaths = normalized
-                    syncEditSourceValues()
-                } : nil,
-                onPluginImported: onPluginImported
-            )
-            .padding(.top, 8)
-
-            if let fluxContext, let fluxRefineCoordinator {
-                ImageGenFluxPromptSection(
-                    values: $values,
-                    fluxContext: fluxContext,
-                    refineCoordinator: fluxRefineCoordinator,
-                    function: function,
-                    sourcePaths: effectiveSourcePaths,
-                    activeBrowsePath: activeBrowsePath,
-                    onValuesChanged: onValuesChanged,
-                    onQueueJobWithAI: onQueueJobWithAI
-                )
-            }
-
-            ScrollView {
+            ImageGenPanelClientScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    ImageGenPromptSection(
+                        function: function,
+                        values: $values,
+                        selectedPluginID: $selectedPluginID,
+                        plugins: plugins,
+                        sourcePath: effectiveSourcePath,
+                        existingSourcePaths: effectiveSourcePaths,
+                        showNegativePrompt: hasNegativePrompt,
+                        promptLabel: "Image Prompt",
+                        promptStreamSession: fluxRefineCoordinator?.promptStreamSession,
+                        onValuesChanged: onValuesChanged,
+                        onSourcePathsImported: function == "edit" ? { paths in
+                            let normalized = ImageGenEditSourcePaths.normalizedPaths(paths)
+                            guard !normalized.isEmpty else { return }
+                            localSourcePaths = normalized
+                            syncEditSourceValues()
+                        } : nil,
+                        onPluginImported: onPluginImported
+                    )
+                    .padding(.top, 8)
+
+                    if let fluxContext, let fluxRefineCoordinator {
+                        ImageGenFluxPromptSection(
+                            values: $values,
+                            fluxContext: fluxContext,
+                            refineCoordinator: fluxRefineCoordinator,
+                            function: function,
+                            sourcePaths: effectiveSourcePaths,
+                            activeBrowsePath: activeBrowsePath,
+                            onValuesChanged: onValuesChanged,
+                            onQueueJobWithAI: onQueueJobWithAI
+                        )
+                    }
+
                     if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
                        let plugin = selectedPlugin {
                         ImageGenCustomSizeSection(

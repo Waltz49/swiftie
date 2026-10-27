@@ -14,6 +14,8 @@
 #   ./Scripts/build_app.sh --reg           # default opener for jpg/jpeg/png/webp
 #   ./Scripts/build_app.sh --skip-dlib     # skip Vendor/dlib-install (face stub only)
 #   ./Scripts/build_app.sh --bench         # also build Tools/FaceDetectBench CLI
+#   ./Scripts/build_app.sh -v              # verbose swift build
+#   ./Scripts/build_app.sh -vv             # extra-verbose swift build
 #
 # Builds ProwserDlibBridgeCore + Swift app via `swift build --product Prowser`. When
 # Vendor/dlib-install/lib/libdlib.a is missing, runs build_dlib_macos.sh first
@@ -38,6 +40,7 @@ NERB_PROFILE_PATH="/tmp/nerb"
 REGISTER_DEFAULTS=0
 FDA_WALKTHROUGH=0
 INSTALL_APP_PATH=""
+SWIFT_BUILD_VERBOSE=""
 
 create_dmg() {
     local app_path="$1"
@@ -269,6 +272,7 @@ Options:
   --fda                   After build: reset TCC + open FDA Settings (no clipboard/dialog)
   --install PATH          Copy signed .app to PATH (e.g. /Applications/swift-prowser.app) for a stable FDA target
   --nerb                  Embed profile /tmp/nerb (same as -p /tmp/nerb at launch)
+  -v, -vv                 Pass verbosity through to \`swift build\`
   -h, --help              Show this help
 EOF
 }
@@ -320,6 +324,14 @@ while [[ $# -gt 0 ]]; do
             INSTALL_APP_PATH="$2"
             shift 2
             ;;
+        -vv)
+            SWIFT_BUILD_VERBOSE=-vv
+            shift
+            ;;
+        -v)
+            SWIFT_BUILD_VERBOSE=-v
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -339,23 +351,24 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     ensure_native_dlib
     echo "Building Prowser ($CONFIG)..."
     if [[ "$CONFIG" == "release" ]]; then
-        swift build -c release --product Prowser -Xswiftc -Osize -Xlinker -dead_strip
+        # Optional SWIFT_BUILD_VERBOSE (-v / -vv); unquoted so empty string omits the flag.
+        swift build $SWIFT_BUILD_VERBOSE -c release --product Prowser -Xswiftc -Osize -Xlinker -dead_strip
     else
-        swift build -c "$CONFIG" --product Prowser
+        swift build $SWIFT_BUILD_VERBOSE -c "$CONFIG" --product Prowser
     fi
     if [[ "$BUILD_BENCH" -eq 1 ]]; then
         echo "Building FaceDetectBench ($CONFIG)..."
         if [[ "$CONFIG" == "release" ]]; then
-            swift build -c release --product FaceDetectBench -Xswiftc -Osize -Xlinker -dead_strip
+            swift build $SWIFT_BUILD_VERBOSE -c release --product FaceDetectBench -Xswiftc -Osize -Xlinker -dead_strip
         else
-            swift build -c "$CONFIG" --product FaceDetectBench
+            swift build $SWIFT_BUILD_VERBOSE -c "$CONFIG" --product FaceDetectBench
         fi
     fi
 else
     echo "Skipping build; packaging existing $CONFIG artifacts..."
 fi
 
-BUILD_DIR="$(swift build -c "$CONFIG" --product Prowser --show-bin-path)"
+BUILD_DIR="$(swift build $SWIFT_BUILD_VERBOSE -c "$CONFIG" --product Prowser --show-bin-path)"
 BINARY="$BUILD_DIR/Prowser"
 RESOURCE_BUNDLE="$BUILD_DIR/Prowser_Prowser.bundle"
 
