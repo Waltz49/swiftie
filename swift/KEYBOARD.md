@@ -87,6 +87,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 |-----|--------|
 | B | Toggle status bar |
 | I | Toggle information sidebar |
+| I (double-tap) | Hide organize sidebar and jobs pane when the first **I** showed information (ignored if the first **I** hid it) |
 | O | Toggle shortcuts sidebar (favorites / move lists) |
 | Cmd+I | Cycle thumbnail overlay (none → name → size → both) |
 | Cmd+Shift+I | Toggle number overlay |
@@ -196,6 +197,7 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Shift+Space | Toggle space bar behavior |
 | Enter/Return/Esc/Q/F | Return to thumbnails |
 | T / P (double-tap) | Return to thumbnails and show file tree / preview |
+| I (double-tap) | Hide organize and jobs when first **I** showed information (same interval as T/P) |
 | F10 | Clear history stacks |
 | ⌃⌘F | macOS Space vs windowed display |
 

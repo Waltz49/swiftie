@@ -69,6 +69,18 @@ extension AppState {
         if visible { revealSidebarColumn(.right) }
         noteSidebarLayoutChanged()
     }
+
+    /// Double-tap **I**: force-hide Organize and Jobs (Information unchanged).
+    func hideOrganizeAndJobsPanes() {
+        clearChromeSuppression()
+        config.updateSetting("shortcuts_sidebar_visible", value: false)
+        if BundleCapabilities.imageGenUIEnabled {
+            config.updateSetting("jobs_visible", value: false)
+            hideJobsPanel()
+        }
+        noteSidebarLayoutChanged()
+    }
+
     func setFileTreeToolbarVisible(_ visible: Bool) {
         guard fileTreeToolbarVisible != visible else { return }
         fileTreeToolbarVisible = visible

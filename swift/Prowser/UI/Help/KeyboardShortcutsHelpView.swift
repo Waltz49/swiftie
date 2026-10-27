@@ -52,6 +52,7 @@ struct KeyboardShortcutsHelpView: View {
                     ])
                     shortcutSection("Sidebars", rows: [
                         ("I", "Toggle information pane"),
+                        ("I (double-tap)", "Hide organize and jobs (only if first I showed information)"),
                         ("O", "Toggle shortcuts sidebar"),
                         ("T", "Toggle file tree"),
                         ("⌥T / ⌥P", "Show file tree or preview only (left)"),

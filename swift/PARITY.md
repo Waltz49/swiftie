@@ -461,6 +461,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 - [~] ⌘F CLIP search (`ClipSearchSheet`)
 - [x] ⌘P Search for Known Person; ⌃⌘P Search for Person in Current Image (native dlib)
 - [x] ⌘G map, ⌘O open directory, ⌘⇧O open file, browse double-tap T/P
+- [x] Double-tap I hides organize + jobs (Swift-only; 2.4s window)
 - [x] ⌘N rename prefix (done), ⌘M convert, ⌘⇧Z resize (full dialog)
 
 ## Suggested implementation order (M10+)

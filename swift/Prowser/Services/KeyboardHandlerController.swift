@@ -8,6 +8,8 @@ final class KeyboardHandlerController {
     private var monitor: Any?
     private var doubleTapLastKey: UInt16?
     private var doubleTapLastTime: TimeInterval = 0
+    /// Second **I** hides Organize/Jobs only when the first **I** showed Information (not when it hid it).
+    private var informationDoubleHideArmed = false
     private let doubleTapWindow: TimeInterval = 2.4
 
     func bind(_ appState: AppState) {
@@ -875,8 +877,7 @@ final class KeyboardHandlerController {
             jumpToLast(appState: appState)
             return true
         case "i":
-            appState.toggleInformationSidebar()
-            return true
+            return handleInformationKeyWithDoubleHide(event, appState: appState)
         case "o":
             appState.toggleShortcutsSidebar()
             return true
@@ -1151,8 +1152,7 @@ final class KeyboardHandlerController {
             applySort(.custom, reversed: false, appState: appState)
             return true
         case "i":
-            appState.toggleInformationSidebar()
-            return true
+            return handleInformationKeyWithDoubleHide(event, appState: appState)
         case "o":
             appState.toggleShortcutsSidebar()
             return true
@@ -1711,6 +1711,31 @@ final class KeyboardHandlerController {
     private func resetBrowseDoubleTap() {
         doubleTapLastKey = nil
         doubleTapLastTime = 0
+        informationDoubleHideArmed = false
+    }
+
+    private static let informationKeyCode: UInt16 = 34
+
+    /// Single **I** toggles Information; second **I** within `doubleTapWindow` hides Organize + Jobs when the first **I** showed Information.
+    private func handleInformationKeyWithDoubleHide(_ event: NSEvent, appState: AppState) -> Bool {
+        if event.isARepeat { return true }
+        let now = ProcessInfo.processInfo.systemUptime
+        if doubleTapLastKey == Self.informationKeyCode,
+           now - doubleTapLastTime < doubleTapWindow {
+            doubleTapLastKey = nil
+            doubleTapLastTime = 0
+            if informationDoubleHideArmed {
+                informationDoubleHideArmed = false
+                appState.hideOrganizeAndJobsPanes()
+            }
+            return true
+        }
+        let wasVisible = appState.config.bool(forKey: "information_sidebar_visible", default: true)
+        doubleTapLastKey = Self.informationKeyCode
+        doubleTapLastTime = now
+        informationDoubleHideArmed = !wasVisible
+        appState.toggleInformationSidebar()
+        return true
     }
 
     private func handleBrowseDoubleTap(
