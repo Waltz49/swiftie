@@ -109,20 +109,7 @@ enum DirectoryRefreshService {
                 if ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState) {
                     return
                 }
-                if appState.fileData.currentViewMode == .browse {
-                    if let current = appState.fileData.currentImagePath,
-                       !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: current),
-                       appState.metadataCache.fileChangedOnDisk(path: current) {
-                        invalidateThumbnails(appState: appState, paths: [current])
-                        appState.reloadBrowseImageIfCurrent(path: current)
-                    }
-                    return
-                }
-                guard displayedSet.count < 500 else { return }
-                let modified = modifiedPaths(in: displayedSet, metadataCache: appState.metadataCache)
-                if !modified.isEmpty {
-                    invalidateThumbnails(appState: appState, paths: modified)
-                }
+                refreshModifiedDisplayedImagesIfNeeded(appState: appState)
                 return
             }
 
@@ -380,8 +367,43 @@ enum DirectoryRefreshService {
         appState.backgroundImageRecognition.noteIdleScanScopeChanged()
     }
 
+    /// Reload caches and on-screen pixels for one file already in the current view (Python ``refresh_modified_file_if_displayed``).
+    @discardableResult
+    static func refreshDisplayedFileIfListed(appState: AppState, path: String) -> Bool {
+        guard let normalized = FileDataModel.normalizePath(path),
+              FileManager.default.fileExists(atPath: normalized),
+              FileDataModel.indexOfPath(normalized, in: appState.fileData.displayedImages) != nil else {
+            return false
+        }
+        invalidateThumbnails(appState: appState, paths: [normalized])
+        return true
+    }
+
+    /// Drop thumbnail / preview / browse caches for displayed files whose bytes changed on disk.
+    static func refreshModifiedDisplayedImagesIfNeeded(appState: AppState) {
+        let displayed = appState.fileData.displayedImages
+        guard !displayed.isEmpty else { return }
+
+        let pathsToCheck: [String]
+        if displayed.count < 500 {
+            pathsToCheck = displayed
+        } else if let current = appState.fileData.currentImagePath {
+            pathsToCheck = [current]
+        } else {
+            return
+        }
+
+        let modified = pathsToCheck.filter { path in
+            FileManager.default.fileExists(atPath: path)
+                && appState.metadataCache.fileChangedOnDisk(path: path)
+        }
+        guard !modified.isEmpty else { return }
+        invalidateThumbnails(appState: appState, paths: modified)
+    }
+
     /// Light refresh when directory listing is unchanged (⌘R) — avoid O(n) main-thread stats + full pixmap drop.
     static func refreshThumbnailPresentation(appState: AppState) {
+        refreshModifiedDisplayedImagesIfNeeded(appState: appState)
         appState.thumbnailInvalidationGeneration += 1
         appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
         appState.thumbnailGridHost?.setNeedsDisplay(appState.thumbnailGridHost?.bounds ?? .zero)

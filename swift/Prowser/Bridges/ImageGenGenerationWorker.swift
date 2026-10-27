@@ -9,6 +9,8 @@ final class ImageGenGenerationWorker {
     private weak var config: AppConfig?
     private(set) var unloadInFlight = false
     private(set) var processMayRetainModel = false
+    /// True while ``requestCancel(terminateWorker:)`` is reaping the NDJSON subprocess (Python ``worker_needs_cleanup``).
+    private(set) var workerTeardownActive = false
 
     var retainsWorkerProcess: Bool {
         processMayRetainModel
@@ -61,6 +63,14 @@ final class ImageGenGenerationWorker {
     }
 
     func requestCancel(activeJobID: String? = nil, terminateWorker: Bool = false) async {
+        if terminateWorker {
+            workerTeardownActive = true
+        }
+        defer {
+            if terminateWorker {
+                workerTeardownActive = false
+            }
+        }
         if await ndjson.running {
             var command: [String: Any] = ["command": "cancel"]
             if let activeJobID, !activeJobID.isEmpty {
@@ -72,6 +82,27 @@ final class ImageGenGenerationWorker {
             await ndjson.terminateForCancel()
             processMayRetainModel = false
         }
+    }
+
+    func workerSubprocessNeedsCleanup() async -> Bool {
+        await ndjson.subprocessNeedsCleanup()
+    }
+
+    func forceTerminateWorker() async {
+        workerTeardownActive = true
+        defer { workerTeardownActive = false }
+        await ndjson.terminateForCancel()
+        processMayRetainModel = false
+    }
+
+    /// Blocks starting another generate (unload or in-flight worker kill after skip escalation).
+    var blocksLaunch: Bool {
+        unloadInFlight || workerTeardownActive
+    }
+
+    /// Status bar “cleanup” dot — model unload only, not brief skip teardown.
+    var indicatesStatusBarCleanup: Bool {
+        unloadInFlight
     }
 
     func unloadImageModel() async {

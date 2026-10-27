@@ -14,6 +14,7 @@ enum ImageGenWorkerPayloadBuilder {
         applyImageExit: Bool
     ) throws -> [String: Any] {
         var runValues = values
+        ImageGenPromptSentenceCase.flushPromptValues(&runValues)
         runValues.removeValue(forKey: JobStepQueue.fluxPromptAIJobKey)
         var pipelineID = plugin.pipelineID
         let effectiveMax = ImageGenDimLimits.effectiveMaxGenerationDimension(

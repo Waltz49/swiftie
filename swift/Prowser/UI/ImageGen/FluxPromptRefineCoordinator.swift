@@ -178,7 +178,11 @@ final class FluxPromptRefineCoordinator {
             cancelRefine(appState: appState)
             return
         }
-        context.promptText = values.wrappedValue["prompt"] as? String ?? ""
+        let normalized = ImageGenPromptSentenceCase.normalized(
+            values.wrappedValue["prompt"] as? String ?? ""
+        )
+        context.promptText = normalized
+        values.wrappedValue["prompt"] = normalized
         if appState.imageGen.hasPendingWork() {
             if appState.imageGen.fluxPromptRefineShouldBypassPendingWorkDialog() {
                 startRefine(

@@ -164,6 +164,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         func textDidEndEditing(_ notification: Notification) {
             guard let textView else { return }
+            if streamSession?.isActive == true { return }
             let normalized = ImageGenPromptSentenceCase.normalized(
                 textView.string,
                 perLine: sentenceCasePerLine

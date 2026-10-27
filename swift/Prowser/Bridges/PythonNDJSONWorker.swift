@@ -66,12 +66,21 @@ actor PythonNDJSONWorker {
         onStderrLine = handler
     }
 
+    /// Subprocess alive but not accepting commands (port of Python ``worker_needs_cleanup`` when not ``_worker_ready``).
+    func subprocessNeedsCleanup() -> Bool {
+        guard let process, process.isRunning else { return false }
+        return !isReady
+    }
+
     func startIfNeeded() async throws {
         if running { return }
         guard let environment else { throw BridgeError.pythonUnavailable }
         if let process, process.isRunning {
-            try await waitForReady()
-            return
+            if isReady {
+                try await waitForReady()
+                return
+            }
+            await reapSubprocess(force: true)
         }
 
         isReady = false
@@ -213,12 +222,8 @@ actor PythonNDJSONWorker {
         readTask = nil
         stderrDrainTask?.cancel()
         stderrDrainTask = nil
-        if let process, process.isRunning {
-            process.terminate()
-        }
-        process = nil
-        stdinHandle = nil
         isReady = false
+        await reapSubprocess(force: true)
         for (_, request) in pending {
             request.continuation.resume(throwing: BridgeError.workerMessage("Cancelled"))
         }
@@ -238,16 +243,22 @@ actor PythonNDJSONWorker {
         if process?.isRunning == true, isReady {
             _ = try? await send(["command": "shutdown"], awaitFinalResult: false)
         }
-        if let process, process.isRunning {
-            process.terminate()
-        }
-        process = nil
-        stdinHandle = nil
+        await reapSubprocess(force: true)
         isReady = false
         for (_, request) in pending {
             request.continuation.resume(throwing: BridgeError.workerNotRunning)
         }
         pending.removeAll()
+    }
+
+    private func reapSubprocess(force: Bool) async {
+        guard let proc = process else {
+            stdinHandle = nil
+            return
+        }
+        await SubprocessTermination.terminate(proc, force: force)
+        process = nil
+        stdinHandle = nil
     }
 
     private func appendStderr(_ chunk: Data) {

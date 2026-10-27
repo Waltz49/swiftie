@@ -13,6 +13,9 @@ final class MetadataCacheService {
     }
 
     private var cache: [String: Entry] = [:]
+    /// Last known on-disk mtime/size for change detection. Survives `invalidate(path)` so
+    /// thumbnail/b browse caches can be dropped when a file is overwritten at the same path.
+    private var diskSnapshots: [String: (mtime: TimeInterval, size: Int64)] = [:]
     private let cacheFile: URL
     private var dirty = false
     private let maxEntries = 12_000
@@ -90,6 +93,7 @@ final class MetadataCacheService {
             exifTimestamp: nil
         )
         dirty = true
+        recordDiskSnapshot(path: path)
     }
 
     func invalidate(path: String) {
@@ -130,15 +134,15 @@ final class MetadataCacheService {
         dirty = true
     }
 
-    /// Returns true when file mtime or size differs from the last recorded snapshot.
+    /// Returns true when file mtime or size differs from the last recorded on-disk snapshot.
     func fileChangedOnDisk(path: String) -> Bool {
         guard let diskMtime = readMtime(for: path),
               let diskSize = readSize(for: path) else { return false }
-        guard let cached = cache[path] else {
-            recordDiskSnapshot(path: path, mtime: diskMtime, size: diskSize)
+        guard let snapshot = diskSnapshots[path] else {
+            diskSnapshots[path] = (diskMtime, diskSize)
             return false
         }
-        return abs(cached.mtime - diskMtime) >= 0.001 || cached.size != diskSize
+        return abs(snapshot.mtime - diskMtime) >= 0.001 || snapshot.size != diskSize
     }
 
     func recordDiskSnapshot(path: String) {
@@ -148,6 +152,7 @@ final class MetadataCacheService {
     }
 
     private func recordDiskSnapshot(path: String, mtime: TimeInterval, size: Int64) {
+        diskSnapshots[path] = (mtime, size)
         if let existing = cache[path] {
             cache[path] = Entry(
                 mtime: mtime,
@@ -206,6 +211,9 @@ final class MetadataCacheService {
             return
         }
         cache = decoded
+        for (path, entry) in decoded {
+            diskSnapshots[path] = (entry.mtime, entry.size)
+        }
     }
 
     private func readMtime(for path: String) -> TimeInterval? {

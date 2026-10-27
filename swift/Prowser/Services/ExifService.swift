@@ -24,35 +24,62 @@ enum ExifService {
         supportedWriteExtensions.contains((path as NSString).pathExtension.lowercased())
     }
 
+    /// On-disk raster type from magic bytes (ignores path extension).
+    static func detectedRasterExtension(path: String) -> String? {
+        guard let head = readFileHead(path: path, count: 16) else { return nil }
+        if head.starts(with: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) {
+            return "png"
+        }
+        if head.count >= 2, head[0] == 0xFF, head[1] == 0xD8 {
+            return "jpeg"
+        }
+        if head.count >= 12,
+           head.prefix(4) == Data("RIFF".utf8),
+           head[8..<12] == Data("WEBP".utf8) {
+            return "webp"
+        }
+        if head.count >= 4 {
+            let sig = head.prefix(4)
+            if sig == Data([0x49, 0x49, 0x2A, 0x00]) || sig == Data([0x4D, 0x4D, 0x00, 0x2A]) {
+                return "tiff"
+            }
+        }
+        return nil
+    }
+
     /// Port of ``image_bytes_match_path_extension`` — false when on-disk format disagrees with the path extension.
     ///
     /// MFLUX stepwise previews copy intermediate PNGs onto the final output path (e.g. ``imagegen-123.webp``)
     /// before the job writes real WebP bytes; WebP EXIF mux must not run on those files.
     static func imageBytesMatchPathExtension(path: String) -> Bool {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
-        defer { try? handle.close() }
-        let head: Data
-        do {
-            head = try handle.read(upToCount: 16) ?? Data()
-        } catch {
-            return false
+        guard let detected = detectedRasterExtension(path: path) else {
+            return !["png", "jpg", "jpeg", "webp", "tif", "tiff"].contains(ext)
         }
         switch ext {
         case "png":
-            return head.starts(with: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+            return detected == "png"
         case "jpg", "jpeg":
-            return head.count >= 2 && head[0] == 0xFF && head[1] == 0xD8
+            return detected == "jpeg"
         case "webp":
-            guard head.count >= 12 else { return false }
-            return head.prefix(4) == Data("RIFF".utf8) && head[8..<12] == Data("WEBP".utf8)
+            return detected == "webp"
         case "tif", "tiff":
-            guard head.count >= 4 else { return false }
-            let sig = head.prefix(4)
-            return sig == Data([0x49, 0x49, 0x2A, 0x00]) || sig == Data([0x4D, 0x4D, 0x00, 0x2A])
+            return detected == "tiff"
         default:
             return true
         }
+    }
+
+    /// True when the file is a supported raster we can stamp (extension may disagree during stepwise previews).
+    static func canWriteExifToOnDiskRaster(path: String) -> Bool {
+        guard canWriteExif(path: path) else { return false }
+        return detectedRasterExtension(path: path) != nil
+    }
+
+    private static func readFileHead(path: String, count: Int) -> Data? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.read(upToCount: count)
     }
 
     // MARK: - Read
@@ -323,7 +350,10 @@ enum ExifService {
         let mtime = attrs[.modificationDate] as? Date
         let atime = attrs[.creationDate] as? Date
 
-        if url.pathExtension.lowercased() == "webp" {
+        let onDisk = detectedRasterExtension(path: path)
+        let useWebPMux = onDisk == "webp"
+            || (onDisk == nil && url.pathExtension.lowercased() == "webp")
+        if useWebPMux {
             try writeUserCommentWebP(url: url, text: text, mtime: mtime, atime: atime)
             return
         }

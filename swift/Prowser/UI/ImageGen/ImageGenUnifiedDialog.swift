@@ -131,7 +131,7 @@ struct ImageGenUnifiedDialog: View {
                 onCommandW: { performClose() },
                 onEscape: { performClose() },
                 onOptionReturn: {
-                    fluxContext.promptText = values["prompt"] as? String ?? ""
+                    fluxContext.promptText = normalizedDialogPromptText()
                     if fluxRefineCoordinator.genShortcutActive(context: fluxContext) {
                         fluxRefineCoordinator.requestGenPrompt(
                             appState: appState,
@@ -1190,8 +1190,9 @@ struct ImageGenUnifiedDialog: View {
 
     private func prepareRunValues(forceFluxAIJob: Bool) -> [String: Any]? {
         var submitValues = prepareSubmitValues(values)
+        syncNormalizedPromptFieldsFromSubmit(into: &values, submitValues: submitValues)
         fluxContext.lmStudioMounted = appState.workers.foregroundModelTasks.isAvailable
-        fluxContext.promptText = values["prompt"] as? String ?? ""
+        fluxContext.promptText = submitValues["prompt"] as? String ?? ""
         fluxContext.taskKind = selectedFunction
         fluxContext.sourcePaths = selectedFunction == "edit"
             ? lockedEditSourcePaths
@@ -1229,8 +1230,27 @@ struct ImageGenUnifiedDialog: View {
         if resolvedCopies != JobStepQueue.normalizeCopies(values["copies"] ?? 1) {
             values["copies"] = resolvedCopies
         }
-        // Image AI exits run at worker payload build time; do not mutate queued job/dialog prompt text.
+        _ = FluxPromptJob.applyPromptExitsAfterFluxJobResolution(
+            values: &submitValues,
+            config: appState.config
+        )
+        syncNormalizedPromptFieldsFromSubmit(into: &values, submitValues: submitValues)
         return submitValues
+    }
+
+    private func syncNormalizedPromptFieldsFromSubmit(
+        into values: inout [String: Any],
+        submitValues: [String: Any]
+    ) {
+        for key in ["prompt", "negative_prompt"] {
+            if let text = submitValues[key] as? String {
+                values[key] = text
+            }
+        }
+    }
+
+    private func normalizedDialogPromptText() -> String {
+        ImageGenPromptSentenceCase.normalized(values["prompt"] as? String ?? "")
     }
 
     private func prepareSubmitValues(_ input: [String: Any]) -> [String: Any] {

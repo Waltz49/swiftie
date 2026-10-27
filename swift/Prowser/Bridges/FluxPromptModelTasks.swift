@@ -57,7 +57,8 @@ final class FluxPromptModelTasks {
 
         let paths = FluxPromptJob.normalizedExistingImagePaths(imagePaths)
         let withImage = !paths.isEmpty
-        let userText = FluxPromptMessages.userMessage(userPrompt: prompt, withImage: withImage)
+        let normalizedPrompt = ImageGenPromptSentenceCase.normalized(prompt)
+        let userText = FluxPromptMessages.userMessage(userPrompt: normalizedPrompt, withImage: withImage)
         let system = FluxPromptMessages.resolvedSystemPrompt(
             taskKind: taskKind,
             config: config,
@@ -113,7 +114,8 @@ final class FluxPromptModelTasks {
 
         let paths = FluxPromptJob.normalizedExistingImagePaths(imagePaths)
         let withImage = !paths.isEmpty
-        let userText = FluxPromptMessages.userMessage(userPrompt: userPrompt, withImage: withImage)
+        let normalizedUser = ImageGenPromptSentenceCase.normalized(userPrompt)
+        let userText = FluxPromptMessages.userMessage(userPrompt: normalizedUser, withImage: withImage)
         var system = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if system.isEmpty {
             system = FluxPromptMessages.resolvedSystemPrompt(

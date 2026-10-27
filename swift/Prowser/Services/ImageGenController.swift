@@ -21,6 +21,8 @@ final class ImageGenController {
     private(set) var progressivePreviewPath: String?
     private(set) var showProgressiveImages = false
     private var progressiveBrowseOpened = false
+    /// Python ``_progressive_list_sync_output_path`` — one directory rescan per output file.
+    private var progressiveListSyncOutputPath: String = ""
     private var activeOutputPath: String?
     private(set) var holdJobQueue = false
     private(set) var queueRevision = 0
@@ -91,6 +93,10 @@ final class ImageGenController {
     private var startupQueueReleaseToken = 0
     private var deferTryStartQueuedJobTask: Task<Void, Never>?
     private let gpuCleanupPollMs = 2_000
+    private let launchGateTeardownPollMs = 50
+    private let launchGateTeardownMaxAttempts = 40
+    private let launchGateOrphanPollMs = 250
+    private let launchGateOrphanMaxAttempts = 8
     private var copyBatchCancelled = false
     private var pendingCancelJobID = ""
     private var suppressTaskFailureUI = false
@@ -299,6 +305,7 @@ final class ImageGenController {
            let path = activeOutputPath,
            !path.isEmpty {
             progressiveBrowseOpened = false
+            progressiveListSyncOutputPath = ""
             onProgressivePreview?(path, true, liveStep, liveStepTotal)
         }
         bumpStripUI()
@@ -306,11 +313,28 @@ final class ImageGenController {
 
     func resetProgressiveBrowseOpened() {
         progressiveBrowseOpened = false
+        progressiveListSyncOutputPath = ""
+    }
+
+    func resetProgressiveListSyncOutputPath() {
+        progressiveListSyncOutputPath = ""
+    }
+
+    func shouldEmitProgressiveListSync(for path: String) -> Bool {
+        let norm = FileDataModel.normalizePath(path) ?? path
+        let prior = FileDataModel.normalizePath(progressiveListSyncOutputPath) ?? progressiveListSyncOutputPath
+        return prior != norm
+    }
+
+    func noteProgressiveListSyncOutputPath(_ path: String) {
+        progressiveListSyncOutputPath = FileDataModel.normalizePath(path) ?? path
     }
 
     func noteProgressiveBrowseOpened() {
         progressiveBrowseOpened = true
     }
+
+    var progressiveBrowseWasOpened: Bool { progressiveBrowseOpened }
 
     func setHoldJobQueue(_ enabled: Bool) {
         guard holdJobQueue != enabled else { return }
@@ -336,8 +360,8 @@ final class ImageGenController {
         // Python defers the worker cancel one tick so the toolbar shows "Skipping copy..." first.
         Task { @MainActor [weak self] in
             guard let self, self.skipSeriesCopyRequested else { return }
-            // Match Python ``cancel_task``: cooperative cancel then kill worker (not only step boundary).
-            self.modelTasks.cancel(terminateWorker: true)
+            // Cooperative cancel keeps the warm Python worker when possible; escalate to kill if stuck in MLX.
+            self.modelTasks.cancelForSeriesCopySkip()
         }
     }
 
@@ -372,6 +396,7 @@ final class ImageGenController {
     ) async throws {
         let normalizedCopies = JobStepQueue.normalizeCopies(copies ?? values["copies"] ?? 1)
         var submitValues = values
+        ImageGenPromptSentenceCase.flushPromptValues(&submitValues)
         submitValues["copies"] = normalizedCopies
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: normalizedCopies)
@@ -418,7 +443,9 @@ final class ImageGenController {
         }
         let pluginID = plugin["plugin_id"] as? String ?? "flux_schnell_play"
         var values = plugin["merged_defaults"] as? [String: Any] ?? [:]
-        values["prompt"] = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        values["prompt"] = ImageGenPromptSentenceCase.normalized(
+            prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         values["width"] = width
         values["height"] = height
         try await enqueueGeneration(pluginID: pluginID, function: "create", values: values, copies: 1)
@@ -615,6 +642,7 @@ final class ImageGenController {
         progressivePreviewPath = nil
         activeOutputPath = nil
         progressiveBrowseOpened = false
+        progressiveListSyncOutputPath = ""
         activeThumbnailPaths = []
         activeJobCardThumbnailPathsCache = []
         stepRunning = nil
@@ -633,7 +661,7 @@ final class ImageGenController {
     /// Status-bar task dot (Python ``_update_status_bar_indicator``).
     func statusBarIndicatorKind() -> String? {
         guard isEnabled else { return nil }
-        if modelTasks.workerNeedsCleanup {
+        if modelTasks.workerStatusBarCleanup {
             return "cleanup"
         }
         if cooldownSecondsRemaining > 0 {
@@ -1707,13 +1735,57 @@ final class ImageGenController {
         fluxPromptTasks.cancel()
     }
 
-    private func launchGeneration(values: [String: Any]) async {
+    /// Port of Python ``_defer_until_worker_cleanup`` / ``_launch_generation_job`` worker gate.
+    private func ensureImageGenWorkerReadyForLaunch(workerWaitAttempts: Int) async -> Bool {
+        let orphanSubprocess = await modelTasks.imageGenWorkerSubprocessNeedsCleanup()
+        if orphanSubprocess {
+            if workerWaitAttempts >= launchGateOrphanMaxAttempts {
+                await modelTasks.forceTerminateImageGenWorker()
+                return !(await modelTasks.imageGenWorkerSubprocessNeedsCleanup())
+            }
+            try? await Task.sleep(for: .milliseconds(launchGateOrphanPollMs))
+            return await ensureImageGenWorkerReadyForLaunch(workerWaitAttempts: workerWaitAttempts + 1)
+        }
+        if modelTasks.workerNeedsCleanup {
+            if workerWaitAttempts >= launchGateTeardownMaxAttempts {
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(launchGateTeardownPollMs))
+            return await ensureImageGenWorkerReadyForLaunch(workerWaitAttempts: workerWaitAttempts + 1)
+        }
+        return true
+    }
+
+    private func launchGeneration(
+        values: [String: Any],
+        workerWaitAttempts: Int = 0,
+        launchRecoveryAttempted: Bool = false
+    ) async {
+        guard await ensureImageGenWorkerReadyForLaunch(workerWaitAttempts: workerWaitAttempts) else {
+            if !launchRecoveryAttempted {
+                await modelTasks.forceTerminateImageGenWorker()
+                if await ensureImageGenWorkerReadyForLaunch(workerWaitAttempts: 0) {
+                    await launchGeneration(
+                        values: values,
+                        workerWaitAttempts: 0,
+                        launchRecoveryAttempted: true
+                    )
+                    return
+                }
+            }
+            handleStepFailure(
+                "The previous model is still releasing GPU memory. "
+                    + "Wait a moment and try again."
+            )
+            return
+        }
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         reloadToolbarSettings(from: imagegen)
         let ext = ImageGenDimLimits.outputExtension(from: config.rawSettings())
         let outputPath = ImageGenPathNaming.nextImageGenPath(config: config, ext: ext)
         activeOutputPath = outputPath
         progressiveBrowseOpened = false
+        progressiveListSyncOutputPath = ""
         do {
             var generationValues = values
             let refined = launchRefinedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1993,6 +2065,7 @@ final class ImageGenController {
         progressivePreviewPath = nil
         activeOutputPath = nil
         progressiveBrowseOpened = false
+        progressiveListSyncOutputPath = ""
         activeThumbnailPaths = []
         activeJobCardThumbnailPathsCache = []
         stepRunning = nil
@@ -2288,6 +2361,7 @@ final class ImageGenController {
         progressivePreviewPath = nil
         activeOutputPath = nil
         progressiveBrowseOpened = false
+        progressiveListSyncOutputPath = ""
         activeThumbnailPaths = []
         activeJobCardThumbnailPathsCache = []
         stepRunning = nil

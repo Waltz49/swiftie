@@ -94,7 +94,7 @@ enum ImageGenGenerationExifService {
     ) async throws -> Bool {
         guard completedStep < totalSteps,
               FileManager.default.isReadableFile(atPath: outputPath),
-              ExifService.imageBytesMatchPathExtension(path: outputPath),
+              ExifService.canWriteExifToOnDiskRaster(path: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
 
         let comment = formatGenerationExifComment(

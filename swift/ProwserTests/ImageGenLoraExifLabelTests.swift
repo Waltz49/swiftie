@@ -190,6 +190,102 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
     }
 
+    @MainActor
+    func testImportRestResolvesZImage4BitFromMfluxJsonHfModel() {
+        let plugins: [[String: Any]] = [
+            [
+                "plugin_id": "z_image_turbo_mflux_4bit",
+                "display_name": "Z-Image Turbo (4-bit)",
+                "hf_model_id": LoRAHFModelIDs.zImageTurboMflux4Bit,
+                "pipeline_id": "mflux_z_image_turbo",
+                "available": true,
+            ],
+            [
+                "plugin_id": "z_image_turbo_mflux",
+                "display_name": "Z-Image Turbo",
+                "hf_model_id": LoRAHFModelIDs.zImageTurbo,
+                "pipeline_id": "mflux_z_image_turbo",
+                "available": true,
+            ],
+        ]
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: "Z-Image Turbo (4-bit)",
+                hfModelID: LoRAHFModelIDs.zImageTurboMflux4Bit,
+                plugins: plugins
+            ),
+            "z_image_turbo_mflux_4bit"
+        )
+        let json = """
+        {"prompt":"cat","seed":1,"steps":9,"quantize":4,"model":"\(LoRAHFModelIDs.zImageTurboMflux4Bit)"}
+        """
+        let parsed = ImageGenExifImport.parseExifGenerationMetadata(json)
+        XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: parsed["model"] as? String ?? "",
+                hfModelID: LoRAHFModelIDs.zImageTurboMflux4Bit,
+                exifParams: parsed,
+                plugins: plugins
+            ),
+            "z_image_turbo_mflux_4bit"
+        )
+    }
+
+    @MainActor
+    func testImportRestPrefers4BitWhenFinalStyleExifHasGuidanceNotQuantization() {
+        let plugins: [[String: Any]] = [
+            [
+                "plugin_id": "z_image_turbo_mflux_4bit",
+                "display_name": "Z-Image Turbo (4-bit)",
+                "hf_model_id": LoRAHFModelIDs.zImageTurboMflux4Bit,
+                "pipeline_id": "mflux_z_image_turbo",
+                "available": true,
+            ],
+            [
+                "plugin_id": "z_image_turbo_mflux",
+                "display_name": "Z-Image Turbo",
+                "hf_model_id": LoRAHFModelIDs.zImageTurbo,
+                "pipeline_id": "mflux_z_image_turbo",
+                "available": true,
+            ],
+        ]
+        let comment = """
+        Image Model:
+        Z-Image Turbo (4-bit)
+        Seed: 1
+        Steps: 9
+        Guidance: 0
+
+        Prompt:
+        cat
+        """
+        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        XCTAssertEqual(
+            ImageGenExifImport.resolvePluginID(
+                forExifModel: parsed["model"] as? String ?? "",
+                exifParams: parsed,
+                plugins: plugins
+            ),
+            "z_image_turbo_mflux_4bit"
+        )
+    }
+
+    @MainActor
+    func testParseExifModelPrefersImageModelBlockOverMfluxJson() {
+        let comment = """
+        {"prompt":"cat","seed":1,"steps":9,"quantize":4,"model":"\(LoRAHFModelIDs.zImageTurbo)"}
+        Image Model:
+        Z-Image Turbo (4-bit)
+        Seed: 1
+
+        Prompt:
+        cat
+        """
+        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
+    }
+
     func testMigrateLegacySDNQPluginIDTo4Bit() {
         XCTAssertEqual(
             ImageGenLegacyMigration.migrateLegacyImageGenPluginID("z_image_turbo_sdnq_int8"),

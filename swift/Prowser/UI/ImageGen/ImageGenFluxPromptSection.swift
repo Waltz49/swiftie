@@ -35,7 +35,9 @@ struct ImageGenFluxPromptSection: View {
 
                     HStack(spacing: 16) {
                         Button(refineCoordinator.isRefining ? "Cancel" : "Gen Prompt ⌥↩") {
-                            fluxContext.promptText = values["prompt"] as? String ?? ""
+                            fluxContext.promptText = ImageGenPromptSentenceCase.normalized(
+                                values["prompt"] as? String ?? ""
+                            )
                             refineCoordinator.requestGenPrompt(
                                 appState: appState,
                                 context: fluxContext,

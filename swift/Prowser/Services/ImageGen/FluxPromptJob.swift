@@ -90,7 +90,8 @@ enum FluxPromptJob {
             _ = error
             return nil
         }
-        let userPrompt = context.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let userPrompt = ImageGenPromptSentenceCase.normalized(context.promptText)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let paths = context.passImage ? imagePaths : []
         let system = FluxPromptMessages.resolvedSystemPrompt(
             taskKind: context.taskKind,
@@ -412,7 +413,8 @@ enum FluxPromptJob {
         let prompt = values["prompt"] as? String ?? ""
         let updated = AIPromptExitService.applyImageAIExit(prompt, config: config)
         guard updated != prompt else { return false }
-        values["prompt"] = updated
+        let recased = ImageGenPromptSentenceCase.afterPromptExit(updated)
+        values["prompt"] = recased
         return true
     }
 }

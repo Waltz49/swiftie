@@ -9,6 +9,8 @@ enum ImageGenPromptSentenceCase {
     )
     private static let horizontalBlankRegex = try! NSRegularExpression(pattern: #"[ \t]+"#)
     private static let spaceBeforePeriodRegex = try! NSRegularExpression(pattern: #"\s+\. "#)
+    /// Ensure a space after sentence punctuation when the next character is not whitespace.
+    private static let missingSpaceAfterPunctRegex = try! NSRegularExpression(pattern: #"[.,:;?!](?=[^\s])"#)
 
     /// Full blur/submit normalization (prepare + capitalize).
     static func normalized(_ text: String, perLine: Bool = false) -> String {
@@ -80,8 +82,14 @@ enum ImageGenPromptSentenceCase {
         return ensureTrailingPeriod(normalizeLineContent(line))
     }
 
+    /// Collapse horizontal blanks, lowercase, and fix punctuation spacing (Python ``_normalize_line_content``).
     private static func normalizeLineContent(_ line: String) -> String {
-        normalizePeriodSpacing(collapseDuplicateBlanks(line).lowercased())
+        let lowered = collapseDuplicateBlanks(line).lowercased()
+        return normalizePeriodSpacing(normalizeSeparatorSpacing(lowered))
+    }
+
+    private static func normalizeSeparatorSpacing(_ text: String) -> String {
+        replaceMatches(in: text, regex: missingSpaceAfterPunctRegex, with: "$0 ")
     }
 
     private static func collapseDuplicateBlanks(_ text: String) -> String {

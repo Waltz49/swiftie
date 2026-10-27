@@ -6,7 +6,8 @@ enum ImageGenMfluxPayloadBuilder {
     static func applyImagePromptRules(values: [String: Any], config: AppConfig) -> [String: Any] {
         var out = values
         guard let raw = out["prompt"] as? String else { return out }
-        var prompt = PrefixPostfixStore.applyRules(raw, forImages: true, config: config)
+        var prompt = ImageGenPromptSentenceCase.normalized(raw)
+        prompt = PrefixPostfixStore.applyRules(prompt, forImages: true, config: config)
         prompt = AIPromptExitService.applyImageAIExit(prompt, config: config)
         out["prompt"] = prompt
         return out

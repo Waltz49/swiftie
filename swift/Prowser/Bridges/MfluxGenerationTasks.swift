@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#endif
 
 /// Runs one image generation job at a time (optimized Python worker or MFLUX CLI).
 @MainActor
@@ -28,7 +25,43 @@ final class MfluxGenerationTasks {
     var isAvailable: Bool { MfluxToolchain.shared.isAvailable }
 
     var workerNeedsCleanup: Bool {
-        generationWorker.unloadInFlight
+        generationWorker.blocksLaunch
+    }
+
+    var workerStatusBarCleanup: Bool {
+        generationWorker.indicatesStatusBarCleanup
+    }
+
+    /// Cooperative stop at the next diffusion step; kill subprocess only if still busy after the grace window.
+    func cancelForSeriesCopySkip(cooperativeEscalateMs: Int = 3_500) {
+        guard isBusy else { return }
+        cancelled = true
+        stepwiseWatcher?.stop()
+        terminateTrackedProcess(force: false)
+        let jobID = activeJobID
+        Task {
+            await generationWorker.requestCancel(
+                activeJobID: jobID,
+                terminateWorker: false
+            )
+            guard cooperativeEscalateMs > 0 else { return }
+            try? await Task.sleep(for: .milliseconds(cooperativeEscalateMs))
+            let orphanSubprocess = await generationWorker.workerSubprocessNeedsCleanup()
+            guard isBusy || orphanSubprocess else { return }
+            terminateTrackedProcess(force: true)
+            await generationWorker.requestCancel(
+                activeJobID: jobID,
+                terminateWorker: true
+            )
+        }
+    }
+
+    func imageGenWorkerSubprocessNeedsCleanup() async -> Bool {
+        await generationWorker.workerSubprocessNeedsCleanup()
+    }
+
+    func forceTerminateImageGenWorker() async {
+        await generationWorker.forceTerminateWorker()
     }
 
     func bind(config: AppConfig) {
@@ -77,7 +110,7 @@ final class MfluxGenerationTasks {
         stepwiseWatcher?.stop()
         terminateTrackedProcess(force: terminateWorker)
         let jobID = activeJobID
-        Task { @MainActor in
+        Task {
             await generationWorker.requestCancel(
                 activeJobID: jobID,
                 terminateWorker: terminateWorker
@@ -110,25 +143,9 @@ final class MfluxGenerationTasks {
         Task { await generationWorker.shutdown() }
     }
 
-    /// SIGTERM (and SIGKILL when ``force``), port of Python ``ModelTasksController._terminate_worker`` / ``force_terminate_worker``.
     private func terminateTrackedProcess(force: Bool) {
-        guard let process, process.isRunning else { return }
-        process.terminate()
-        guard force else { return }
-        let pid = process.processIdentifier
-        let deadline = Date().addingTimeInterval(2.0)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if process.isRunning {
-            #if canImport(Darwin)
-            kill(pid, SIGKILL)
-            #endif
-            let killDeadline = Date().addingTimeInterval(3.0)
-            while process.isRunning, Date() < killDeadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-        }
+        guard let process else { return }
+        SubprocessTermination.terminateSynchronously(process, force: force)
     }
 
     private func runGenerate(payload: [String: Any], jobID: String) async {

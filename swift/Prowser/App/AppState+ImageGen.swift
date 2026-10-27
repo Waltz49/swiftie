@@ -123,17 +123,24 @@ extension AppState {
         guard imageGen.showProgressiveImages else { return }
         guard !isSlideshowActive else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
+
+        if config.string(forKey: "sort_mode", default: "date") == SortMode.date.rawValue {
+            config.updateSetting("sort_reversed", value: false)
+        }
+
+        let inPlace = tryInPlaceProgressiveRefresh(at: path)
+        let wantBrowse = forceEnterBrowse || !imageGen.progressiveBrowseWasOpened
+        if inPlace {
+            if !wantBrowse { return }
+            if fileData.currentViewMode == .browse { return }
+        }
+
         let parent = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
         let currentParent = fileData.currentDirectory.map {
             URL(fileURLWithPath: $0).standardizedFileURL.path
         }
         let needsBrowseLevel = currentParent != parent || specificFilesActive
 
-        if config.string(forKey: "sort_mode", default: "date") == SortMode.date.rawValue {
-            config.updateSetting("sort_reversed", value: false)
-        }
-
-        beginSuppressDirectoryRefresh()
         if needsBrowseLevel {
             if forceEnterBrowse, currentParent != parent {
                 displaceCurrentLevelIfOpeningNewDirectory(path)
@@ -143,7 +150,7 @@ extension AppState {
         } else {
             ensureImageListedForBrowse(path: path)
             fileData.setCurrentImagePath(path)
-            if let index = fileData.displayedImages.firstIndex(of: path) {
+            if let index = FileDataModel.indexOfPath(path, in: fileData.displayedImages) {
                 fileData.setCurrentIndex(index)
             }
             if forceEnterBrowse {
@@ -155,16 +162,65 @@ extension AppState {
         imageGen.noteProgressiveBrowseOpened()
     }
 
+    /// Python ``_try_in_place_progressive_refresh`` — thumbnail/list/browse pixels + directory listing sync.
+    @discardableResult
+    private func tryInPlaceProgressiveRefresh(at outputPath: String) -> Bool {
+        let mode = fileData.currentViewMode
+        guard mode == .thumbnail || mode == .list || mode == .browse else { return false }
+        guard let normalized = FileDataModel.normalizePath(outputPath) else { return false }
+
+        let listedPath = fileData.displayedImages.first { FileDataModel.pathsReferToSameFile($0, normalized) }
+        let inCurrentDirectory = fileData.currentDirectory.map {
+            FileDataModel.pathIsInDirectory(file: normalized, directory: $0)
+        } ?? false
+
+        if !inCurrentDirectory, listedPath == nil { return false }
+
+        if listedPath == nil, imageGen.shouldEmitProgressiveListSync(for: normalized) {
+            imageGen.noteProgressiveListSyncOutputPath(normalized)
+            let syncDirectory = inCurrentDirectory ? (fileData.currentDirectory ?? parentDirectory(of: normalized)) : parentDirectory(of: normalized)
+            if let syncDirectory {
+                eventBus.emit(.filesChangedOnDisk, payload: .string(syncDirectory))
+            }
+        }
+
+        switch mode {
+        case .thumbnail, .list:
+            if listedPath != nil {
+                DirectoryRefreshService.refreshDisplayedFileIfListed(appState: self, path: normalized)
+            } else {
+                DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [normalized])
+            }
+            thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+            return true
+        case .browse:
+            guard DirectoryRefreshService.refreshDisplayedFileIfListed(appState: self, path: normalized) else {
+                return false
+            }
+            guard let current = fileData.currentImagePath,
+                  FileDataModel.pathsReferToSameFile(current, normalized) else { return false }
+            reloadBrowseImageIfCurrent(path: normalized)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func parentDirectory(of path: String) -> String? {
+        FileDataModel.parentDirectory(of: path)
+    }
+
     private func ensureImageListedForBrowse(path: String) {
-        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        guard let normalized = FileDataModel.normalizePath(path) else { return }
+        let directory = URL(fileURLWithPath: normalized).deletingLastPathComponent().path
         if directory != fileData.currentDirectory {
             loadDirectory(directory, saveHistory: false)
-        } else if !fileData.displayedImages.contains(path) {
+        } else if FileDataModel.indexOfPath(normalized, in: fileData.displayedImages) == nil {
             DirectoryRefreshService.checkAndRefreshIfChanged(appState: self)
         }
-        if !fileData.displayedImages.contains(path) {
+        if FileDataModel.indexOfPath(normalized, in: fileData.displayedImages) == nil {
             var images = fileData.displayedImages
-            images.append(path)
+            images.append(normalized)
             let options = SortingService.Options.from(config: config)
             fileData.setDisplayedImages(
                 SortingService.sorted(images, options: options, metadataCache: metadataCache)

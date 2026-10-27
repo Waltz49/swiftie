@@ -101,8 +101,14 @@ enum ImageGenExifImport {
         var updated = values
         var pluginID = selectedPluginID
 
+        let hfFromMeta = mfluxHfModelID(from: comment)
         if let model = parsed["model"] as? String,
-           let resolved = resolvePluginID(forExifModel: model, plugins: plugins) {
+           let resolved = resolvePluginID(
+               forExifModel: model,
+               hfModelID: hfFromMeta,
+               exifParams: parsed,
+               plugins: plugins
+           ) {
             pluginID = resolved
             if let plugin = plugins.first(where: { ($0["plugin_id"] as? String) == resolved }),
                let defaults = plugin["merged_defaults"] as? [String: Any] {
@@ -245,10 +251,21 @@ enum ImageGenExifImport {
         return keys
     }
 
-    static func resolvePluginID(forExifModel modelText: String, plugins: [[String: Any]]) -> String? {
+    static func resolvePluginID(
+        forExifModel modelText: String,
+        hfModelID: String? = nil,
+        exifParams: [String: Any] = [:],
+        plugins: [[String: Any]]
+    ) -> String? {
         let token = normalizeExifModelToken(modelText)
         guard !token.isEmpty else { return nil }
-        if let zImage = resolveZImagePluginID(forExifModel: modelText, token: token, plugins: plugins) {
+        if let zImage = resolveZImagePluginID(
+            forExifModel: modelText,
+            hfModelID: hfModelID,
+            exifParams: exifParams,
+            token: token,
+            plugins: plugins
+        ) {
             return zImage
         }
         for plugin in plugins where plugin["available"] as? Bool ?? true {
@@ -261,6 +278,8 @@ enum ImageGenExifImport {
 
     private static func resolveZImagePluginID(
         forExifModel modelText: String,
+        hfModelID: String?,
+        exifParams: [String: Any],
         token: String,
         plugins: [[String: Any]]
     ) -> String? {
@@ -272,13 +291,33 @@ enum ImageGenExifImport {
         if token.contains("z_image_turbo_sdnq") || token.contains("sdnq_int8") {
             return pluginAvailable("z_image_turbo_mflux_4bit") ? "z_image_turbo_mflux_4bit" : nil
         }
+        if let hf = hfModelID?.trimmingCharacters(in: .whitespacesAndNewlines), !hf.isEmpty {
+            if ImageGenExifCommentFormatting.isZImageTurbo4BitIdentity(hf) {
+                return pluginAvailable("z_image_turbo_mflux_4bit") ? "z_image_turbo_mflux_4bit" : nil
+            }
+            if ImageGenExifCommentFormatting.isZImageTurboIdentity(hf) {
+                return pluginAvailable("z_image_turbo_mflux") ? "z_image_turbo_mflux" : nil
+            }
+        }
         if ImageGenExifCommentFormatting.isZImageTurbo4BitIdentity(modelText) {
             return pluginAvailable("z_image_turbo_mflux_4bit") ? "z_image_turbo_mflux_4bit" : nil
         }
         if ImageGenExifCommentFormatting.isZImageTurboIdentity(modelText) {
+            if exifParams["quantization"] == nil, exifParams["guidance"] != nil,
+               pluginAvailable("z_image_turbo_mflux_4bit") {
+                return "z_image_turbo_mflux_4bit"
+            }
             return pluginAvailable("z_image_turbo_mflux") ? "z_image_turbo_mflux" : nil
         }
         return nil
+    }
+
+    private static func mfluxHfModelID(from comment: String) -> String? {
+        guard let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(comment) else { return nil }
+        let raw = (meta["model_config"] as? String) ?? (meta["model"] as? String) ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.lowercased() != "none" else { return nil }
+        return trimmed
     }
 
     private static func gatedExifParams(_ params: [String: Any], plugins: [[String: Any]]) -> [String: Any] {
@@ -379,13 +418,28 @@ enum ImageGenExifImport {
     }
 
     private static func parseExifModelName(_ fullComment: String) -> String? {
-        if let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(fullComment) {
-            let raw = (meta["model_config"] as? String) ?? (meta["model"] as? String) ?? ""
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty, trimmed.lowercased() != "none" {
-                return ImageGenExifCommentFormatting.presentedModelName(trimmed)
+        if hasFormattedImageModelSection(fullComment),
+           let block = imageModelNameFromFormattedBlock(fullComment) {
+            return ImageGenExifCommentFormatting.presentedModelName(block)
+        }
+        if let hf = mfluxHfModelID(from: fullComment) {
+            return ImageGenExifCommentFormatting.presentedModelName(hf)
+        }
+        return imageModelNameFromFormattedBlock(fullComment)
+            .map { ImageGenExifCommentFormatting.presentedModelName($0) }
+    }
+
+    private static func hasFormattedImageModelSection(_ text: String) -> Bool {
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let lower = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if lower == "image model" || lower == "image model:" {
+                return true
             }
         }
+        return false
+    }
+
+    private static func imageModelNameFromFormattedBlock(_ fullComment: String) -> String? {
         var inModelBlock = false
         for line in fullComment.split(separator: "\n", omittingEmptySubsequences: false) {
             let stripped = line.trimmingCharacters(in: .whitespaces)
@@ -403,7 +457,7 @@ enum ImageGenExifImport {
                 continue
             }
             if ImageGenExifCommentFormatting.isExifLoraContinuationLine(String(line)) { continue }
-            return ImageGenExifCommentFormatting.presentedModelName(stripped)
+            return stripped
         }
         return nil
     }
