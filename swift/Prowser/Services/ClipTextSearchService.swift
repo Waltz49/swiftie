@@ -15,6 +15,7 @@ enum ClipTextSearchService {
             useCustomDirectory: resolvedOptions.useCustomDirectory
         )
 
+        let respectFilenameFilter = !resolvedOptions.ignoreFilenameFilter
         let displayedSeed = appState.fileData.displayedImages
         let includeDisplayed = resolvedOptions.useCustomDirectory ? [] : displayedSeed
         let paths = SearchImagePathCollector.collectPaths(
@@ -22,7 +23,8 @@ enum ClipTextSearchService {
             recursive: resolvedOptions.recursive,
             customDirectory: resolvedOptions.customDirectory,
             useCustomDirectory: resolvedOptions.useCustomDirectory,
-            includeDisplayed: includeDisplayed
+            includeDisplayed: includeDisplayed,
+            respectFilenameFilter: respectFilenameFilter
         )
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "No Images Found", message: "No images found to search.")
@@ -31,16 +33,24 @@ enum ClipTextSearchService {
 
         let clipName = appState.config.string(forKey: "clip_model_name", default: "openai/clip-vit-base-patch32")
         let searchDir = resolvedOptions.useCustomDirectory ? resolvedOptions.customDirectory : SearchImagePathCollector.currentSearchDirectory(appState: appState)
+        let filterForLog = respectFilenameFilter
+            ? appState.filterSettings.filterPattern
+            : "*"
+        var scopeExtra =
+            "threshold=\(String(format: "%.2f", options.threshold)) clip=\(clipName) prompt=\(options.prompt.prefix(120))"
+        if resolvedOptions.ignoreFilenameFilter {
+            scopeExtra += " ignore_filter=true"
+        }
         SimilaritySearchLog.logScope(
             config: appState.config,
             kind: "CLIP text",
             candidateCount: paths.count,
             recursive: options.recursive,
             searchDirectory: searchDir,
-            filterPattern: appState.filterSettings.filterPattern,
+            filterPattern: filterForLog,
             searchDepth: appState.config.int(forKey: "search_depth", default: 4),
             referencePaths: [],
-            extra: "threshold=\(String(format: "%.2f", options.threshold)) clip=\(clipName) prompt=\(options.prompt.prefix(120))"
+            extra: scopeExtra
         )
 
         appState.backgroundImageRecognition.suspendForForegroundSearch()
@@ -144,6 +154,21 @@ enum ClipTextSearchService {
                     message: "No images found matching the search criteria."
                 )
                 return
+            }
+
+            if respectFilenameFilter {
+                ordered = DirectoryScanner.filterPathsMatchingPattern(
+                    ordered,
+                    pattern: appState.filterSettings.filterPattern
+                )
+                if ordered.isEmpty {
+                    closeProgressPanel()
+                    StyledMessageDialog.showInformation(
+                        title: "No Matches Found",
+                        message: "No images found matching the search criteria."
+                    )
+                    return
+                }
             }
 
             panel.beginIndeterminatePhase(label: "Updating thumbnail view…")

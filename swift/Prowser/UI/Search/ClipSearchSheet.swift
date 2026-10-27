@@ -7,6 +7,7 @@ struct ClipSearchOptions: Sendable {
     var useCustomDirectory: Bool
     var customDirectory: String
     var threshold: Double
+    var ignoreFilenameFilter: Bool
 }
 
 @MainActor
@@ -20,6 +21,7 @@ struct ClipSearchSheet: View {
     @State private var useCustomDirectory = false
     @State private var customDirectory = ""
     @State private var threshold = 0.20
+    @State private var ignoreFilenameFilter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -56,6 +58,16 @@ struct ClipSearchSheet: View {
                         .frame(width: SearchSheetCheckboxLayout.width)
                         .disabled(!useCustomDirectory)
                     Text("Search in subdirectories")
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Toggle("", isOn: $ignoreFilenameFilter)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                    Text("All Files (Ignore filter)")
+                        .contentShape(Rectangle())
+                        .onTapGesture { ignoreFilenameFilter.toggle() }
+                        .help("Search all images in scope, not only names matching the current filename filter.")
                 }
             }
             HStack {
@@ -117,6 +129,7 @@ struct ClipSearchSheet: View {
     }
 
     private func loadDefaults() {
+        ignoreFilenameFilter = appState.config.bool(forKey: "clip_search_ignore_filter", default: false)
         prompt = appState.config.string(forKey: "clip_prompt", default: "")
         recursive = appState.config.bool(forKey: "clip_recursive", default: false)
         if let prime = appState.consumeClipSearchDirectoryPrime() {
@@ -158,13 +171,15 @@ struct ClipSearchSheet: View {
         appState.config.updateSetting("clip_search_dir_enabled", value: useCustomDirectory)
         appState.config.updateSetting("clip_search_dir", value: expandedDir)
         appState.config.updateSetting("clip_similarity_threshold", value: threshold)
+        appState.config.updateSetting("clip_search_ignore_filter", value: ignoreFilenameFilter)
         closeDialog()
         onSubmit(ClipSearchOptions(
             prompt: trimmed,
             recursive: effectiveRecursive,
             useCustomDirectory: useCustomDirectory,
             customDirectory: expandedDir,
-            threshold: threshold
+            threshold: threshold,
+            ignoreFilenameFilter: ignoreFilenameFilter
         ))
     }
 }

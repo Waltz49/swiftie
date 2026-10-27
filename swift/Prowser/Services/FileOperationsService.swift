@@ -121,9 +121,10 @@ final class FileOperationsService {
         }
         if !trashed.isEmpty {
             appState.status.showFileOperation("Moved \(trashed.count) file(s) to Trash")
+            let removed = Set(trashed.compactMap { FileDataModel.normalizePath($0) ?? $0 })
             DirectoryRefreshService.applyRemovedFiles(
                 appState: appState,
-                removed: Set(trashed),
+                removed: removed,
                 displayed: originalDisplayed,
                 activePath: activePath
             )
@@ -973,7 +974,12 @@ final class FileOperationsService {
         }
         let failedCount = ordered.count - restored
         if restored > 0 {
-            appState.clearDeletedPlaceholders(for: ordered.map(\.originalPath))
+            let placeholderPaths = ordered.map(\.originalPath) + restoredPaths
+            appState.clearDeletedPlaceholders(for: placeholderPaths)
+            let integrateItems = zip(restoredPaths, ordered).map { path, entry in
+                (path: path, originalPath: entry.originalPath, originalIndex: entry.originalIndex)
+            }
+            DirectoryRefreshService.integrateRestoredFiles(appState: appState, restored: integrateItems)
             appState.status.showFileOperation(
                 restoreFromTrashStatusMessage(
                     restoredPaths: restoredPaths,
@@ -1316,7 +1322,7 @@ final class FileOperationsService {
         }
 
         guard let directory = appState.fileData.currentDirectory else { return }
-        appState.loadDirectory(directory, saveHistory: false)
+        appState.loadDirectory(directory, saveHistory: false, showLoadingState: false)
         appState.eventBus.emit(.filesChangedOnDisk, payload: .string(directory))
     }
 }

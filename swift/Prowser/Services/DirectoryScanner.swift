@@ -99,6 +99,15 @@ enum DirectoryScanner {
         }
     }
 
+    static func pathMatchesFilenameFilter(_ path: String, pattern: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        return matchesGlob(name, pattern: pattern)
+    }
+
+    static func filterPathsMatchingPattern(_ paths: [String], pattern: String) -> [String] {
+        paths.filter { pathMatchesFilenameFilter($0, pattern: pattern) }
+    }
+
     /// Port of `ImageBrowserConfig.get_filter_pattern_for_matching` + `fnmatch.fnmatch(..., .lower())`.
     static func patternForMatching(_ storedPattern: String) -> String {
         if storedPattern == "*" || storedPattern.isEmpty { return "*" }

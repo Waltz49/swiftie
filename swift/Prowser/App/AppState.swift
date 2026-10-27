@@ -1199,7 +1199,9 @@ final class AppState {
             }.value
             guard self.fileData.currentDirectory == dir else { return }
             let currentDisplayed = self.fileData.displayedImages
-            if images == currentDisplayed {
+            let hasStalePaths = !self.isFormattedListMode()
+                && currentDisplayed.contains { !FileManager.default.fileExists(atPath: $0) }
+            if images == currentDisplayed, !hasStalePaths {
                 DirectoryRefreshService.refreshThumbnailPresentation(appState: self)
                 return
             }
@@ -1728,8 +1730,8 @@ final class AppState {
             id: DialogID.similaritySearch,
             show: showSimilaritySearchSheet,
             title: "Find Similar Images",
-            defaultSize: NSSize(width: 480, height: 260),
-            minSize: NSSize(width: 440, height: 220),
+            defaultSize: NSSize(width: 480, height: 288),
+            minSize: NSSize(width: 440, height: 248),
             focusTextOnShow: true,
             onClose: { [weak self] in self?.showSimilaritySearchSheet = false }
         ) {
@@ -1741,8 +1743,8 @@ final class AppState {
             id: DialogID.clipSearch,
             show: showClipSearchSheet,
             title: "Search by Text",
-            defaultSize: NSSize(width: 500, height: 320),
-            minSize: NSSize(width: 460, height: 280),
+            defaultSize: NSSize(width: 500, height: 348),
+            minSize: NSSize(width: 460, height: 308),
             focusTextOnShow: true,
             onClose: { [weak self] in self?.showClipSearchSheet = false }
         ) {

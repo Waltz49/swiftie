@@ -93,6 +93,18 @@ enum DirectoryRefreshService {
             removed.subtract(filterOnlyRemovals(from: removed, appState: appState))
             let added = rawAdded
 
+            if !appState.isFormattedListMode() {
+                let staleOnDisk = displayed.filter { !FileManager.default.fileExists(atPath: $0) }
+                if !staleOnDisk.isEmpty {
+                    removeDisplayedFiles(
+                        appState: appState,
+                        removed: Set(staleOnDisk),
+                        displayed: displayed
+                    )
+                    return
+                }
+            }
+
             if diskSet == displayedSet || (added.isEmpty && removed.isEmpty) {
                 if ThumbnailLockOrdering.applyLockFirstOrderIfNeeded(appState: appState) {
                     return
@@ -152,7 +164,7 @@ enum DirectoryRefreshService {
         if !removed.isEmpty && added.isEmpty {
             if appState.fileData.currentViewMode == .browse {
                 let preserved = appState.fileData.currentImagePath
-                let newList = displayed.filter { !removed.contains($0) }
+                let newList = displayed.filter { !pathMatchesAny(in: removed, path: $0) }
                 appState.fileData.setDisplayedImages(newList)
                 if let preserved, newList.contains(preserved) {
                     appState.fileData.setCurrentImagePath(preserved)
@@ -203,6 +215,57 @@ enum DirectoryRefreshService {
         }
     }
 
+    /// Restored trash undo: re-list files and refresh thumbs (Python `add_thumbnails_for_files`).
+    static func integrateRestoredFiles(
+        appState: AppState,
+        restored: [(path: String, originalPath: String, originalIndex: Int?)]
+    ) {
+        guard !restored.isEmpty else { return }
+
+        var pathsToInvalidate: [String] = []
+        var toInsert: [(path: String, index: Int?)] = []
+
+        for item in restored {
+            guard let normalized = FileDataModel.normalizePath(item.path) else { continue }
+            appState.clearDeletedPlaceholders(for: [item.originalPath, normalized])
+            guard restoredPathBelongsInCurrentView(normalized, appState: appState) else { continue }
+
+            let displayed = appState.fileData.displayedImages
+            if FileDataModel.indexOfPath(normalized, in: displayed) != nil {
+                pathsToInvalidate.append(normalized)
+            } else {
+                toInsert.append((normalized, item.originalIndex))
+            }
+        }
+
+        if !pathsToInvalidate.isEmpty {
+            invalidateThumbnails(appState: appState, paths: pathsToInvalidate)
+            appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+        }
+
+        guard !toInsert.isEmpty else { return }
+
+        var current = appState.fileData.displayedImages
+        for item in toInsert {
+            guard FileDataModel.indexOfPath(item.path, in: current) == nil else { continue }
+            if let index = item.index, index >= 0, index <= current.count {
+                current.insert(item.path, at: index)
+            } else {
+                current.append(item.path)
+            }
+        }
+        let ordered = DisplayOrderService.applyDisplayOrder(current, appState: appState)
+        appState.fileData.setDisplayedImages(ordered)
+        appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
+    }
+
+    private static func restoredPathBelongsInCurrentView(_ path: String, appState: AppState) -> Bool {
+        guard let directory = appState.fileData.currentDirectory,
+              FileDataModel.pathIsInDirectory(file: path, directory: directory) else { return false }
+        let basename = (path as NSString).lastPathComponent
+        return DirectoryScanner.matchesGlob(basename, pattern: appState.filterSettings.filterPattern)
+    }
+
     /// Remove deleted paths from the displayed list and advance the active image (Python `remove_thumbnails_for_files`).
     static func applyRemovedFiles(
         appState: AppState,
@@ -239,7 +302,7 @@ enum DirectoryRefreshService {
         activePath: String?
     ) {
         let priorActivePath = activePath ?? appState.fileData.currentImagePath
-        if let priorActivePath, !removed.contains(priorActivePath) {
+        if let priorActivePath, !pathMatchesAny(in: removed, path: priorActivePath) {
             appState.fileData.setCurrentImagePath(priorActivePath)
         } else if let next = nextImageAfterDeletion(
             original: original,
@@ -259,10 +322,10 @@ enum DirectoryRefreshService {
         activePath: String? = nil
     ) {
         let priorActivePath = activePath ?? appState.fileData.currentImagePath
-        let newList = displayed.filter { !removed.contains($0) }
+        let newList = displayed.filter { !pathMatchesAny(in: removed, path: $0) }
         appState.fileData.setDisplayedImages(newList)
 
-        if let priorActivePath, newList.contains(priorActivePath), !removed.contains(priorActivePath) {
+        if let priorActivePath, newList.contains(priorActivePath), !pathMatchesAny(in: removed, path: priorActivePath) {
             appState.fileData.setCurrentImagePath(priorActivePath)
         } else {
             let next = nextImageAfterDeletion(
@@ -285,6 +348,12 @@ enum DirectoryRefreshService {
         if sortMode == .duplicates {
             appState.applyCurrentSort()
         }
+        noteIdleBackgroundScanScopeChanged(appState: appState)
+    }
+
+    private static func pathMatchesAny(in candidates: Set<String>, path: String) -> Bool {
+        if candidates.contains(path) { return true }
+        return candidates.contains { FileDataModel.pathsReferToSameFile(path, $0) }
     }
 
     private static func nextImageAfterDeletion(
@@ -293,17 +362,17 @@ enum DirectoryRefreshService {
         activePath: String?
     ) -> String? {
         guard let activePath else {
-            return original.first { !removed.contains($0) }
+            return original.first { !pathMatchesAny(in: removed, path: $0) }
         }
         if let index = original.firstIndex(of: activePath) {
-            for candidate in original[(index + 1)...] where !removed.contains(candidate) {
+            for candidate in original[(index + 1)...] where !pathMatchesAny(in: removed, path: candidate) {
                 return candidate
             }
-            for candidate in original[..<index].reversed() where !removed.contains(candidate) {
+            for candidate in original[..<index].reversed() where !pathMatchesAny(in: removed, path: candidate) {
                 return candidate
             }
         }
-        return original.first { !removed.contains($0) }
+        return original.first { !pathMatchesAny(in: removed, path: $0) }
     }
 
     /// Invalidate idle background scan state when displayed paths or file content change.

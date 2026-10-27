@@ -840,6 +840,8 @@ final class AppConfig {
             "cnn_search_dir": "",
             "clip_search_dir_enabled": false,
             "clip_search_dir": "",
+            "cnn_search_ignore_filter": false,
+            "clip_search_ignore_filter": false,
             "cnn_feature_batch_size": 16,
             "caption_lms_host": "localhost:1234",
             "caption_system_prompt": "Analyze the provided image thoroughly and write a highly detailed, visually rich, {CAPTION_WORD_COUNT}-word caption.",

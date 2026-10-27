@@ -5,6 +5,7 @@ struct SimilaritySearchOptions: Sendable {
     var recursive: Bool
     var useCustomDirectory: Bool
     var customDirectory: String
+    var ignoreFilenameFilter: Bool
 }
 
 @MainActor
@@ -17,6 +18,7 @@ struct SimilaritySearchSheet: View {
     @State private var useCustomDirectory = false
     @State private var customDirectory = ""
     @State private var dirValid = false
+    @State private var ignoreFilenameFilter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -48,6 +50,16 @@ struct SimilaritySearchSheet: View {
                             recursive.toggle()
                         }
                 }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Toggle("", isOn: $ignoreFilenameFilter)
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .frame(width: SearchSheetCheckboxLayout.width)
+                    Text("All Files (Ignore filter)")
+                        .contentShape(Rectangle())
+                        .onTapGesture { ignoreFilenameFilter.toggle() }
+                        .help("Search all images in scope, not only names matching the current filename filter.")
+                }
             }
             HStack {
                 Spacer()
@@ -72,6 +84,7 @@ struct SimilaritySearchSheet: View {
     }
 
     private func loadDefaults() {
+        ignoreFilenameFilter = appState.config.bool(forKey: "cnn_search_ignore_filter", default: false)
         recursive = appState.config.bool(forKey: "cnn_recursive", default: false)
         if let prime = appState.consumeSimilaritySearchDirectoryPrime() {
             useCustomDirectory = prime.useCustomDirectory
@@ -113,10 +126,12 @@ struct SimilaritySearchSheet: View {
         appState.config.updateSetting("cnn_recursive", value: effectiveRecursive)
         appState.config.updateSetting("cnn_search_dir_enabled", value: useCustomDirectory)
         appState.config.updateSetting("cnn_search_dir", value: expandedDir)
+        appState.config.updateSetting("cnn_search_ignore_filter", value: ignoreFilenameFilter)
         let options = SimilaritySearchOptions(
             recursive: effectiveRecursive,
             useCustomDirectory: useCustomDirectory,
-            customDirectory: expandedDir
+            customDirectory: expandedDir,
+            ignoreFilenameFilter: ignoreFilenameFilter
         )
         closeDialog()
         onSubmit(options)

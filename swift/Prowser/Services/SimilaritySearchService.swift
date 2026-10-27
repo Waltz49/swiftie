@@ -18,6 +18,7 @@ enum SimilaritySearchService {
             return
         }
 
+        let respectFilenameFilter = !resolvedOptions.ignoreFilenameFilter
         let displayedSeed = appState.fileData.displayedImages
         let paths = SearchImagePathCollector.collectPaths(
             appState: appState,
@@ -26,7 +27,9 @@ enum SimilaritySearchService {
             useCustomDirectory: resolvedOptions.useCustomDirectory,
             // Python always injects the reference image(s) into the candidate list,
             // even when searching a custom directory that does not contain them.
-            includeDisplayed: refs
+            includeDisplayed: refs,
+            respectFilenameFilter: respectFilenameFilter,
+            alwaysIncludeUnfiltered: Set(refs)
         )
         guard !paths.isEmpty else {
             StyledMessageDialog.showWarning(title: "No Images Found", message: "No images found to search.")
@@ -42,16 +45,23 @@ enum SimilaritySearchService {
         )
         let metricName = appState.config.string(forKey: "similarity_metric", default: "cosine")
         let resnetForLog = appState.config.string(forKey: "resnet_model", default: "resnet18")
+        let filterForLog = respectFilenameFilter
+            ? appState.filterSettings.filterPattern
+            : "*"
+        var scopeExtra = "metric=\(metricName) resnet=\(resnetForLog)"
+        if resolvedOptions.ignoreFilenameFilter {
+            scopeExtra += " ignore_filter=true"
+        }
         SimilaritySearchLog.logScope(
             config: appState.config,
             kind: "CNN",
             candidateCount: paths.count,
             recursive: resolvedOptions.recursive,
             searchDirectory: searchDir,
-            filterPattern: appState.filterSettings.filterPattern,
+            filterPattern: filterForLog,
             searchDepth: appState.config.int(forKey: "search_depth", default: 4),
             referencePaths: refs,
-            extra: "metric=\(metricName) resnet=\(resnetForLog)"
+            extra: scopeExtra
         )
 
         appState.backgroundImageRecognition.suspendForForegroundSearch()
@@ -136,7 +146,7 @@ enum SimilaritySearchService {
                 appState.config.string(forKey: "similarity_metric", default: "cosine")
             )
             let pathsCopy = paths
-            let ordered = await Task.detached(priority: .userInitiated) {
+            var ordered = await Task.detached(priority: .userInitiated) {
                 SimilarityOrdering.orderBySimilarity(
                     paths: pathsCopy,
                     features: features,
@@ -156,6 +166,18 @@ enum SimilaritySearchService {
                 closeProgressPanel()
                 StyledMessageDialog.showWarning(title: "No Results", message: "No similar images found.")
                 return
+            }
+
+            if respectFilenameFilter {
+                ordered = DirectoryScanner.filterPathsMatchingPattern(
+                    ordered,
+                    pattern: appState.filterSettings.filterPattern
+                )
+                guard !ordered.isEmpty else {
+                    closeProgressPanel()
+                    StyledMessageDialog.showWarning(title: "No Results", message: "No similar images found.")
+                    return
+                }
             }
 
             panel.beginIndeterminatePhase(label: "Updating thumbnail view…")
