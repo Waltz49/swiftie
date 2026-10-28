@@ -1662,7 +1662,6 @@ final class ImageGenController {
         progressMessage = "Refining prompt…"
         taskStatusHTML = progressMessage
         bumpQueueRevision()
-        await refreshActiveJobStatusView()
         fluxPromptTasks.onFluxPromptChunk = { [weak self] chunk in
             self?.handleFluxPromptChunkForJobAI(chunk)
         }
@@ -2923,7 +2922,6 @@ final class ImageGenController {
         _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
         rebuildActiveStripViewLocally()
         publishActiveStrip(preferLiveFields: true)
-        Task { await refreshActiveJobStatusView() }
     }
 
     private func beginGenerationProgressTracking(values: [String: Any]) async {
@@ -3262,6 +3260,7 @@ final class ImageGenController {
     /// The visible active row reads ``activeStatusView``, not the queued copy.
     private func publishQueuedStatusOntoActiveJobIfNeeded(_ job: ImageGenQueuedJob) {
         guard activeJobID == job.jobID else { return }
+        if jobAIStageActive { return }
         activeStatusView = job.statusView
         let paths = cardThumbnailPaths(job.thumbnailPaths)
         activeThumbnailPaths = paths
@@ -3280,6 +3279,8 @@ final class ImageGenController {
 
     func refreshActiveJobStatusView() async {
         guard activeJobID != nil else { return }
+        // Job card keeps pre-refinement rows; progress strip shows AI stage.
+        if jobAIStageActive { return }
         let timing = currentTimingForDisplay()
         let loraLabel = await resolvedLoraStatusLabel(pluginID: activePluginID, values: pendingValues)
         lastResolvedLoraStatusLabel = loraLabel
@@ -3293,7 +3294,6 @@ final class ImageGenController {
             running: isProcessing,
             omitLiveStepsRow: true,
             withAI: withAITitle,
-            aiStageActive: jobAIStageActive,
             step: liveStepTotal > 0 ? liveStep : nil,
             stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
             elapsedSeconds: timing.elapsed,
@@ -3320,7 +3320,6 @@ final class ImageGenController {
         running: Bool = false,
         omitLiveStepsRow: Bool = false,
         withAI: Bool = false,
-        aiStageActive: Bool = false,
         step: Int? = nil,
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
@@ -3337,7 +3336,6 @@ final class ImageGenController {
             running: running,
             omitLiveStepsRow: omitLiveStepsRow,
             withAI: withAI,
-            aiStageActive: aiStageActive,
             step: step,
             stepTotal: stepTotal,
             elapsedSeconds: elapsedSeconds,
