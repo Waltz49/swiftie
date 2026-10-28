@@ -54,16 +54,21 @@ struct InformationPaneContentView: View {
         if section.expanded, !section.fieldRows.isEmpty {
             fieldTable(rows: section.fieldRows, bordered: section.borderedTable)
         }
+        if section.expanded {
+            filenameSectionSeparator
+        }
     }
 
-    @ViewBuilder
-    private func descriptionBlock(_ section: InformationDescriptionSection) -> some View {
+    private var filenameSectionSeparator: some View {
         Rectangle()
             .fill(colors.sidebarMutedText)
             .frame(height: 1)
             .padding(.top, 10)
             .padding(.bottom, 6)
+    }
 
+    @ViewBuilder
+    private func descriptionBlock(_ section: InformationDescriptionSection) -> some View {
         switch section.body {
         case .addUserComment:
             Text("Add user comment")
