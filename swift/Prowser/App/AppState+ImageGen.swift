@@ -124,10 +124,6 @@ extension AppState {
         guard !isSlideshowActive else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
 
-        if config.string(forKey: "sort_mode", default: "date") == SortMode.date.rawValue {
-            config.updateSetting("sort_reversed", value: false)
-        }
-
         let inPlace = tryInPlaceProgressiveRefresh(at: path)
         let wantBrowse = forceEnterBrowse || !imageGen.progressiveBrowseWasOpened
         if inPlace {
