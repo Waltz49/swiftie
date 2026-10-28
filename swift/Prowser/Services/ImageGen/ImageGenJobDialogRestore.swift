@@ -3,10 +3,14 @@ import Foundation
 /// Restore unified-dialog sources when editing a queue job (Python ``open_imagegen_dialog_from_job`` / ``_job_session_state``).
 @MainActor
 enum ImageGenJobDialogRestore {
+    /// Python ``_job_session_state`` (edit): live ``source_image_paths`` / ``source_image_path`` only.
+    /// Do not use ``sourcePathsForGenerationExif`` here — ``_canonical_source_image_paths`` is for
+    /// output EXIF and can lag behind the panel list after Replace/Update.
     static func editSourcePaths(from values: [String: Any], tempRoot: String) -> [String] {
-        let fromExif = ImageGenExifReferences.sourcePathsForGenerationExif(values: values, tempRoot: tempRoot)
-        if !fromExif.isEmpty { return fromExif }
-        return ImageGenExifReferences.resolveSourceImagePaths(values)
+        _ = tempRoot
+        return ImageGenExifReferences.resolveSourceImagePaths(values).filter {
+            FileManager.default.fileExists(atPath: $0)
+        }
     }
 
     static func infillSourcePath(from values: [String: Any], tempRoot: String) -> String? {

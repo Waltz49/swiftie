@@ -1286,6 +1286,7 @@ struct ImageGenUnifiedDialog: View {
             if !lockedEditSourcePaths.isEmpty {
                 out["source_image_paths"] = lockedEditSourcePaths
                 out["source_image_path"] = lockedEditSourcePaths[0]
+                out["_canonical_source_image_paths"] = lockedEditSourcePaths
             }
         default:
             break

@@ -776,6 +776,7 @@ private struct MoveDestinationsMenuContent: View {
                     appState.fileOperations.moveToLastDropLocation(copyOnly: nil)
                 }
             }
+            .keyboardShortcut("0", modifiers: .command)
             MoveWorkFilesMenuButton(appState: appState)
             Divider()
         } else {
@@ -828,6 +829,10 @@ private struct DestinationMenuButton: View {
                     appState.fileOperations.moveToDestination(slot: slot, copyOnly: nil)
                 }
             }
+            .keyboardShortcut(
+                KeyEquivalent(Character(UnicodeScalar(48 + slot)!)),
+                modifiers: .command
+            )
         }
     }
 }
