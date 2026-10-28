@@ -52,6 +52,52 @@ final class ExternalEditorSession {
         }
     }
 
+    /// Port of ``edit_pixelmator_pro_multi_files`` / ``edit_with_pixelmator_pro_multi`` (first file as document, rest as layers).
+    func beginPixelmatorMultiEdit(paths: [String]) {
+        stopMonitoring()
+        guard paths.count >= 2 else { return }
+
+        let normalized = paths.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        for path in normalized {
+            guard FileManager.default.isReadableFile(atPath: path) else {
+                appState?.status.show("File not found")
+                return
+            }
+        }
+
+        guard let first = normalized.first else { return }
+        editorAppName = ImageGenEditorSettings.pixelmatorProName
+        filePath = first
+        snapshotFileState(path: first)
+
+        let canvas = Self.maxPixelmatorCanvasSize(filePaths: normalized)
+        let launched = PixelmatorInfillService.launchPixelmatorProMultiFiles(
+            paths: normalized,
+            canvasWidth: canvas?.0 ?? 0,
+            canvasHeight: canvas?.1 ?? 0
+        )
+        guard launched else {
+            appState?.status.show("Could not open Pixelmator Pro.")
+            clearSession()
+            return
+        }
+        startMonitoring()
+    }
+
+    private static func maxPixelmatorCanvasSize(filePaths: [String]) -> (Int, Int)? {
+        var maxWidth = 0
+        var maxHeight = 0
+        for path in filePaths {
+            guard let dims = SimilarImageGroupPairsBuilder.orientedDimensions(path: path) else {
+                return nil
+            }
+            maxWidth = max(maxWidth, dims.width)
+            maxHeight = max(maxHeight, dims.height)
+        }
+        guard maxWidth > 0, maxHeight > 0 else { return nil }
+        return (maxWidth, maxHeight)
+    }
+
     private func snapshotFileState(path: String) {
         let url = URL(fileURLWithPath: path)
         if let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .contentAccessDateKey]) {

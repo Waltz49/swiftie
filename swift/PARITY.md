@@ -106,7 +106,7 @@ Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). L
 - [~] Duplicate file(s) (`FileOperationsService.duplicateFiles`)
 - [~] Find Similar Images… (⌘K) — native Core ML + consent download
 - [~] Show in Directory (⇧⌘H — `showImageInDirectory()`)
-- [~] Edit in \<external editor\> (⌘E; Pixelmator Pro multi-select exception deferred)
+- [x] Edit in \<external editor\> (⌘E; Pixelmator Pro multi-select opens one doc with extra files as layers)
 - [~] Edit EXIF User Comment… (⇧⌘E)
 - [~] Convert Format… (⌘M — `ConvertFormatSheet`)
 - [~] Extract Faces (single file via `FaceBridge.scanDirectory` imagePaths)

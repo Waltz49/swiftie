@@ -170,21 +170,36 @@ final class FileOperationsService {
 
     func openWithExternalEditor() {
         guard let appState else { return }
-        let paths = selectedPaths()
-        guard let path = paths.first else {
+        let paths = SelectionService.selectedFilesOrCurrent(appState: appState)
+        guard !paths.isEmpty else {
             appState.status.show("No image selected")
             return
         }
-        guard paths.count == 1 else {
-            appState.status.show("Select a single image to edit")
+
+        let editorName = appState.config.string(forKey: "image_editor_app", default: "Preview")
+
+        if paths.count >= 2 {
+            guard ImageGenEditorSettings.isPixelmatorProEditor(editorName) else {
+                appState.status.show("Select a single image to edit")
+                return
+            }
+            guard ImageGenEditorSettings.isPixelmatorProInstalled() else {
+                showAlert(
+                    "Editor Not Found",
+                    "Could not find Pixelmator Pro in /Applications."
+                )
+                return
+            }
+            ExternalEditorSession.shared.beginPixelmatorMultiEdit(paths: paths)
             return
         }
+
+        let path = paths[0]
         guard FileManager.default.fileExists(atPath: path) else {
             appState.status.show("File not found")
             return
         }
 
-        let editorName = appState.config.string(forKey: "image_editor_app", default: "Preview")
         guard let appURL = Self.applicationURL(named: editorName) else {
             showAlert(
                 "Editor Not Found",

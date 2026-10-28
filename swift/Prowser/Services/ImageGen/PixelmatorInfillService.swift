@@ -30,9 +30,6 @@ enum PixelmatorInfillService {
             make new image layer at the end of layers with properties {file:contents of f, preserve transparency:true}
           end tell
         end repeat
-        tell docRef
-          set current layer to first layer
-        end tell
       end tell
     end run
     """
