@@ -35,6 +35,12 @@ final class KeyboardHandlerController {
             if self.tryHandleFileTreeKeyboard(event) {
                 return nil
             }
+            if self.tryHandleImageGenUnifiedSourceNavArrow(event) {
+                return nil
+            }
+            if self.tryHandleImageGenUnifiedCmdArrow(event) {
+                return nil
+            }
             if Self.isolateNonBrowserKeyDown(event) {
                 return nil
             }
@@ -519,6 +525,11 @@ final class KeyboardHandlerController {
         let dialogOwns = !BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event)
         guard textFocused || dialogOwns else { return false }
 
+        if ImageGenDialogKeyRouting.isUnifiedSourceNavArrow(event, keyWindow: keyWindow)
+            || ImageGenDialogKeyRouting.isUnifiedFunctionCycleArrow(event, keyWindow: keyWindow) {
+            return false
+        }
+
         if isTextNavigationCommand(event) { return false }
         if dialogOwns, isDialogSaveCommand(event) { return false }
 
@@ -554,6 +565,47 @@ final class KeyboardHandlerController {
 
     private static func isTextNavigationCommand(_ event: NSEvent) -> Bool {
         isArrowKey(event.keyCode)
+    }
+
+    /// Route ⌥←/⌥→ when the unified dialog is key (backup if the dialog-local monitor misses the event).
+    private func tryHandleImageGenUnifiedSourceNavArrow(_ event: NSEvent) -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        guard ImageGenDialogKeyRouting.isOptionOnly(event.modifierFlags),
+              ImageGenDialogKeyRouting.isHorizontalArrow(event.keyCode) else { return false }
+        guard let unified = visibleImageGenUnifiedWindow() else { return false }
+        guard NSApp.keyWindow === unified else { return false }
+
+        let delta = event.keyCode == 123 ? -1 : 1
+        NotificationCenter.default.post(
+            name: .prowserStepImageGenSource,
+            object: nil,
+            userInfo: ["delta": delta]
+        )
+        return true
+    }
+
+    /// Route function cycling when the unified dialog is visible but the main window (or another surface) is key.
+    private func tryHandleImageGenUnifiedCmdArrow(_ event: NSEvent) -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        guard ImageGenDialogKeyRouting.isCommandOnly(event.modifierFlags),
+              ImageGenDialogKeyRouting.isHorizontalArrow(event.keyCode) else { return false }
+        guard visibleImageGenUnifiedWindow() != nil else { return false }
+
+        if ImageGenDialogKeyRouting.isImageGenUnifiedWindow(NSApp.keyWindow) { return false }
+        if appState?.fileTreePaneHasKeyboardFocus(in: event.window) == true { return false }
+
+        let delta = event.keyCode == 123 ? -1 : 1
+        NotificationCenter.default.post(
+            name: .prowserCycleImageGenFunction,
+            object: nil,
+            userInfo: ["delta": delta]
+        )
+        return true
+    }
+
+    private func visibleImageGenUnifiedWindow() -> NSWindow? {
+        guard let window = SceneWindowChrome.imageGenUnifiedWindow(), window.isVisible else { return nil }
+        return window
     }
 
     @discardableResult

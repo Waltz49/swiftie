@@ -1,6 +1,39 @@
 import AppKit
 import SwiftUI
 
+/// Modifier checks for image-gen dialog shortcuts (Python Qt footer + unified ``keyPressEvent``).
+enum ImageGenDialogKeyRouting {
+    static func isCommandOnly(_ flags: NSEvent.ModifierFlags) -> Bool {
+        let m = flags.intersection(.deviceIndependentFlagsMask)
+        return m.contains(.command) && !m.contains(.option) && !m.contains(.control) && !m.contains(.shift)
+    }
+
+    static func isOptionOnly(_ flags: NSEvent.ModifierFlags) -> Bool {
+        let m = flags.intersection(.deviceIndependentFlagsMask)
+        return m.contains(.option) && !m.contains(.command) && !m.contains(.control) && !m.contains(.shift)
+    }
+
+    static func isHorizontalArrow(_ keyCode: UInt16) -> Bool {
+        keyCode == 123 || keyCode == 124
+    }
+
+    static func isImageGenUnifiedWindow(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        if window.identifier?.rawValue == SceneWindowChrome.imageGenUnifiedID { return true }
+        return window.title == "Image Generation"
+    }
+
+    static func isUnifiedSourceNavArrow(_ event: NSEvent, keyWindow: NSWindow?) -> Bool {
+        guard isOptionOnly(event.modifierFlags), isHorizontalArrow(event.keyCode) else { return false }
+        return isImageGenUnifiedWindow(keyWindow)
+    }
+
+    static func isUnifiedFunctionCycleArrow(_ event: NSEvent, keyWindow: NSWindow?) -> Bool {
+        guard isCommandOnly(event.modifierFlags), isHorizontalArrow(event.keyCode) else { return false }
+        return isImageGenUnifiedWindow(keyWindow)
+    }
+}
+
 /// Footer keyboard shortcuts from Python `install_image_gen_footer_keyboard_shortcuts`
 /// (event filter on all dialog widgets — works while a text field is first responder).
 struct ImageGenDialogKeyHandler: NSViewRepresentable {
@@ -103,9 +136,19 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                     return nil
                 }
 
-                if flags == .command, event.charactersIgnoringModifiers == "w" {
+                if ImageGenDialogKeyRouting.isCommandOnly(flags),
+                   event.charactersIgnoringModifiers == "w" {
                     self.onCommandW?()
                     return nil
+                }
+
+                // ⌥← / ⌥→ — source image (Python unified ``keyPressEvent`` / ``_SourceNavKeyFilter``).
+                if ImageGenDialogKeyRouting.isOptionOnly(flags),
+                   ImageGenDialogKeyRouting.isHorizontalArrow(event.keyCode) {
+                    let handled = event.keyCode == 123
+                        ? self.onOptionLeft?() == true
+                        : self.onOptionRight?() == true
+                    if handled { return nil }
                 }
 
                 if event.keyCode == 36 || event.keyCode == 76 {
@@ -120,31 +163,22 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                         if modsNoKeypad.contains(.option), !modsNoKeypad.contains(.shift) {
                             if self.onCommandOptionReturn?() == true { return nil }
                         }
-                        if flags == .command {
+                        if ImageGenDialogKeyRouting.isCommandOnly(flags) {
                             self.onCommandReturn?()
                             return nil
                         }
                     }
                 }
 
-                if flags == .command {
+                // ⌘← / ⌘→ — cycle footer function (Python ``cycle_imagegen_function_dialog``).
+                if ImageGenDialogKeyRouting.isCommandOnly(flags),
+                   ImageGenDialogKeyRouting.isHorizontalArrow(event.keyCode) {
                     if event.keyCode == 123 {
                         self.onCommandLeft?()
-                        return nil
-                    }
-                    if event.keyCode == 124 {
+                    } else {
                         self.onCommandRight?()
-                        return nil
                     }
-                }
-
-                if flags == .option {
-                    if event.keyCode == 123 {
-                        if self.onOptionLeft?() == true { return nil }
-                    }
-                    if event.keyCode == 124 {
-                        if self.onOptionRight?() == true { return nil }
-                    }
+                    return nil
                 }
 
                 if flags.isEmpty, event.keyCode == 33 || event.keyCode == 30 {

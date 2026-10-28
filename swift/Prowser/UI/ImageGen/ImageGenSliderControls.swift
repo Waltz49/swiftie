@@ -157,6 +157,7 @@ struct ImageGenIntSliderRow: View {
     var resetDefault: Any? = nil
     var compactTrack: Bool = false
     var inlineLabel: Bool = false
+    var hideLabel: Bool = false
     var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     /// When set, show a "Continuous" hint beside the value at this slider value (copies = 51).
     var continuousAt: Int? = nil
@@ -208,7 +209,9 @@ struct ImageGenIntSliderRow: View {
 
     var body: some View {
         Group {
-            if inlineLabel {
+            if hideLabel {
+                sliderTrackRow
+            } else if inlineLabel {
                 HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
                     Text(label)
                         .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
@@ -268,6 +271,7 @@ struct ImageGenFloatSliderRow: View {
     var resetDefault: Any? = nil
     var compactTrack: Bool = false
     var inlineLabel: Bool = false
+    var hideLabel: Bool = false
     var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
 
@@ -318,7 +322,9 @@ struct ImageGenFloatSliderRow: View {
 
     var body: some View {
         Group {
-            if inlineLabel {
+            if hideLabel {
+                sliderTrackRow
+            } else if inlineLabel {
                 HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
                     Text(label)
                         .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)

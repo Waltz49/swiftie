@@ -5,11 +5,15 @@ extension Notification.Name {
     static let prowserRaiseImageGenDialog = Notification.Name("prowser.raiseImageGenDialog")
     /// Open or front the SwiftUI ``imagegen-unified`` scene (works from jobs panel / sidebar).
     static let prowserPresentImageGenUnifiedWindow = Notification.Name("prowser.presentImageGenUnifiedWindow")
+    /// ⌘← / ⌘→ cycle footer function when focus is outside the dialog (Python ``_handle_imagegen_unified_cmd_arrow``).
+    static let prowserCycleImageGenFunction = Notification.Name("prowser.cycleImageGenFunction")
+    /// ⌥← / ⌥→ step source when the app keyboard monitor forwards (dialog-local monitor is primary).
+    static let prowserStepImageGenSource = Notification.Name("prowser.stepImageGenSource")
 }
 
 @MainActor
 struct ImageGenUnifiedDialog: View {
-    static let windowIdentifier = "imagegen-unified"
+    static let windowIdentifier = SceneWindowChrome.imageGenUnifiedID
 
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -151,8 +155,8 @@ struct ImageGenUnifiedDialog: View {
                     }
                     return false
                 },
-                onOptionLeft: { stepSourceImage(delta: -1) },
-                onOptionRight: { stepSourceImage(delta: 1) },
+                onOptionLeft: { handleSourceNavKeyboard(delta: -1) },
+                onOptionRight: { handleSourceNavKeyboard(delta: 1) },
                 onBracketKey: { keyCode in handleInfillBrushBracketKey(keyCode) }
             )
         )
@@ -177,6 +181,16 @@ struct ImageGenUnifiedDialog: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserRaiseImageGenDialog)) { _ in
             raiseWindow()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserCycleImageGenFunction)) { note in
+            let delta = note.userInfo?["delta"] as? Int ?? 0
+            guard delta == -1 || delta == 1 else { return }
+            cycleFunction(delta: delta)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserStepImageGenSource)) { note in
+            let delta = note.userInfo?["delta"] as? Int ?? 0
+            guard delta == -1 || delta == 1 else { return }
+            _ = handleSourceNavKeyboard(delta: delta)
         }
         .background {
             SceneWindowLifecycleBridge(windowIdentifier: Self.windowIdentifier) {
@@ -694,19 +708,28 @@ struct ImageGenUnifiedDialog: View {
     private func adoptLockedSingleSourcePath(_ path: String) {
         let normalized = (path as NSString).standardizingPath
         switch selectedFunction {
+        case "edit":
+            lockedEditSourcePaths = [normalized]
+            appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
+            values["source_image_path"] = normalized
+            values["source_image_paths"] = [normalized]
+            markDirtyIfNeeded()
         case "expand":
             lockedExpandSourcePath = normalized
+            values["source_image_path"] = normalized
+            values["source_image_paths"] = [normalized]
+            markDirtyIfNeeded()
         case "infill":
             if lockedInfillSourcePath != normalized {
                 clearInfillDialogWorkingExportState()
             }
             lockedInfillSourcePath = normalized
+            values["source_image_path"] = normalized
+            values["source_image_paths"] = [normalized]
+            markDirtyIfNeeded()
         default:
             return
         }
-        values["source_image_path"] = normalized
-        values["source_image_paths"] = [normalized]
-        markDirtyIfNeeded()
     }
 
     /// Drop paint/Pixelmator export paths tied to a previous infill source (dialog-only batch dirs).
@@ -791,14 +814,58 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
+    /// True when Python would install ``ImageGenSourceNavRow`` / source key filter for this mode.
+    private func sourceNavKeyboardActive() -> Bool {
+        switch selectedFunction {
+        case "edit":
+            return lockedEditSourcePaths.count == 1
+        case "expand":
+            return panelSourcePath != nil
+        case "infill":
+            guard let path = panelSourcePath else { return false }
+            let tempRoot = appState.config.temporaryFilesDirectory.path
+            return !ImageGenInfillPathSemantics.isWorkingTempPath(path, tempRoot: tempRoot)
+        default:
+            return false
+        }
+    }
+
+    /// ⌥← / ⌥→ — consume when source nav applies (Python ``_SourceNavKeyFilter`` always eats Alt+arrows).
+    private func handleSourceNavKeyboard(delta: Int) -> Bool {
+        guard sourceNavKeyboardActive() else { return false }
+        _ = stepSourceImage(delta: delta)
+        return true
+    }
+
     private func stepSourceImage(delta: Int) -> Bool {
-        guard selectedFunction == "expand" || selectedFunction == "infill" else { return false }
+        guard selectedFunction == "edit" || selectedFunction == "expand" || selectedFunction == "infill" else {
+            return false
+        }
+        if selectedFunction == "edit" {
+            guard lockedEditSourcePaths.count == 1 else { return false }
+        }
+        if selectedFunction == "infill", let path = panelSourcePath {
+            let tempRoot = appState.config.temporaryFilesDirectory.path
+            if ImageGenInfillPathSemantics.isWorkingTempPath(path, tempRoot: tempRoot) {
+                return false
+            }
+        }
         guard let path = panelSourcePath else { return false }
         let images = appState.fileData.displayedImages
-        guard let index = images.firstIndex(of: path) else { return false }
-        let next = index + delta
-        guard images.indices.contains(next) else { return false }
-        adoptLockedSingleSourcePath(images[next])
+        guard !images.isEmpty else { return false }
+        guard let index = ImageGenDisplayedImageNavigation.indexInDisplayedList(path: path, images: images) else {
+            return false
+        }
+        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
+        guard let nextIndex = ImageGenDisplayedImageNavigation.adjacentIndex(
+            from: index,
+            delta: delta,
+            count: images.count,
+            wrapAround: wrap
+        ) else {
+            return false
+        }
+        adoptLockedSingleSourcePath(images[nextIndex])
         return true
     }
 
@@ -942,16 +1009,11 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private func cycleFunction(delta: Int) {
-        let available = functions.filter { !(pluginsByFunction[$0] ?? []).isEmpty }
-        guard !available.isEmpty else { return }
-        guard let index = available.firstIndex(of: selectedFunction) else { return }
-        let next = available[(index + delta + available.count) % available.count]
+        guard let index = functions.firstIndex(of: selectedFunction) else { return }
+        let next = functions[(index + delta + functions.count) % functions.count]
         let previous = selectedFunction
         Task {
-            let ok = await switchFunction(from: previous, to: next)
-            if ok {
-                selectedFunction = next
-            }
+            _ = await switchFunction(from: previous, to: next)
         }
     }
 

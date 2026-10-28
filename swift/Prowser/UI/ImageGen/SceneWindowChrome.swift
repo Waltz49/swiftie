@@ -4,8 +4,8 @@ import SwiftUI
 /// SwiftUI `Window` scenes for imagegen (jobs panel, unified dialog).
 @MainActor
 enum SceneWindowChrome {
-    static let jobsPanelID = "jobs-panel"
-    static let imageGenUnifiedID = "imagegen-unified"
+    nonisolated static let jobsPanelID = "jobs-panel"
+    nonisolated static let imageGenUnifiedID = "imagegen-unified"
 
     static func window(identifier: String, title: String? = nil) -> NSWindow? {
         NSApp.windows.first { window in

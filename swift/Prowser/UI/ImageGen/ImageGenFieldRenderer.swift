@@ -27,6 +27,8 @@ private struct ImageGenFieldNodeView: View {
     let node: [String: Any]
     var compactSliderTracks: Bool = false
     var copiesSliderMax: Int? = nil
+    /// Sliders inside a ``labeled`` group use the group label only (Python ``_mount_node``).
+    var omitSliderLabels: Bool = false
     @Binding var values: [String: Any]
 
     var body: some View {
@@ -48,6 +50,13 @@ private struct ImageGenFieldNodeView: View {
                 )
             } else if layout == "prompt_block" {
                 EmptyView()
+            } else if layout == "labeled" {
+                ImageGenLabeledFieldGroup(
+                    node: node,
+                    compactSliderTracks: compactSliderTracks,
+                    copiesSliderMax: copiesSliderMax,
+                    values: $values
+                )
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     if let label = node["label"] as? String, !label.isEmpty {
@@ -73,8 +82,64 @@ private struct ImageGenFieldNodeView: View {
                 spec: spec,
                 compactSliderTracks: compactSliderTracks,
                 copiesSliderMax: copiesSliderMax,
+                omitSliderLabels: omitSliderLabels,
                 values: $values
             )
+        }
+    }
+}
+
+@MainActor
+private struct ImageGenLabeledFieldGroup: View {
+    let node: [String: Any]
+    var compactSliderTracks: Bool = false
+    var copiesSliderMax: Int? = nil
+    @Binding var values: [String: Any]
+
+    private var groupLabel: String {
+        node["label"] as? String ?? ""
+    }
+
+    private var children: [[String: Any]] {
+        node["children"] as? [[String: Any]] ?? []
+    }
+
+    private var childControls: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(children.indices, id: \.self) { idx in
+                ImageGenFieldNodeView(
+                    node: children[idx],
+                    compactSliderTracks: compactSliderTracks,
+                    copiesSliderMax: copiesSliderMax,
+                    omitSliderLabels: true,
+                    values: $values
+                )
+            }
+        }
+    }
+
+    var body: some View {
+        Group {
+            if compactSliderTracks, !groupLabel.isEmpty {
+                HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                    Text(groupLabel)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: ImageGenInlineFieldLayout.parameterLabelWidth, alignment: .leading)
+                    childControls
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if !groupLabel.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(groupLabel)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .padding(.top, 4)
+                    childControls
+                }
+            } else {
+                childControls
+            }
         }
     }
 }
@@ -84,6 +149,7 @@ private struct ImageGenFieldSpecView: View {
     let spec: [String: Any]
     var compactSliderTracks: Bool = false
     var copiesSliderMax: Int? = nil
+    var omitSliderLabels: Bool = false
     @Binding var values: [String: Any]
 
     private func effectiveIntSliderMax(spec: [String: Any], key: String) -> Int {
@@ -111,7 +177,8 @@ private struct ImageGenFieldSpecView: View {
                 step: spec["step"] as? Int ?? 1,
                 resetDefault: spec["reset_default"],
                 compactTrack: compactSliderTracks,
-                inlineLabel: compactSliderTracks,
+                inlineLabel: compactSliderTracks && !omitSliderLabels,
+                hideLabel: omitSliderLabels,
                 continuousAt: key == "copies" && copiesSliderMax != nil
                     ? JobStepQueue.seriesContinuousCopies
                     : nil,
@@ -126,7 +193,8 @@ private struct ImageGenFieldSpecView: View {
                 step: doubleValue(spec["step"], default: 0.1),
                 resetDefault: spec["reset_default"],
                 compactTrack: compactSliderTracks,
-                inlineLabel: compactSliderTracks,
+                inlineLabel: compactSliderTracks && !omitSliderLabels,
+                hideLabel: omitSliderLabels,
                 values: $values
             )
         case "choice":

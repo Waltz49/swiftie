@@ -15,7 +15,7 @@ struct ImageGenSourceNavRow<Center: View>: View {
 
     private var currentIndex: Int? {
         guard let currentPath else { return nil }
-        return displayedImages.firstIndex(of: currentPath)
+        return ImageGenDisplayedImageNavigation.indexInDisplayedList(path: currentPath, images: displayedImages)
     }
 
     private var navigationVisible: Bool {
@@ -54,14 +54,26 @@ struct ImageGenSourceNavRow<Center: View>: View {
 
     private func canNavigate(delta: Int) -> Bool {
         guard let index = currentIndex else { return false }
-        let next = index + delta
-        return next >= 0 && next < displayedImages.count
+        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
+        return ImageGenDisplayedImageNavigation.canStep(
+            from: index,
+            delta: delta,
+            count: displayedImages.count,
+            wrapAround: wrap
+        )
     }
 
     func navigate(delta: Int) {
         guard let index = currentIndex else { return }
-        let next = index + delta
-        guard displayedImages.indices.contains(next) else { return }
+        let wrap = appState.config.bool(forKey: "wrap_around", default: true)
+        guard let next = ImageGenDisplayedImageNavigation.adjacentIndex(
+            from: index,
+            delta: delta,
+            count: displayedImages.count,
+            wrapAround: wrap
+        ) else {
+            return
+        }
         onSelectPath(displayedImages[next])
     }
 }
