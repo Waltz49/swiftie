@@ -1235,6 +1235,7 @@ struct ImageGenUnifiedDialog: View {
             config: appState.config
         )
         syncNormalizedPromptFieldsFromSubmit(into: &values, submitValues: submitValues)
+        ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &submitValues, from: values)
         return submitValues
     }
 

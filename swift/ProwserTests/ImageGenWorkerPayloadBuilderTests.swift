@@ -3,6 +3,31 @@ import XCTest
 
 final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     @MainActor
+    func testEnqueueSubmitRestoresDialogSeriesRefinementAfterStrip() {
+        var submit: [String: Any] = [
+            "prompt": "test",
+            "series_refinement": true,
+            "copies": 3,
+        ]
+        let flags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submit)
+        ImageGenJobValuesSnapshot.stripDialogLeakedJobQueueFlags(&submit)
+        XCTAssertNil(submit["series_refinement"])
+        ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &submit, from: flags)
+        XCTAssertEqual(submit["series_refinement"] as? Bool, true)
+    }
+
+    @MainActor
+    func testReplaceSubmitPreservesThenAppliesDialogSeriesRefinement() {
+        var snapshotted: [String: Any] = ["prompt": "x", "copies": 2]
+        let prior: [String: Any] = ["series_refinement": true]
+        let dialog: [String: Any] = ["series_refinement": false]
+        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &snapshotted, source: prior)
+        XCTAssertEqual(snapshotted["series_refinement"] as? Bool, true)
+        ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &snapshotted, from: dialog)
+        XCTAssertEqual(snapshotted["series_refinement"] as? Bool, false)
+    }
+
+    @MainActor
     func testSnapshotJobValuesPreservesSeriesRefinement() async throws {
         let config = ProwserTestSupport.ephemeralAppConfig()
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_schnell_mflux") else {

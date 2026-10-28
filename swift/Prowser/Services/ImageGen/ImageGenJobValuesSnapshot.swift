@@ -29,6 +29,33 @@ enum ImageGenJobValuesSnapshot {
         }
     }
 
+    /// Keys explicitly set on the dialog submit payload (including ``false``).
+    static func jobQueueOnlyKeysPresent(in values: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for key in jobQueueOnlyKeys where values[key] != nil {
+            out[key] = values[key]
+        }
+        return out
+    }
+
+    /// Apply dialog / queue-toolbar flags after snapshot (editor wins over leaked settings).
+    static func applyJobQueueOnlyKeys(values: inout [String: Any], from flags: [String: Any]) {
+        for key in jobQueueOnlyKeys {
+            guard let raw = flags[key] else { continue }
+            if let bool = boolFromJSONish(raw) {
+                values[key] = bool
+            } else {
+                values[key] = raw
+            }
+        }
+    }
+
+    private static func boolFromJSONish(_ raw: Any) -> Bool? {
+        if let value = raw as? Bool { return value }
+        if let number = raw as? NSNumber { return number.boolValue }
+        return nil
+    }
+
     /// Port of ``normalize_replaced_job_values`` in ``flux_prompt_job.py``.
     static func normalizeReplacedJobValues(_ values: inout [String: Any]) {
         guard JobStepQueue.hasFluxPromptAIJob(values),

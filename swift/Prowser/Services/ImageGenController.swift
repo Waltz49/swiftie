@@ -398,7 +398,12 @@ final class ImageGenController {
         var submitValues = values
         ImageGenPromptSentenceCase.flushPromptValues(&submitValues)
         submitValues["copies"] = normalizedCopies
+        let dialogJobQueueFlags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submitValues)
+        if !ImageGenJobValuesSnapshot.jobValuesSnapshotted(submitValues) {
+            ImageGenJobValuesSnapshot.stripDialogLeakedJobQueueFlags(&submitValues)
+        }
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
+        ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &submitValues, from: dialogJobQueueFlags)
         var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: normalizedCopies)
         let prompt = FluxPromptJob.effectiveJobPromptForTooltip(submitValues)
         steps = JobStepQueue.ensureStepsHavePrompt(steps, prompt: prompt, jobValues: submitValues)
@@ -579,8 +584,10 @@ final class ImageGenController {
         let priorValues = queue.jobs[index].values
         var submitValues = values
         submitValues["copies"] = copies
-        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: priorValues)
+        let dialogJobQueueFlags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submitValues)
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
+        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: priorValues)
+        ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &submitValues, from: dialogJobQueueFlags)
         ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&submitValues)
         var steps = try await registry.materializeSteps(pluginID: pluginID, values: submitValues, copies: copies)
         JobStepQueue.stampSeriesCopiesOnSteps(&steps, copies: copies)
@@ -689,8 +696,10 @@ final class ImageGenController {
         let copies = copiesDone + remaining
         var submitValues = values
         submitValues["copies"] = copies
-        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: pendingValues)
+        let dialogJobQueueFlags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submitValues)
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
+        ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: pendingValues)
+        ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &submitValues, from: dialogJobQueueFlags)
         ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&submitValues)
         copiesTotal = copies
         if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {

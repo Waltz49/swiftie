@@ -159,8 +159,16 @@ private struct ImageGenFieldSpecView: View {
 
     private func bindingBool(_ key: String, default defaultValue: Bool) -> Binding<Bool> {
         Binding(
-            get: { values[key] as? Bool ?? defaultValue },
-            set: { values[key] = $0 }
+            get: {
+                if let value = values[key] as? Bool { return value }
+                if let number = values[key] as? NSNumber { return number.boolValue }
+                return defaultValue
+            },
+            set: { newValue in
+                var updated = values
+                updated[key] = newValue
+                values = updated
+            }
         )
     }
 }

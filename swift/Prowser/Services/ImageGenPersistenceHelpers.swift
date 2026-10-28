@@ -48,6 +48,7 @@ enum ImageGenPersistence {
                 && !globalDialogPrefKeys.contains(key)
                 && !deprecatedFieldKeys.contains(key)
                 && key != "series_prompt_refinement"
+                && key != "series_refinement"
         }
     }
 
