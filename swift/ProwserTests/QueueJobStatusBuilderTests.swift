@@ -1,6 +1,8 @@
 import XCTest
+import AppKit
 @testable import Prowser
 
+@MainActor
 final class QueueJobStatusBuilderTests: XCTestCase {
     func testContinuousSeriesCopiesLineShowsContinuous() {
         let result = QueueJobStatusBuilder.build(
@@ -89,5 +91,42 @@ final class QueueJobStatusBuilderTests: XCTestCase {
             }
             return false
         }))
+    }
+
+    func testKleinEditJobCardSizeMatchesSourceNotSliderDefaults() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("queue-status-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let imagePath = tempDir.appendingPathComponent("source.png").path
+        let image = NSImage(size: NSSize(width: 1024, height: 768))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 1024, height: 768).fill()
+        image.unlockFocus()
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            XCTFail("Could not encode test PNG")
+            return
+        }
+        try png.write(to: URL(fileURLWithPath: imagePath))
+
+        let result = QueueJobStatusBuilder.build(
+            pluginID: "flux_klein_4b_edit",
+            function: "edit",
+            values: [
+                "prompt": "edit test",
+                "width": 512,
+                "height": 512,
+                "use_custom_size": false,
+                "source_image_paths": [imagePath],
+            ],
+            copiesTotal: 1
+        )
+        let fp = result.statusView.fingerprint()
+        XCTAssertTrue(fp.contains("1024 x 768"), "Expected fitted source size, got: \(fp)")
+        XCTAssertFalse(fp.contains("512 x 512"))
     }
 }

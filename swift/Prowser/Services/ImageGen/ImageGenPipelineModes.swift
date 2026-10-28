@@ -89,4 +89,97 @@ enum ImageGenPipelineModes {
         if let n = any as? NSNumber { return n.intValue }
         return nil
     }
+
+    /// Port of ``effective_pipeline_id_for_values``.
+    static func effectivePipelineIDForValues(pipelineID: String, values: [String: Any]) -> String {
+        if pipelineID == "mflux_flux2_klein_create",
+           !ImageGenExifReferences.resolveSourceImagePaths(values).isEmpty {
+            return "mflux_flux2_klein_edit"
+        }
+        return pipelineID
+    }
+
+    /// Output dimensions shown on job cards (port of ``generation_status_display_size``).
+    static func generationStatusDisplaySize(
+        plugin: ImageGenPluginDescriptor,
+        values: [String: Any],
+        payload: [String: Any]?,
+        settings: [String: Any]
+    ) -> (width: Int, height: Int)? {
+        var merged = values
+        if let payload {
+            for (key, value) in payload {
+                merged[key] = value
+            }
+        }
+        let pluginMax = ImageGenDimLimits.effectiveMaxGenerationDimension(
+            pluginMax: ImageGenPluginMetadata.maxGenerationDimension(pluginID: plugin.pluginID),
+            settings: settings
+        )
+        let maxSide = intValue(merged["max_generation_dimension"]) ?? pluginMax
+        let pipelineID = effectivePipelineIDForValues(pipelineID: plugin.pipelineID, values: merged)
+
+        if pipelineID == "mflux_flux2_klein_edit" {
+            if boolFromSettingsValue(merged["use_custom_size"]) {
+                guard let w = intValue(merged["width"]), let h = intValue(merged["height"]), w > 0, h > 0 else {
+                    return nil
+                }
+                let fitted = ImageGenInfillMath.fitEditOutputDims(width: w, height: h, maxSide: maxSide)
+                return (fitted.width, fitted.height)
+            }
+            let paths = ImageGenExifReferences.resolveSourceImagePaths(merged)
+            guard let path = paths.first,
+                  FileManager.default.fileExists(atPath: path),
+                  let size = ImageRecognitionImageLoader.orientedPixelSize(path: path) else {
+                return nil
+            }
+            let fitted = ImageGenInfillMath.fitEditOutputDims(
+                width: size.width,
+                height: size.height,
+                maxSide: maxSide
+            )
+            return (fitted.width, fitted.height)
+        }
+
+        if pipelineID == "mflux_fill_infill" {
+            let basePath = (merged["pixelmator_base_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !basePath.isEmpty, FileManager.default.fileExists(atPath: basePath),
+                  let size = ImageRecognitionImageLoader.orientedPixelSize(path: basePath) else {
+                return nil
+            }
+            return ImageGenDimMath.alignDimsForPipeline(
+                pipelineID: "flux_schnell_mflux_play",
+                width: size.width,
+                height: size.height,
+                effectiveMaxSide: maxSide
+            )
+        }
+
+        guard mode(pipelineID: pipelineID)?.includesOutputDimensions == true else { return nil }
+
+        var w: Int?
+        var h: Int?
+        if let payload {
+            if let pw = intValue(payload["width"]), let ph = intValue(payload["height"]), pw > 0, ph > 0 {
+                w = pw
+                h = ph
+            }
+        }
+        if w == nil || h == nil || (w ?? 0) <= 0 || (h ?? 0) <= 0 {
+            guard let mw = intValue(merged["width"]), let mh = intValue(merged["height"]), mw > 0, mh > 0 else {
+                return nil
+            }
+            return ImageGenDimMath.alignDimsForPipeline(
+                pipelineID: pipelineID,
+                width: mw,
+                height: mh,
+                effectiveMaxSide: maxSide
+            )
+        }
+        guard let w, let h else { return nil }
+        if pipelineID == "mflux_fill_expand" {
+            return ImageGenOutpaintMask.clampOutpaintDims(width: w, height: h, maxSide: maxSide)
+        }
+        return (w, h)
+    }
 }

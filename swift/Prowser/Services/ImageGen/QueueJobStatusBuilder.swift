@@ -8,6 +8,7 @@ struct QueueJobStatusBuildResult {
 }
 
 /// Native job card status (port of ``build_queue_job_status_view``).
+@MainActor
 enum QueueJobStatusBuilder {
     private static let quantLabel = "Q:"
     private static let promptTruncate = 400
@@ -27,7 +28,8 @@ enum QueueJobStatusBuilder {
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
         estimateSeconds: Double? = nil,
-        loraLabel: String? = nil
+        loraLabel: String? = nil,
+        settings: [String: Any] = [:]
     ) -> QueueJobStatusBuildResult {
         let thumbPaths = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
         let refsInvalid = JobCardThumbnailPaths.referencesInvalid(pluginID: pluginID, values: values)
@@ -68,7 +70,13 @@ enum QueueJobStatusBuilder {
             )
         }
 
-        let fields = collectFields(plugin: plugin, values: values, payload: payload, loraLabel: loraLabel)
+        let fields = collectFields(
+            plugin: plugin,
+            values: values,
+            payload: payload,
+            loraLabel: loraLabel,
+            settings: settings
+        )
         let stepsValue = stepsDisplay(fieldsSteps: fields.steps, step: step, stepTotal: stepTotal)
         let showTiming = step != nil && stepTotal != nil && (stepTotal ?? 0) > 0 && elapsedSeconds != nil
 
@@ -181,7 +189,8 @@ enum QueueJobStatusBuilder {
         plugin: ImageGenPluginDescriptor,
         values: [String: Any],
         payload: [String: Any]? = nil,
-        loraLabel: String? = nil
+        loraLabel: String? = nil,
+        settings: [String: Any] = [:]
     ) -> StatusFields {
         var effective = values
         if let payload {
@@ -199,8 +208,13 @@ enum QueueJobStatusBuilder {
         } else {
             fields.lora = loraLabelForStatus(plugin: plugin, values: effective)
         }
-        if let w = intValue(effective["width"]), let h = intValue(effective["height"]), w > 0, h > 0 {
-            fields.size = "\(w) x \(h)"
+        if let displaySize = ImageGenPipelineModes.generationStatusDisplaySize(
+            plugin: plugin,
+            values: values,
+            payload: payload,
+            settings: settings
+        ) {
+            fields.size = "\(displaySize.width) x \(displaySize.height)"
         }
         if let steps = intValue(effective["steps"]) {
             fields.steps = "\(steps)"

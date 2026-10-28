@@ -3340,7 +3340,8 @@ final class ImageGenController {
             stepTotal: stepTotal,
             elapsedSeconds: elapsedSeconds,
             estimateSeconds: estimateSeconds,
-            loraLabel: loraLabel
+            loraLabel: loraLabel,
+            settings: config.rawSettings()
         )
     }
 
