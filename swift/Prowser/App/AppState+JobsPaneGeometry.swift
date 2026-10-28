@@ -7,6 +7,10 @@ extension AppState {
     func scheduleJobsPaneGeometryRefit() {
         let snapping = jobsSurfaceExactSnapPasses > 0
         guard snapping || jobsDisplayMode == .pane else { return }
+        if rightSidebarSplit.userPaneResizeInProgress {
+            jobsPaneRefitDeferred = true
+            return
+        }
         if isAdjustingJobsPaneGeometry {
             jobsPaneRefitDeferred = true
             return

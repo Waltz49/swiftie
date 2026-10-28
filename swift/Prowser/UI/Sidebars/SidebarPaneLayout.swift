@@ -10,6 +10,8 @@ enum SidebarPaneLayout {
     static let minJobsQueueContentHeight: CGFloat = 20
     static let paneFitHeightToleranceMin: CGFloat = 8
     static let jobsPaneSizeChangeTolerance: CGFloat = 10
+    /// Max fraction of sidebar alloc height for automatic jobs pane growth when upper panes are visible.
+    static let jobsPaneAutoResizeMaxFraction: CGFloat = 0.75
 
     /// Height of one inter-pane splitter grip (matches Qt `setHandleWidth`).
     static func splitterHandleHeight(viewBorderWidthPx: Int) -> CGFloat {

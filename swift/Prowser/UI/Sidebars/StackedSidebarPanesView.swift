@@ -28,8 +28,6 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
     @ViewBuilder let pane1: () -> Pane1
     @ViewBuilder let pane2: () -> Pane2
 
-    @State private var draggingSplitterIndex: Int?
-
     var body: some View {
         GeometryReader { geometry in
             let displayed = descriptors.filter { descriptor in
@@ -52,6 +50,11 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .overlay {
+                SidebarPaneResizeCoordinateAnchor(splitModel: model)
+                    .allowsHitTesting(false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             .onAppear {
                 relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
             }
@@ -105,18 +108,10 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             onToggle: { togglePane(descriptor) },
             paneIndex: descriptor.index,
             allowsTitlebarDrag: descriptor.allowsTitlebarDrag,
+            splitModel: model,
             onTitleClick: descriptor.index == 0 && model.side == .left ? { appState.requestFileTreeFocus() } : nil,
             onTitleDoubleClick: descriptor.allowsDoubleClickFit
                 ? { handleDoubleClick(descriptor) }
-                : nil,
-            onTitlebarDragStarted: descriptor.allowsTitlebarDrag
-                ? { y in model.beginTitlebarDrag(atY: y) }
-                : nil,
-            onTitlebarDrag: descriptor.allowsTitlebarDrag
-                ? { y in model.applyTitlebarDrag(paneIndex: descriptor.index, currentY: y, appState: appState) }
-                : nil,
-            onTitlebarDragEnded: descriptor.allowsTitlebarDrag
-                ? { model.endTitlebarDrag(appState: appState) }
                 : nil,
             status: descriptor.status,
             omitLeftBorder: model.side == .right ? true : descriptor.omitLeftBorder,
@@ -150,38 +145,32 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
 
     private func splitterHandle(betweenUpperIndex index: Int) -> some View {
         let colors = appState.theme.colors
-        return Rectangle()
-            .fill(colors.sidebarHeaderBorder.opacity(0.8))
-            .frame(height: CGFloat(max(1, colors.viewBorderWidthPx)))
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeUpDown.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if draggingSplitterIndex == nil {
-                            draggingSplitterIndex = index
-                            model.beginTitlebarDrag(atY: 0)
-                        }
-                        model.applySplitterDrag(
-                            upperIndex: index,
-                            currentY: value.translation.height,
-                            appState: appState
-                        )
-                    }
-                    .onEnded { _ in
-                        draggingSplitterIndex = nil
-                        model.endTitlebarDrag(appState: appState)
-                    }
+        let lowerIndex = index + 1
+        let handleHeight = CGFloat(max(1, colors.viewBorderWidthPx))
+        return ZStack {
+            Rectangle()
+                .fill(colors.sidebarHeaderBorder.opacity(0.8))
+                .allowsHitTesting(false)
+            SidebarPaneVerticalResizeMouseView(
+                paneIndex: lowerIndex,
+                splitModel: model,
+                appState: appState
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(height: handleHeight)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                NSCursor.resizeUpDown.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
     }
 
     private func relayout(totalHeight: CGFloat, displayedCount: Int) {
+        if model.userPaneResizeInProgress { return }
         let handle = SidebarPaneLayout.splitterHandleHeight(
             viewBorderWidthPx: appState.theme.colors.viewBorderWidthPx
         )

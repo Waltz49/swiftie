@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -14,9 +15,13 @@ final class SidebarPaneSplitModel {
     private unowned let config: AppConfig
 
     private(set) var sizes: [CGFloat]
+    private(set) var userPaneResizeInProgress = false
     private var fitTargets: [Int: CGFloat] = [:]
     private var dragStartSizes: [CGFloat]?
-    private var dragPressY: CGFloat?
+    private var dragPressWindowY: CGFloat?
+    private var jobsGeometryHeldDuringUserDrag = false
+    /// Flipped column view for stable window-space resize deltas (set by ``StackedSidebarPanesView``).
+    weak var resizeCoordinateReferenceView: NSView?
 
     init(side: SidebarSplitSide, config: AppConfig) {
         self.side = side
@@ -167,16 +172,37 @@ final class SidebarPaneSplitModel {
         config.saveSplitterSizes(persistenceKey, sizes: saved)
     }
 
-    func beginTitlebarDrag(atY: CGFloat) {
-        dragStartSizes = sizes
-        dragPressY = atY
+    /// Port of Python `_jobs_is_sole_visible_pane`.
+    func jobsIsSoleVisiblePane(appState: AppState) -> Bool {
+        guard side == .right else { return false }
+        let vis = visibility(appState: appState)
+        guard vis.count > 2, vis[2] else { return false }
+        return !vis[0] && !vis[1]
     }
 
-    func applyTitlebarDrag(paneIndex: Int, currentY: CGFloat, appState: AppState) {
+    func resizeCoordinateY(for event: NSEvent, fallbackView: NSView? = nil) -> CGFloat? {
+        let reference = resizeCoordinateReferenceView ?? fallbackView
+        guard let reference, reference.window != nil else { return nil }
+        let point = reference.convert(event.locationInWindow, from: nil)
+        return point.y
+    }
+
+    func beginPaneResizeDrag(paneIndex: Int, pressWindowY: CGFloat, appState: AppState) {
+        dragStartSizes = sizes
+        dragPressWindowY = pressWindowY
+        userPaneResizeInProgress = true
+        fitTargets.removeAll()
+        if side == .right, paneIndex == 2, appState.jobsDisplayMode == .pane {
+            jobsGeometryHeldDuringUserDrag = true
+            appState.beginJobsPaneGeometryAdjustment()
+        }
+    }
+
+    func applyPaneResizeDrag(paneIndex: Int, currentWindowY: CGFloat, appState: AppState) {
         let vis = visibility(appState: appState)
         let start = dragStartSizes ?? sizes
-        let pressY = dragPressY ?? currentY
-        let deltaY = currentY - pressY
+        let pressY = dragPressWindowY ?? currentWindowY
+        let deltaY = currentWindowY - pressY
         guard let updated = SidebarPaneLayout.applyPaneTitlebarDragDelta(
             paneIdx: paneIndex,
             dy: deltaY,
@@ -189,15 +215,29 @@ final class SidebarPaneSplitModel {
         sizes = updated
     }
 
-    func endTitlebarDrag(appState: AppState) {
-        dragStartSizes = nil
-        dragPressY = nil
+    func endPaneResizeDrag(appState: AppState, paneIndex: Int) {
+        defer {
+            dragStartSizes = nil
+            dragPressWindowY = nil
+            userPaneResizeInProgress = false
+            if jobsGeometryHeldDuringUserDrag {
+                jobsGeometryHeldDuringUserDrag = false
+                appState.endJobsPaneGeometryAdjustment()
+            }
+        }
         mergePersistedSizes(appState: appState)
+        fitTargets.removeAll()
+        if side == .right, paneIndex == 2 {
+            let mode = appState.jobsQueueSizeMode
+            let jobCount = appState.imageGen.queue.jobs.count
+            if mode == .all, jobCount > 1, !appState.shouldShrinkWrapJobsClient() {
+                appState.jobsPaneAllMultiHeightPinned = true
+            }
+        }
     }
 
-    func applySplitterDrag(upperIndex: Int, currentY: CGFloat, appState: AppState) {
-        let lowerIndex = upperIndex + 1
-        applyTitlebarDrag(paneIndex: lowerIndex, currentY: currentY, appState: appState)
+    func applySplitterResizeDrag(upperIndex: Int, currentWindowY: CGFloat, appState: AppState) {
+        applyPaneResizeDrag(paneIndex: upperIndex + 1, currentWindowY: currentWindowY, appState: appState)
     }
 
     func neededPaneHeight(
@@ -275,7 +315,12 @@ final class SidebarPaneSplitModel {
         let mode = appState.jobsQueueSizeMode
         let jobCount = appState.imageGen.queue.jobs.count
         if mode == .all, jobCount > 1 {
-            resizePaneToHeight(paneIndex: 2, targetHeight: sizes[2] + extraContentHeight, appState: appState)
+            resizePaneToHeight(
+                paneIndex: 2,
+                targetHeight: sizes[2] + extraContentHeight,
+                appState: appState,
+                applyJobsAutoHeightCap: false
+            )
         } else {
             ensureJobsPaneFitsContent(appState: appState, forceRefit: false)
         }
@@ -290,7 +335,12 @@ final class SidebarPaneSplitModel {
         defer { appState.endJobsPaneGeometryAdjustment() }
         appState.refreshJobsPaneLiveMeasurements()
         let target = appState.jobsPaneTargetPaneHeight()
-        resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+        resizePaneToHeight(
+            paneIndex: 2,
+            targetHeight: target,
+            appState: appState,
+            applyJobsAutoHeightCap: true
+        )
     }
 
     /// Port of ``right_sidebar_combined.ensure_jobs_pane_fits_content``.
@@ -318,27 +368,56 @@ final class SidebarPaneSplitModel {
         switch mode {
         case .strip:
             if shrinkWrap || abs(current - target) > tolerance || forceRefit {
-                resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                resizePaneToHeight(
+                    paneIndex: 2,
+                    targetHeight: target,
+                    appState: appState,
+                    applyJobsAutoHeightCap: true
+                )
             }
         case .one:
             if shrinkWrap || abs(current - target) > tolerance || forceRefit {
-                resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                resizePaneToHeight(
+                    paneIndex: 2,
+                    targetHeight: target,
+                    appState: appState,
+                    applyJobsAutoHeightCap: true
+                )
             }
         case .all:
             if shrinkWrap {
                 if abs(current - target) > tolerance || forceRefit {
-                    resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                    resizePaneToHeight(
+                        paneIndex: 2,
+                        targetHeight: target,
+                        appState: appState,
+                        applyJobsAutoHeightCap: true
+                    )
                 }
                 appState.jobsPaneAllMultiHeightPinned = false
             } else if jobCount > 1 {
                 if forceRefit {
-                    resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
-                    appState.jobsPaneAllMultiHeightPinned = true
+                    resizePaneToHeight(
+                        paneIndex: 2,
+                        targetHeight: target,
+                        appState: appState,
+                        applyJobsAutoHeightCap: true
+                    )
                 } else if target > current + tolerance {
-                    resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                    resizePaneToHeight(
+                        paneIndex: 2,
+                        targetHeight: target,
+                        appState: appState,
+                        applyJobsAutoHeightCap: true
+                    )
                 }
             } else if abs(current - target) > tolerance || forceRefit {
-                resizePaneToHeight(paneIndex: 2, targetHeight: target, appState: appState)
+                resizePaneToHeight(
+                    paneIndex: 2,
+                    targetHeight: target,
+                    appState: appState,
+                    applyJobsAutoHeightCap: true
+                )
                 appState.jobsPaneAllMultiHeightPinned = false
             }
         }
@@ -367,21 +446,41 @@ final class SidebarPaneSplitModel {
     }
 
     private func expandPaneToFit(paneIndex: Int, needed: CGFloat, appState: AppState) {
-        resizePaneToHeight(paneIndex: paneIndex, targetHeight: needed, appState: appState)
+        resizePaneToHeight(
+            paneIndex: paneIndex,
+            targetHeight: needed,
+            appState: appState,
+            applyJobsAutoHeightCap: paneIndex == 2 && side == .right
+        )
     }
 
     private func collapsePaneFromFit(paneIndex: Int, appState: AppState) {
         let minH = minHeight(for: paneIndex, headerOnly: false, appState: appState)
-        resizePaneToHeight(paneIndex: paneIndex, targetHeight: minH, appState: appState)
+        resizePaneToHeight(
+            paneIndex: paneIndex,
+            targetHeight: minH,
+            appState: appState,
+            applyJobsAutoHeightCap: false
+        )
     }
 
-    private func resizePaneToHeight(paneIndex: Int, targetHeight: CGFloat, appState: AppState) {
+    private func resizePaneToHeight(
+        paneIndex: Int,
+        targetHeight: CGFloat,
+        appState: AppState,
+        applyJobsAutoHeightCap: Bool = false
+    ) {
         let vis = visibility(appState: appState)
         let total = sizes.reduce(0, +)
         guard total > 0 else { return }
+        var cappedTarget = targetHeight
+        if applyJobsAutoHeightCap, side == .right, paneIndex == 2, !jobsIsSoleVisiblePane(appState: appState) {
+            let maxJobs = total * SidebarPaneLayout.jobsPaneAutoResizeMaxFraction
+            cappedTarget = min(cappedTarget, maxJobs)
+        }
         let collapseFlags = SidebarPaneLayout.collapseFlagsForTarget(
             targetIdx: paneIndex,
-            neededTarget: targetHeight,
+            neededTarget: cappedTarget,
             total: total,
             visibility: vis,
             minHeightForPane: { idx, headerOnly in
@@ -392,7 +491,7 @@ final class SidebarPaneSplitModel {
             paneCount: 3,
             currentSizes: sizes,
             targetIdx: paneIndex,
-            neededTarget: targetHeight,
+            neededTarget: cappedTarget,
             visibility: vis,
             headerHeightForPane: headerHeight(for:),
             minHeightForPane: { idx, headerOnly in

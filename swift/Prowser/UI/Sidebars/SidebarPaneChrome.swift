@@ -9,37 +9,27 @@ struct SidebarPaneTitlebar: View {
     let onToggle: () -> Void
     var paneIndex: Int? = nil
     var allowsTitlebarDrag: Bool = false
+    var splitModel: SidebarPaneSplitModel? = nil
     var onTitleClick: (() -> Void)? = nil
     var onTitleDoubleClick: (() -> Void)? = nil
-    var onTitlebarDragStarted: ((CGFloat) -> Void)? = nil
-    var onTitlebarDrag: ((CGFloat) -> Void)? = nil
-    var onTitlebarDragEnded: (() -> Void)? = nil
     var status: String? = nil
     var omitLeftBorder: Bool = false
     var showsFlyoutButton: Bool = false
     var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
 
-    @State private var dragStartY: CGFloat?
     @State private var suppressTitleClick = false
+
+    private var titlebarResizeEnabled: Bool {
+        guard allowsTitlebarDrag, let paneIndex, paneIndex >= 1, splitModel != nil else { return false }
+        return true
+    }
 
     var body: some View {
         let colors = appState.theme.colors
 
         HStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(colors.sidebarHeaderText)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-
-            if let status, !status.isEmpty {
-                Text(status)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(colors.sidebarHeaderText.opacity(0.85))
-                    .lineLimit(1)
-            }
+            titlebarDragRegion(colors: colors)
 
             if let contextMenuKind {
                 SidebarPaneToolsMenuButton(kind: contextMenuKind)
@@ -68,19 +58,6 @@ struct SidebarPaneTitlebar: View {
         .padding(.vertical, 4)
         .frame(height: 30)
         .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .gesture(titlebarDragGesture)
-        .onTapGesture(count: 2) {
-            suppressTitleClick = true
-            onTitleDoubleClick?()
-        }
-        .onTapGesture(count: 1) {
-            guard !suppressTitleClick else {
-                suppressTitleClick = false
-                return
-            }
-            onTitleClick?()
-        }
         .background(colors.sidebarHeaderBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -106,21 +83,50 @@ struct SidebarPaneTitlebar: View {
         }
     }
 
-    private var titlebarDragGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
-            .onChanged { value in
-                guard allowsTitlebarDrag, let onTitlebarDrag else { return }
-                if dragStartY == nil {
-                    dragStartY = value.startLocation.y
-                    suppressTitleClick = true
-                    onTitlebarDragStarted?(value.startLocation.y)
+    @ViewBuilder
+    private func titlebarDragRegion(colors: ThemeColors) -> some View {
+        ZStack {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(colors.sidebarHeaderText)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if let status, !status.isEmpty {
+                    Text(status)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(colors.sidebarHeaderText.opacity(0.85))
+                        .lineLimit(1)
                 }
-                onTitlebarDrag(value.location.y)
             }
-            .onEnded { _ in
-                dragStartY = nil
-                onTitlebarDragEnded?()
+            .allowsHitTesting(false)
+
+            if titlebarResizeEnabled, let paneIndex, let splitModel {
+                SidebarPaneVerticalResizeMouseView(
+                    paneIndex: paneIndex,
+                    splitModel: splitModel,
+                    appState: appState,
+                    onDragStarted: { suppressTitleClick = true },
+                    onDoubleClick: {
+                        suppressTitleClick = true
+                        onTitleDoubleClick?()
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onTapGesture(count: 1) {
+            guard !titlebarResizeEnabled else { return }
+            onTitleClick?()
+        }
+        .onTapGesture(count: 2) {
+            guard !titlebarResizeEnabled else { return }
+            suppressTitleClick = true
+            onTitleDoubleClick?()
+        }
     }
 }
 
@@ -133,11 +139,9 @@ struct SidebarPaneSection<Content: View>: View {
     let onToggle: () -> Void
     var paneIndex: Int? = nil
     var allowsTitlebarDrag: Bool = false
+    var splitModel: SidebarPaneSplitModel? = nil
     var onTitleClick: (() -> Void)? = nil
     var onTitleDoubleClick: (() -> Void)? = nil
-    var onTitlebarDragStarted: ((CGFloat) -> Void)? = nil
-    var onTitlebarDrag: ((CGFloat) -> Void)? = nil
-    var onTitlebarDragEnded: (() -> Void)? = nil
     var status: String? = nil
     var omitLeftBorder: Bool = false
     var showsFlyoutButton: Bool = false
@@ -153,11 +157,9 @@ struct SidebarPaneSection<Content: View>: View {
                 onToggle: onToggle,
                 paneIndex: paneIndex,
                 allowsTitlebarDrag: allowsTitlebarDrag,
+                splitModel: splitModel,
                 onTitleClick: onTitleClick,
                 onTitleDoubleClick: onTitleDoubleClick,
-                onTitlebarDragStarted: onTitlebarDragStarted,
-                onTitlebarDrag: onTitlebarDrag,
-                onTitlebarDragEnded: onTitlebarDragEnded,
                 status: status,
                 omitLeftBorder: omitLeftBorder,
                 showsFlyoutButton: showsFlyoutButton,
