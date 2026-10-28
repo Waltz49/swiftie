@@ -586,7 +586,7 @@ extension AppState {
             rootView: ActiveJobStripView().environment(self)
         )
         stripHost.view.frame = NSRect(x: 0, y: 0, width: 360, height: 80)
-        Task { await imageGen.refreshActiveStripView() }
+        imageGen.prepareQuitConfirmationStrip()
 
         let parentWindow = BrowserWindowIdentity.resolveMainBrowserWindow()
         let choice = StyledMessageDialog.present(

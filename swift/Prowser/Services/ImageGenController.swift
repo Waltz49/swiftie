@@ -3579,18 +3579,19 @@ final class ImageGenController {
         return isProcessing
     }
 
+    /// Port of Python ``ImageGenController._quit_interrupts_active_worker`` (model + foreground workers only).
     func quitInterruptsActiveWorker() -> Bool {
-        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
-            return true
+        modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy
+    }
+
+    /// Python ``ActiveJobStripWidget.refresh(force=True)`` before the quit ``QMessageBox`` runs.
+    func prepareQuitConfirmationStrip() {
+        if isProcessing || cooldownSecondsRemaining > 0 || generationWorkerActive() {
+            rebuildActiveStripViewLocally()
+        } else {
+            activeStripView = ActiveJobStripStatusView()
         }
-        // Expand/create prep (``buildPayload`` / placement) runs before ``modelTasks`` is busy.
-        if isProcessing, activeJobID != nil {
-            return true
-        }
-        if copyBatchActive, !copyBatchCancelled {
-            return true
-        }
-        return false
+        publishActiveStrip(preferLiveFields: true)
     }
 
     func resetTerminateQuitConfirmation() {
