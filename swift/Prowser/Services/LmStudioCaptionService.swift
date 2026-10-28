@@ -917,11 +917,7 @@ final class LmStudioCaptionService {
     private func logHTTPResponseData(_ data: Data, status: Int, config: AppConfig) {
         if let json = try? JSONSerialization.jsonObject(with: data),
            let payload = json as? [String: Any] {
-            SessionViewLog.logLMStudioCall(
-                method: "response HTTP \(status)",
-                payload: payload,
-                config: config
-            )
+            SessionViewLog.logLMStudioHTTPResponse(status: status, payload: payload, config: config)
         } else if let text = String(data: data, encoding: .utf8), !text.isEmpty {
             SessionViewLog.appendTimestampedBlock(
                 header: "\(Self.logTag) response HTTP \(status)",

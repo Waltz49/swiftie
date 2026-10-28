@@ -96,6 +96,37 @@ enum SessionViewLog {
         appendLine("\n[\(ts)] \(method)\n\(relaxJSONForLog(json))\n", config: config)
     }
 
+    /// Compact ``GET /v1/models`` and ``GET /api/v1/models`` bodies instead of dumping full catalog JSON.
+    @MainActor
+    static func logLMStudioHTTPResponse(status: Int, payload: [String: Any], config: AppConfig) {
+        let ts = debugTimestamp()
+        if let compact = compactModelsListLogLine(payload) {
+            appendLine("\n[\(ts)] response HTTP \(status)\n\(compact)\n", config: config)
+            return
+        }
+        logLMStudioCall(method: "response HTTP \(status)", payload: payload, config: config)
+    }
+
+    private static func compactModelsListLogLine(_ payload: [String: Any]) -> String? {
+        if isOpenAIModelsListResponse(payload) || isNativeModelsListResponse(payload) {
+            return "models: { ... }"
+        }
+        return nil
+    }
+
+    private static func isOpenAIModelsListResponse(_ payload: [String: Any]) -> Bool {
+        guard payload["object"] as? String == "list",
+              let data = payload["data"] as? [[String: Any]] else {
+            return false
+        }
+        if data.isEmpty { return true }
+        return data.contains { ($0["object"] as? String) == "model" || $0["id"] != nil }
+    }
+
+    private static func isNativeModelsListResponse(_ payload: [String: Any]) -> Bool {
+        payload["models"] is [[String: Any]]
+    }
+
     @MainActor
     static func logLMStudioError(_ message: String, detail: String? = nil, config: AppConfig) {
         var body = message

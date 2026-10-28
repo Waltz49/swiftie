@@ -8,7 +8,7 @@
   "mflux_quantize": 4,
   "output_path": "/var/folders/1c/cvcvczxn41v2nflwsys6sdh00000gn/T/out.png",
   "pipeline_id": "flux_schnell_mflux_play",
-  "prompt": "test",
+  "prompt": "Test.",
   "show_progressive_images": true,
   "steps": 4,
   "width": 1024

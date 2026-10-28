@@ -1834,39 +1834,6 @@ final class AppState {
         onClose: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
-        // #region agent log
-        if id == DialogID.checkLorasOptions || id == DialogID.checkLorasResults {
-            let path = "/Users/douglasnadel/dev/swiftie/.cursor/debug-f5adc1.log"
-            let visible = auxiliaryDialogs.isVisible(id)
-            let payload: [String: Any] = [
-                "sessionId": "f5adc1",
-                "hypothesisId": "E",
-                "location": "AppState.syncDialog",
-                "message": "check loras dialog sync",
-                "data": [
-                    "id": id,
-                    "show": String(show),
-                    "alreadyVisible": String(visible),
-                ],
-                "timestamp": Int(Date().timeIntervalSince1970 * 1000),
-            ]
-            if JSONSerialization.isValidJSONObject(payload),
-               let json = try? JSONSerialization.data(withJSONObject: payload),
-               let line = String(data: json, encoding: .utf8) {
-                let url = URL(fileURLWithPath: path)
-                if !FileManager.default.fileExists(atPath: path) {
-                    FileManager.default.createFile(atPath: path, contents: nil)
-                }
-                if let handle = try? FileHandle(forWritingTo: url) {
-                    defer { try? handle.close() }
-                    _ = try? handle.seekToEnd()
-                    if let bytes = (line + "\n").data(using: .utf8) {
-                        try? handle.write(contentsOf: bytes)
-                    }
-                }
-            }
-        }
-        // #endregion
         if show {
             guard !auxiliaryDialogs.isVisible(id) else { return }
             auxiliaryDialogs.present(

@@ -3,6 +3,25 @@ import XCTest
 
 final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     @MainActor
+    func testSnapshotJobValuesPreservesSeriesRefinement() async throws {
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_schnell_mflux") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let snap = try await ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
+            plugin: plugin,
+            values: [
+                "prompt": "test",
+                "series_refinement": true,
+                "copies": 3,
+            ],
+            config: config
+        )
+        XCTAssertEqual(snap["series_refinement"] as? Bool, true)
+    }
+
+    @MainActor
     func testFluxSchnellPayloadMatchesGolden() async throws {
         let config = ProwserTestSupport.ephemeralAppConfig()
         config.setValue(false, forKey: "debug_mode")

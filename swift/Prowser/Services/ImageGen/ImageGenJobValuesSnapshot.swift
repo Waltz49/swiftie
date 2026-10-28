@@ -50,8 +50,8 @@ enum ImageGenJobValuesSnapshot {
         values: [String: Any],
         config: AppConfig
     ) async throws -> [String: Any] {
+        // Match Python ``snapshot_job_values_at_submit`` (no strip here; see ``stripDialogLeakedJobQueueFlags``).
         var out = values
-        stripDialogLeakedJobQueueFlags(&out)
         normalizeEditSourcePaths(plugin: plugin, values: &out)
         let lc = LoRACatalogStore(paths: config.profilePaths).load()
         try await LoRAJobSnapshot.snapshotLoraForJob(
