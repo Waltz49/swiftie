@@ -128,45 +128,56 @@ enum CheckLorasController {
 
             let runStart = Date()
             let gpuPhaseClock = GpuPhaseClock()
+            let progressSnapshot = CheckLorasProgressSnapshot()
 
-            var workDirectoryRefreshTimer: Timer?
-            workDirectoryRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            func applyProgressUI(message: [String: Any]) {
+                let stats = message["stats"] as? [String: Any] ?? [:]
+                let gpuDone = (stats["gpu_probes_done"] as? NSNumber)?.intValue
+                    ?? (stats["gpu_probes_done"] as? Int)
+                    ?? 0
+                gpuPhaseClock.noteGPURenderIfNeeded(gpuDone: gpuDone)
+                let elapsed = Date().timeIntervalSince(runStart)
+                let gpuElapsed = gpuPhaseClock.gpuPhaseElapsed()
+                let eta = CheckLorasProgressFormatter.estimatedGPURemaining(
+                    stats: stats,
+                    gpuPhaseElapsed: gpuElapsed
+                )
+                let (done, total) = CheckLorasProgressFormatter.progressValue(message: message)
+                let label = CheckLorasProgressFormatter.statusText(
+                    message: message,
+                    elapsed: elapsed,
+                    eta: eta
+                )
+                progress.setMaximum(max(1, total))
+                progress.update(value: done, label: label)
+            }
+
+            var progressRefreshTimer: Timer?
+            let refreshTimer = Timer(timeInterval: 1.0, repeats: true) { _ in
                 Task { @MainActor in
                     progress.setAccessoryButtonEnabled(
                         CheckLorasWorkDirectory.containsWorkImages(config: appState.config)
                     )
+                    applyProgressUI(message: progressSnapshot.message)
                 }
             }
+            progressRefreshTimer = refreshTimer
+            RunLoop.main.add(refreshTimer, forMode: .common)
 
             let runResult: CheckLorasRunResult
             do {
                 runResult = try await bridge.checkLorasRun(options: options) { message in
-                    let stats = message["stats"] as? [String: Any] ?? [:]
-                    let gpuDone = (stats["gpu_probes_done"] as? NSNumber)?.intValue
-                        ?? (stats["gpu_probes_done"] as? Int)
-                        ?? 0
-                    gpuPhaseClock.noteGPURenderIfNeeded(gpuDone: gpuDone)
-                    let elapsed = Date().timeIntervalSince(runStart)
-                    let gpuElapsed = gpuPhaseClock.gpuPhaseElapsed()
-                    let eta = CheckLorasProgressFormatter.estimatedGPURemaining(
-                        stats: stats,
-                        gpuPhaseElapsed: gpuElapsed
-                    )
-                    let (done, total) = CheckLorasProgressFormatter.progressValue(message: message)
-                    let label = CheckLorasProgressFormatter.statusText(
-                        message: message,
-                        elapsed: elapsed,
-                        eta: eta
-                    )
-                    progress.setMaximum(max(1, total))
-                    progress.update(value: done, label: label)
+                    Task { @MainActor in
+                        progressSnapshot.set(message)
+                        applyProgressUI(message: message)
+                    }
                 }
             } catch {
-                workDirectoryRefreshTimer?.invalidate()
+                progressRefreshTimer?.invalidate()
                 progress.close()
                 throw error
             }
-            workDirectoryRefreshTimer?.invalidate()
+            progressRefreshTimer?.invalidate()
             progress.close()
 
             NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
@@ -198,6 +209,27 @@ enum CheckLorasController {
                 message: error.localizedDescription
             )
         }
+    }
+}
+
+/// Latest progress payload for 1 Hz elapsed refresh (timer + Python callbacks).
+private final class CheckLorasProgressSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [String: Any] = [
+        "phase": "probe",
+        "stats": [:] as [String: Any],
+    ]
+
+    var message: [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func set(_ message: [String: Any]) {
+        lock.lock()
+        stored = message
+        lock.unlock()
     }
 }
 

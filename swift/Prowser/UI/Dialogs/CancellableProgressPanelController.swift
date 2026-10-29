@@ -110,7 +110,7 @@ final class CancellableProgressPanelController {
         label = NSTextField(labelWithString: "")
         label.lineBreakMode = .byClipping
         label.usesSingleLineMode = false
-        label.maximumNumberOfLines = promptAccessory == nil ? 3 : 8
+        label.maximumNumberOfLines = promptAccessory == nil ? 3 : 14
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let timeRemaining: NSTextField?

@@ -854,6 +854,11 @@ def _filter_plan_by_lora_scope(
     ]
 
 
+def _probe_choice_user_sort_key(choice: LoraProbeChoice) -> str:
+    """Case-insensitive key for user-visible LoRA list ordering (Test LoRAs, etc.)."""
+    return (choice.label or choice.display_name or "").strip().lower()
+
+
 def discover_check_lora_choices(
     settings: Optional[Dict[str, Any]],
     *,
@@ -867,8 +872,7 @@ def discover_check_lora_choices(
     """
     del dedupe_downloads  # options listing does not delete or hash Downloads
     choices = discover_find_lora_choices(settings)
-    # Catalog entries first, then orphans — matches prior Check LoRAs ordering.
-    choices.sort(key=lambda c: (c.from_downloads, (c.label or "").lower()))
+    choices.sort(key=_probe_choice_user_sort_key)
     return choices
 
 
@@ -956,7 +960,7 @@ def discover_find_lora_choices(
             )
         )
 
-    choices.sort(key=lambda c: (c.display_name or c.label or "").lower())
+    choices.sort(key=_probe_choice_user_sort_key)
     return choices
 
 
@@ -1349,6 +1353,57 @@ def _probe_baseline_on_disk_matches(
     return True
 
 
+def _probe_model_series_prefix(model_key: str) -> str:
+    return _compact_probe_label(lora_model_display_name(model_key))
+
+
+def _latest_probe_series_mtime(model_key: str, *, exclude_path: Optional[str] = None) -> float:
+    """Newest mtime among probe PNGs for this model (excluding *exclude_path* if set)."""
+    from prowser_temp_files import ensure_temporary_files_directory
+
+    prefix = _probe_model_series_prefix(model_key)
+    if not prefix:
+        return 0.0
+    work_dir = ensure_temporary_files_directory()
+    exclude_abs = os.path.abspath(exclude_path) if exclude_path else None
+    latest = 0.0
+    try:
+        for name in os.listdir(work_dir):
+            if not name.lower().endswith(".png"):
+                continue
+            if not name.startswith(prefix):
+                continue
+            path = os.path.join(work_dir, name)
+            if exclude_abs and os.path.abspath(path) == exclude_abs:
+                continue
+            try:
+                latest = max(latest, os.path.getmtime(path))
+            except OSError:
+                continue
+    except OSError:
+        return latest
+    return latest
+
+
+def _touch_probe_baseline_series_mtime(baseline_path: str, model_key: str) -> None:
+    """Set baseline mtime 1s newer than the newest other probe PNG for this model."""
+    if not baseline_path or not os.path.isfile(baseline_path):
+        return
+    latest = _latest_probe_series_mtime(
+        model_key,
+        exclude_path=baseline_path,
+    )
+    target = latest + 1.0
+    try:
+        os.utime(baseline_path, (target, target))
+        print(
+            f"[Check LoRAs] Baseline mtime -> {target:.0f} "
+            f"(series latest {latest:.0f}) {baseline_path}"
+        )
+    except OSError as exc:
+        print(f"[Check LoRAs] Could not touch baseline mtime: {exc}")
+
+
 def _ensure_probe_baseline(
     cache: LoraProbeBaselineCache,
     *,
@@ -1424,6 +1479,7 @@ def _ensure_probe_baseline(
         path=baseline_path,
     )
     print(f"[Check LoRAs] Baseline cached -> {baseline_path}")
+    _touch_probe_baseline_series_mtime(baseline_path, model_key)
     return baseline_path, True
 
 
@@ -1563,6 +1619,8 @@ def _run_baseline_vs_lora_probe(
             quantization=quantization,
             guidance=guidance,
         )
+        if baseline_path:
+            _touch_probe_baseline_series_mtime(baseline_path, model_key)
         return has_effect
     finally:
         _retain_probe_temps(out_path)

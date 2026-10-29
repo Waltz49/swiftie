@@ -10,27 +10,39 @@ enum CheckLorasProgressFormatter {
         let stats = message["stats"] as? [String: Any] ?? [:]
         var lines: [String] = []
 
-        if elapsed > 0 || eta != nil {
-            var timing = "Elapsed: \(formatDuration(elapsed))"
-            if let eta, eta > 0 {
-                timing += " · Est. remaining: \(formatDuration(eta))"
-            }
-            lines.append(timing)
-        }
-
         switch phase {
         case "scan":
             lines.append("Scanning LoRA weights (cache + top-level Downloads)…")
             appendScanLines(stats: stats, into: &lines)
+            appendTimingLine(elapsed: elapsed, eta: eta, into: &lines)
         case "downloads":
             lines.append("Removing duplicate Downloads LoRAs…")
             let scanned = int(stats["downloads_scanned"])
             let deduped = int(stats["downloads_deduped"])
             lines.append("Downloads scanned: \(scanned) · Duplicates removed: \(deduped)")
+            appendTimingLine(elapsed: elapsed, eta: eta, into: &lines)
         default:
-            appendProbeLines(message: message, stats: stats, into: &lines)
+            appendProbeLines(
+                message: message,
+                stats: stats,
+                elapsed: elapsed,
+                eta: eta,
+                into: &lines
+            )
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func appendTimingLine(
+        elapsed: TimeInterval,
+        eta: TimeInterval?,
+        into lines: inout [String]
+    ) {
+        var timing = "Elapsed: \(formatDuration(elapsed))"
+        if let eta, eta > 0 {
+            timing += " · Est. remaining: \(formatDuration(eta))"
+        }
+        lines.append(timing)
     }
 
     private static func appendScanLines(stats: [String: Any], into lines: inout [String]) {
@@ -64,12 +76,20 @@ enum CheckLorasProgressFormatter {
     private static func appendProbeLines(
         message: [String: Any],
         stats: [String: Any],
+        elapsed: TimeInterval,
+        eta: TimeInterval?,
         into lines: inout [String]
     ) {
         let activity = (stats["probe_activity"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let loraLabel = stats["current_lora_label"] as? String ?? "—"
         let modelKey = message["model_key"] as? String ?? ""
         let modelLabel = modelKey.isEmpty ? "—" : modelKey
+
+        if !activity.isEmpty {
+            lines.append(activity)
+        } else {
+            lines.append("Testing \(modelLabel) with \(loraLabel)")
+        }
 
         let loraPos = "\(int(stats["lora_index"]))/\(max(1, int(stats["loras_total"])))"
         let modelPos = int(stats["models_for_lora"]) > 0
@@ -83,11 +103,7 @@ enum CheckLorasProgressFormatter {
             "Model \(modelPos) · LoRA \(loraPos) on this model · Probe \(probePos)/\(workTotal) (\(probesDone) finished)"
         )
 
-        if !activity.isEmpty {
-            lines.append(activity)
-        } else {
-            lines.append("Testing \(modelLabel) with \(loraLabel)")
-        }
+        appendTimingLine(elapsed: elapsed, eta: eta, into: &lines)
 
         switch stats["last_result"] as? String ?? "" {
         case "pass":
@@ -100,13 +116,11 @@ enum CheckLorasProgressFormatter {
             break
         }
 
-        lines.append(
-            "Installed models in plan: \(int(stats["models_total"])) · "
-                + "Passed probes: \(int(stats["passed_probe_count"])) · "
-                + "Passed LoRAs: \(int(stats["supported_loras"])) · "
-                + "Newly enabled: \(int(stats["newly_enabled_count"])) · "
-                + "Failed probes: \(int(stats["failed_probe_count"]))"
-        )
+        lines.append("Installed models in plan: \(int(stats["models_total"]))")
+        lines.append("Passed probes: \(int(stats["passed_probe_count"]))")
+        lines.append("Passed LoRAs: \(int(stats["supported_loras"]))")
+        lines.append("Newly enabled: \(int(stats["newly_enabled_count"]))")
+        lines.append("Failed probes: \(int(stats["failed_probe_count"]))")
         let skippedReg = int(stats["skipped_registered_probes"])
         if skippedReg > 0 {
             lines.append("Skipped registered pairs: \(skippedReg)")

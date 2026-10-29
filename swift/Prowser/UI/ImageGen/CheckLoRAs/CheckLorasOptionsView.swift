@@ -77,10 +77,8 @@ struct CheckLorasOptionsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    modelsSection
-                    lorasSection
-                    registrationSection
                     probePromptSection
+                    registrationSection
                     Toggle("Re-probe changed files only (skip unchanged weights)", isOn: $skipUnchanged)
                     Toggle(
                         "Test on other base model families",
@@ -90,6 +88,8 @@ struct CheckLorasOptionsView: View {
                         "When checked, each LoRA is also tested on installed base models "
                             + "outside its usual family. Cross-family passes are marked with * in Map LoRAs."
                     )
+                    modelsSection
+                    lorasSection
                 }
                 .padding(.horizontal, 4)
             }

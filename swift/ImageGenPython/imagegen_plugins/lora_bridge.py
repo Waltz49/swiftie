@@ -1256,7 +1256,10 @@ def _handle_check_loras_prepare(cmd: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("A LoRA import is running. Wait for it to finish.")
 
     job_id = str(cmd.get("job_id") or "")
+    from workers.model_tasks_worker import clear_generation_cancel
+
     _check_loras_cancel_flag[0] = False
+    clear_generation_cancel()
     _check_loras_preparing = True
     thread = threading.Thread(
         target=_run_check_loras_prepare_worker,
@@ -1386,6 +1389,9 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
             }
         )
     finally:
+        from workers.model_tasks_worker import clear_generation_cancel
+
+        clear_generation_cancel()
         _check_loras_running = False
         _active_check_loras_thread = None
 
@@ -1402,7 +1408,10 @@ def _handle_check_loras_run(cmd: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("A LoRA import is running. Wait for it to finish.")
 
     job_id = str(cmd.get("job_id") or "")
+    from workers.model_tasks_worker import clear_generation_cancel
+
     _check_loras_cancel_flag[0] = False
+    clear_generation_cancel()
     _check_loras_running = True
     thread = threading.Thread(
         target=_run_check_loras_worker,
@@ -1421,7 +1430,10 @@ def _handle_check_loras_run(cmd: Dict[str, Any]) -> Dict[str, Any]:
 
 def _handle_check_loras_cancel(cmd: Dict[str, Any]) -> Dict[str, Any]:
     global _check_loras_cancel_flag
+    from workers.model_tasks_worker import request_generation_cancel
+
     _check_loras_cancel_flag[0] = True
+    request_generation_cancel()
     return {
         "type": "result",
         "job_id": cmd.get("job_id", ""),
