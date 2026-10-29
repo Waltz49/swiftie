@@ -17,7 +17,7 @@ struct ImageGenCustomSizeSection: View {
     var compactSliderTracks: Bool = false
     var onValuesChanged: (() -> Void)?
 
-    @State private var isExpanded = true
+    @State private var isExpanded = false
     @State private var aspectLock = false
     @State private var aspectRatio: Double = 1.0
     @State private var aspectLockPrevW: Int?
@@ -107,12 +107,16 @@ struct ImageGenCustomSizeSection: View {
         }
         .onAppear {
             if usesOptionalCustomSize {
-                isExpanded = values["use_custom_size"] as? Bool ?? false
+                let useCustom = ImageGenEditCustomSizeSubmit.optionalCustomSizeEnabled(in: values)
+                isExpanded = useCustom
+                values["use_custom_size"] = useCustom
             }
             aspectLock = values["aspect_ratio_lock"] as? Bool ?? false
             captureAspectRatio()
             syncAspectLockPrevDims()
-            applyEffectiveMaxIfNeeded()
+            if !usesOptionalCustomSize {
+                applyEffectiveMaxIfNeeded()
+            }
             settingsObserver = appState.eventBus.subscribe(.settingsChanged) { _ in
                 refreshGenerationDimLimits()
             }
@@ -254,8 +258,16 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private func refreshGenerationDimLimits() {
+        let beforeW = values["width"] as? Int
+        let beforeH = values["height"] as? Int
+        let beforeLock = values["aspect_ratio_lock"] as? Bool
         applyEffectiveMaxIfNeeded()
-        onValuesChanged?()
+        let changed = values["width"] as? Int != beforeW
+            || values["height"] as? Int != beforeH
+            || values["aspect_ratio_lock"] as? Bool != beforeLock
+        if changed {
+            onValuesChanged?()
+        }
     }
 
     private func applyEffectiveMaxIfNeeded() {
@@ -267,9 +279,19 @@ struct ImageGenCustomSizeSection: View {
             height: height,
             effectiveMaxSide: effectiveMaxSide
         )
+        let needsAspectLock = scaledDown && !aspectLock
+        guard w != width || h != height || needsAspectLock else {
+            if aspectLock {
+                captureAspectRatio()
+            }
+            syncAspectLockPrevDims()
+            return
+        }
         aspectLockUpdating = true
-        values["width"] = w
-        values["height"] = h
+        if w != width || h != height {
+            values["width"] = w
+            values["height"] = h
+        }
         if scaledDown {
             aspectLock = true
             values["aspect_ratio_lock"] = true
@@ -465,6 +487,31 @@ struct ImageGenCustomSizeSection: View {
     }
 }
 
+/// Edit optional custom size fields at queue Replace/Update submit (Python ``collect_values`` / widget bools).
+@MainActor
+enum ImageGenEditCustomSizeSubmit {
+    static func optionalCustomSizeEnabled(in values: [String: Any]) -> Bool {
+        ImageGenPipelineModes.boolFromSettingsValue(values["use_custom_size"])
+    }
+
+    static func normalizeOptionalCustomSizeFields(_ values: inout [String: Any]) {
+        let useCustom = optionalCustomSizeEnabled(in: values)
+        values["use_custom_size"] = useCustom
+        guard useCustom else { return }
+        guard let width = intFromAny(values["width"]),
+              let height = intFromAny(values["height"]),
+              width > 0, height > 0 else { return }
+        values["width"] = width
+        values["height"] = height
+    }
+
+    private static func intFromAny(_ value: Any?) -> Int? {
+        if let n = value as? Int { return n }
+        if let n = value as? NSNumber { return n.intValue }
+        return nil
+    }
+}
+
 enum ImageGenFieldLayoutFilter {
     static func dimensionSpecs(from layout: [[String: Any]]) -> (width: [String: Any]?, height: [String: Any]?) {
         var width: [String: Any]?
@@ -475,6 +522,61 @@ enum ImageGenFieldLayoutFilter {
             if key == "height" { height = spec }
         }
         return (width, height)
+    }
+
+    /// Edit dialogs mount custom size from pipeline limits when width/height are absent from ``field_layout``
+    /// (Python ``mount_edit_custom_size_section`` / ``edit_custom_size_field_specs``).
+    static func resolvedCustomSizeDimensionSpecs(
+        function: String,
+        layout: [[String: Any]],
+        values: [String: Any],
+        mergedDefaults: [String: Any]
+    ) -> (width: [String: Any], height: [String: Any])? {
+        let fromLayout = dimensionSpecs(from: layout)
+        if let width = fromLayout.width, let height = fromLayout.height {
+            return (width, height)
+        }
+        guard function == "edit" else { return nil }
+        return editOptionalCustomSizeDimensionSpecs(values: values, mergedDefaults: mergedDefaults)
+    }
+
+    private static func editOptionalCustomSizeDimensionSpecs(
+        values: [String: Any],
+        mergedDefaults: [String: Any]
+    ) -> (width: [String: Any], height: [String: Any]) {
+        let widthReset = intFromAny(mergedDefaults["width"]) ?? 1024
+        let heightReset = intFromAny(mergedDefaults["height"]) ?? 1024
+        let widthDefault = intFromAny(values["width"]) ?? widthReset
+        let heightDefault = intFromAny(values["height"]) ?? heightReset
+        let dimMin = 256
+        let dimStep = 16
+        let width: [String: Any] = [
+            "key": "width",
+            "label": "Width",
+            "kind": "int_slider",
+            "default": widthDefault,
+            "min_value": dimMin,
+            "max_value": ImageGenDimLimits.maxGenerationDimensionCeiling,
+            "step": dimStep,
+            "reset_default": widthReset,
+        ]
+        let height: [String: Any] = [
+            "key": "height",
+            "label": "Height",
+            "kind": "int_slider",
+            "default": heightDefault,
+            "min_value": dimMin,
+            "max_value": ImageGenDimLimits.maxGenerationDimensionCeiling,
+            "step": dimStep,
+            "reset_default": heightReset,
+        ]
+        return (width, height)
+    }
+
+    private static func intFromAny(_ value: Any?) -> Int? {
+        if let n = value as? Int { return n }
+        if let n = value as? NSNumber { return n.intValue }
+        return nil
     }
 
     static func layoutExcludingDimensionsAndPrompt(_ layout: [[String: Any]]) -> [[String: Any]] {

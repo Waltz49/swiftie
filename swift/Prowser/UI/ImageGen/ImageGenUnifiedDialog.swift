@@ -407,6 +407,8 @@ struct ImageGenUnifiedDialog: View {
                     jobValues: values,
                     fullPrompt: job.fullPrompt
                 )
+                ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&values)
+                syncLockedSourcePathsFromJobValues(values)
                 visitedFunctions.insert(selectedFunction)
             } else {
                 let targetFunction = selectedFunction
@@ -1350,6 +1352,7 @@ struct ImageGenUnifiedDialog: View {
                 out["source_image_path"] = lockedEditSourcePaths[0]
                 out["_canonical_source_image_paths"] = lockedEditSourcePaths
             }
+            ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&out)
         default:
             break
         }

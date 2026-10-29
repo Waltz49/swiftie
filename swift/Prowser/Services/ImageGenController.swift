@@ -398,6 +398,9 @@ final class ImageGenController {
         var submitValues = values
         ImageGenPromptSentenceCase.flushPromptValues(&submitValues)
         submitValues["copies"] = normalizedCopies
+        if function == "edit" {
+            ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&submitValues)
+        }
         let dialogJobQueueFlags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submitValues)
         if !ImageGenJobValuesSnapshot.jobValuesSnapshotted(submitValues) {
             ImageGenJobValuesSnapshot.stripDialogLeakedJobQueueFlags(&submitValues)
@@ -584,6 +587,9 @@ final class ImageGenController {
         let priorValues = queue.jobs[index].values
         var submitValues = values
         submitValues["copies"] = copies
+        if function == "edit" {
+            ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&submitValues)
+        }
         let dialogJobQueueFlags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submitValues)
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: priorValues)
@@ -696,6 +702,9 @@ final class ImageGenController {
         let copies = copiesDone + remaining
         var submitValues = values
         submitValues["copies"] = copies
+        if function == "edit" {
+            ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&submitValues)
+        }
         let dialogJobQueueFlags = ImageGenJobValuesSnapshot.jobQueueOnlyKeysPresent(in: submitValues)
         submitValues = try await snapshotSubmitValues(pluginID: pluginID, values: submitValues)
         ImageGenJobValuesSnapshot.preserveJobQueueOnlyKeys(values: &submitValues, source: pendingValues)
@@ -3394,12 +3403,7 @@ final class ImageGenController {
 
     private func removeAspectPadTemps() {
         guard !aspectPadTempPaths.isEmpty else { return }
-        for path in aspectPadTempPaths where !path.isEmpty {
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue {
-                try? FileManager.default.removeItem(atPath: path)
-            }
-        }
+        ImageGenEditAspectPad.removeEditAspectPadTemps(aspectPadTempPaths)
         aspectPadTempPaths = []
     }
 

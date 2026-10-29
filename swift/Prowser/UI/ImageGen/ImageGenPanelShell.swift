@@ -36,8 +36,13 @@ struct ImageGenPanelShell: View {
         selectedPlugin?["field_layout"] as? [[String: Any]] ?? []
     }
 
-    private var dimensionSpecs: (width: [String: Any]?, height: [String: Any]?) {
-        ImageGenFieldLayoutFilter.dimensionSpecs(from: fieldLayout)
+    private var customSizeDimensionSpecs: (width: [String: Any], height: [String: Any])? {
+        ImageGenFieldLayoutFilter.resolvedCustomSizeDimensionSpecs(
+            function: function,
+            layout: fieldLayout,
+            values: values,
+            mergedDefaults: selectedPlugin?["merged_defaults"] as? [String: Any] ?? [:]
+        )
     }
 
     private var filteredLayout: [[String: Any]] {
@@ -242,12 +247,11 @@ struct ImageGenPanelShell: View {
                         )
                     }
 
-                    if let width = dimensionSpecs.width, let height = dimensionSpecs.height,
-                       let plugin = selectedPlugin {
+                    if let dimSpecs = customSizeDimensionSpecs, let plugin = selectedPlugin {
                         ImageGenCustomSizeSection(
                             values: $values,
-                            widthSpec: width,
-                            heightSpec: height,
+                            widthSpec: dimSpecs.width,
+                            heightSpec: dimSpecs.height,
                             pipelineID: plugin["pipeline_id"] as? String ?? "",
                             pluginMaxDimension: plugin["max_generation_dimension"] as? Int ?? 2048,
                             function: function,

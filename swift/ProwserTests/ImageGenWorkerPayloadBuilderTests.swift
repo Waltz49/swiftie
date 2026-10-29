@@ -1,3 +1,5 @@
+import CoreGraphics
+import ImageIO
 import XCTest
 @testable import Prowser
 
@@ -189,6 +191,161 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
             JobCardThumbnailPaths.paths(pluginID: plugin.pluginID, values: snapshot),
             [intended]
         )
+    }
+
+    @MainActor
+    func testReplaceSubmitHonorsNSNumberCustomSize() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-replace-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("source.png").path
+        XCTAssertTrue(createSolidPNG(at: source, width: 64, height: 64))
+
+        var dialogSubmit: [String: Any] = [
+            "prompt": "edit",
+            "source_image_path": source,
+            "source_image_paths": [source],
+            "use_custom_size": NSNumber(value: true),
+            "width": NSNumber(value: 256),
+            "height": NSNumber(value: 256),
+            "aspect_ratio_test": false,
+            "steps": 4,
+        ]
+        ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&dialogSubmit)
+
+        let config = ProwserTestSupport.ephemeralAppConfig(profileRoot: dir)
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_klein_4b_edit") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: dialogSubmit,
+            outputPath: dir.appendingPathComponent("out.png").path,
+            config: config,
+            applyImageExit: false
+        )
+        let paths = payload["source_image_paths"] as? [String]
+        XCTAssertEqual(paths?.count, 1)
+        XCTAssertNotEqual(paths?.first, source)
+    }
+
+    @MainActor
+    func testKleinEditMultiImageCustomSizeAndAspectPadding() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-edit-multi-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let first = dir.appendingPathComponent("first.png").path
+        let second = dir.appendingPathComponent("second.png").path
+        XCTAssertTrue(createSolidPNG(at: first, width: 96, height: 48))
+        XCTAssertTrue(createSolidPNG(at: second, width: 48, height: 96))
+
+        let config = ProwserTestSupport.ephemeralAppConfig(profileRoot: dir)
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_klein_4b_edit") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: [
+                "prompt": "edit",
+                "source_image_path": first,
+                "source_image_paths": [first, second],
+                "use_custom_size": true,
+                "width": 192,
+                "height": 192,
+                "aspect_ratio_test": true,
+                "steps": 4,
+            ],
+            outputPath: dir.appendingPathComponent("out.png").path,
+            config: config,
+            applyImageExit: false
+        )
+        let generatorPaths = payload["source_image_paths"] as? [String]
+        XCTAssertEqual(generatorPaths?.count, 2)
+        XCTAssertNotEqual(generatorPaths?[0], first)
+        XCTAssertNotEqual(generatorPaths?[1], second)
+        let canonical = payload["_canonical_source_image_paths"] as? [String]
+        XCTAssertEqual(canonical, [first, second])
+        let padTemps = payload["_aspect_pad_temp_paths"] as? [String] ?? []
+        XCTAssertGreaterThanOrEqual(padTemps.count, 2)
+        for path in generatorPaths ?? [] {
+            XCTAssertEqual(ImageRecognitionImageLoader.orientedPixelSize(path: path)?.width, 192)
+            XCTAssertEqual(ImageRecognitionImageLoader.orientedPixelSize(path: path)?.height, 192)
+        }
+
+        let prepped = try await ImageGenMfluxPrep.apply(to: payload)
+        let cliSources = prepped["source_image_paths"] as? [String]
+        XCTAssertEqual(cliSources?.count, 2)
+        XCTAssertEqual(cliSources, generatorPaths)
+    }
+
+    @MainActor
+    func testKleinEditCustomSizePadsFirstSourcePath() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-edit-pad-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("source.png").path
+        XCTAssertTrue(createSolidPNG(at: source, width: 64, height: 32))
+
+        let config = ProwserTestSupport.ephemeralAppConfig(profileRoot: dir)
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_klein_4b_edit") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: [
+                "prompt": "edit",
+                "source_image_path": source,
+                "source_image_paths": [source],
+                "use_custom_size": true,
+                "width": 128,
+                "height": 128,
+                "aspect_ratio_test": false,
+                "steps": 4,
+            ],
+            outputPath: dir.appendingPathComponent("out.png").path,
+            config: config,
+            applyImageExit: false
+        )
+        let generatorPaths = payload["source_image_paths"] as? [String]
+        XCTAssertEqual(generatorPaths?.count, 1)
+        XCTAssertNotEqual(generatorPaths?.first, source)
+        let padTemps = payload["_aspect_pad_temp_paths"] as? [String]
+        XCTAssertEqual(padTemps?.count, 1)
+        XCTAssertEqual(padTemps?.first, generatorPaths?.first)
+        XCTAssertNil(payload["width"])
+        XCTAssertNil(payload["use_custom_size"])
+    }
+
+    private func createSolidPNG(at path: String, width: Int, height: Int) -> Bool {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let image = context.makeImage() else {
+            return false
+        }
+        guard let destination = CGImageDestinationCreateWithURL(
+            URL(fileURLWithPath: path) as CFURL,
+            "public.png" as CFString,
+            1,
+            nil
+        ) else { return false }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination)
     }
 
     private func assertPayloadSubset(

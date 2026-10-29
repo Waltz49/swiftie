@@ -68,7 +68,40 @@ enum ImageGenWorkerPayloadBuilder {
         }
         if pipelineID == "mflux_flux2_klein_edit" {
             applyMfluxLoraStub(&merged)
-            attachSourcePaths(&merged, canonical: true)
+            var sourcePaths = ImageGenExifReferences.resolveSourceImagePaths(merged)
+            if !sourcePaths.isEmpty {
+                merged["_canonical_source_image_paths"] = sourcePaths
+                merged["source_image_paths"] = sourcePaths
+                merged["source_image_path"] = sourcePaths[0]
+                var padTemps: [String] = []
+                if ImageGenPipelineModes.boolFromSettingsValue(merged["use_custom_size"]) {
+                    let targetW = intValue(merged["width"]) ?? 0
+                    let targetH = intValue(merged["height"]) ?? 0
+                    if targetW > 0, targetH > 0 {
+                        let expanded = ImageGenEditAspectPad.generatorPathsWithScreenSizeExpansion(
+                            sourcePaths: sourcePaths,
+                            targetWidth: targetW,
+                            targetHeight: targetH,
+                            tempRoot: config.temporaryFilesDirectory
+                        )
+                        sourcePaths = expanded.generatorPaths
+                        padTemps.append(contentsOf: expanded.tempPaths)
+                    }
+                }
+                if ImageGenPipelineModes.boolFromSettingsValue(merged["aspect_ratio_test"]) {
+                    let padded = ImageGenEditAspectPad.generatorPathsWithAspectPadding(
+                        sourcePaths: sourcePaths,
+                        tempRoot: config.temporaryFilesDirectory
+                    )
+                    sourcePaths = padded.generatorPaths
+                    padTemps.append(contentsOf: padded.tempPaths)
+                }
+                merged["source_image_paths"] = sourcePaths
+                merged["source_image_path"] = sourcePaths[0]
+                if !padTemps.isEmpty {
+                    merged["_aspect_pad_temp_paths"] = padTemps
+                }
+            }
             merged.removeValue(forKey: "width")
             merged.removeValue(forKey: "height")
         }

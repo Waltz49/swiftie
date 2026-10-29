@@ -266,21 +266,31 @@ enum ImageGenMfluxPrep {
     }
 
     private static func applyKleinEdit(_ run: inout [String: Any]) throws {
-        if let paths = run["_aspect_pad_temp_paths"] as? [String] {
-            for path in paths where FileManager.default.isReadableFile(atPath: path) {
-                run["source_image_path"] = path
-                run["source_image_paths"] = [path]
-                break
-            }
-        }
-        guard let source = run["source_image_path"] as? String,
-              FileManager.default.isReadableFile(atPath: source) else {
+        let sources = ImageGenExifReferences.resolveSourceImagePaths(run)
+        guard let first = sources.first, FileManager.default.isReadableFile(atPath: first) else {
             throw MfluxCLIError.missingField("source_image_path")
         }
-        if run["width"] == nil || run["height"] == nil,
-           let cg = ImageGenOutpaintMask.loadCGImage(path: source) {
-            run["width"] = cg.width
-            run["height"] = cg.height
+        run["source_image_path"] = first
+        run["source_image_paths"] = sources
+        if run["width"] == nil || run["height"] == nil {
+            let maxSide = intValue(run["max_generation_dimension"], default: 2048)
+            if let size = ImageRecognitionImageLoader.orientedPixelSize(path: first) {
+                let fitted = ImageGenInfillMath.fitEditOutputDims(
+                    width: size.width,
+                    height: size.height,
+                    maxSide: maxSide
+                )
+                run["width"] = fitted.width
+                run["height"] = fitted.height
+            } else if let cg = ImageGenOutpaintMask.loadCGImage(path: first) {
+                let fitted = ImageGenInfillMath.fitEditOutputDims(
+                    width: cg.width,
+                    height: cg.height,
+                    maxSide: maxSide
+                )
+                run["width"] = fitted.width
+                run["height"] = fitted.height
+            }
         }
     }
 
