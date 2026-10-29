@@ -118,9 +118,53 @@ private struct ImageGenLabeledFieldGroup: View {
         }
     }
 
+    private var isCopiesLabeledGroup: Bool {
+        groupLabel == "Copies"
+    }
+
+    /// Python ``klein_edit_copies_group`` / custom-size ``controlsRow``: slider inline with label; refinement under label column.
+    private var copiesLabeledLayout: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let copiesNode = children.first(where: { fieldSpecKey($0) == "copies" }) {
+                HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
+                    Text(groupLabel)
+                        .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
+                        .foregroundStyle(.primary)
+                        .frame(width: ImageGenInlineFieldLayout.parameterLabelWidth, alignment: .leading)
+                    ImageGenFieldNodeView(
+                        node: copiesNode,
+                        compactSliderTracks: compactSliderTracks,
+                        copiesSliderMax: copiesSliderMax,
+                        omitSliderLabels: true,
+                        values: $values
+                    )
+                }
+            }
+            ForEach(children.indices, id: \.self) { idx in
+                let child = children[idx]
+                if fieldSpecKey(child) != "copies" {
+                    ImageGenFieldNodeView(
+                        node: child,
+                        compactSliderTracks: compactSliderTracks,
+                        copiesSliderMax: copiesSliderMax,
+                        omitSliderLabels: true,
+                        values: $values
+                    )
+                }
+            }
+        }
+    }
+
+    private func fieldSpecKey(_ node: [String: Any]) -> String? {
+        guard let spec = node["spec"] as? [String: Any] else { return nil }
+        return spec["key"] as? String
+    }
+
     var body: some View {
         Group {
-            if compactSliderTracks, !groupLabel.isEmpty {
+            if isCopiesLabeledGroup, !groupLabel.isEmpty {
+                copiesLabeledLayout
+            } else if compactSliderTracks, !groupLabel.isEmpty {
                 HStack(alignment: .center, spacing: ImageGenInlineFieldLayout.rowSpacing) {
                     Text(groupLabel)
                         .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
@@ -159,6 +203,26 @@ private struct ImageGenFieldSpecView: View {
         return spec["max_value"] as? Int ?? 100
     }
 
+    /// Disable image-series refinement when only one copy remains (Python copies-group UX).
+    private var seriesRefinementControlEnabled: Bool {
+        JobStepQueue.normalizeCopies(values["copies"] ?? 1) > 1
+    }
+
+    private var editSourceImageCount: Int {
+        if let paths = values["source_image_paths"] as? [String] {
+            return ImageGenEditSourcePaths.normalizedPaths(paths).count
+        }
+        if let path = values["source_image_path"] as? String, !path.isEmpty {
+            return ImageGenEditSourcePaths.normalizedPaths([path]).count
+        }
+        return 0
+    }
+
+    /// ``aspect_ratio_test`` only applies when several edit sources are loaded.
+    private var aspectRatioTestControlEnabled: Bool {
+        editSourceImageCount > 1
+    }
+
     var body: some View {
         let key = spec["key"] as? String ?? ""
         let label = spec["label"] as? String ?? key
@@ -167,7 +231,28 @@ private struct ImageGenFieldSpecView: View {
         case "text":
             TextField(label, text: bindingString(key, default: spec["default"] as? String ?? ""))
         case "bool":
-            Toggle(label, isOn: bindingBool(key, default: spec["default"] as? Bool ?? false))
+            if key == "series_refinement" {
+                Toggle(label, isOn: bindingBool(key, default: spec["default"] as? Bool ?? false))
+                    .disabled(!seriesRefinementControlEnabled)
+                    .help(
+                        "For a series of generations, replace the first source image with\n"
+                            + "the new result of the previous generation before the next copy.\n"
+                            + "Other source images, if any, stay in the same order for subsequent\n"
+                            + "generations."
+                    )
+            } else if key == "aspect_ratio_test" {
+                Toggle(label, isOn: bindingBool(key, default: spec["default"] as? Bool ?? false))
+                    .disabled(!aspectRatioTestControlEnabled)
+                    .help(
+                        "When you use several images,\n"
+                            + "use copies to preserve the aspect ratio.\n"
+                            + "May introduce borders in result, but not\n"
+                            + "checking this may produce stretched or squashed\n"
+                            + "results."
+                    )
+            } else {
+                Toggle(label, isOn: bindingBool(key, default: spec["default"] as? Bool ?? false))
+            }
         case "int_slider":
             ImageGenIntSliderRow(
                 label: label,
