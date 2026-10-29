@@ -45,7 +45,10 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                         height: model.sizes[descriptor.index]
                     )
                     if position < displayed.count - 1 {
-                        splitterHandle(betweenUpperIndex: descriptor.index)
+                        splitterHandle(
+                            upperPaneIndex: descriptor.index,
+                            lowerPaneIndex: displayed[position + 1].index
+                        )
                     }
                 }
             }
@@ -143,16 +146,15 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         }
     }
 
-    private func splitterHandle(betweenUpperIndex index: Int) -> some View {
+    private func splitterHandle(upperPaneIndex: Int, lowerPaneIndex: Int) -> some View {
         let colors = appState.theme.colors
-        let lowerIndex = index + 1
         let handleHeight = CGFloat(max(1, colors.viewBorderWidthPx))
         return ZStack {
             Rectangle()
                 .fill(colors.sidebarHeaderBorder.opacity(0.8))
                 .allowsHitTesting(false)
             SidebarPaneVerticalResizeMouseView(
-                paneIndex: lowerIndex,
+                paneIndex: lowerPaneIndex,
                 splitModel: model,
                 appState: appState
             )

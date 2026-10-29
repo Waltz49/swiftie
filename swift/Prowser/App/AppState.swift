@@ -69,8 +69,6 @@ final class AppState {
     var jobsQueueStripMeasureRefresh: (@MainActor () -> Void)?
     var jobsPaneRefitDeferred = false
     var jobsPaneResizeDebounce: DispatchWorkItem?
-    /// When true, ALL mode with multiple jobs keeps user height until mode change or forced refit (⌥\\ / cycle).
-    var jobsPaneAllMultiHeightPinned = false
     var jobsPaneGeometryForceRefit = false
     /// Remaining layout passes that should snap the showing jobs surface to the measured height.
     var jobsSurfaceExactSnapPasses = 0
@@ -370,7 +368,6 @@ final class AppState {
             guard let self else { return }
             self.bumpImageGenUI()
             if self.shouldShrinkWrapJobsClient() {
-                self.jobsPaneAllMultiHeightPinned = false
                 self.measuredJobsCardStackHeight = 0
                 self.jobsQueuePanelIntrinsicHeight = 0
             }

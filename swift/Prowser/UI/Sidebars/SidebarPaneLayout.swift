@@ -138,9 +138,9 @@ enum SidebarPaneLayout {
     ) -> [CGFloat]? {
         if paneIdx < 1 || dy == 0 { return nil }
         guard paneIdx < visibility.count, visibility[paneIdx] else { return nil }
-        let upper = paneIdx - 1
-        guard visibility[upper] else { return nil }
         guard paneIdx < startSizes.count else { return nil }
+        // Upper neighbor may be hidden (e.g. information collapsed while jobs stays open).
+        guard let upper = (0..<paneIdx).reversed().first(where: { visibility[$0] }) else { return nil }
 
         let minUpper = minHeightForPane(upper, false)
         let minLower = minHeightForPane(paneIdx, false)

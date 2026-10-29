@@ -227,12 +227,11 @@ final class SidebarPaneSplitModel {
         }
         mergePersistedSizes(appState: appState)
         fitTargets.removeAll()
-        if side == .right, paneIndex == 2 {
-            let mode = appState.jobsQueueSizeMode
-            let jobCount = appState.imageGen.queue.jobs.count
-            if mode == .all, jobCount > 1, !appState.shouldShrinkWrapJobsClient() {
-                appState.jobsPaneAllMultiHeightPinned = true
-            }
+        if side == .right, paneIndex == 2,
+           appState.jobsQueueSizeMode == .all,
+           appState.imageGen.queue.jobs.count > 1,
+           !appState.shouldShrinkWrapJobsClient() {
+            appState.jobsPaneRefitDeferred = false
         }
     }
 
@@ -394,16 +393,9 @@ final class SidebarPaneSplitModel {
                         applyJobsAutoHeightCap: true
                     )
                 }
-                appState.jobsPaneAllMultiHeightPinned = false
             } else if jobCount > 1 {
-                if forceRefit {
-                    resizePaneToHeight(
-                        paneIndex: 2,
-                        targetHeight: target,
-                        appState: appState,
-                        applyJobsAutoHeightCap: true
-                    )
-                } else if target > current + tolerance {
+                // Python multijob ALL: grow when splitter slice is shorter than content; never shrink (⌥\ uses snap).
+                if target > current + tolerance {
                     resizePaneToHeight(
                         paneIndex: 2,
                         targetHeight: target,
@@ -418,7 +410,6 @@ final class SidebarPaneSplitModel {
                     appState: appState,
                     applyJobsAutoHeightCap: true
                 )
-                appState.jobsPaneAllMultiHeightPinned = false
             }
         }
     }
@@ -431,6 +422,9 @@ final class SidebarPaneSplitModel {
         }
         if mode == .one {
             return jobsPaneHeight(appState: appState, headerOnly: false)
+        }
+        if mode == .all {
+            return header + SidebarPaneLayout.minJobsQueueContentHeight
         }
         if appState.shouldShrinkWrapJobsClient() {
             return jobsPaneHeight(appState: appState, headerOnly: false)

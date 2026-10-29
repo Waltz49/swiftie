@@ -28,6 +28,7 @@ extension AppState {
                 let lastPass = self.jobsSurfaceExactSnapPasses == 0
                 if self.applyJobsSurfaceExactSnap(allowIncomplete: lastPass) || lastPass {
                     self.jobsSurfaceExactSnapPasses = 0
+                    self.jobsPaneGeometryForceRefit = false
                 } else {
                     self.scheduleJobsPaneGeometryRefit()
                 }
@@ -36,6 +37,9 @@ extension AppState {
             guard self.jobsDisplayMode == .pane else { return }
             let forceRefit = self.jobsPaneGeometryForceRefit
             self.jobsPaneGeometryForceRefit = false
+            if !forceRefit, !self.shouldAutoResizeJobsSidebarPane() {
+                return
+            }
             self.rightSidebarSplit.ensureJobsPaneFitsContent(appState: self, forceRefit: forceRefit)
         }
         jobsPaneResizeDebounce = work
