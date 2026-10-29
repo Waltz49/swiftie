@@ -306,6 +306,7 @@ struct SlideshowView: View {
     @MainActor
     private func advance(images: [String]) {
         guard images.count > 1 else { return }
+        guard !isTransitioning else { return }
         let backAndForth = appState.config.bool(forKey: "slideshow_back_and_forth", default: false)
         let nextIndex: Int
         if backAndForth {
@@ -325,8 +326,10 @@ struct SlideshowView: View {
     @MainActor
     private func startTimer(images: [String], interval: TimeInterval) {
         stopTimer()
-        guard images.count > 1, interval > 0 else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+        guard images.count > 1 else { return }
+        // Rate 0 = no dwell between slides (Python QTimer interval 0); Foundation uses ~0.1 ms when interval ≤ 0.
+        let fireInterval = interval > 0 ? interval : 0.000_1
+        timer = Timer.scheduledTimer(withTimeInterval: fireInterval, repeats: true) { _ in
             Task { @MainActor in
                 advance(images: images)
             }

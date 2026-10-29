@@ -1419,7 +1419,7 @@ final class AppState {
     var pendingLoraSettingsModelKey: String?
 
     func openSettingsWindow(tab explicitTab: SettingsTab? = nil, userInfo: [String: Any] = [:]) {
-        let tab = SettingsTab.resolvedOpenTab(explicit: explicitTab)
+        let tab = SettingsTab.resolvedOpenTab(explicit: explicitTab ?? defaultSettingsTabForCurrentView())
         requestedSettingsTab = tab
         if let loraKey = userInfo["lora_model_key"] as? String, !loraKey.isEmpty {
             pendingLoraSettingsModelKey = loraKey
@@ -1436,6 +1436,16 @@ final class AppState {
         )
         settingsOpenRequestToken += 1
         settingsDialog.show(appState: self)
+    }
+
+    /// When no tab is requested explicitly, slideshow modes open the Slideshow preferences pane (⌘,).
+    private func defaultSettingsTabForCurrentView() -> SettingsTab? {
+        switch fileData.currentViewMode {
+        case .slideshow, .slideshow2, .slideshow3:
+            return .slideshow
+        default:
+            return nil
+        }
     }
 
     func userCommentForActiveImage() -> String? {

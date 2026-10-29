@@ -25,19 +25,30 @@ struct SlideshowPresetEditor: View {
                 .frame(maxWidth: 240)
                 .onSubmit { persistNow() }
 
-            slideshowIntSlider(title: "Slide duration (ms)", value: $rate, range: 0...15000, step: 250)
-            slideshowIntSlider(title: "Transition speed (ms)", value: $transitionSpeed, range: 0...10000, step: 100)
+            slideshowIntSlider(title: "Slide duration (ms)", value: $rate, range: 0...60_000, step: 250)
+            slideshowIntSlider(title: "Transition speed (ms)", value: $transitionSpeed, range: 0...10_000, step: 100)
             slideshowIntSlider(title: "Max rotation (°)", value: $maxRotation, range: 0...360, step: 15)
             slideshowIntSlider(title: "Overlap %", value: $overlapPercent, range: 0...200, step: 10)
 
-            Picker("Direction", selection: $direction) {
-                ForEach(SlideshowPresetUtils.validDirections, id: \.self) { dir in
-                    Text(dir).tag(dir)
+            HStack {
+                Picker("Default Direction", selection: $direction) {
+                    ForEach(SlideshowPresetUtils.validDirections, id: \.self) { dir in
+                        Text(dir).tag(dir)
+                    }
                 }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 200)
+                .onChange(of: direction) { _, _ in schedulePersist() }
+
+                Spacer(minLength: 12)
+
+                Button("Use Current") {
+                    applyCurrentSlideshowSettings()
+                }
+                .help(
+                    "Copy the current startup slideshow rate, transition, rotation, overlap, and direction into this preset (name unchanged)."
+                )
             }
-            .pickerStyle(.menu)
-            .frame(maxWidth: 200)
-            .onChange(of: direction) { _, _ in schedulePersist() }
         }
         .onAppear { load() }
         .onChange(of: name) { _, _ in schedulePersist() }
@@ -103,5 +114,21 @@ struct SlideshowPresetEditor: View {
         ]
         appState.config.setValue(SlideshowPresetUtils.normalizePreset(preset, key: presetKey), forKey: configKey)
         appState.config.applySettingsChange(emit: appState.eventBus)
+    }
+
+    private func applyCurrentSlideshowSettings() {
+        let fields = SlideshowPresetUtils.startupTimingFields(from: appState.config.rawSettings())
+        isLoading = true
+        rate = fields["rate"] as? Int ?? rate
+        transitionSpeed = fields["transition_speed"] as? Int ?? transitionSpeed
+        maxRotation = fields["max_rotation"] as? Int ?? maxRotation
+        direction = fields["direction"] as? String ?? direction
+        let delay = fields["overlap_delay"] as? Int ?? 0
+        overlapPercent = SlideshowPresetUtils.overlapPercent(
+            overlapDelay: delay,
+            transitionSpeed: transitionSpeed
+        )
+        isLoading = false
+        persistNow()
     }
 }

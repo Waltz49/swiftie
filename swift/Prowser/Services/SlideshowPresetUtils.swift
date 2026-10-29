@@ -44,6 +44,27 @@ enum SlideshowPresetUtils {
         return normalizePreset(settings[configKey], key: key)
     }
 
+    /// Startup slideshow timing/direction (keys 1–8 and Settings → startup defaults); preset name is excluded.
+    static func startupTimingFields(from settings: [String: Any]) -> [String: Any] {
+        let transitionSpeed = (settings["slideshow_transition_speed"] as? NSNumber)?.intValue ?? 1300
+        let overlapPercentValue: Int
+        if let stored = settings["slideshow_overlap_percent"] as? Int {
+            overlapPercentValue = stored
+        } else {
+            let delay = (settings["slideshow_overlap_delay"] as? NSNumber)?.intValue ?? 0
+            overlapPercentValue = overlapPercent(overlapDelay: delay, transitionSpeed: transitionSpeed)
+        }
+        let overlapDelayValue = overlapDelay(overlapPercent: overlapPercentValue, transitionSpeed: transitionSpeed)
+        let direction = settings["slideshow_direction"] as? String ?? "right"
+        return [
+            "rate": (settings["slideshow_rate"] as? NSNumber)?.intValue ?? 5000,
+            "transition_speed": transitionSpeed,
+            "max_rotation": (settings["slideshow_max_rotation"] as? NSNumber)?.intValue ?? 0,
+            "overlap_delay": overlapDelayValue,
+            "direction": Set(validDirections).contains(direction) ? direction : "right",
+        ]
+    }
+
     /// Runtime slideshow playback only; does not modify persisted settings.
     static func effectiveTransitionSpeedMs(transitionSpeedMs: Int, slideRateMs: Int) -> Int {
         let transition = max(0, transitionSpeedMs)
