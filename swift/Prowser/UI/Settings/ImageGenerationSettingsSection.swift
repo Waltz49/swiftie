@@ -7,6 +7,7 @@ struct ImageGenerationSettingsSection: View {
     @Binding var pythonEnvironmentExpanded: Bool
     @State private var showExitScripts = false
     @State private var showPrefixPostfix = false
+    @State private var showRejectedPhrases = false
     @State private var imageOutputEnabled = false
     @State private var imageOutputPath = ""
     @State private var imagegenVenvPath = ""
@@ -66,6 +67,14 @@ struct ImageGenerationSettingsSection: View {
                 onGear: { showExitScripts = true }
             )
 
+            gearToggleRow(
+                title: "Reject forbidden LM Studio phrases",
+                subtitle: "Restart chat when the model response contains configured refusal phrases.",
+                key: ChatRejectedResponsePhrasesStore.settingsEnableKey,
+                defaultValue: true,
+                onGear: { showRejectedPhrases = true }
+            )
+
             cooldownSlider(title: "Inter-job cooldown time", key: "imagegen_job_cooldown_seconds", defaultValue: ImageGenDimLimits.jobCooldownSecondsDefault)
             cooldownSlider(title: "Inter copy cooldown", key: "imagegen_inter_copy_cooldown_seconds", defaultValue: ImageGenDimLimits.interCopyCooldownSecondsDefault)
 
@@ -116,6 +125,7 @@ struct ImageGenerationSettingsSection: View {
         }
         .sheet(isPresented: $showExitScripts) { ExitScriptsSheet() }
         .sheet(isPresented: $showPrefixPostfix) { PrefixPostfixSheet() }
+        .sheet(isPresented: $showRejectedPhrases) { RejectedResponsePhrasesSheet() }
         .onAppear {
             loadImageCreationDirectory()
             imagegenVenvPath = appState.config.imagegenVenvURL().path

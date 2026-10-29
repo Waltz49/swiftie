@@ -404,6 +404,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `imagegen_unload_models_when_queue_held` | done | done (`ModelTasksBridge.unloadImageModel`) |
 | `imagegen_unload_lmstudio_models_before_generation` | always on in worker | done (`LmStudioCaptionService` before `startGenerate`; default on) |
 | `use_prompt_filter_exits`, text/image exit scripts, prefix/postfix | done | partial (runtime on Python bridges for prompts) |
+| `chat_use_rejected_response_phrases`, `chat_rejected_response_phrases.json` | hardcoded phrases in chat worker only | done (settings UI + JSON; matcher/retry helper for chat LM Studio stream, not flux/caption) |
 | `say_exit` | done | done (`UserCommentSpeaker` + `ExitScriptUtils.sayExitArgv`) |
 | `jobs_pane_compact`, `jobs_display_mode` | done | done |
 | Job queue / active job JSON (`job_step_persistence`) | done | done |
@@ -413,6 +414,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | Key | Python | Swift |
 |-----|--------|-------|
 | Chat messages / system prompts (`chat_system_prompts.json`) | done | done |
+| LM Studio rejected response phrases (`CHAT_REJECTED_RESPONSE_PHRASES`) | hardcoded; chat worker retry (max 5) | Swift: editable list + enable toggle; `ChatRejectedPhraseStreamRetry` for chat stream only |
 | CNN / known-person search last directory settings (`find_person_*`) | done | done |
 
 ### On-disk caches (not in `settings.json`)

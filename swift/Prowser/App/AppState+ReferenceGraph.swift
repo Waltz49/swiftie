@@ -180,27 +180,66 @@ extension AppState {
         selection.clear()
         status.show("Reference graph: \(normalized.count) files")
     }
+    /// Python ``open_reference_thumbnail_paths``: one image → browse; several → custom-sort thumbnail level.
+    func openReferenceThumbnailPaths(_ paths: [String]) {
+        let valid = JobReferenceThumbsNSView.validPreviewPaths(paths)
+        guard !valid.isEmpty else { return }
+        if valid.count == 1 {
+            openImageInBrowse(path: valid[0])
+            return
+        }
+        openReferencePaths(valid, focusPath: nil)
+    }
+
     func openReferencePaths(_ paths: [String], focusPath: String?) {
         let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
         guard normalized.count >= 2 else { return }
+
+        directoryHistory.saveCurrent(fileData: fileData, config: config, selection: selection)
+
         clearReferenceGraphPresentation()
+        DuplicateGroupPresentation.clearDuplicatePresentation(appState: self)
         config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
         config.updateSetting("sort_reversed", value: false)
         let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
         setSpecificFilesActive(true)
         fileData.setCurrentDirectory(directory)
         fileData.setDisplayedImages(normalized)
-        if let focusPath, let index = normalized.firstIndex(of: focusPath) {
+        if let focusPath,
+           let focusNorm = FileDataModel.normalizePath(focusPath),
+           let index = FileDataModel.indexOfPath(focusNorm, in: normalized) {
             fileData.setCurrentIndex(index)
-            fileData.setCurrentImagePath(focusPath)
+            fileData.setCurrentImagePath(normalized[index])
         } else {
             fileData.setCurrentIndex(0)
             fileData.setCurrentImagePath(normalized[0])
+        }
+        if fileData.currentViewMode == .browse {
+            closeBrowseView()
+        } else if fileData.currentViewMode == .list {
+            toggleListView()
+        } else if fileData.currentViewMode == .slideshow
+            || fileData.currentViewMode == .slideshow2
+            || fileData.currentViewMode == .slideshow3 {
+            fileData.setViewMode(.thumbnail)
+        }
+        if fileData.currentViewMode != .thumbnail {
+            fileData.setViewMode(.thumbnail)
         }
         config.updateSetting("last_directory", value: directory)
         eventBus.emit(.directoryLoaded, payload: .string(directory))
         watchCurrentDirectory()
         selection.clear()
+        thumbnailGridHost?.reloadLayoutIfNeeded()
+        if fileData.currentViewMode == .thumbnail,
+           let grid = thumbnailGridHost,
+           let path = fileData.currentImagePath,
+           let pathNorm = FileDataModel.normalizePath(path),
+           let index = FileDataModel.indexOfPath(pathNorm, in: normalized) {
+            grid.selectIndex(index, scroll: true, notifyDelegate: false)
+            grid.scrollToSelectionAfterLayout()
+        }
+        menuRefresh.refreshAll()
         status.show("Showing \(normalized.count) reference images")
     }
 

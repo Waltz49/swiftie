@@ -1920,12 +1920,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
             syncPanelToController(panel)
         }
         panel.onOpenReferences = { paths in
-            // Python ``open_reference_thumbnail_paths``: one image → browse; several → custom-sort level.
-            if paths.count == 1 {
-                appState.openImageInBrowse(path: paths[0])
-            } else {
-                appState.openReferencePaths(paths, focusPath: nil)
-            }
+            appState.openReferenceThumbnailPaths(paths)
         }
         panel.onCardGeometryChanged = { [weak panel] in
             guard let panel else { return }

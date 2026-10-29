@@ -880,6 +880,7 @@ final class AppConfig {
             "imagegen_job_cooldown_seconds": 0,
             "imagegen_inter_copy_cooldown_seconds": 23,
             "imagegen_add_chat_prefix_postfix": true,
+            "chat_use_rejected_response_phrases": true,
             "imagegen_output_format": "png",
             "imagegen_low_ram": true,
             "imagegen_include_triggers_in_exif": false,
