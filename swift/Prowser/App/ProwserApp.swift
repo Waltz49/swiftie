@@ -106,11 +106,24 @@ final class DirectoryLoadCoordinator {
         }
     }
 
+    /// Drop any in-flight directory scan so a specific-files level is not overwritten when it finishes.
+    func cancelPendingDirectoryLoad() {
+        activeLoadTask?.cancel()
+        activeLoadGeneration += 1
+        if appState.isLoadingDirectory {
+            appState.isLoadingDirectory = false
+            if appState.showThumbnailDirectoryLoadingCanvas {
+                appState.endThumbnailDirectoryLoad()
+            }
+        }
+    }
+
     /// Port of Python `load_file_with_directory_thumbnails`: open the file in browse and
     /// populate `displayedImages` from its parent directory so exiting browse shows the full dir.
     func loadFileWithDirectoryThumbnails(_ targetFile: String) {
         guard FileManager.default.fileExists(atPath: targetFile) else { return }
 
+        cancelPendingDirectoryLoad()
         appState.clearBrowseReturnState()
         appState.setSpecificFilesActive(false)
         appState.directoryHistory.saveCurrent(
@@ -140,6 +153,92 @@ final class DirectoryLoadCoordinator {
         appState.fileData.setViewMode(.browse)
         appState.clearBrowseReturnState()
         appState.scheduleDeferredMenuRefresh()
+    }
+
+    /// Python ``open_reference_thumbnail_paths`` (job card reference thumbnails).
+    func openReferenceThumbnailPaths(_ paths: [String]) {
+        let valid = JobCardThumbnailPaths.validPreviewPaths(paths)
+        guard !valid.isEmpty else { return }
+        if valid.count == 1 {
+            loadFileWithDirectoryThumbnails(valid[0])
+            return
+        }
+        applySpecificFilesLevel(
+            paths: valid,
+            focusPath: nil,
+            saveHistory: true,
+            statusMessage: "Showing \(valid.count) reference images"
+        )
+    }
+
+    /// Custom-order thumbnail grid for an explicit path list (reference paths, etc.).
+    func applySpecificFilesLevel(
+        paths: [String],
+        focusPath: String?,
+        saveHistory: Bool,
+        statusMessage: String
+    ) {
+        let normalized = paths.compactMap { FileDataModel.normalizePath($0) }
+        guard normalized.count >= 2 else { return }
+
+        if saveHistory {
+            appState.directoryHistory.saveCurrent(
+                fileData: appState.fileData,
+                config: appState.config,
+                selection: appState.selection
+            )
+        }
+
+        cancelPendingDirectoryLoad()
+        appState.clearReferenceGraphPresentation()
+        DuplicateGroupPresentation.clearDuplicatePresentation(appState: appState)
+        appState.config.updateSetting("sort_mode", value: SortMode.custom.rawValue)
+        appState.config.updateSetting("sort_reversed", value: false)
+
+        let directory = URL(fileURLWithPath: normalized[0]).deletingLastPathComponent().path
+        appState.setSpecificFilesActive(true)
+        appState.fileData.setCurrentDirectory(directory)
+        appState.fileData.setDisplayedImages(normalized)
+
+        if let focusPath,
+           let focusNorm = FileDataModel.normalizePath(focusPath),
+           let index = FileDataModel.indexOfPath(focusNorm, in: normalized) {
+            appState.fileData.setCurrentIndex(index)
+            appState.fileData.setCurrentImagePath(normalized[index])
+        } else {
+            appState.fileData.setCurrentIndex(0)
+            appState.fileData.setCurrentImagePath(normalized[0])
+        }
+
+        if appState.fileData.currentViewMode == .browse {
+            appState.closeBrowseView()
+        } else if appState.fileData.currentViewMode == .list {
+            appState.toggleListView()
+        } else if appState.fileData.currentViewMode == .slideshow
+            || appState.fileData.currentViewMode == .slideshow2
+            || appState.fileData.currentViewMode == .slideshow3 {
+            appState.fileData.setViewMode(.thumbnail)
+        }
+        if appState.fileData.currentViewMode != .thumbnail {
+            appState.fileData.setViewMode(.thumbnail)
+        }
+
+        appState.config.updateSetting("last_directory", value: directory)
+        appState.eventBus.emit(.directoryLoaded, payload: .string(directory))
+        appState.watchCurrentDirectory()
+        appState.selection.clear()
+        appState.thumbnailGridHost?.reloadLayoutIfNeeded()
+        if appState.fileData.currentViewMode == .thumbnail,
+           let grid = appState.thumbnailGridHost,
+           let path = appState.fileData.currentImagePath,
+           let pathNorm = FileDataModel.normalizePath(path),
+           let index = FileDataModel.indexOfPath(pathNorm, in: normalized) {
+            grid.selectIndex(index, scroll: true, notifyDelegate: false)
+            grid.scrollToSelectionAfterLayout()
+        }
+        appState.menuRefresh.refreshAll()
+        appState.status.show(statusMessage)
+        appState.persistRestoreState()
     }
 
     func loadDirectory(

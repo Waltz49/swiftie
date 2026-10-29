@@ -8,12 +8,7 @@ enum JobCardThumbnailPaths {
         var seen = Set<String>()
 
         func append(_ raw: String) {
-            let normalized = (raw as NSString).standardizingPath
-            guard !normalized.isEmpty else { return }
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: normalized, isDirectory: &isDir), !isDir.boolValue else {
-                return
-            }
+            guard let normalized = existingFilePath(raw) else { return }
             guard !seen.contains(normalized) else { return }
             seen.insert(normalized)
             paths.append(normalized)
@@ -34,6 +29,22 @@ enum JobCardThumbnailPaths {
             append(src)
         }
         return paths
+    }
+
+    /// Python ``_valid_preview_paths`` (job card thumbnail clicks).
+    static func validPreviewPaths(_ paths: [String]) -> [String] {
+        paths.compactMap { existingFilePath($0) }
+    }
+
+    /// Trim, require a readable non-directory file, return standardized path (Python ``os.path.isfile``).
+    private static func existingFilePath(_ raw: String) -> String? {
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return nil }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else {
+            return nil
+        }
+        return (path as NSString).standardizingPath
     }
 
     static func referencesInvalid(pluginID: String, values: [String: Any]) -> Bool {

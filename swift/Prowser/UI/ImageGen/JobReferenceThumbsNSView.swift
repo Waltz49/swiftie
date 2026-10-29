@@ -23,22 +23,9 @@ final class JobReferenceThumbsNSView: NSView {
 
     var cellCount: Int { cells.count }
 
-    /// Python ``_valid_preview_paths``.
-    static func validPreviewPaths(_ paths: [String]) -> [String] {
-        paths.compactMap { raw in
-            let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !path.isEmpty else { return nil }
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else {
-                return nil
-            }
-            return path
-        }
-    }
-
     /// Python ``JobCard._ref_count``: one placeholder cell when references are invalid.
     static func cellCount(paths: [String], referencesInvalid: Bool) -> Int {
-        referencesInvalid ? 1 : validPreviewPaths(paths).count
+        referencesInvalid ? 1 : JobCardThumbnailPaths.validPreviewPaths(paths).count
     }
 
     override init(frame frameRect: NSRect) {
@@ -59,7 +46,7 @@ final class JobReferenceThumbsNSView: NSView {
     }
 
     func configure(paths: [String], referencesInvalid: Bool, colors: ThemeColors) {
-        let valid = referencesInvalid ? [] : Self.validPreviewPaths(paths)
+        let valid = referencesInvalid ? [] : JobCardThumbnailPaths.validPreviewPaths(paths)
         if valid == self.paths, referencesInvalid == self.referencesInvalid, !cells.isEmpty || valid.isEmpty {
             cells.forEach { $0.applyTheme(colors) }
             return
@@ -154,6 +141,15 @@ final class JobReferenceThumbsNSView: NSView {
             return
         }
         onOpenPaths?(paths)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard !referencesInvalid, !paths.isEmpty else {
+            super.mouseUp(with: event)
+            return
+        }
+        // Consume the matching mouseUp so the status click overlay cannot treat a thumb
+        // click as a card double-click (open editor).
     }
 }
 

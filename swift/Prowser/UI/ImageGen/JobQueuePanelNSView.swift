@@ -1181,7 +1181,9 @@ final class JobCardNSView: NSView {
         column.addArrangedSubview(mainRow)
 
         contentView.addSubview(column)
-        contentView.addSubview(clickOverlay)
+        // Overlay lives on the status widget only (Python dbl-click filter on status), so it
+        // cannot sit above reference thumbs in the z-order.
+        statusWidget.addSubview(clickOverlay)
         addSubview(backgroundView)
         addSubview(contentView)
         jobNumberBadge.translatesAutoresizingMaskIntoConstraints = false
@@ -1685,18 +1687,6 @@ final class JobCardNSView: NSView {
         if (dx * dx + dy * dy) > 16 {
             onBeginDrag?(boundJobID, event)
         }
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        handleSelectionMouseDown(event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        handleSelectionMouseUp(event)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        handleSelectionMouseDragged(event)
     }
 
     override func rightMouseDown(with event: NSEvent) {
