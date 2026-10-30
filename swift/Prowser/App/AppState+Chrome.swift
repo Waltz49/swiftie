@@ -329,7 +329,7 @@ extension AppState {
     }
 
     var chromeToggleMenuTitle: String {
-        isAnyChromeVisible ? "Hide Panes" : "Show Panes"
+        "Show Panes"
     }
 
     func toggleChrome() {

@@ -117,7 +117,7 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: toolbarToggleTitle(visible: appState.fileTreeToolbarVisible),
+            title: "Show Toolbar",
             checked: appState.fileTreeToolbarVisible,
             action: #selector(PaneMenuActions.treeShowToolbar(_:))
         )
@@ -136,17 +136,12 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: toolbarToggleTitle(visible: appState.informationMenuBarVisible, noun: "Menu Bar"),
+            title: "Show Menu Bar",
             checked: appState.informationMenuBarVisible,
             action: #selector(PaneMenuActions.infoShowMenuBar(_:))
         )
         stripMenuIcons(menu)
         return menu
-    }
-
-    /// "Show Toolbar" while hidden, "Hide Toolbar" while visible (the item stays checkable).
-    private static func toolbarToggleTitle(visible: Bool, noun: String = "Toolbar") -> String {
-        (visible ? "Hide " : "Show ") + noun
     }
 
     private static func addAction(

@@ -6,7 +6,7 @@ show_help() {
     'Usage: build-wait.sh [-h|--help] [ss|fda|command [args...]]' \
     '' \
     'Wait until no process matches "swift-build" (pgrep -f), showing a single-line' \
-    '"Running HH:MM:SS" status, then print "done" and run a command.' \
+    '"Waiting for build to finish: HH:MM:SS" status, then print "done" and run a command.' \
     '' \
     'With no arguments, or with ss, runs your shell ss alias (clear, prints alias, then build/run).' \
     'With fda, runs your shell fda alias the same way.' \
@@ -29,11 +29,11 @@ esac
 
 wait_for_swift_build() {
   while pgrep -f swift-build >/dev/null; do
-    printf '\rRunning %s' "$(date '+%H:%M:%S')"
+    printf '\rWaiting for build to finish: %s' "$(date '+%H:%M:%S')"
     sleep 1
   done
   printf '\r\033[K'
-  echo done
+  echo "Build completed"
 }
 
 # Run a user alias from bash login+interactive config (k/clear, alias print, body).

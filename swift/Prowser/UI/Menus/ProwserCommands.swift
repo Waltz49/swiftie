@@ -189,10 +189,8 @@ struct ProwserCommands: Commands {
 
                 ChromeToggleMenuButton(appState: appState)
 
-                Button("List View Toggle") {
-                    Task { @MainActor in appState.toggleListView() }
-                }
-                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
+                ListViewToggleButton(appState: appState)
+                    .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
 
                 PaneToggleButton(appState: appState, pane: .organizeSidebar)
                     .keyboardShortcut("o", modifiers: [])
@@ -709,11 +707,38 @@ private struct ChromeToggleMenuButton: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        Button(MenuStateHelpers.chromeToggleTitle(appState: appState)) {
-            appState.toggleChrome()
+        let visible = appState.isAnyChromeVisible
+        Toggle(isOn: Binding(
+            get: { visible },
+            set: { newValue in
+                if newValue != visible {
+                    appState.toggleChrome()
+                }
+            }
+        )) {
+            Text(MenuStateHelpers.chromeToggleTitle(appState: appState))
         }
         .keyboardShortcut(".", modifiers: [])
         .keyboardShortcut(".", modifiers: .control)
+    }
+}
+
+@MainActor
+private struct ListViewToggleButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        let isList = appState.fileData.currentViewMode == .list
+        Toggle(isOn: Binding(
+            get: { isList },
+            set: { newValue in
+                if newValue != isList {
+                    Task { @MainActor in appState.toggleListView() }
+                }
+            }
+        )) {
+            Text("Show List View")
+        }
     }
 }
 
@@ -848,8 +873,11 @@ private struct SortMenuButton: View {
 
     var body: some View {
         let checked = MenuStateHelpers.sortMenuItemChecked(mode: mode, reversed: reversed, config: appState.config)
-        let button = Button(checked ? "✓ \(title)" : title) {
-            Task { @MainActor in apply(mode, reversed) }
+        let button = Toggle(isOn: Binding(
+            get: { checked },
+            set: { _ in Task { @MainActor in apply(mode, reversed) } }
+        )) {
+            Text(title)
         }
         if let shortcutKey {
             button.keyboardShortcut(shortcutKey, modifiers: shortcutModifiers)
@@ -864,8 +892,11 @@ private struct RandomSortMenuButton: View {
 
     var body: some View {
         let checked = MenuStateHelpers.sortMenuItemChecked(mode: .random, reversed: false, config: appState.config)
-        Button(checked ? "✓ Random Sort" : "Random Sort") {
-            Task { @MainActor in appState.applyRandomSort() }
+        Toggle(isOn: Binding(
+            get: { checked },
+            set: { _ in Task { @MainActor in appState.applyRandomSort() } }
+        )) {
+            Text("Random Sort")
         }
         .keyboardShortcut("r", modifiers: [])
     }
@@ -887,8 +918,15 @@ private struct PaneToggleButton: View {
 
     var body: some View {
         let (name, visible) = paneLabelState
-        Button(MenuStateHelpers.paneToggleLabel(name, visible: visible)) {
-            Task { @MainActor in toggle() }
+        Toggle(isOn: Binding(
+            get: { visible },
+            set: { newValue in
+                if newValue != visible {
+                    Task { @MainActor in toggle() }
+                }
+            }
+        )) {
+            Text(MenuStateHelpers.paneToggleLabel(name))
         }
     }
 

@@ -101,12 +101,12 @@ final class ImageListTableHeaderView: NSTableHeaderView {
         let menu = NSMenu()
         for column in ImageListColumnID.columnSelectorMenuOrder {
             let visible = headerDelegate.listHeaderIsColumnVisible(column)
-            let mark = visible ? "✓" : " "
             let item = NSMenuItem(
-                title: "\(mark) \(column.menuTitle)",
+                title: column.menuTitle,
                 action: #selector(toggleColumnVisibility(_:)),
                 keyEquivalent: ""
             )
+            item.state = visible ? .on : .off
             item.target = self
             item.representedObject = column
             menu.addItem(item)

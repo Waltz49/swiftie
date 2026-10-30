@@ -65,8 +65,15 @@ private struct FilterNoFilterMenuButton: View {
     let selected: Bool
 
     var body: some View {
-        Button(selected ? "✓ No Filter (*)" : "No Filter (*)") {
-            Task { @MainActor in appState.applyFilenameFilterPattern("*") }
+        Toggle(isOn: Binding(
+            get: { selected },
+            set: { newValue in
+                if newValue, !selected {
+                    Task { @MainActor in appState.applyFilenameFilterPattern("*") }
+                }
+            }
+        )) {
+            Text("No Filter (*)")
         }
     }
 }
@@ -76,8 +83,15 @@ private struct FilterPresetMenuButton: View {
     let entry: FilterPresetMenu.PresetEntry
 
     var body: some View {
-        Button(entry.isSelected ? "✓ \(entry.displayTitle)" : entry.displayTitle) {
-            Task { @MainActor in appState.applyFilenameFilterPattern(entry.applyPattern) }
+        Toggle(isOn: Binding(
+            get: { entry.isSelected },
+            set: { newValue in
+                if newValue, !entry.isSelected {
+                    Task { @MainActor in appState.applyFilenameFilterPattern(entry.applyPattern) }
+                }
+            }
+        )) {
+            Text(entry.displayTitle)
         }
     }
 }

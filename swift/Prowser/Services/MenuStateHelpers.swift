@@ -102,11 +102,12 @@ enum MenuStateHelpers {
         }
     }
 
+    /// Checkmark on the menu item reflects visibility; label stays static (Python pane tools menus).
     static func chromeToggleTitle(appState: AppState) -> String {
-        appState.isAnyChromeVisible ? "Hide Panes" : "Show Panes"
+        "Show Panes"
     }
 
-    static func paneToggleLabel(_ name: String, visible: Bool) -> String {
-        visible ? "Hide \(name)" : "Show \(name)"
+    static func paneToggleLabel(_ name: String) -> String {
+        "Show \(name)"
     }
 }
