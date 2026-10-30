@@ -57,48 +57,62 @@ struct ImageGenUnifiedDialog: View {
                 ProgressView("Loading…")
                     .frame(maxWidth: .infinity, minHeight: 220)
             } else {
-                ImageGenPanelShell(
-                    function: selectedFunction,
-                    values: $values,
-                    plugins: pluginsByFunction[selectedFunction] ?? [],
-                    selectedPluginID: $selectedPluginID,
-                    sourcePaths: selectedFunction == "edit" ? lockedEditSourcePaths : [],
-                    sourcePath: panelSourcePath,
-                    onValuesChanged: { markDirtyIfNeeded() },
-                    onPluginImported: { prepareImportedPluginSelection($0) },
-                    onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
-                        lockedEditSourcePaths = paths
-                        appState.imageGenDialogRequest.editSourcePaths = paths
-                    } : nil,
-                    onSingleSourcePathChanged: { path in
-                        adoptLockedSingleSourcePath(path)
-                    },
-                    compactSliderTracks: true,
-                    infillCanvasHolder: infillCanvasHolder,
-                    infillMaskPNGData: session.infillMaskPNGData(),
-                    onInfillMaskPNGDataChanged: { data in
-                        session.setInfillMaskPNGData(data)
-                        markDirtyIfNeeded()
-                    },
-                    onInfillHasPaintChanged: { infillHasPaint = $0 },
-                    onInfillPixelmatorDocPathChanged: { path in
-                        session.setInfillPixelmatorDocPath(path)
-                        if let path, !path.isEmpty {
-                            values["pixelmator_doc_path"] = path
-                            values["pixelmator_doc_name"] = (path as NSString).lastPathComponent
+                ZStack(alignment: .topTrailing) {
+                    ImageGenPanelShell(
+                        function: selectedFunction,
+                        values: $values,
+                        plugins: pluginsByFunction[selectedFunction] ?? [],
+                        selectedPluginID: $selectedPluginID,
+                        sourcePaths: selectedFunction == "edit" ? lockedEditSourcePaths : [],
+                        sourcePath: panelSourcePath,
+                        onValuesChanged: { markDirtyIfNeeded() },
+                        onPluginImported: { prepareImportedPluginSelection($0) },
+                        onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
+                            lockedEditSourcePaths = paths
+                            appState.imageGenDialogRequest.editSourcePaths = paths
+                        } : nil,
+                        onSingleSourcePathChanged: { path in
+                            adoptLockedSingleSourcePath(path)
+                        },
+                        compactSliderTracks: true,
+                        infillCanvasHolder: infillCanvasHolder,
+                        infillMaskPNGData: session.infillMaskPNGData(),
+                        onInfillMaskPNGDataChanged: { data in
+                            session.setInfillMaskPNGData(data)
+                            markDirtyIfNeeded()
+                        },
+                        onInfillHasPaintChanged: { infillHasPaint = $0 },
+                        onInfillPixelmatorDocPathChanged: { path in
+                            session.setInfillPixelmatorDocPath(path)
+                            if let path, !path.isEmpty {
+                                values["pixelmator_doc_path"] = path
+                                values["pixelmator_doc_name"] = (path as NSString).lastPathComponent
+                            }
+                            markDirtyIfNeeded()
+                        },
+                        onInfillPixelmatorExportChanged: { meta in
+                            adoptInfillPixelmatorExportMeta(meta)
+                        },
+                        fluxContext: fluxContext,
+                        fluxRefineCoordinator: fluxRefineCoordinator,
+                        activeBrowsePath: activeImagePath,
+                        onQueueJobWithAI: {
+                            Task { await submit(replace: false, forceFluxAIJob: true) }
                         }
-                        markDirtyIfNeeded()
-                    },
-                    onInfillPixelmatorExportChanged: { meta in
-                        adoptInfillPixelmatorExportMeta(meta)
-                    },
-                    fluxContext: fluxContext,
-                    fluxRefineCoordinator: fluxRefineCoordinator,
-                    activeBrowsePath: activeImagePath,
-                    onQueueJobWithAI: {
-                        Task { await submit(replace: false, forceFluxAIJob: true) }
+                    )
+                    if let row = editingQueueJobRow, let jobNumber = row.jobNumber {
+                        ImageGenJobNumberBadgeView(
+                            jobNumber: jobNumber,
+                            isActive: row.isActive,
+                            held: row.held,
+                            inError: row.inError,
+                            fontSize: 20
+                        )
+                        .padding(.top, 4)
+                        .padding(.trailing, 4)
+                        .allowsHitTesting(false)
                     }
-                )
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .onChange(of: selectedPluginID) { oldValue, newValue in
                     if importedPluginSwitchID == newValue {
@@ -290,6 +304,11 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private var replaceJobID: String? { request.replaceJobID }
+
+    private var editingQueueJobRow: QueueRowSnapshot? {
+        guard let replaceJobID else { return nil }
+        return appState.imageGen.queueSnapshot().first { $0.jobID == replaceJobID }
+    }
 
     private var showReplaceUpdate: Bool {
         guard let replaceJobID else { return false }

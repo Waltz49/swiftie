@@ -92,6 +92,10 @@ final class NSAssetIconButton: NSButton {
     private var isHovered = false
     private var trackingArea: NSTrackingArea?
 
+    /// macOS often clears modifier flags before ``NSButton`` actions run; fire on mouse down instead.
+    var deliversActionOnMouseDown = false
+    private(set) var modifierFlagsAtMouseDown: NSEvent.ModifierFlags = []
+
     var showsActiveIcon = false {
         didSet { applyIcon() }
     }
@@ -139,6 +143,26 @@ final class NSAssetIconButton: NSButton {
         )
         addTrackingArea(area)
         trackingArea = area
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if deliversActionOnMouseDown, event.type == .leftMouseDown {
+            modifierFlagsAtMouseDown = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if let target, let action {
+                NSApp.sendAction(action, to: target, from: self)
+            }
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    /// Modifier keys for an action wired through ``deliversActionOnMouseDown`` or the current event.
+    static func modifierFlagsForAction(sender: Any?) -> NSEvent.ModifierFlags {
+        if let button = sender as? NSAssetIconButton, button.deliversActionOnMouseDown {
+            return button.modifierFlagsAtMouseDown
+        }
+        return (NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags)
+            .intersection(.deviceIndependentFlagsMask)
     }
 
     override func mouseEntered(with event: NSEvent) {

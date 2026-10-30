@@ -25,7 +25,7 @@ struct JobQueueActionBar: View {
             Spacer()
             Button("Edit", action: onEdit)
             Button("Cancel") { onCancel(false) }
-                .help("Option+click to cancel this and all following jobs")
+                .help("Option+click to cancel without confirmation")
         }
         .font(.caption)
         .buttonStyle(.borderless)

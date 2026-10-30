@@ -802,22 +802,9 @@ final class ImageGenController {
         return queue.jobs.contains(where: { $0.jobID == jobID })
     }
 
-    func cancelJob(id: String, cascade: Bool = false) {
+    func cancelJob(id: String) {
         if id == activeJobID {
             cancelActiveJob()
-            return
-        }
-        if cascade {
-            guard let row = queueSnapshot().firstIndex(where: { $0.jobID == id }) else { return }
-            let suffix = queueSnapshot().suffix(from: row).map(\.jobID)
-            for jobID in suffix where jobID != activeJobID {
-                queue.jobs.removeAll { $0.jobID == jobID }
-            }
-            if let selectedJobID, suffix.contains(selectedJobID) {
-                self.selectedJobID = nil
-            }
-            persistQueue()
-            bumpQueueRevision()
             return
         }
         queue.jobs.removeAll { $0.jobID == id }

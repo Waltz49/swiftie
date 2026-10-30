@@ -140,12 +140,17 @@ final class JobQueueActionBarNSView: NSView {
         minusButton = minus
         stack.addArrangedSubview(minus)
 
-        stack.addArrangedSubview(assetIconButton(
+        let cancel = assetIconButton(
             normalName: "trash_icon",
             hoverName: "trash_icon_hover",
-            tooltip: "Cancel job\nOption+click to cancel this job and all jobs after it (no confirmation).",
-            action: #selector(cancelAction)
-        ))
+            tooltip: """
+            Cancel job
+            Option+click to cancel without confirmation.
+            """,
+            action: #selector(cancelAction(_:))
+        )
+        cancel.deliversActionOnMouseDown = true
+        stack.addArrangedSubview(cancel)
     }
 
     private func seriesToggleButton(baseName: String, tooltip: String, action: Selector) -> NSAssetIconButton {
@@ -180,8 +185,9 @@ final class JobQueueActionBarNSView: NSView {
     }
 
     @objc private func editAction() { onEdit?() }
-    @objc private func cancelAction() {
-        onCancel?(NSEvent.modifierFlags.contains(.option))
+    @objc private func cancelAction(_ sender: Any?) {
+        let flags = NSAssetIconButton.modifierFlagsForAction(sender: sender)
+        onCancel?(flags.contains(.option))
     }
     @objc private func addAction() {
         onAddSeries?(1, NSEvent.modifierFlags.contains(.option))

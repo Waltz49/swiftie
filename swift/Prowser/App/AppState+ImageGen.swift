@@ -547,9 +547,9 @@ extension AppState {
         }
     }
 
-    func confirmCancelJob(id: String, cascade: Bool) {
-        if cascade {
-            imageGen.cancelJob(id: id, cascade: true)
+    func confirmCancelJob(id: String, skipConfirmation: Bool) {
+        if skipConfirmation {
+            imageGen.cancelJob(id: id)
             return
         }
         let rows = imageGen.queueSnapshot()

@@ -156,9 +156,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             guard let id = self?.actionBarTargetJobID() else { return }
             self?.onEdit?(id)
         }
-        sharedActionBar.onCancel = { [weak self] cascade in
+        sharedActionBar.onCancel = { [weak self] skipConfirmation in
             guard let id = self?.actionBarTargetJobID() else { return }
-            self?.onCancel?(id, cascade)
+            self?.onCancel?(id, skipConfirmation)
         }
         sharedActionBar.onAddSeries = { [weak self] delta, option in
             guard let self else { return }
@@ -320,7 +320,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     private func wireCardCallbacks(_ card: JobCardNSView, row: QueueRowSnapshot) {
         card.onEdit = { [weak self] in self?.onEdit?(row.jobID) }
-        card.onCancel = { [weak self] cascade in self?.onCancel?(row.jobID, cascade) }
+        card.onCancel = { [weak self] skipConfirmation in
+            self?.onCancel?(row.jobID, skipConfirmation)
+        }
         card.onSelect = { [weak self] in self?.onSelect?(row.jobID) }
         card.onOpenReferences = { [weak self] paths in self?.onOpenReferences?(paths) }
         card.onJobNumberClick = { [weak self] in self?.onJobNumberClick?(row.jobID) }
@@ -913,13 +915,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 }
 
-private enum JobNumberBadgeColors {
-    static let queuedUnheld = NSColor(red: 0.8, green: 0.67, blue: 0.13, alpha: 1)
-    static let activeRunning = NSColor(red: 0.4, green: 0.8, blue: 0.4, alpha: 1)
-    static let heldRunning = NSColor(red: 0.6, green: 0.4, blue: 0.8, alpha: 1)
-    static let errorBackground = NSColor(red: 1, green: 0.4, blue: 0.4, alpha: 1)
-}
-
 @MainActor
 private final class JobNumberBadgeLabel: NSView {
     override var isFlipped: Bool { true }
@@ -970,16 +965,14 @@ private final class JobNumberBadgeLabel: NSView {
         layer?.cornerRadius = 4
         if showError {
             textField.textColor = .white
-            layer?.backgroundColor = JobNumberBadgeColors.errorBackground.cgColor
+            layer?.backgroundColor = ImageGenJobNumberBadgeColors.errorBackground.cgColor
         } else {
             layer?.backgroundColor = cellBackground.cgColor
-            if isActive {
-                textField.textColor = held ? JobNumberBadgeColors.heldRunning : JobNumberBadgeColors.activeRunning
-            } else if held {
-                textField.textColor = JobNumberBadgeColors.errorBackground
-            } else {
-                textField.textColor = JobNumberBadgeColors.queuedUnheld
-            }
+            textField.textColor = ImageGenJobNumberBadgeColors.textColor(
+                isActive: isActive,
+                held: held,
+                inError: inError
+            )
         }
         toolTip = showError
             ? "Click to clear error and allow this job to run"
@@ -1697,7 +1690,11 @@ final class JobCardNSView: NSView {
     }
 
     @objc private func editAction() { onEdit?() }
-    @objc private func cancelAction() { onCancel?(NSEvent.modifierFlags.contains(.option)) }
+    @objc private func cancelAction() {
+        let flags = (NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags)
+            .intersection(.deviceIndependentFlagsMask)
+        onCancel?(flags.contains(.option))
+    }
 
     func snapshotImage() -> NSImage {
         let rep = bitmapImageRepForCachingDisplay(in: bounds)!
@@ -1887,8 +1884,8 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         panel.onEdit = { jobID in
             appState.openImageGenDialogFromQueueJob(jobID: jobID)
         }
-        panel.onCancel = { jobID, cascade in
-            appState.confirmCancelJob(id: jobID, cascade: cascade)
+        panel.onCancel = { jobID, skipConfirmation in
+            appState.confirmCancelJob(id: jobID, skipConfirmation: skipConfirmation)
         }
         panel.onSelect = { jobID in
             let gen = appState.imageGen
