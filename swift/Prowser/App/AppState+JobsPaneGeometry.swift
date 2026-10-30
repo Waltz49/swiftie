@@ -61,7 +61,7 @@ extension AppState {
     private func jobsSurfaceSnapMeasurementsReady() -> Bool {
         if jobsQueueSizeMode == .strip || imageGen.queue.jobs.isEmpty { return true }
         guard let host = jobsQueuePanelMeasureHost else { return false }
-        let count = imageGen.queue.jobs.count
+        let count = visibleJobsQueueRowCount()
         let expected = jobsQueueSizeMode == .one ? min(1, count) : count
         return host.panel.displayedRowCount == expected
     }
@@ -112,7 +112,7 @@ extension AppState {
     /// Sidebar jobs pane body height from live AppKit measurements (not formula estimates).
     func jobsPaneLiveContentHeight() -> CGFloat {
         let mode = jobsQueueSizeMode
-        let jobCount = imageGen.queue.jobs.count
+        let jobCount = visibleJobsQueueRowCount()
         let shrinkWrap = shouldShrinkWrapJobsClient()
         let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
         let toolbarShown = jobsToolbarVisible && jobsDisplayMode == .pane

@@ -26,9 +26,6 @@ struct ImageGenUnifiedDialog: View {
     @State private var errorMessage = ""
     @State private var closeOnGenerate = false
     @State private var submitNotice = ""
-    @State private var isDirty = false
-    @State private var baselineValues: [String: Any] = [:]
-    @State private var baselineSelectedPluginID = ""
     @State private var visitedFunctions: Set<String> = []
     @State private var pluginSwitchGuard = false
     @State private var importedPluginSwitchID: String?
@@ -65,7 +62,7 @@ struct ImageGenUnifiedDialog: View {
                         selectedPluginID: $selectedPluginID,
                         sourcePaths: selectedFunction == "edit" ? lockedEditSourcePaths : [],
                         sourcePath: panelSourcePath,
-                        onValuesChanged: { markDirtyIfNeeded() },
+                        onValuesChanged: nil,
                         onPluginImported: { prepareImportedPluginSelection($0) },
                         onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
                             lockedEditSourcePaths = paths
@@ -79,7 +76,6 @@ struct ImageGenUnifiedDialog: View {
                         infillMaskPNGData: session.infillMaskPNGData(),
                         onInfillMaskPNGDataChanged: { data in
                             session.setInfillMaskPNGData(data)
-                            markDirtyIfNeeded()
                         },
                         onInfillHasPaintChanged: { infillHasPaint = $0 },
                         onInfillPixelmatorDocPathChanged: { path in
@@ -88,7 +84,6 @@ struct ImageGenUnifiedDialog: View {
                                 values["pixelmator_doc_path"] = path
                                 values["pixelmator_doc_name"] = (path as NSString).lastPathComponent
                             }
-                            markDirtyIfNeeded()
                         },
                         onInfillPixelmatorExportChanged: { meta in
                             adoptInfillPixelmatorExportMeta(meta)
@@ -100,7 +95,7 @@ struct ImageGenUnifiedDialog: View {
                             Task { await submit(replace: false, forceFluxAIJob: true) }
                         }
                     )
-                    if let row = editingQueueJobRow, let jobNumber = row.jobNumber {
+                    if showReplaceUpdate, let row = editingQueueJobRow, let jobNumber = row.jobNumber {
                         ImageGenJobNumberBadgeView(
                             jobNumber: jobNumber,
                             isActive: row.isActive,
@@ -155,7 +150,7 @@ struct ImageGenUnifiedDialog: View {
                             appState: appState,
                             context: fluxContext,
                             values: $values,
-                            onValuesChanged: { markDirtyIfNeeded() },
+                            onValuesChanged: nil,
                             queueJobWithAI: { Task { await submit(replace: false, forceFluxAIJob: true) } }
                         )
                         return true
@@ -164,7 +159,7 @@ struct ImageGenUnifiedDialog: View {
                 },
                 onShiftOptionReturn: {
                     if fluxRefineCoordinator.undoShortcutActive(context: fluxContext) {
-                        fluxRefineCoordinator.undoRefine(values: $values, onValuesChanged: { markDirtyIfNeeded() })
+                        fluxRefineCoordinator.undoRefine(values: $values, onValuesChanged: nil)
                         return true
                     }
                     return false
@@ -264,13 +259,6 @@ struct ImageGenUnifiedDialog: View {
 
     private var footerActionButtons: [DialogButton] {
         var buttons: [DialogButton] = []
-        if isDirty {
-            buttons.append(
-                DialogButton("Cancel", isCancel: true, help: "Discard changes and close.") {
-                    performCancel()
-                }
-            )
-        }
         buttons.append(
             DialogButton("Close", help: "Close this dialog (⌘W).") {
                 performClose()
@@ -455,8 +443,6 @@ struct ImageGenUnifiedDialog: View {
         guard generation == loadGeneration else { return }
         if pendingRequest.replaceJobID != nil {
             adoptQueueJobEditorBaseline()
-        } else {
-            commitEditorBaseline()
         }
         schedulePostOpenWork(
             generation: generation,
@@ -710,11 +696,6 @@ struct ImageGenUnifiedDialog: View {
             }
         }
 
-        if replaceJobID != nil {
-            markDirtyIfNeeded()
-        } else {
-            commitEditorBaseline()
-        }
         // Initial bootstrap uses `schedulePostOpenWork` for `.full`; only user-driven switches need this.
         if !oldFunction.isEmpty, !functionsWithFullAvailability.contains(newFunction) {
             let generation = loadGeneration
@@ -734,12 +715,10 @@ struct ImageGenUnifiedDialog: View {
             appState.imageGenDialogRequest.editSourcePaths = lockedEditSourcePaths
             values["source_image_path"] = normalized
             values["source_image_paths"] = [normalized]
-            markDirtyIfNeeded()
         case "expand":
             lockedExpandSourcePath = normalized
             values["source_image_path"] = normalized
             values["source_image_paths"] = [normalized]
-            markDirtyIfNeeded()
         case "infill":
             if lockedInfillSourcePath != normalized {
                 clearInfillDialogWorkingExportState()
@@ -747,7 +726,6 @@ struct ImageGenUnifiedDialog: View {
             lockedInfillSourcePath = normalized
             values["source_image_path"] = normalized
             values["source_image_paths"] = [normalized]
-            markDirtyIfNeeded()
         default:
             return
         }
@@ -779,7 +757,6 @@ struct ImageGenUnifiedDialog: View {
         if let doc = values["pixelmator_doc_path"] as? String, !doc.isEmpty {
             session.setInfillPixelmatorDocPath(doc)
         }
-        markDirtyIfNeeded()
     }
 
     private func refreshInfillFromMenuRequest() {
@@ -910,11 +887,6 @@ struct ImageGenUnifiedDialog: View {
         guard selectedPluginID == newPluginID else { return }
         session.setValues(values, for: selectedFunction)
         session.setPluginID(newPluginID, for: selectedFunction)
-        if replaceJobID != nil {
-            markDirtyIfNeeded()
-        } else {
-            commitEditorBaseline()
-        }
     }
 
     private func removeLorasInapplicableToSelectedPlugin(_ pluginID: String) async {
@@ -994,7 +966,6 @@ struct ImageGenUnifiedDialog: View {
             values["source_image_paths"] = sourcePaths
             values["source_image_path"] = sourcePaths[0]
         }
-        commitEditorBaseline()
     }
 
     private func prepareImportedPluginSelection(_ pluginID: String) {
@@ -1038,13 +1009,7 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
-    private func commitEditorBaseline() {
-        baselineValues = values
-        baselineSelectedPluginID = selectedPluginID
-        isDirty = false
-    }
-
-    /// Queue-job load and Replace/Update: baseline matches committed job + editor chrome (Python ``_after_successful_submit`` for replace).
+    /// Queue-job load and Replace/Update: normalize editor chrome after job values load (Python ``_after_successful_submit`` for replace).
     private func adoptQueueJobEditorBaseline() {
         ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&values)
         syncLockedSourcePathsFromJobValues(values)
@@ -1054,7 +1019,6 @@ struct ImageGenUnifiedDialog: View {
         FluxPromptJob.restoreFluxPromptAIJobIntoEditor(values: &values, context: fluxContext)
         FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
         fluxRefineCoordinator.clearRefineUndoState()
-        commitEditorBaseline()
     }
 
     private func syncLockedSourcePathsFromJobValues(_ jobValues: [String: Any]) {
@@ -1084,11 +1048,6 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
-    private func markDirtyIfNeeded() {
-        isDirty = !ImageGenPersistence.snapshotsEqual(values, baselineValues)
-            || selectedPluginID != baselineSelectedPluginID
-    }
-
     /// Python ``ImageGenUnifiedDialog._on_queue_replace_job_state_changed`` (visibility + copies mirror).
     private func refreshQueueReplaceChromeFromJobCard() {
         guard let jobID = replaceJobID else { return }
@@ -1107,10 +1066,6 @@ struct ImageGenUnifiedDialog: View {
         guard !dismissing else { return }
         appState.imageGen.cancelFluxPromptRefine()
         fluxRefineCoordinator.teardown(appState: appState)
-        if replaceJobID != nil {
-            performCancel()
-            return
-        }
         dismissing = true
         persistVisitedFunctions()
         closeDialog()
@@ -1125,22 +1080,6 @@ struct ImageGenUnifiedDialog: View {
         appState.workers.fluxPromptTasks.markAvailable(ok)
         appState.workers.foregroundModelTasks.markAvailable(ok)
         fluxContext.lmStudioMounted = ok
-    }
-
-    private func performCancel() {
-        guard !dismissing else { return }
-        dismissing = true
-        if isDirty {
-            if !baselineSelectedPluginID.isEmpty {
-                selectedPluginID = baselineSelectedPluginID
-            }
-            session.setValues(baselineValues, for: selectedFunction)
-            session.setPluginID(baselineSelectedPluginID, for: selectedFunction)
-            persistVisitedFunctions(excluding: selectedFunction)
-        } else {
-            persistVisitedFunctions()
-        }
-        closeDialog()
     }
 
     private func closeDialog() {
@@ -1473,8 +1412,6 @@ struct ImageGenUnifiedDialog: View {
             values = submitValues
             if replace {
                 adoptQueueJobEditorBaseline()
-            } else {
-                commitEditorBaseline()
             }
             session.setValues(values, for: selectedFunction)
             session.setPluginID(selectedPluginID, for: selectedFunction)

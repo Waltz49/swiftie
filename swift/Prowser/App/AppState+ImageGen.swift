@@ -389,7 +389,7 @@ extension AppState {
         case .one, .strip:
             return true
         case .all:
-            return shouldShrinkWrapJobsClient() || imageGen.queue.jobs.count <= 1
+            return shouldShrinkWrapJobsClient() || visibleJobsQueueRowCount() <= 1
         }
     }
 
@@ -622,6 +622,43 @@ extension AppState {
         DispatchQueue.main.async { [weak self] in
             self?.syncJobsPaneGeometry()
         }
+    }
+
+    func setJobsShowHeldJobs(_ show: Bool) {
+        guard jobsShowHeldJobs != show else { return }
+        jobsShowHeldJobs = show
+        config.updateSetting("jobs_show_held_jobs", value: show)
+        config.applySettingsChange(emit: eventBus)
+        if !show, let selected = imageGen.selectedJobID, selected != imageGen.activeJobID, imageGen.jobHeld(jobID: selected) {
+            imageGen.selectJob(id: nil)
+        }
+        jobsQueuePanelSync?()
+        syncJobsPaneGeometry()
+    }
+
+    /// Queue rows shown as job cards (optional hide of per-job held rows).
+    func filteredQueueSnapshot() -> [QueueRowSnapshot] {
+        let rows = imageGen.queueSnapshot()
+        guard jobsShowHeldJobs else {
+            return rows.filter { $0.isActive || !$0.held }
+        }
+        return rows
+    }
+
+    func jobsQueueRowsForDisplay(mode: JobsQueueSizeMode) -> [QueueRowSnapshot] {
+        let rows = filteredQueueSnapshot()
+        switch mode {
+        case .strip:
+            return []
+        case .one:
+            return Array(rows.prefix(1))
+        case .all:
+            return rows
+        }
+    }
+
+    func visibleJobsQueueRowCount() -> Int {
+        filteredQueueSnapshot().count
     }
 
     func setJobsPanelAlwaysOnTop(_ enabled: Bool) {

@@ -820,9 +820,7 @@ final class ImageGenController {
         copyBatchCancelled = true
         skipSeriesCopyRequested = false
         pendingCancelJobID = activeJobID ?? ""
-        cooldownTask?.cancel()
-        cooldownDisplayTask?.cancel()
-        cooldownSecondsRemaining = 0
+        stopScheduledCooldown()
         if jobAIStageActive {
             fluxPromptTasks.cancel()
             jobAIStageActive = false
@@ -1999,6 +1997,7 @@ final class ImageGenController {
     }
 
     private func continueAfterAbortedStep() async {
+        stopScheduledCooldown()
         completeRunningStepAfterCopy()
         skipSeriesCopyInFlight = false
         resetActiveJobProgressTracking()
@@ -2006,7 +2005,7 @@ final class ImageGenController {
             if seriesContinues() {
                 _ = demoteActiveRemainingToQueue()
             } else {
-                finishCopyBatch(cancelled: false)
+                finishCopyBatch(cancelled: false, skipUpcomingCooldown: true)
             }
             scheduleUnloadImageModelForQueueHold()
             return
@@ -2014,7 +2013,7 @@ final class ImageGenController {
         if seriesContinues() {
             await promoteAndRunNextStep()
         } else {
-            finishCopyBatch(cancelled: false)
+            finishCopyBatch(cancelled: false, skipUpcomingCooldown: true)
         }
     }
 
@@ -2026,20 +2025,19 @@ final class ImageGenController {
         finishCopyBatch(cancelled: true)
     }
 
-    private func finishActiveJob(cancelled: Bool) {
-        finishCopyBatch(cancelled: cancelled)
+    private func finishActiveJob(cancelled: Bool, skipUpcomingCooldown: Bool = false) {
+        finishCopyBatch(cancelled: cancelled, skipUpcomingCooldown: skipUpcomingCooldown)
     }
 
-    private func finishCopyBatch(cancelled: Bool = false) {
+    private func finishCopyBatch(cancelled: Bool = false, skipUpcomingCooldown: Bool = false) {
         guard activeJobID != nil || isProcessing || stepRunning != nil || stepPendingDoc != nil
             || copyBatchCancelled || jobAIStageActive else {
             return
         }
         let cancelledJobID = cancelled ? (activeJobID ?? pendingCancelJobID) : ""
         let finishedJobID = activeJobID
-        cooldownTask?.cancel()
-        cooldownDisplayTask?.cancel()
-        cooldownSecondsRemaining = 0
+        let skipQueueCooldown = cancelled || skipUpcomingCooldown
+        stopScheduledCooldown()
         if cancelled, !cancelledJobID.isEmpty {
             removeCancelledJobFromQueue(jobID: cancelledJobID)
         } else if let finishedJobID, !finishedJobID.isEmpty {
@@ -2087,7 +2085,7 @@ final class ImageGenController {
         }
         bumpQueueRevision()
         if !holdJobQueue, !queueAdvanceSuppressed, !startupQueueHold {
-            if !queue.jobs.isEmpty, jobCooldownSeconds() > 0 {
+            if !queue.jobs.isEmpty, jobCooldownSeconds() > 0, !skipQueueCooldown {
                 scheduleJobCooldownThen { await self.startNextQueuedJobIfIdle() }
             } else {
                 Task { await startNextQueuedJobIfIdle() }
@@ -2528,6 +2526,16 @@ final class ImageGenController {
         ImageGenDimLimits.appJobCooldownSeconds(settings: config.rawSettings())
     }
 
+    private func stopScheduledCooldown() {
+        cooldownTask?.cancel()
+        cooldownTask = nil
+        cooldownDisplayTask?.cancel()
+        cooldownDisplayTask = nil
+        cooldownSecondsRemaining = 0
+        cooldownBeforeNextJob = false
+        lastCooldownUISecond = nil
+    }
+
     private func scheduleCopyCooldownThen(_ action: @escaping () async -> Void) {
         cooldownBeforeNextJob = false
         scheduleCooldownTimer(seconds: copyCooldownSeconds(), action: action)
@@ -2539,8 +2547,7 @@ final class ImageGenController {
     }
 
     private func scheduleCooldownTimer(seconds: Int, action: @escaping () async -> Void) {
-        cooldownTask?.cancel()
-        cooldownDisplayTask?.cancel()
+        stopScheduledCooldown()
         enterCopyCooldownAfterSuccess()
         let ms = max(0, seconds * 1000)
         cooldownSecondsRemaining = max(0, seconds)

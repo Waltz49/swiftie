@@ -229,7 +229,7 @@ final class SidebarPaneSplitModel {
         fitTargets.removeAll()
         if side == .right, paneIndex == 2,
            appState.jobsQueueSizeMode == .all,
-           appState.imageGen.queue.jobs.count > 1,
+           appState.visibleJobsQueueRowCount() > 1,
            !appState.shouldShrinkWrapJobsClient() {
             appState.jobsPaneRefitDeferred = false
         }
@@ -312,7 +312,7 @@ final class SidebarPaneSplitModel {
         defer { appState.endJobsPaneGeometryAdjustment() }
 
         let mode = appState.jobsQueueSizeMode
-        let jobCount = appState.imageGen.queue.jobs.count
+        let jobCount = appState.visibleJobsQueueRowCount()
         if mode == .all, jobCount > 1 {
             resizePaneToHeight(
                 paneIndex: 2,
@@ -351,7 +351,7 @@ final class SidebarPaneSplitModel {
         appState.refreshJobsPaneLiveMeasurements()
 
         let mode = appState.jobsQueueSizeMode
-        let jobCount = appState.imageGen.queue.jobs.count
+        let jobCount = appState.visibleJobsQueueRowCount()
         let shrinkWrap = appState.shouldShrinkWrapJobsClient()
         let target = appState.jobsPaneTargetPaneHeight()
         let current = sizes[2]

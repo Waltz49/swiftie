@@ -483,7 +483,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         case .strip:
             return true
         case .all:
-            if appState.imageGen.queue.jobs.count <= 1 {
+            if rows.count <= 1 {
                 return true
             }
             return scrollFitsAllJobRowsInViewport()
@@ -494,7 +494,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         guard let appState = paneContextMenuAppState else { return false }
         let mode = appState.jobsQueueSizeMode
         if mode == .one { return !rows.isEmpty }
-        if mode == .all, appState.imageGen.queue.jobs.count <= 1 { return !rows.isEmpty }
+        if mode == .all, rows.count <= 1 { return !rows.isEmpty }
         return false
     }
 
@@ -1845,15 +1845,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
     private func syncPanelToController(_ panel: JobQueuePanelNSView) {
         let controller = appState.imageGen
         let mode = appState.jobsQueueSizeMode
-        let rows: [QueueRowSnapshot]
-        switch mode {
-        case .all:
-            rows = controller.queueSnapshot()
-        case .one:
-            rows = controller.queueSnapshot().prefix(1).map { $0 }
-        case .strip:
-            rows = []
-        }
+        let rows = appState.jobsQueueRowsForDisplay(mode: mode)
         // Python ``_ensure_single_job_auto_selection``: a sole visible card is always selected
         // (one-job mode or single queue row), so its action bar shows without a click.
         var selectedJobID = controller.selectedJobID
@@ -1895,7 +1887,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
                 return
             }
             let mode = appState.jobsQueueSizeMode
-            let rowCount = gen.queueSnapshot().count
+            let rowCount = appState.visibleJobsQueueRowCount()
             let soleVisible = mode != .strip && (mode == .one || rowCount == 1)
             if soleVisible {
                 gen.selectJob(id: jobID)
@@ -1985,7 +1977,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         }
         // A panel that still shows the previous mode's rows (e.g. ONE → ALL before the new
         // hierarchy is built) would report the wrong stack.
-        let snapshotCount = appState.imageGen.queueSnapshot().count
+        let snapshotCount = appState.visibleJobsQueueRowCount()
         let expectedRows = mode == .one ? min(1, snapshotCount) : snapshotCount
         if mode != .strip, panel.displayedRowCount != expectedRows {
             jobsPaneDebug("report skipped (rows \(panel.displayedRowCount) != \(expectedRows)) mode=\(mode)")

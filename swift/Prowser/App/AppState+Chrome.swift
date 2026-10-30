@@ -99,6 +99,7 @@ extension AppState {
         fileTreeToolbarVisible = config.bool(forKey: "file_tree_show_toolbar", default: true)
         informationMenuBarVisible = config.bool(forKey: "information_show_menu_bar", default: true)
         jobsToolbarVisible = config.bool(forKey: "jobs_show_toolbar", default: true)
+        jobsShowHeldJobs = config.bool(forKey: "jobs_show_held_jobs", default: true)
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         jobsPanelAlwaysOnTop = imagegen["job_queue_always_on_top"] as? Bool ?? false
         imageGen.reloadToolbarSettings(from: imagegen)

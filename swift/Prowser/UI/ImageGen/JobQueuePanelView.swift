@@ -8,12 +8,13 @@ struct JobQueuePanelView: View {
     var compactForFloating: Bool = false
 
     private var fillsAvailableHeight: Bool {
-        appState.jobsQueueSizeMode == .all && appState.imageGen.queue.jobs.count > 1
+        appState.jobsQueueSizeMode == .all && appState.visibleJobsQueueRowCount() > 1
     }
 
     var body: some View {
         let _ = appState.imageGenUIRevision
         let _ = appState.measuredJobsCardStackHeight
+        let _ = appState.jobsShowHeldJobs
         let controller = appState.imageGen
         let _ = controller.queueRevision
         let mode = appState.jobsQueueSizeMode
@@ -46,7 +47,7 @@ struct JobQueuePanelView: View {
         }
         .onChange(of: activeStripStructureKey) { _, _ in
             let mode = appState.jobsQueueSizeMode
-            if mode == .all, appState.imageGen.queue.jobs.count > 1 { return }
+            if mode == .all, appState.visibleJobsQueueRowCount() > 1 { return }
             if mode == .one || mode == .strip {
                 appState.syncJobsPaneGeometry()
             }
@@ -107,7 +108,7 @@ struct JobQueuePanelView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
         case .all:
-            if appState.imageGen.queue.jobs.count <= 1 {
+            if appState.visibleJobsQueueRowCount() <= 1 {
                 JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .contentShape(Rectangle())

@@ -55,6 +55,8 @@ final class AppState {
     var jobsQueuePanelSync: (@MainActor () -> Void)?
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     var jobsToolbarVisible = true
+    /// When false, held queue rows are hidden from job cards (toolbar queue counts unchanged).
+    var jobsShowHeldJobs = true
     var jobsPanelAlwaysOnTop = false
     var measuredJobsCardStackHeight: CGFloat = 0
     var measuredActiveJobStripHeight: CGFloat = 0

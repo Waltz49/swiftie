@@ -64,6 +64,13 @@ enum SidebarPaneContextMenus {
             enabled: controller.isEnabled,
             action: #selector(PaneMenuActions.jobsHoldQueue(_:))
         )
+        addCheckable(
+            menu,
+            title: "Show Held Jobs",
+            checked: appState.jobsShowHeldJobs,
+            enabled: controller.isEnabled,
+            action: #selector(PaneMenuActions.jobsShowHeld(_:))
+        )
         addAction(
             menu,
             title: "Skip This Copy",
@@ -81,7 +88,7 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
-            title: toolbarToggleTitle(visible: appState.jobsToolbarVisible),
+            title: "Show Toolbar",
             checked: appState.jobsToolbarVisible,
             action: #selector(PaneMenuActions.jobsShowToolbar(_:))
         )
@@ -238,6 +245,10 @@ final class PaneMenuActions: NSObject {
     @objc func jobsHoldQueue(_ sender: NSMenuItem) {
         guard let appState else { return }
         appState.imageGen.setHoldJobQueue(toggledValue(sender))
+    }
+
+    @objc func jobsShowHeld(_ sender: NSMenuItem) {
+        appState?.setJobsShowHeldJobs(toggledValue(sender))
     }
 
     @objc func jobsSkipCopy(_ sender: NSMenuItem) {
