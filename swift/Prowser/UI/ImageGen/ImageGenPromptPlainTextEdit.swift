@@ -296,7 +296,7 @@ final class ImageGenPromptPlainTextHostView: NSView {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isContinuousSpellCheckingEnabled = true
         textView.isGrammarCheckingEnabled = true
-        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.allowsUndo = true

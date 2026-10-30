@@ -175,33 +175,6 @@ struct ProwserCommands: Commands {
 
         CommandMenu(MenuBarTitles.view) {
             Group {
-                PaneToggleButton(appState: appState, pane: .fileTree)
-                    .keyboardShortcut("t", modifiers: [])
-
-                PaneToggleButton(appState: appState, pane: .preview)
-                    .keyboardShortcut("p", modifiers: [])
-
-                PaneToggleButton(appState: appState, pane: .informationSidebar)
-                    .keyboardShortcut("i", modifiers: [])
-
-                PaneToggleButton(appState: appState, pane: .statusBar)
-                    .keyboardShortcut("b", modifiers: [])
-
-                ChromeToggleMenuButton(appState: appState)
-
-                ListViewToggleButton(appState: appState)
-                    .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
-
-                PaneToggleButton(appState: appState, pane: .organizeSidebar)
-                    .keyboardShortcut("o", modifiers: [])
-
-                if BundleCapabilities.imageGenUIEnabled {
-                    PaneToggleButton(appState: appState, pane: .jobsSidebar)
-                        .keyboardShortcut("j", modifiers: [])
-                }
-
-                ThemeMenuContent(appState: appState, applyTheme: applyTheme)
-
                 Button("Enter Image Viewer") {
                     Task { @MainActor in
                         guard appState.fileData.currentImagePath != nil else { return }
@@ -210,10 +183,30 @@ struct ProwserCommands: Commands {
                 }
                 .keyboardShortcut("f", modifiers: [])
 
-                Button("Cycle Thumbnail Overlay") {
-                    Task { @MainActor in appState.cycleThumbnailOverlay() }
+                Divider()
+
+                PaneToggleButton(appState: appState, pane: .fileTree)
+                    .keyboardShortcut("t", modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .informationSidebar)
+                    .keyboardShortcut("i", modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .preview)
+                    .keyboardShortcut("p", modifiers: [])
+
+                if BundleCapabilities.imageGenUIEnabled {
+                    PaneToggleButton(appState: appState, pane: .jobsSidebar)
+                        .keyboardShortcut("j", modifiers: [])
                 }
-                .keyboardShortcut("i", modifiers: .command)
+
+                PaneToggleButton(appState: appState, pane: .organizeSidebar)
+                    .keyboardShortcut("o", modifiers: [])
+
+                PaneToggleButton(appState: appState, pane: .statusBar)
+                    .keyboardShortcut("b", modifiers: [])
+
+                ListViewToggleButton(appState: appState)
+                    .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF12FunctionKey)!)), modifiers: [])
 
                 Menu("Sort By") {
                     SortMenuButton(appState: appState, title: "Date (Newest First)", mode: .date, reversed: false, apply: applySortMode, shortcutKey: "d")
@@ -237,7 +230,18 @@ struct ProwserCommands: Commands {
 
                 ActualSizeToggleButton(appState: appState)
 
-                FullscreenToggleButton()
+                Button("Cycle Thumbnail Overlay") {
+                    Task { @MainActor in appState.cycleThumbnailOverlay() }
+                }
+                .keyboardShortcut("i", modifiers: .command)
+
+                Divider()
+
+                ThemeMenuContent(appState: appState, applyTheme: applyTheme)
+
+                MacOSSpaceToggleButton()
+
+                ChromeToggleMenuButton(appState: appState)
             }
             .disabled(!allowBrowserMenuCommands)
         }
@@ -662,8 +666,19 @@ private struct ActualSizeToggleButton: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        Button("Actual Size") {
-            appState.toggleBrowseActualSize()
+        Toggle(isOn: Binding(
+            get: {
+                _ = appState.menuCommandsRevision
+                return appState.browseActualSizeMenuChecked
+            },
+            set: { newValue in
+                let current = appState.browseActualSizeMenuChecked
+                if newValue != current {
+                    appState.toggleBrowseActualSize()
+                }
+            }
+        )) {
+            Text("Actual Size")
         }
         .keyboardShortcut("a", modifiers: [])
         .disabled(appState.fileData.currentViewMode != .browse)
@@ -681,13 +696,20 @@ private struct ExternalEditorButton: View {
     }
 }
 
-private struct FullscreenToggleButton: View {
+private struct MacOSSpaceToggleButton: View {
     @State private var inMacOSSpace = false
 
     var body: some View {
-        Button(inMacOSSpace ? "Show in Windowed Mode" : "Show in macOS Space") {
-            WindowFullscreen.toggleMacOSSpace()
-            inMacOSSpace = WindowFullscreen.isInMacOSSpace
+        Toggle(isOn: Binding(
+            get: { inMacOSSpace },
+            set: { newValue in
+                if newValue != inMacOSSpace {
+                    WindowFullscreen.toggleMacOSSpace()
+                    inMacOSSpace = WindowFullscreen.isInMacOSSpace
+                }
+            }
+        )) {
+            Text("Show in MacOS Space")
         }
         .keyboardShortcut("f", modifiers: [.command, .control])
         .onAppear {
@@ -945,9 +967,9 @@ private struct PaneToggleButton: View {
         case .preview:
             return ("Preview", appState.config.bool(forKey: "preview_visible", default: true))
         case .organizeSidebar:
-            return ("Organize Sidebar", appState.config.bool(forKey: "shortcuts_sidebar_visible", default: true))
+            return ("Organization Pane", appState.config.bool(forKey: "shortcuts_sidebar_visible", default: true))
         case .informationSidebar:
-            return ("Information Sidebar", appState.config.bool(forKey: "information_sidebar_visible", default: true))
+            return ("File Information", appState.config.bool(forKey: "information_sidebar_visible", default: true))
         case .jobsSidebar:
             let paneShowing = appState.jobsDisplayMode == .pane
                 && appState.config.bool(forKey: "jobs_visible", default: true)

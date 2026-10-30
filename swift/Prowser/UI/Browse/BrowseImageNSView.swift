@@ -138,6 +138,11 @@ final class BrowseImageNSView: NSView {
     func zoomIn() { applyZoom(factor: scaleFactor * 1.15, anchor: bounds.center) }
     func zoomOut() { applyZoom(factor: scaleFactor / 1.15, anchor: bounds.center) }
 
+    /// True when browse is showing 1:1 actual size (not fit-to-window or manual zoom).
+    var isDisplayingActualSize: Bool {
+        preferredActualSize && !zoomPinned
+    }
+
     func setActualSizeMode(_ enabled: Bool) {
         if preferredActualSize != enabled {
             onActualSizeModeChanged?(enabled)
@@ -179,6 +184,7 @@ final class BrowseImageNSView: NSView {
             fitToWindow()
         }
         needsDisplay = true
+        notifyBrowseDisplayModeChanged()
     }
 
     private func finishImageLoad() {
@@ -202,6 +208,7 @@ final class BrowseImageNSView: NSView {
         }
         needsDisplay = true
         appState?.browseCursorAutoHide.reassertAfterCanvasContentChange()
+        notifyBrowseDisplayModeChanged()
     }
 
     private func capturePreserveSnapshot(forNewPath path: String?) {
@@ -282,6 +289,7 @@ final class BrowseImageNSView: NSView {
         scrollOffset = CGPoint(x: 0, y: 0)
         zoomPinned = true
         needsDisplay = true
+        notifyBrowseDisplayModeChanged()
     }
 
     /// Fit image height to the browse viewport (Swift-only ⌥=).
@@ -296,6 +304,7 @@ final class BrowseImageNSView: NSView {
         scrollOffset = CGPoint(x: 0, y: 0)
         zoomPinned = true
         needsDisplay = true
+        notifyBrowseDisplayModeChanged()
     }
 
     private func loadImage() {
@@ -772,6 +781,11 @@ final class BrowseImageNSView: NSView {
         zoomPinned = true
         clampScroll()
         needsDisplay = true
+        notifyBrowseDisplayModeChanged()
+    }
+
+    private func notifyBrowseDisplayModeChanged() {
+        appState?.bumpMenuCommandsRevision()
     }
 
     private func canPan() -> Bool {

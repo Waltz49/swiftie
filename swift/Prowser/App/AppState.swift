@@ -2004,10 +2004,17 @@ final class AppState {
         config.updateSetting("browse_view_actual_size", value: enabled)
         eventBus.emit(.browseKeyboard, payload: .browseAction(.setActualSize(enabled)))
         status.show(enabled ? "Actual size mode" : "Fit to window mode")
+        bumpMenuCommandsRevision()
     }
 
     var browseActualSizeEnabled: Bool {
         config.bool(forKey: "browse_view_actual_size", default: false)
+    }
+
+    /// View ▸ Actual Size checkmark: 1:1 display active, not manual zoom / fit.
+    var browseActualSizeMenuChecked: Bool {
+        guard fileData.currentViewMode == .browse else { return false }
+        return browseImageHost?.isDisplayingActualSize ?? false
     }
 
     func createScreenSizeCopy(fitMethod: ScreenSizeCopyService.FitMethod? = nil) {
