@@ -149,7 +149,6 @@ When the **file tree** has keyboard focus, **⌘F** (Find Images / CLIP), **⌘P
 | Cmd+A | Select all images |
 | Cmd+Q | Quit application |
 | Cmd+Shift+D | Toggle debug mode |
-| Cmd+D | Debug cache status |
 | Cmd+Shift+C | Cache subdirectories' thumbnails |
 | Cmd+Shift+H | Show image in directory |
 | Shift+F | Find duplicate images (recursive) |

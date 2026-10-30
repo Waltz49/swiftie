@@ -454,7 +454,6 @@ struct ProwserCommands: Commands {
                     Button("Print Cache Status") {
                         Task { @MainActor in appState.printCacheStatus() }
                     }
-                    .keyboardShortcut("d", modifiers: .command)
 
                     Button("Toggle Debug Mode") {
                         Task { @MainActor in appState.toggleDebugMode() }
@@ -827,15 +826,22 @@ private struct LastImageMenuButton: View {
     }
 }
 
+@MainActor
 private struct FavoriteMenuButton: View {
     @Bindable var appState: AppState
     let slot: Int
 
     var body: some View {
-        Button(MenuStateHelpers.favoriteMenuLabel(slot: slot, config: appState.config)) {
+        let enabled = MenuStateHelpers.favoriteIsEnabled(slot: slot, config: appState.config)
+        let button = Button(MenuStateHelpers.favoriteMenuLabel(slot: slot, config: appState.config)) {
             Task { @MainActor in appState.fileOperations.openFavoriteDirectory(slot: slot) }
         }
-        .disabled(!MenuStateHelpers.favoriteIsEnabled(slot: slot, config: appState.config))
+        .disabled(!enabled)
+        if enabled {
+            button.keyboardShortcut(menuBarDigitKeyEquivalent(slot: slot), modifiers: .control)
+        } else {
+            button
+        }
     }
 }
 
@@ -854,12 +860,13 @@ private struct DestinationMenuButton: View {
                     appState.fileOperations.moveToDestination(slot: slot, copyOnly: nil)
                 }
             }
-            .keyboardShortcut(
-                KeyEquivalent(Character(UnicodeScalar(48 + slot)!)),
-                modifiers: .command
-            )
+            .keyboardShortcut(menuBarDigitKeyEquivalent(slot: slot), modifiers: .command)
         }
     }
+}
+
+private func menuBarDigitKeyEquivalent(slot: Int) -> KeyEquivalent {
+    KeyEquivalent(Character(UnicodeScalar(48 + slot)!))
 }
 
 private struct SortMenuButton: View {
