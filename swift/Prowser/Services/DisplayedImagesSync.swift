@@ -34,4 +34,22 @@ enum DisplayedImagesSync {
         fileData.setDisplayedImages(merged)
         fileData.setCurrentImagePath(path)
     }
+
+    /// True when the thumbnail listing belongs to `currentDirectory` (empty list counts as matching).
+    static func displayedImagesMatchCurrentDirectory(
+        fileData: FileDataModel,
+        specificFilesActive: Bool,
+        referenceGraphActive: Bool
+    ) -> Bool {
+        if specificFilesActive || referenceGraphActive { return true }
+        let images = fileData.displayedImages
+        if images.isEmpty { return true }
+        guard let directory = fileData.currentDirectory else { return true }
+        for path in images {
+            guard FileDataModel.pathIsInDirectory(file: path, directory: directory) else {
+                return false
+            }
+        }
+        return true
+    }
 }

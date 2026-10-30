@@ -179,7 +179,9 @@ struct ThumbnailGridView: NSViewRepresentable {
                 self.applyThumbnailLoadingActive(mode == ViewMode.thumbnail.rawValue)
                 if mode == ViewMode.thumbnail.rawValue {
                     self.lastSyncedIndex = -1
-                    self.ensureHighlightedVisible()
+                    if !self.appState.shouldSuppressStaleThumbnailGrid {
+                        self.ensureHighlightedVisible()
+                    }
                 }
             }
             bag.subscribe(.filterPatternChanged) { [weak self] _ in
@@ -294,7 +296,9 @@ struct ThumbnailGridView: NSViewRepresentable {
         private func syncFromAppState(force: Bool) {
             guard let gridView else { return }
             syncThemeVisualsIfNeeded(to: gridView, force: force)
-            let paths = appState.showThumbnailDirectoryLoadingCanvas ? [] : appState.fileData.displayedImages
+            let paths = appState.showThumbnailDirectoryLoadingCanvas || appState.shouldSuppressStaleThumbnailGrid
+                ? []
+                : appState.fileData.displayedImages
             let index = resolvedHighlightIndex(in: paths)
             let fingerprint = GridSyncFingerprint(
                 themeID: appState.theme.colors.themeID,

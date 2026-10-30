@@ -65,6 +65,7 @@ final class DirectoryLoadCoordinator {
     private unowned let appState: AppState
     private var activeLoadGeneration = 0
     private var activeLoadTask: Task<Void, Never>?
+    private var pendingLoadingCanvasTask: Task<Void, Never>?
 
     init(appState: AppState) {
         self.appState = appState
@@ -110,11 +111,37 @@ final class DirectoryLoadCoordinator {
     func cancelPendingDirectoryLoad() {
         activeLoadTask?.cancel()
         activeLoadGeneration += 1
+        cancelPendingLoadingCanvas()
+        appState.pendingBrowseExitThumbnailScroll = false
         if appState.isLoadingDirectory {
             appState.isLoadingDirectory = false
             if appState.showThumbnailDirectoryLoadingCanvas {
                 appState.endThumbnailDirectoryLoad()
             }
+            appState.showThumbnailDirectoryLoadingCanvas = false
+        }
+    }
+
+    private func cancelPendingLoadingCanvas() {
+        pendingLoadingCanvasTask?.cancel()
+        pendingLoadingCanvasTask = nil
+    }
+
+    private func scheduleLoadingCanvasIfNeeded(
+        generation: Int,
+        scannedCount: Int,
+        showLoadingState: Bool
+    ) {
+        cancelPendingLoadingCanvas()
+        guard showLoadingState,
+              scannedCount >= ThumbnailLayout.directoryLoadingCanvasMinimumImageCount else { return }
+        pendingLoadingCanvasTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: ThumbnailLayout.directoryLoadingCanvasShowDelay)
+            guard !Task.isCancelled, let self else { return }
+            guard generation == self.activeLoadGeneration else { return }
+            guard self.appState.isLoadingDirectory else { return }
+            self.appState.showThumbnailDirectoryLoadingCanvas = true
+            self.appState.beginThumbnailDirectoryLoad()
         }
     }
 
@@ -272,11 +299,15 @@ final class DirectoryLoadCoordinator {
         activeLoadTask?.cancel()
         activeLoadGeneration += 1
         let generation = activeLoadGeneration
+        cancelPendingLoadingCanvas()
+        appState.pendingBrowseExitThumbnailScroll = false
+
+        let contextChanges = appState.thumbnailContextWouldChange(forNewDirectory: normalized)
 
         let pin: String?
         if let explicit = pinnedImagePath.flatMap({ FileDataModel.normalizePath($0) }) {
             pin = explicit
-        } else if appState.fileData.currentViewMode == .browse {
+        } else if appState.fileData.currentViewMode == .browse, !contextChanges {
             pin = appState.fileData.currentImagePath
         } else {
             pin = nil
@@ -291,33 +322,68 @@ final class DirectoryLoadCoordinator {
             useExifDate: appState.config.useExifDate
         )
 
-        let useLoadingCanvas = !appState.hasCompletedInitialThumbnailDirectoryLoad
+        let firstSessionThumbnailDirectoryLoad = showLoadingState
+            && !appState.hasCompletedInitialThumbnailDirectoryLoad
             && appState.fileData.currentViewMode == .thumbnail
             && pin == nil
+
+        let eligibilityForLoadingCanvas = firstSessionThumbnailDirectoryLoad
+            || (showLoadingState && contextChanges)
 
         if showLoadingState {
             appState.isLoadingDirectory = true
         }
-        appState.showThumbnailDirectoryLoadingCanvas = useLoadingCanvas && showLoadingState
+        if firstSessionThumbnailDirectoryLoad {
+            appState.showThumbnailDirectoryLoadingCanvas = true
+        } else {
+            appState.showThumbnailDirectoryLoadingCanvas = false
+        }
 
-        if useLoadingCanvas, showLoadingState {
+        if eligibilityForLoadingCanvas, showLoadingState {
             appState.fileData.setDisplayedImages([])
             appState.fileData.setCurrentDirectory(normalized)
-            appState.beginThumbnailDirectoryLoad()
         } else if pin != nil {
             appState.fileData.setCurrentDirectory(normalized)
             if let pin {
                 appState.fileData.setCurrentImagePath(pin)
             }
+        } else {
+            appState.fileData.setCurrentDirectory(normalized)
+        }
+
+        exitBrowseForExternalDirectoryLoadIfNeeded(explicitPinnedPath: pinnedImagePath)
+
+        if firstSessionThumbnailDirectoryLoad {
+            appState.beginThumbnailDirectoryLoad()
         }
 
         activeLoadTask = Task { @MainActor [weak self] in
-            let images = await Task.detached(priority: .userInitiated) {
-                DirectoryLoadBackgroundWork.scanAndSort(snapshot)
+            let scanned = await Task.detached(priority: .userInitiated) {
+                DirectoryScanner.scanDirectory(
+                    at: snapshot.path,
+                    extensions: snapshot.extensions,
+                    filterPattern: snapshot.filterPattern
+                )
             }.value
 
             guard !Task.isCancelled else { return }
             guard let self else { return }
+            guard generation == self.activeLoadGeneration else { return }
+
+            if eligibilityForLoadingCanvas, !firstSessionThumbnailDirectoryLoad {
+                self.scheduleLoadingCanvasIfNeeded(
+                    generation: generation,
+                    scannedCount: scanned.count,
+                    showLoadingState: showLoadingState
+                )
+            }
+
+            let images = await Task.detached(priority: .userInitiated) {
+                DirectoryLoadBackgroundWork.sort(scanned, snapshot: snapshot)
+            }.value
+
+            guard !Task.isCancelled else { return }
+            guard generation == self.activeLoadGeneration else { return }
             self.finishDirectoryLoad(
                 generation: generation,
                 path: normalized,
@@ -326,6 +392,19 @@ final class DirectoryLoadCoordinator {
                 showLoadingState: showLoadingState,
                 onComplete: onComplete
             )
+        }
+    }
+
+    /// Python external `load_directory`: leave browse except parent-dir scan with explicit pin (`load_file_with_directory_thumbnails`).
+    private func exitBrowseForExternalDirectoryLoadIfNeeded(explicitPinnedPath: String?) {
+        guard appState.fileData.currentViewMode == .browse else { return }
+        if explicitPinnedPath != nil { return }
+        appState.clearBrowseReturnState()
+        if appState.returnToListViewAfterBrowse {
+            appState.returnToListViewAfterBrowse = false
+            appState.fileData.setViewMode(.list)
+        } else {
+            appState.fileData.setViewMode(.thumbnail)
         }
     }
 
@@ -375,6 +454,8 @@ final class DirectoryLoadCoordinator {
         onComplete: (() -> Void)?
     ) {
         guard generation == activeLoadGeneration else { return }
+
+        cancelPendingLoadingCanvas()
 
         appState.fileData.setCurrentDirectory(path)
         let ordered = DisplayOrderService.applyDisplayOrder(

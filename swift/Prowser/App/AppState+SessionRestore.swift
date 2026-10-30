@@ -34,11 +34,18 @@ extension AppState {
             } else {
                 browseReturnThumbnailState = nil
             }
-            ensureCurrentDirectoryAlignedWithActiveImage()
+            let deferThumbnailWork = shouldDeferBrowseExitThumbnailWork()
+            if !deferThumbnailWork {
+                ensureCurrentDirectoryAlignedWithActiveImage()
+            }
             reconcileUserRequestedTreeDirectoryWithActiveImage()
             if newMode == .thumbnail {
-                finalizeThumbnailHighlightAfterBrowseExit(preferredPath: browseExitPath)
-                scheduleScrollThumbnailGridToActiveImageAfterLayout()
+                if deferThumbnailWork {
+                    pendingBrowseExitThumbnailScroll = true
+                } else {
+                    finalizeThumbnailHighlightAfterBrowseExit(preferredPath: browseExitPath)
+                    scheduleScrollThumbnailGridToActiveImageAfterLayout()
+                }
             }
             syncFileTreeToActiveImage()
             focusMainCanvas()
@@ -64,6 +71,41 @@ extension AppState {
     /// Drop stashed thumbnail context so exiting browse uses the current directory listing.
     func clearBrowseReturnState() {
         browseReturnThumbnailState = nil
+    }
+
+    func displayedImagesMatchCurrentDirectory() -> Bool {
+        DisplayedImagesSync.displayedImagesMatchCurrentDirectory(
+            fileData: fileData,
+            specificFilesActive: specificFilesActive,
+            referenceGraphActive: referenceGraphActive
+        )
+    }
+
+    /// Thumbnail grid should not paint or rebuild stale paths during an async directory transition.
+    var shouldSuppressStaleThumbnailGrid: Bool {
+        showThumbnailDirectoryLoadingCanvas
+            || (isLoadingDirectory && !displayedImagesMatchCurrentDirectory())
+    }
+
+    /// Skip browse-exit highlight/scroll until the new directory listing is applied.
+    private func shouldDeferBrowseExitThumbnailWork() -> Bool {
+        isLoadingDirectory || !displayedImagesMatchCurrentDirectory()
+    }
+
+    func observeDirectoryLoadedForDeferredBrowseExitScroll() {
+        _ = eventBus.subscribe(.directoryLoaded) { [weak self] _ in
+            guard let self else { return }
+            guard self.fileData.currentViewMode == .thumbnail else { return }
+            if self.pendingBrowseExitThumbnailScroll {
+                self.pendingBrowseExitThumbnailScroll = false
+                self.finalizeThumbnailHighlightAfterBrowseExit(
+                    preferredPath: self.fileData.currentImagePath
+                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.scrollThumbnailGridToActiveImageAfterLayout()
+                }
+            }
+        }
     }
 
     func prepareBrowseReturnStateIfNeeded() {

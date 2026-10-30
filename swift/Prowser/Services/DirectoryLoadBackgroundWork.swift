@@ -18,7 +18,11 @@ enum DirectoryLoadBackgroundWork {
             extensions: snapshot.extensions,
             filterPattern: snapshot.filterPattern
         )
-        return DirectoryBackgroundSorting.sorted(scanned, snapshot: snapshot)
+        return sort(scanned, snapshot: snapshot)
+    }
+
+    static func sort(_ paths: [String], snapshot: Snapshot) -> [String] {
+        DirectoryBackgroundSorting.sorted(paths, snapshot: snapshot)
     }
 }
 

@@ -97,6 +97,13 @@ struct ProfilePaths: Sendable {
         return url
     }
 
+    /// Letterboxed desktop wallpaper files (`prowser_wallpaper-*.webp`, undo backups). Not removed on exit.
+    var wallpaperDirectory: URL {
+        let url = prowserHome.appendingPathComponent("wallpaper", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     var logsDirectory: URL {
         let url = prowserHome.appendingPathComponent("logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

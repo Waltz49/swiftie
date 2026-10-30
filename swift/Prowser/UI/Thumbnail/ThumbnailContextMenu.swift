@@ -368,16 +368,15 @@ private final class MenuActions: NSObject {
         appState.fileOperations.revealInFinder(paths)
     }
 
-    @objc func wallpaperContain(_ sender: NSMenuItem) { setWallpaper(sender, scaling: .contain) }
-    @objc func wallpaperCover(_ sender: NSMenuItem) { setWallpaper(sender, scaling: .cover) }
-    @objc func wallpaperWidth(_ sender: NSMenuItem) { setWallpaper(sender, scaling: .fitWidth) }
-    @objc func wallpaperHeight(_ sender: NSMenuItem) { setWallpaper(sender, scaling: .fitHeight) }
+    @objc func wallpaperContain(_ sender: NSMenuItem) { setWallpaper(sender, fitMethod: .contain) }
+    @objc func wallpaperCover(_ sender: NSMenuItem) { setWallpaper(sender, fitMethod: .cover) }
+    @objc func wallpaperWidth(_ sender: NSMenuItem) { setWallpaper(sender, fitMethod: .width) }
+    @objc func wallpaperHeight(_ sender: NSMenuItem) { setWallpaper(sender, fitMethod: .height) }
 
-    private func setWallpaper(_ sender: NSMenuItem, scaling: WallpaperService.Scaling) {
+    private func setWallpaper(_ sender: NSMenuItem, fitMethod: WallpaperManager.FitMethod) {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
         do {
-            try WallpaperService.setWallpaper(path: path, scaling: scaling)
-            appState.status.show("Wallpaper updated")
+            try appState.wallpaperManager.setImageAsDesktopBackground(imagePath: path, fitMethod: fitMethod)
         } catch {
             appState.status.show("Wallpaper failed: \(error.localizedDescription)")
         }

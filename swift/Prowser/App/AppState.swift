@@ -18,6 +18,7 @@ final class AppState {
     let metadataCache: MetadataCacheService
     let previewPaneCache = PreviewPaneSessionCache()
     let fileOperations: FileOperationsService
+    let wallpaperManager = WallpaperManager()
     let exifOperations = ExifOperationsController()
     let searchOperations = SearchOperationsService()
     let imageRecognition: ImageRecognitionService
@@ -122,6 +123,8 @@ final class AppState {
     var slideshow2ViewportSize = CGSize(width: 800, height: 600)
     var statusBarPeekActive = false
     var browseReturnThumbnailState: BrowseReturnThumbnailState?
+    /// Set when browse exit skips scroll/highlight because a directory load is in flight.
+    var pendingBrowseExitThumbnailScroll = false
     /// When set, closing browse returns to list view (Python `_return_to_list_view`).
     var returnToListViewAfterBrowse = false
     var lastViewMode: ViewMode = .thumbnail
@@ -318,8 +321,10 @@ final class AppState {
         // floating panel itself stays closed until the user shows it (⌘J).
         jobsDisplayMode = JobsDisplayMode.normalize(config.string(forKey: "jobs_display_mode", default: "pane"))
         observeViewModeChanges()
+        observeDirectoryLoadedForDeferredBrowseExitScroll()
         directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
+        wallpaperManager.bind(self)
         exifOperations.bind(self)
         searchOperations.bind(self)
         backgroundImageRecognition.bind(self)
@@ -1108,9 +1113,6 @@ final class AppState {
     func openHomeDirectory() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         guard FileManager.default.fileExists(atPath: home) else { return }
-        if fileData.currentViewMode == .browse {
-            closeBrowseView()
-        }
         let hadFilter = filterSettings.filterPattern != "*"
         if hadFilter {
             filterSettings.setFilterPattern("*", persist: true)
@@ -1128,9 +1130,7 @@ final class AppState {
         }
         config.updateSetting("sort_mode", value: SortMode.date.rawValue)
         config.updateSetting("sort_reversed", value: false)
-        if fileData.currentViewMode == .browse {
-            closeBrowseView()
-        } else if fileData.currentViewMode == .list {
+        if fileData.currentViewMode == .list {
             fileData.setViewMode(.thumbnail)
         }
         if filterSettings.filterPattern != "*" {
@@ -1142,6 +1142,7 @@ final class AppState {
 
     /// After browse, align `currentDirectory` with the active image so the file tree can highlight correctly.
     func ensureCurrentDirectoryAlignedWithActiveImage() {
+        guard !isLoadingDirectory else { return }
         guard let path = fileData.currentImagePath,
               FileManager.default.fileExists(atPath: path) else { return }
         if specificFilesActive || referenceGraphActive {
@@ -1870,6 +1871,7 @@ final class AppState {
             prowserHome: config.prowserHome,
             debugMode: debugMode
         )
+        wallpaperManager.cleanupTempFiles()
     }
 
 

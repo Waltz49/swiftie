@@ -21,6 +21,10 @@ enum ThumbnailLayout {
     /// Inset between cell border and image (Python `_paint_thumbnail` inner_margin).
     static let innerMargin: CGFloat = 6
     static let cornerRadius: CGFloat = 7
+    /// Minimum listing size before showing the directory loading canvas (empty grid + “Loading”).
+    static let directoryLoadingCanvasMinimumImageCount = 200
+    /// Wait before showing the loading canvas so fast/small directory loads never flash it.
+    static let directoryLoadingCanvasShowDelay: Duration = .milliseconds(200)
 
     struct GridMetrics {
         let columns: Int

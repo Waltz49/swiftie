@@ -31,7 +31,12 @@ final class FileOperationsService {
         ExternalEditorSession.shared.bind(appState: appState)
     }
 
-    var canUndoFileOperation: Bool { undoStack.canUndo }
+    var canUndoFileOperation: Bool {
+        if appState?.wallpaperManager.canUndoWallpaper == true { return true }
+        return undoStack.canUndo
+    }
+
+    var pendingFileUndoOperation: FileUndoOperation? { undoStack.peekLast }
 
     func revealInFinder(_ paths: [String]) {
         let urls = paths.map { URL(fileURLWithPath: $0) }
@@ -137,6 +142,11 @@ final class FileOperationsService {
 
     func undoLastFileOperation() {
         guard let appState else { return }
+        if appState.wallpaperManager.canUndoWallpaper {
+            if appState.wallpaperManager.undoWallpaper() {
+                return
+            }
+        }
         guard let operation = undoStack.pop() else {
             appState.status.showFileOperation("No undo operations available")
             return
@@ -147,6 +157,7 @@ final class FileOperationsService {
         case .move(let entries):
             restoreMovedFiles(entries)
         }
+        appState.refreshMenuState()
     }
 
     func lockSelectedFiles() {
@@ -869,11 +880,8 @@ final class FileOperationsService {
         guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir) else { return }
 
         if isDir.boolValue {
-            appState.loadDirectory(expanded, saveHistory: true)
             appState.clearBrowseReturnState()
-            if appState.fileData.currentViewMode != .thumbnail {
-                appState.fileData.setViewMode(.thumbnail)
-            }
+            appState.loadDirectory(expanded, saveHistory: true)
         } else {
             let ext = URL(fileURLWithPath: expanded).pathExtension.lowercased()
             let allowed = Set(appState.config.imageExtensions.map { AppConfig.normalizeExtension($0) })

@@ -34,12 +34,16 @@ enum ThumbnailEmptyStateRenderer {
         directory: String?,
         filterPattern: String,
         directoryListingDenied: Bool,
-        isLoadingDirectory: Bool = false
+        isLoadingDirectory: Bool = false,
+        directoryListingInProgress: Bool = false
     ) -> String? {
         guard let directory else { return nil }
         let displayDirectory = StatusBarFormatter.displayPath(directory)
         if isLoadingDirectory {
             return "Loading\n\n\(displayDirectory)"
+        }
+        if directoryListingInProgress {
+            return nil
         }
         if directoryListingDenied {
             return """

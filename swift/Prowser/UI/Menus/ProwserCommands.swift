@@ -138,10 +138,7 @@ struct ProwserCommands: Commands {
 
                 Divider()
 
-                Button("Undo Delete") {
-                    Task { @MainActor in appState.fileOperations.undoLastFileOperation() }
-                }
-                .keyboardShortcut("z", modifiers: .command)
+                UndoMenuButton(appState: appState)
 
                 Divider()
 
@@ -390,16 +387,16 @@ struct ProwserCommands: Commands {
                     Divider()
 
                     Button("Fit (Contain)") {
-                        Task { @MainActor in setWallpaper(scaling: .contain, persist: true) }
+                        Task { @MainActor in setWallpaper(fitMethod: .contain, persist: true) }
                     }
                     Button("Fill (Cover)") {
-                        Task { @MainActor in setWallpaper(scaling: .cover, persist: true) }
+                        Task { @MainActor in setWallpaper(fitMethod: .cover, persist: true) }
                     }
                     Button("Fit to Width") {
-                        Task { @MainActor in setWallpaper(scaling: .fitWidth, persist: true) }
+                        Task { @MainActor in setWallpaper(fitMethod: .width, persist: true) }
                     }
                     Button("Fit to Height") {
-                        Task { @MainActor in setWallpaper(scaling: .fitHeight, persist: true) }
+                        Task { @MainActor in setWallpaper(fitMethod: .height, persist: true) }
                     }
                 }
 
@@ -545,36 +542,23 @@ struct ProwserCommands: Commands {
 
     @MainActor
     private func setWallpaperLastUsed() {
-        let method = appState.config.string(forKey: "last_used_wallpaper_fit_method", default: "contain")
-        let scaling: WallpaperService.Scaling
-        switch method {
-        case "cover": scaling = .cover
-        case "fitWidth": scaling = .fitWidth
-        case "fitHeight": scaling = .fitHeight
-        default: scaling = .contain
-        }
-        setWallpaper(scaling: scaling, persist: false)
+        let method = WallpaperManager.FitMethod(
+            configValue: appState.config.string(forKey: "last_used_wallpaper_fit_method", default: "contain")
+        )
+        setWallpaper(fitMethod: method, persist: false)
     }
 
     @MainActor
-    private func setWallpaper(scaling: WallpaperService.Scaling, persist: Bool) {
+    private func setWallpaper(fitMethod: WallpaperManager.FitMethod, persist: Bool) {
         guard let path = wallpaperSourcePath() else {
             appState.status.show("No image selected")
             return
         }
         do {
-            try WallpaperService.setWallpaper(path: path, scaling: scaling)
+            try appState.wallpaperManager.setImageAsDesktopBackground(imagePath: path, fitMethod: fitMethod)
             if persist {
-                let key: String
-                switch scaling {
-                case .contain: key = "contain"
-                case .cover: key = "cover"
-                case .fitWidth: key = "fitWidth"
-                case .fitHeight: key = "fitHeight"
-                }
-                appState.config.updateSetting("last_used_wallpaper_fit_method", value: key)
+                appState.config.updateSetting("last_used_wallpaper_fit_method", value: fitMethod.configValue)
             }
-            appState.status.show("Desktop wallpaper updated")
         } catch {
             StyledMessageDialog.showWarning(
                 title: "Cannot Set Wallpaper",
@@ -583,6 +567,19 @@ struct ProwserCommands: Commands {
         }
     }
 
+}
+
+@MainActor
+private struct UndoMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button(appState.menuRefresh.undoMenuTitle) {
+            Task { @MainActor in appState.fileOperations.undoLastFileOperation() }
+        }
+        .keyboardShortcut("z", modifiers: .command)
+        .disabled(!appState.menuRefresh.undoMenuEnabled)
+    }
 }
 
 @MainActor

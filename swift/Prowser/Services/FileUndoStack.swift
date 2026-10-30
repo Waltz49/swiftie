@@ -49,6 +49,8 @@ final class FileUndoStack {
         stack.popLast()
     }
 
+    var peekLast: FileUndoOperation? { stack.last }
+
     func clear() {
         stack.removeAll()
     }

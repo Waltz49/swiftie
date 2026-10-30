@@ -19,6 +19,8 @@ final class MenuRefreshState {
     /// Tools → Exclude Thumbs from View (⌘X); thumbnail view only when exclude rules are enabled.
     var excludeFilesFromViewVisible = false
     var moveToTrashMenuTitle = "Move File to Trash"
+    var undoMenuTitle = "Undo"
+    var undoMenuEnabled = false
     var quickMassRenameMenuVisible = false
     var lockUnlockMenuVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
@@ -36,6 +38,7 @@ final class MenuRefreshState {
         refreshExcludeFilesFromView(appState: appState)
         refreshDeleteExifDate(appState: appState)
         refreshMoveToTrashMenu(appState: appState)
+        refreshUndoMenu(appState: appState)
         refreshQuickMassRenameMenu(appState: appState)
         refreshLockUnlockMenu(appState: appState)
     }
@@ -58,6 +61,7 @@ final class MenuRefreshState {
         refreshDeleteExifDate(appState: appState)
         refreshExcludeFilesFromView(appState: appState)
         refreshMoveToTrashMenu(appState: appState)
+        refreshUndoMenu(appState: appState)
         refreshQuickMassRenameMenu(appState: appState)
         refreshLockUnlockMenu(appState: appState)
     }
@@ -88,6 +92,27 @@ final class MenuRefreshState {
         moveToTrashMenuTitle = paths.count > 1
             ? "Move Files to Trash\(ellipsis)"
             : "Move File to Trash\(ellipsis)"
+    }
+
+    func refreshUndoMenu(appState: AppState) {
+        if appState.wallpaperManager.canUndoWallpaper {
+            undoMenuTitle = "Undo Wallpaper"
+            undoMenuEnabled = true
+            return
+        }
+        guard let operation = appState.fileOperations.pendingFileUndoOperation else {
+            undoMenuTitle = "Undo"
+            undoMenuEnabled = false
+            return
+        }
+        switch operation {
+        case .move:
+            undoMenuTitle = "Undo Move"
+            undoMenuEnabled = true
+        case .delete:
+            undoMenuTitle = "Undo Delete"
+            undoMenuEnabled = true
+        }
     }
 
     func refreshQuickMassRenameMenu(appState: AppState) {

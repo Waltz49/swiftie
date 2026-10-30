@@ -745,7 +745,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 directory: currentDirectory,
                 filterPattern: filterPattern,
                 directoryListingDenied: directoryListingDenied,
-                isLoadingDirectory: isLoadingDirectory
+                isLoadingDirectory: isLoadingDirectory,
+                directoryListingInProgress: appState?.isLoadingDirectory == true && !isLoadingDirectory
             ) {
                 filterButtons = ThumbnailEmptyStateRenderer.draw(
                     in: area,

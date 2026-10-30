@@ -141,7 +141,7 @@ struct DirectoriesSettingsTab: View {
                             persistTemporaryFiles()
                         }
                     }
-                    Text("Directory to use for wallpaper, conversions, resize, and other operations.")
+                    Text("Directory for infill, masking, image generation, conversions, resize, and similar work. Wallpaper files are stored under the profile wallpaper folder.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
