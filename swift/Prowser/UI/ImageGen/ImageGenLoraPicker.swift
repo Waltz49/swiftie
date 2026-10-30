@@ -495,10 +495,19 @@ struct ImageGenLoraPicker: View {
             return
         }
         selectionDetailLine = ids.map { id in
-            let label = labelForPresetID(id) ?? id
+            let name = selectionDetailName(for: id)
             let scale = scales[id] ?? 1
-            return "\(label) [\(formatLoraScale(scale))]"
-        }.joined(separator: ", ")
+            return "\(name) [\(formatLoraScale(scale))]"
+        }.joined(separator: "\n")
+    }
+
+    /// Info line under the LoRA pulldown: catalog name + scale only (no trigger hints).
+    private func selectionDetailName(for presetID: String) -> String {
+        var name = labelForPresetID(presetID) ?? presetID
+        if let triggerRange = name.range(of: " - Trigger:") {
+            name = String(name[..<triggerRange.lowerBound])
+        }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func mfluxLoraStackIDs(from raw: Any?) -> [String] {

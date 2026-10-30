@@ -49,19 +49,32 @@ struct PrefixPostfixSheet: View {
                 }
                 .width(44)
                 TableColumn("Text") { entry in
-                    Text(entry.text).lineLimit(2)
+                    Button {
+                        editingEntry = entry
+                    } label: {
+                        Text(displayText(for: entry))
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .help(entry.text.isEmpty ? "Edit text" : entry.text)
                 }
                 TableColumn("On") { entry in
                     SettingsPreferenceSwitch(isOn: binding(for: entry.id, key: .active))
                 }
                 .width(44)
                 TableColumn("") { entry in
-                    HStack {
-                        Button("Edit") { editingEntry = entry }
-                        Button("Delete") { deleteEntry(entry.id) }
-                    }
+                    AppAssetIconButton(
+                        normalName: "trash_icon",
+                        hoverName: "trash_icon_hover",
+                        size: 22,
+                        iconSize: 14,
+                        tooltip: "Delete",
+                        action: { deleteEntry(entry.id) }
+                    )
+                    .focusable(false)
                 }
-                .width(100)
+                .width(44)
             }
 
             DialogButtonRow([
@@ -130,6 +143,10 @@ struct PrefixPostfixSheet: View {
                 }
             }
         )
+    }
+
+    private func displayText(for entry: PrefixPostfixEntry) -> String {
+        entry.text.replacingOccurrences(of: "\n", with: "\\n")
     }
 
     private func addEntry() {
