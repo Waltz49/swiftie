@@ -81,12 +81,20 @@ struct ImageGenDimSliderRow: View {
             )
             .frame(width: valueControlWidth)
             if includesReset {
+                let trashIcons = ImageGenChrome.fieldResetTrashIcons(
+                    fieldKey: key,
+                    compactTrack: compactTrack
+                )
                 ImageGenFieldResetButton(
                     isActive: !ImageGenFieldResetLogic.matchesDefault(
                         current: values[key],
                         resetDefault: resetDefault,
                         kind: "int_slider"
                     ),
+                    normalName: trashIcons.normalName,
+                    hoverName: trashIcons.hoverName,
+                    fileExtension: trashIcons.normalExtension,
+                    hoverFileExtension: trashIcons.hoverExtension,
                     tooltip: "Reset to default",
                     action: resetToDefault
                 )
@@ -194,12 +202,20 @@ struct ImageGenIntSliderRow: View {
                     .foregroundStyle(.secondary)
             }
             if includesReset {
+                let trashIcons = ImageGenChrome.fieldResetTrashIcons(
+                    fieldKey: key,
+                    compactTrack: compactTrack
+                )
                 ImageGenFieldResetButton(
                     isActive: !ImageGenFieldResetLogic.matchesDefault(
                         current: values[key],
                         resetDefault: resetDefault,
                         kind: "int_slider"
                     ),
+                    normalName: trashIcons.normalName,
+                    hoverName: trashIcons.hoverName,
+                    fileExtension: trashIcons.normalExtension,
+                    hoverFileExtension: trashIcons.hoverExtension,
                     tooltip: "Reset to default",
                     action: resetToDefault
                 )

@@ -33,6 +33,8 @@ struct AppAssetIconButton: View {
     let normalName: String
     let hoverName: String
     var fileExtension: String = "png"
+    /// When hover assets use a different format than ``fileExtension`` (e.g. red trash webp + gray hover png).
+    var hoverFileExtension: String? = nil
     var size: CGFloat = 26
     var iconSize: CGFloat? = nil
     var tooltip: String = ""
@@ -44,10 +46,18 @@ struct AppAssetIconButton: View {
         iconSize ?? max(12, size - 10)
     }
 
+    private func fileExtension(forHover: Bool) -> String {
+        if forHover, let hoverFileExtension {
+            return hoverFileExtension
+        }
+        return fileExtension
+    }
+
     var body: some View {
         Button(action: action) {
             let imageName = isHovered ? hoverName : normalName
-            if let image = AppAssets.image(name: imageName, fileExtension: fileExtension) {
+            let ext = fileExtension(forHover: isHovered)
+            if let image = AppAssets.image(name: imageName, fileExtension: ext) {
                 image
                     .resizable()
                     .scaledToFit()
@@ -72,8 +82,8 @@ struct AppAssetIconButton: View {
     }
 
     private var tooltipIcon: NSImage? {
-        AppAssets.nsImage(name: hoverName, fileExtension: fileExtension)
-            ?? AppAssets.nsImage(name: normalName, fileExtension: fileExtension)
+        AppAssets.nsImage(name: hoverName, fileExtension: fileExtension(forHover: true))
+            ?? AppAssets.nsImage(name: normalName, fileExtension: fileExtension(forHover: false))
     }
 }
 

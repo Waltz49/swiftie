@@ -97,6 +97,10 @@ struct ImageGenPromptActionButtons: View {
 @MainActor
 struct ImageGenFieldResetButton: View {
     let isActive: Bool
+    var normalName: String = "trash_icon"
+    var hoverName: String = "trash_icon_hover"
+    var fileExtension: String = "png"
+    var hoverFileExtension: String? = nil
     let tooltip: String
     let action: () -> Void
 
@@ -104,8 +108,10 @@ struct ImageGenFieldResetButton: View {
         Group {
             if isActive {
                 AppAssetIconButton(
-                    normalName: "trash_icon",
-                    hoverName: "trash_icon_hover",
+                    normalName: normalName,
+                    hoverName: hoverName,
+                    fileExtension: fileExtension,
+                    hoverFileExtension: hoverFileExtension,
                     size: ImageGenChrome.fieldButtonSize,
                     iconSize: ImageGenChrome.fieldResetIconSize,
                     tooltip: tooltip,
@@ -122,6 +128,31 @@ struct ImageGenFieldResetButton: View {
 enum ImageGenChrome {
     static let fieldButtonSize: CGFloat = 26
     static let fieldResetIconSize: CGFloat = 16
+
+    struct FieldResetTrashIcons {
+        var normalName: String
+        var hoverName: String
+        var normalExtension: String
+        var hoverExtension: String
+    }
+
+    /// Unified dialog Steps / Copies use ``red_trash_icon.png`` (opaque white backing), not the cutout webp.
+    static func fieldResetTrashIcons(fieldKey: String, compactTrack: Bool) -> FieldResetTrashIcons {
+        if compactTrack, fieldKey == "copies" || fieldKey == "steps" {
+            return FieldResetTrashIcons(
+                normalName: "red_trash_icon",
+                hoverName: "trash_icon_hover",
+                normalExtension: "png",
+                hoverExtension: "png"
+            )
+        }
+        return FieldResetTrashIcons(
+            normalName: "trash_icon",
+            hoverName: "trash_icon_hover",
+            normalExtension: "png",
+            hoverExtension: "png"
+        )
+    }
     static let promptClearButtonSize: CGFloat = 21
     static let promptClearIconSize: CGFloat = 13
     static let dimHelperButtonSize: CGFloat = 22

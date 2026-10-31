@@ -1002,6 +1002,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
            let pillRect = filenamePillRect(for: index),
            pillRect.contains(point),
            showFilenames || showImageSize {
+            suppressBrowseActivation = true
             beginInlineRename(path: imagePaths[index])
             return
         }
@@ -1045,6 +1046,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         if showsEmptyCanvas {
             let point = convert(event.locationInWindow, from: nil)
             handleEmptyStateClick(at: point)
+            return
+        }
+        if renameEditor != nil {
+            resetDragState()
             return
         }
         let point = convert(event.locationInWindow, from: nil)
