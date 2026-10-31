@@ -277,6 +277,7 @@ final class ImageGenPromptPlainTextHostView: NSView {
     private var heightConstraint: NSLayoutConstraint?
     private var minLines = ImageGenPromptLayout.defaultMinLines
     private var maxLines = ImageGenPromptLayout.defaultMaxLines
+    private var lastLayoutWidth: CGFloat = 0
     private weak var coordinator: ImageGenPromptPlainTextEdit.Coordinator?
 
     private(set) var userScrolledDuringStream = false
@@ -359,6 +360,14 @@ final class ImageGenPromptPlainTextHostView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: heightConstraint?.constant ?? 80)
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(newSize.width - frame.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged {
+            refreshHeightAndScrollPolicy()
+        }
+    }
+
     override func layout() {
         super.layout()
         refreshHeightAndScrollPolicy()
@@ -388,7 +397,16 @@ final class ImageGenPromptPlainTextHostView: NSView {
 
     func refreshHeightAndScrollPolicy() {
         let font = textView.font ?? .systemFont(ofSize: NSFont.systemFontSize)
-        let contentLines = Self.contentLineCount(textView: textView)
+        let inset = textView.textContainerInset.width * 2
+        let containerWidth = max(1, bounds.width - inset)
+        let contentLines = Self.contentLineCount(
+            textView: textView,
+            containerWidth: containerWidth
+        )
+        if abs(containerWidth - lastLayoutWidth) > 0.5 {
+            lastLayoutWidth = containerWidth
+            textView.needsDisplay = true
+        }
         let visibleLines = ImageGenPromptLayout.clampedVisibleLines(
             contentLines: contentLines,
             minLines: minLines,
@@ -414,13 +432,18 @@ final class ImageGenPromptPlainTextHostView: NSView {
         userScrolledDuringStream = false
     }
 
-    static func contentLineCount(textView: NSTextView) -> Int {
+    static func contentLineCount(textView: NSTextView, containerWidth: CGFloat? = nil) -> Int {
         guard let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer
         else { return 1 }
 
-        let inset = textView.textContainerInset.width * 2
-        let width = max(1, textView.bounds.width - inset)
+        let width: CGFloat
+        if let containerWidth {
+            width = max(1, containerWidth)
+        } else {
+            let inset = textView.textContainerInset.width * 2
+            width = max(1, textView.bounds.width - inset)
+        }
         if width > 1 {
             textContainer.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         }

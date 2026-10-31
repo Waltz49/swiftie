@@ -61,12 +61,23 @@ struct ImageGenPanelClientScrollView<Content: View>: NSViewRepresentable {
         weak var document: ImageGenPanelClientScrollDocumentView?
         weak var hosting: NSHostingView<Content>?
         private var widthObserver: NSObjectProtocol?
+        private var frameObserver: NSObjectProtocol?
 
         func installWidthObservation(on scrollView: NSScrollView) {
             scrollView.contentView.postsBoundsChangedNotifications = true
             widthObserver = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
                 object: scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.scheduleLayout()
+                }
+            }
+            scrollView.postsFrameChangedNotifications = true
+            frameObserver = NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification,
+                object: scrollView,
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -83,7 +94,7 @@ struct ImageGenPanelClientScrollView<Content: View>: NSViewRepresentable {
 
         private func layoutDocument() {
             guard let scrollView, let document, let hosting else { return }
-            let width = max(1, scrollView.contentView.bounds.width)
+            let width = max(1, scrollView.bounds.width)
             if hosting.frame.width != width {
                 hosting.frame.size.width = width
             }
@@ -101,6 +112,9 @@ struct ImageGenPanelClientScrollView<Content: View>: NSViewRepresentable {
         deinit {
             if let widthObserver {
                 NotificationCenter.default.removeObserver(widthObserver)
+            }
+            if let frameObserver {
+                NotificationCenter.default.removeObserver(frameObserver)
             }
         }
     }
