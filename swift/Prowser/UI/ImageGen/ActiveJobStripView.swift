@@ -25,6 +25,7 @@ struct ActiveJobStripView: View {
 @MainActor
 final class ActiveJobStripNSView: NSView {
     var onCancel: (() -> Void)?
+    var onEdit: (() -> Void)?
     var onSkipCooldown: (() -> Void)?
     var onAddSeries: ((Int, Bool) -> Void)?
     var onSubtractSeries: ((Bool) -> Void)?
@@ -404,11 +405,17 @@ final class ActiveJobStripNSView: NSView {
         seriesRow.addArrangedSubview(plus)
         seriesRow.addArrangedSubview(minus)
 
+        let actionRow = NSStackView()
+        actionRow.orientation = .horizontal
+        actionRow.spacing = 4
+        actionRow.alignment = .centerY
+        actionRow.addArrangedSubview(makeEditIconButton())
         let trash = makeCancelIconButton()
         cancelButton = trash
+        actionRow.addArrangedSubview(trash)
 
         column.addArrangedSubview(seriesRow)
-        column.addArrangedSubview(trash)
+        column.addArrangedSubview(actionRow)
 
         iconColumn.addSubview(column)
         NSLayoutConstraint.activate([
@@ -458,6 +465,19 @@ final class ActiveJobStripNSView: NSView {
         )
     }
 
+    private func makeEditIconButton() -> NSAssetIconButton {
+        makeStripIconButton(
+            normalName: "edit_icon",
+            hoverName: "edit_icon_hover",
+            tooltip: """
+            Replicate job settings…
+            For a pending job, use Replace in the dialog to update it in place.
+            For a running batch job, use Update to change remaining copies.
+            """,
+            action: #selector(editAction)
+        )
+    }
+
     private func makeCancelIconButton() -> NSButton {
         makeStripIconButton(
             normalName: "trash_icon",
@@ -467,6 +487,7 @@ final class ActiveJobStripNSView: NSView {
         )
     }
 
+    @objc private func editAction() { onEdit?() }
     @objc private func cancelAction() { onCancel?() }
     @objc private func addSeriesAction() {
         onAddSeries?(1, NSEvent.modifierFlags.contains(.option))
@@ -518,6 +539,7 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     @MainActor
     private func wireStripActions(on nsView: ActiveJobStripNSView, appState: AppState) {
         nsView.onCancel = { appState.confirmCancelGeneration() }
+        nsView.onEdit = { appState.editActiveQueueJob() }
         nsView.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
         nsView.onAddSeries = { delta, option in
             guard let jobID = appState.imageGen.activeJobID else { return }
