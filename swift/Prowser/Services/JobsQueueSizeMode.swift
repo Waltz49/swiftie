@@ -78,6 +78,10 @@ enum JobQueuePaneMetrics {
             if rowCount > 0 { content += 2 }
             content += rowLine + 4
         }
+        if strip.showCancelIcon {
+            let iconBlock = JobQueueLayout.stripIconSize * 2 + 2
+            content = max(content, iconBlock)
+        }
         // Match ``ActiveJobStripNSView.measuredContentHeight`` frame chrome (border + inner padding).
         return 10 + max(content, 18)
     }

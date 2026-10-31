@@ -7,19 +7,21 @@ extension AppState {
     func scheduleJobsPaneGeometryRefit() {
         let snapping = jobsSurfaceExactSnapPasses > 0
         guard snapping || jobsDisplayMode == .pane else { return }
-        if rightSidebarSplit.userPaneResizeInProgress {
+        if rightSidebarSplit.userPaneResizeInProgress || isAdjustingJobsPaneGeometry {
             jobsPaneRefitDeferred = true
-            return
-        }
-        if isAdjustingJobsPaneGeometry {
-            jobsPaneRefitDeferred = true
-            return
         }
         jobsPaneResizeDebounce?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.jobsPaneResizeDebounce = nil
             if self.isAdjustingJobsPaneGeometry {
+                self.jobsPaneRefitDeferred = true
+                DispatchQueue.main.async { [weak self] in
+                    self?.scheduleJobsPaneGeometryRefit()
+                }
+                return
+            }
+            if self.rightSidebarSplit.userPaneResizeInProgress {
                 self.jobsPaneRefitDeferred = true
                 return
             }
@@ -28,16 +30,15 @@ extension AppState {
                 let lastPass = self.jobsSurfaceExactSnapPasses == 0
                 if self.applyJobsSurfaceExactSnap(allowIncomplete: lastPass) || lastPass {
                     self.jobsSurfaceExactSnapPasses = 0
-                    self.jobsPaneGeometryForceRefit = false
                 } else {
                     self.scheduleJobsPaneGeometryRefit()
+                    return
                 }
-                return
             }
             guard self.jobsDisplayMode == .pane else { return }
             let forceRefit = self.jobsPaneGeometryForceRefit
             self.jobsPaneGeometryForceRefit = false
-            if !forceRefit, !self.shouldAutoResizeJobsSidebarPane() {
+            if !self.shouldInvokeJobsPaneEnsureFitsRefit(forceRefit: forceRefit) {
                 return
             }
             self.rightSidebarSplit.ensureJobsPaneFitsContent(appState: self, forceRefit: forceRefit)
@@ -106,7 +107,49 @@ extension AppState {
     }
 
     func noteJobsQueuePanelMeasurement(panelHeight: CGFloat) {
+        guard jobsQueueCardDetailsReadyForSizing() else { return }
+        let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: panelHeight)
+        guard abs(jobsQueuePanelIntrinsicHeight - panelHeight) > tolerance else { return }
         jobsQueuePanelIntrinsicHeight = panelHeight
+        guard shouldScheduleJobsPaneRefitForContentChange(onQueueChange: true) else { return }
+        scheduleJobsPaneGeometryRefit()
+    }
+
+    /// Port of Python ``auto_sidebar_pane_content_height`` / ``prepare_size_measure`` gating:
+    /// do not shrink the jobs pane from stale zeros or default card heights.
+    func jobsPaneFitMeasurementsReady() -> Bool {
+        let mode = jobsQueueSizeMode
+        let jobCount = visibleJobsQueueRowCount()
+        let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
+
+        if mode == .strip {
+            if !showsStrip { return true }
+            if measuredActiveJobStripHeight > 0 { return true }
+            return JobQueuePaneMetrics.estimatedActiveStripHeight(for: imageGen.activeStripView) > 28
+        }
+
+        if jobCount == 0 {
+            if !showsStrip { return true }
+            return measuredActiveJobStripHeight > 0
+                || JobQueuePaneMetrics.estimatedActiveStripHeight(for: imageGen.activeStripView) > 28
+        }
+
+        guard let host = jobsQueuePanelMeasureHost else { return false }
+        let panel = host.panel
+        if panel.isLaidOutAtPlaceholderWidth { return false }
+        let expected = mode == .one ? min(1, jobCount) : jobCount
+        if panel.displayedRowCount != expected { return false }
+
+        guard jobsQueueCardDetailsReadyForSizing() else { return false }
+
+        let queueBlock = max(jobsQueuePanelIntrinsicHeight, measuredJobsCardStackHeight)
+        let actionBarFloor = 40 + JobQueueLayout.actionBarHeight
+        guard queueBlock > actionBarFloor else { return false }
+
+        if showsStrip, measuredActiveJobStripHeight <= 0 {
+            return JobQueuePaneMetrics.estimatedActiveStripHeight(for: imageGen.activeStripView) > 28
+        }
+        return true
     }
 
     /// Sidebar jobs pane body height from live AppKit measurements (not formula estimates).
@@ -139,14 +182,31 @@ extension AppState {
         var body = JobQueuePaneMetrics.panelPadding * 2
 
         if showsStrip {
-            body += max(measuredActiveJobStripHeight, 28)
+            let stripEstimate = JobQueuePaneMetrics.estimatedActiveStripHeight(for: imageGen.activeStripView)
+            body += max(measuredActiveJobStripHeight, stripEstimate, 28)
             if mode != .strip, jobCount > 0 || imageGen.isProcessing {
                 body += JobQueuePaneMetrics.vstackSpacing
             }
         }
 
         if mode != .strip {
-            body += max(jobsQueuePanelIntrinsicHeight, measuredJobsCardStackHeight, 40)
+            var queueBlock = max(jobsQueuePanelIntrinsicHeight, measuredJobsCardStackHeight)
+            if jobCount > 0, let host = jobsQueuePanelMeasureHost {
+                let width = host.panel.layoutViewportWidth()
+                if width > 1 {
+                    queueBlock = max(
+                        queueBlock,
+                        host.panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
+                    )
+                }
+            }
+            if jobCount > 0 {
+                if queueBlock > 0 {
+                    body += max(queueBlock, 40)
+                }
+            } else if queueBlock > 0 {
+                body += queueBlock
+            }
         }
 
         let bottom = JobQueuePaneMetrics.paneAutoResizeBottomInset(
@@ -169,12 +229,39 @@ extension AppState {
         return header + max(content, SidebarPaneLayout.minJobsQueueContentHeight)
     }
 
+    /// Port of ``JobQueuePanelWidget._deferred_generation_geometry_sync`` + ⌘\\ re-apply current mode.
+    func scheduleJobsPaneLayoutSettleRefresh() {
+        guard jobsDisplayMode == .pane else { return }
+        jobsPaneLayoutSettleToken += 1
+        let token = jobsPaneLayoutSettleToken
+        let delaysMs: [Int] = [0, 50, 200]
+        for (index, delayMs) in delaysMs.enumerated() {
+            let finalPass = index == delaysMs.count - 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs)) { [weak self] in
+                self?.performJobsPaneLayoutSettleRefresh(expectedToken: token, finalPass: finalPass)
+            }
+        }
+    }
+
+    private func performJobsPaneLayoutSettleRefresh(expectedToken: Int, finalPass: Bool) {
+        guard expectedToken == jobsPaneLayoutSettleToken else { return }
+        guard jobsDisplayMode == .pane else { return }
+        jobsQueuePanelSync?()
+        jobsQueueStripMeasureRefresh?()
+        guard finalPass else { return }
+        refreshJobsPaneLiveMeasurements()
+        jobsPaneGeometryForceRefit = true
+        scheduleJobsPaneGeometryRefit()
+    }
+
     func refreshJobsPaneLiveMeasurements() {
         jobsQueueStripMeasureRefresh?()
         jobsQueuePanelSync?()
         guard let host = jobsQueuePanelMeasureHost else { return }
         let width = host.panel.layoutViewportWidth()
         let mode = jobsQueueSizeMode
-        jobsQueuePanelIntrinsicHeight = host.panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
+        noteJobsQueuePanelMeasurement(
+            panelHeight: host.panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
+        )
     }
 }

@@ -14,6 +14,9 @@ struct JobQueuePanelView: View {
     var body: some View {
         let _ = appState.imageGenUIRevision
         let _ = appState.measuredJobsCardStackHeight
+        let _ = appState.jobsQueuePanelIntrinsicHeight
+        let _ = appState.jobsQueuePanelLayoutRevision
+        let _ = appState.jobsQueueStatusDetailsRevision
         let _ = appState.jobsShowHeldJobs
         let controller = appState.imageGen
         let _ = controller.queueRevision
@@ -40,6 +43,12 @@ struct JobQueuePanelView: View {
         .modifier(JobQueuePanelVerticalSizing(fillsAvailableHeight: fillsAvailableHeight))
         .background(appState.theme.colors.sidebarBackground)
         .onAppear {
+            appState.scheduleJobsPaneLayoutSettleRefresh()
+        }
+        .onChange(of: appState.measuredJobsCardStackHeight) { _, _ in
+            appState.syncJobsPaneGeometry()
+        }
+        .onChange(of: appState.jobsQueuePanelIntrinsicHeight) { _, _ in
             appState.syncJobsPaneGeometry()
         }
         .onChange(of: mode) { _, _ in
@@ -105,11 +114,19 @@ struct JobQueuePanelView: View {
             stripModeBody(controller: controller)
         case .one:
             JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
+                .frame(
+                    minHeight: max(appState.jobsQueuePanelIntrinsicHeight, appState.measuredJobsCardStackHeight, 40),
+                    alignment: .topLeading
+                )
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
         case .all:
             if appState.visibleJobsQueueRowCount() <= 1 {
                 JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
+                    .frame(
+                        minHeight: max(appState.jobsQueuePanelIntrinsicHeight, appState.measuredJobsCardStackHeight, 40),
+                        alignment: .topLeading
+                    )
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .contentShape(Rectangle())
             } else {

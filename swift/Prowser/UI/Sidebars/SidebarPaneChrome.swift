@@ -149,6 +149,11 @@ struct SidebarPaneSection<Content: View>: View {
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
     @ViewBuilder let content: () -> Content
 
+    private var isJobsPaneContext: Bool {
+        if case .jobs = contextMenuKind { return true }
+        return false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             SidebarPaneTitlebar(
@@ -170,7 +175,7 @@ struct SidebarPaneSection<Content: View>: View {
             if isExpanded {
                 content()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .clipped()
+                    .modifier(SidebarPaneOverflowClip(enabled: !isJobsPaneContext))
                     .background(appState.theme.colors.sidebarBackground)
                     .overlay(alignment: .leading) {
                         if !omitLeftBorder {
@@ -202,6 +207,11 @@ struct SidebarPaneBody<Content: View>: View {
     let kind: SidebarPaneContextMenuKind?
     @ViewBuilder let content: () -> Content
 
+    private var isJobsContextMenu: Bool {
+        if case .jobs = kind { return true }
+        return false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let kind, toolbarVisible(for: kind) {
@@ -209,7 +219,7 @@ struct SidebarPaneBody<Content: View>: View {
             }
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .clipped()
+                .modifier(SidebarPaneOverflowClip(enabled: !isJobsContextMenu))
         }
         .overlay {
             if let kind, !usesInternalContextMenu(kind) {
@@ -247,6 +257,20 @@ struct SidebarPaneBody<Content: View>: View {
             return appState.informationMenuBarVisible
         case .jobs:
             return appState.jobsToolbarVisible
+        }
+    }
+}
+
+/// Clips pane overflow for upper sidebar sections; the jobs pane sits on the bottom edge and
+/// does not need bottom clipping when content is slightly taller than the splitter slice.
+struct SidebarPaneOverflowClip: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.clipped()
+        } else {
+            content
         }
     }
 }

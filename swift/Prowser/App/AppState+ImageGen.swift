@@ -352,8 +352,24 @@ extension AppState {
     }
 
     func growJobsPaneForActionBar(extra: CGFloat) {
-        guard jobsDisplayMode == .pane, !isAdjustingJobsPaneGeometry else { return }
-        rightSidebarSplit.growJobsPaneForActionBar(extraContentHeight: extra, appState: self)
+        guard jobsDisplayMode == .pane, extra > 0 else { return }
+        if isAdjustingJobsPaneGeometry {
+            jobsPaneRefitDeferred = true
+            return
+        }
+        let mode = jobsQueueSizeMode
+        let shrinkWrap = shouldShrinkWrapJobsClient()
+        let jobCount = visibleJobsQueueRowCount()
+        let usesFixedContent = mode == .one || mode == .strip
+            || (mode == .all && (shrinkWrap || jobCount <= 1))
+
+        if mode == .all, !shrinkWrap, jobCount > 1 {
+            rightSidebarSplit.growJobsPaneForActionBar(extraContentHeight: extra, appState: self)
+        } else if usesFixedContent {
+            syncJobsPaneGeometry()
+        } else {
+            rightSidebarSplit.growJobsPaneForActionBar(extraContentHeight: extra, appState: self)
+        }
     }
 
     func updateMeasuredActiveJobStripHeight(_ height: CGFloat) {
@@ -371,15 +387,21 @@ extension AppState {
         }
         guard abs(measuredActiveJobStripHeight - height) > refitTolerance else { return }
         measuredActiveJobStripHeight = height
-        guard shouldScheduleJobsPaneRefitForContentChange() else { return }
+        guard shouldScheduleJobsPaneRefitForContentChange(onQueueChange: false) else { return }
         scheduleJobsPaneGeometryRefit()
     }
 
     func updateMeasuredJobsQueueGeometry(cardStackHeight: CGFloat) {
+        guard jobsQueueCardDetailsReadyForSizing() else { return }
         let tolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: cardStackHeight)
+        let grew = cardStackHeight > measuredJobsCardStackHeight + tolerance
         guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
         measuredJobsCardStackHeight = cardStackHeight
-        guard shouldScheduleJobsPaneRefitForContentChange() else { return }
+        jobsQueuePanelLayoutRevision += 1
+        if grew {
+            jobsPaneGeometryForceRefit = true
+        }
+        guard shouldScheduleJobsPaneRefitForContentChange(onQueueChange: true) else { return }
         scheduleJobsPaneGeometryRefit()
     }
 
@@ -393,10 +415,48 @@ extension AppState {
         }
     }
 
+    /// Port of ``JobQueuePanelWidget.should_auto_resize_sidebar_on_queue_change``.
+    func shouldAutoResizeJobsSidebarOnQueueChange() -> Bool {
+        switch jobsQueueSizeMode {
+        case .one:
+            return true
+        case .strip:
+            return false
+        case .all:
+            return shouldShrinkWrapJobsClient() || visibleJobsQueueRowCount() <= 1
+        }
+    }
+
     /// Port of panel geometry notify gating (not ``JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE``).
-    func shouldScheduleJobsPaneRefitForContentChange() -> Bool {
+    func shouldScheduleJobsPaneRefitForContentChange(onQueueChange: Bool = false) -> Bool {
         guard jobsDisplayMode == .pane else { return false }
+        if onQueueChange {
+            return shouldScheduleJobsPaneRefitForQueueChange()
+        }
         return shouldAutoResizeJobsSidebarPane()
+    }
+
+    /// Port of ``JobQueuePanelWidget._notify_sidebar_geometry_if_needed`` queue-change branch.
+    func shouldScheduleJobsPaneRefitForQueueChange() -> Bool {
+        if shouldAutoResizeJobsSidebarOnQueueChange() { return true }
+        if jobsQueueSizeMode == .all,
+           visibleJobsQueueRowCount() > 1,
+           !shouldShrinkWrapJobsClient() {
+            return true
+        }
+        return false
+    }
+
+    /// Whether ``ensureJobsPaneFitsContent`` should run (includes multijob grow-only refit).
+    func shouldInvokeJobsPaneEnsureFitsRefit(forceRefit: Bool) -> Bool {
+        if forceRefit { return true }
+        if shouldAutoResizeJobsSidebarPane() { return true }
+        if jobsQueueSizeMode == .all,
+           visibleJobsQueueRowCount() > 1,
+           !shouldShrinkWrapJobsClient() {
+            return true
+        }
+        return false
     }
 
     func beginJobsPaneGeometryAdjustment() {
@@ -407,7 +467,7 @@ extension AppState {
         isAdjustingJobsPaneGeometry = false
         if jobsPaneRefitDeferred {
             jobsPaneRefitDeferred = false
-            guard shouldAutoResizeJobsSidebarPane() else { return }
+            guard shouldInvokeJobsPaneEnsureFitsRefit(forceRefit: false) else { return }
             scheduleJobsPaneGeometryRefit()
         }
     }
@@ -656,6 +716,17 @@ extension AppState {
 
     func visibleJobsQueueRowCount() -> Int {
         filteredQueueSnapshot().count
+    }
+
+    /// Pane sizing must wait until async ``refreshQueuedJobStatus`` has built row status views.
+    func jobsQueueCardDetailsReadyForSizing() -> Bool {
+        let rows = jobsQueueRowsForDisplay(mode: jobsQueueSizeMode)
+        guard !rows.isEmpty else { return true }
+        return rows.allSatisfy { imageGen.isQueueRowStatusDetailReady($0) }
+    }
+
+    func isQueueRowStatusDetailReady(_ row: QueueRowSnapshot) -> Bool {
+        imageGen.isQueueRowStatusDetailReady(row)
     }
 
     func setJobsPanelAlwaysOnTop(_ enabled: Bool) {

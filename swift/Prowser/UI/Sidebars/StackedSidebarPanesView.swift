@@ -59,19 +59,19 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .onAppear {
-                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
+                relayout(totalHeight: geometry.size.height, displayed: displayed)
             }
             .onChange(of: geometry.size.height) { _, newHeight in
-                relayout(totalHeight: newHeight, displayedCount: displayed.count)
+                relayout(totalHeight: newHeight, displayed: displayed)
             }
             .onChange(of: appState.sidebarLayoutRevision) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
+                relayout(totalHeight: geometry.size.height, displayed: displayed)
             }
             .onChange(of: appState.jobsDisplayMode) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
+                relayout(totalHeight: geometry.size.height, displayed: displayed)
             }
             .onChange(of: appState.jobsQueueSizeMode) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayedCount: displayed.count)
+                relayout(totalHeight: geometry.size.height, displayed: displayed)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -84,17 +84,6 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                     .frame(width: CGFloat(max(1, appState.theme.colors.viewBorderWidthPx)))
             }
         }
-    }
-
-    private var layoutSignature: String {
-        descriptors.map { descriptor in
-            let expanded = model.paneExpanded(
-                configKey: descriptor.expandedConfigKey,
-                default: descriptor.defaultExpanded
-            )
-            return "\(descriptor.index):\(descriptor.isDisplayed):\(expanded)"
-        }.joined(separator: "|")
-        + "|jobs:\(appState.jobsDisplayMode.rawValue)|mode:\(appState.jobsQueueSizeMode.rawValue)"
     }
 
     @ViewBuilder
@@ -129,7 +118,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
 
         section
             .frame(height: paneHeight, alignment: .top)
-            .clipped()
+            .modifier(SidebarPaneOverflowClip(enabled: !descriptor.isJobsPane))
             .background {
                 if descriptor.isJobsPane {
                     JobsSidebarPanePeekExclusionAnchor()
@@ -171,14 +160,20 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         }
     }
 
-    private func relayout(totalHeight: CGFloat, displayedCount: Int) {
+    private func relayout(totalHeight: CGFloat, displayed: [SidebarPaneDescriptor]) {
         if model.userPaneResizeInProgress { return }
+        let displayedCount = displayed.count
+        guard displayedCount > 0 else { return }
         let handle = SidebarPaneLayout.splitterHandleHeight(
             viewBorderWidthPx: appState.theme.colors.viewBorderWidthPx
         )
         let splitterTotal = CGFloat(max(0, displayedCount - 1)) * handle
         let allocHeight = max(totalHeight - splitterTotal, CGFloat(displayedCount) * SidebarPaneLayout.headerHeight)
-        let updated = model.layoutSizes(totalHeight: allocHeight, appState: appState)
+        var updated = model.layoutSizes(totalHeight: allocHeight, appState: appState)
+        let drift = totalHeight - (updated.reduce(0, +) + splitterTotal)
+        if abs(drift) > 1, let bottomIndex = displayed.last?.index {
+            updated[bottomIndex] = max(SidebarPaneLayout.headerHeight, updated[bottomIndex] + drift)
+        }
         model.applySizes(updated, appState: appState, persist: false)
         refitJobsPaneIfNeeded(appState: appState)
     }

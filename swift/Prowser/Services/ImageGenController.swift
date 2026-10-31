@@ -194,6 +194,8 @@ final class ImageGenController {
     /// Second argument is true when browse should be entered (first preview or final step).
     var onProgressivePreview: ((String, Bool, Int, Int) -> Void)?
     var onQueueChanged: (() -> Void)?
+    /// Fired after async queue row status views (plugin payload) finish building.
+    var onQueueStatusDetailsReady: (() -> Void)?
 
     /// In-place progress-strip updates (fill, elapsed, cooldown count). Does not refresh job cards.
     func setStripLiveSink(
@@ -479,6 +481,10 @@ final class ImageGenController {
     }
 
     func queueSnapshot() -> [QueueRowSnapshot] {
+        if activeJobID != nil,
+           activeStatusView == nil || activeStatusView?.isEmpty == true {
+            refreshActiveJobStatusViewSynchronously()
+        }
         let activeNumber = resolvedActiveJobNumber()
         var pending = queue.jobs
             .filter { $0.jobID != activeJobID }
@@ -532,14 +538,206 @@ final class ImageGenController {
         return unheld + held
     }
 
+    /// Build queue card status from persisted job data before the sidebar paints cards.
+    func prepareQueueRowsForSidebarDisplay() {
+        for index in queue.jobs.indices {
+            let job = queue.jobs[index]
+            if job.statusView == nil || job.statusView?.isEmpty == true {
+                refreshQueuedJobStatusSynchronously(at: index, bumpRevision: false)
+            }
+        }
+        if activeJobID != nil, activeStatusView == nil || activeStatusView?.isEmpty == true {
+            refreshActiveJobStatusViewSynchronously()
+        }
+    }
+
+    /// True when the card can show plugin-built status rows (not the degraded placeholder).
+    func isQueueRowStatusDetailReady(_ row: QueueRowSnapshot) -> Bool {
+        if row.isActive {
+            guard let activeStatusView, !activeStatusView.isEmpty else { return false }
+            return true
+        }
+        guard let job = queue.jobs.first(where: { $0.jobID == row.jobID }) else { return false }
+        guard let view = job.statusView, !view.isEmpty else { return false }
+        return true
+    }
+
     private func presentationStatusView(for job: ImageGenQueuedJob) -> QueueJobStatusView? {
-        if job.inError {
+        if let index = queue.jobs.firstIndex(where: { $0.jobID == job.jobID }),
+           queue.jobs[index].statusView == nil || queue.jobs[index].statusView?.isEmpty == true {
+            refreshQueuedJobStatusSynchronously(at: index, bumpRevision: false)
+        }
+        let current = queue.jobs.first(where: { $0.jobID == job.jobID }) ?? job
+        if current.inError {
             return QueueJobStatusView.queueStatusViewWithErrorBanner(
-                job.statusView,
-                errorMessage: job.errorMessage
+                current.statusView,
+                errorMessage: current.errorMessage
             )
         }
-        return job.statusView
+        return current.statusView
+    }
+
+    private func syncLoraStatusLabel(pluginID: String, values: [String: Any]) -> String? {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID),
+              plugin.loraHostID != nil else { return nil }
+        return ImageGenExifCommentFormatting.loraNameForExifFromValues(
+            values: values,
+            pipelineID: plugin.pipelineID,
+            loraHostID: plugin.loraHostID
+        )
+    }
+
+    private func buildPayloadForQueueStatusSync(
+        pluginID: String,
+        values: [String: Any],
+        applyImageExit: Bool
+    ) -> [String: Any] {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return [:] }
+        var runValues = values
+        var applyExit = applyImageExit
+        if applyImageExit {
+            runValues = ImageGenMfluxPayloadBuilder.applyImagePromptRules(values: runValues, config: config)
+            applyExit = false
+        }
+        return (
+            try? ImageGenWorkerPayloadBuilder.build(
+                plugin: plugin,
+                values: runValues,
+                outputPath: queueStatusPreviewOutputPath(),
+                config: config,
+                applyImageExit: applyExit
+            )
+        ) ?? [:]
+    }
+
+    /// Port of ``status_view_for_queue_row`` / ``refresh_queued_job_status`` on the main thread before painting.
+    private func refreshQueuedJobStatusSynchronously(at index: Int, bumpRevision: Bool = true) {
+        guard queue.jobs.indices.contains(index) else { return }
+        let jobID = queue.jobs[index].jobID
+        guard var job = queuedJob(byID: jobID) else { return }
+
+        if job.pluginUnavailable || ImageGenPluginCatalog.plugin(pluginID: job.pluginID) == nil {
+            let built = buildQueueStatusView(
+                pluginID: job.pluginID,
+                function: job.function,
+                values: job.values,
+                copiesTotal: job.copiesTotal,
+                pluginUnavailable: true
+            )
+            applySynchronizedQueuedStatusRefresh(
+                jobID: jobID,
+                job: &job,
+                built: built,
+                bumpRevision: bumpRevision
+            )
+            return
+        }
+
+        let hasFluxAI = job.values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] != nil
+        let applyImageExit = !hasFluxAI
+        let skipImageExit = !job.fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        var payload: [String: Any] = [:]
+        if skipImageExit {
+            if hasFluxAI {
+                payload["prompt"] = job.fullPrompt
+            }
+        } else {
+            payload = buildPayloadForQueueStatusSync(
+                pluginID: job.pluginID,
+                values: job.values,
+                applyImageExit: applyImageExit
+            )
+            if hasFluxAI, !job.fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                payload["prompt"] = job.fullPrompt
+            }
+        }
+
+        if let hf = payload["hf_model_id"] {
+            job.values["hf_model_id"] = hf
+        }
+        if !payload.isEmpty {
+            ImageGenLoraWorkerPayloadEnrich.mergeLoraFields(from: payload, into: &job.values)
+        }
+
+        let exited = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !exited.isEmpty, !hasFluxAI {
+            job.fullPrompt = exited
+        } else {
+            job.fullPrompt = JobStepQueue.resolvedFullPrompt(
+                stored: job.fullPrompt,
+                values: job.values,
+                steps: job.steps,
+                statusView: job.statusView
+            )
+        }
+
+        let copiesForStatus = max(1, job.copiesTotal)
+        job.values["copies"] = copiesForStatus
+        let loraLabel = syncLoraStatusLabel(pluginID: job.pluginID, values: job.values)
+        let built = buildQueueStatusView(
+            pluginID: job.pluginID,
+            function: job.function,
+            values: job.values,
+            copiesTotal: copiesForStatus,
+            payload: payload.isEmpty ? nil : payload,
+            withAI: hasFluxAI,
+            loraLabel: loraLabel
+        )
+        applySynchronizedQueuedStatusRefresh(
+            jobID: jobID,
+            job: &job,
+            built: built,
+            bumpRevision: bumpRevision
+        )
+    }
+
+    private func applySynchronizedQueuedStatusRefresh(
+        jobID: String,
+        job: inout ImageGenQueuedJob,
+        built: QueueJobStatusBuildResult,
+        bumpRevision: Bool
+    ) {
+        job.statusView = built.statusView
+        job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
+        job.referencesInvalid = built.referencesInvalid
+        guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
+            publishQueuedStatusOntoActiveJobIfNeeded(job)
+            if bumpRevision { bumpQueueRevision() }
+            return
+        }
+        queue.jobs[writeIndex] = job
+        applyQueuedJobErrorBanner(at: writeIndex)
+        publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
+        if bumpRevision { bumpQueueRevision() }
+    }
+
+    private func refreshActiveJobStatusViewSynchronously() {
+        guard activeJobID != nil else { return }
+        if jobAIStageActive { return }
+        let timing = currentTimingForDisplay()
+        let loraLabel = syncLoraStatusLabel(pluginID: activePluginID, values: pendingValues)
+        lastResolvedLoraStatusLabel = loraLabel
+        let withAITitle = pendingValues[JobStepQueue.fluxPromptAIJobKey] is [String: Any]
+            || pendingValues["series_prompt_refinement"] as? Bool == true
+        let built = buildQueueStatusView(
+            pluginID: activePluginID,
+            function: activeFunction,
+            values: pendingValues,
+            copiesTotal: copiesTotal,
+            running: isProcessing,
+            omitLiveStepsRow: true,
+            withAI: withAITitle,
+            step: liveStepTotal > 0 ? liveStep : nil,
+            stepTotal: liveStepTotal > 0 ? liveStepTotal : nil,
+            elapsedSeconds: timing.elapsed,
+            estimateSeconds: timing.estimate,
+            loraLabel: loraLabel
+        )
+        activeStatusView = built.statusView
+        let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
+        activeThumbnailPaths = cardPaths
+        activeJobCardThumbnailPathsCache = cardPaths
     }
 
     func moveJob(before beforeJobID: String?, jobID: String) {
@@ -3112,8 +3310,12 @@ final class ImageGenController {
         for index in queue.jobs.indices {
             await refreshQueuedJobStatus(at: index)
         }
+        await refreshActiveJobStatusView()
         persistQueue()
         bumpQueueRevision()
+        await MainActor.run {
+            onQueueStatusDetailsReady?()
+        }
     }
 
     private func queueStatusPreviewOutputPath() -> String {
@@ -3142,13 +3344,14 @@ final class ImageGenController {
             job.referencesInvalid = built.referencesInvalid
             guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
                 publishQueuedStatusOntoActiveJobIfNeeded(job)
-                bumpStripUI()
+                bumpQueueRevision()
                 return
             }
             queue.jobs[writeIndex] = job
             applyQueuedJobErrorBanner(at: writeIndex)
             publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
-            bumpStripUI()
+            bumpQueueRevision()
+            await MainActor.run { onQueueStatusDetailsReady?() }
             return
         }
 
@@ -3207,13 +3410,16 @@ final class ImageGenController {
         job.referencesInvalid = built.referencesInvalid
         guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
             publishQueuedStatusOntoActiveJobIfNeeded(job)
-            bumpStripUI()
+            bumpQueueRevision()
             return
         }
         queue.jobs[writeIndex] = job
         applyQueuedJobErrorBanner(at: writeIndex)
         publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
-        bumpStripUI()
+        bumpQueueRevision()
+        await MainActor.run {
+            onQueueStatusDetailsReady?()
+        }
     }
 
     /// Port of ``_sync_active_job_queue_row`` (active job still has a queue row until the worker pops it).
@@ -4010,7 +4216,10 @@ final class ImageGenController {
         ImageGenJobNumber.reconcile(knownNumbers: knownNumbers, config: config)
         activeDisplayIndex = queue.activeDisplayIndex
         let hasActive = restoreActiveJobFromStepFiles()
-        Task { await refreshAllQueuedJobStatusViews() }
+        for index in queue.jobs.indices {
+            refreshQueuedJobStatusSynchronously(at: index, bumpRevision: false)
+        }
+        refreshActiveJobStatusViewSynchronously()
         if (!queue.jobs.isEmpty || hasActive), !holdJobQueue {
             startupQueueHold = true
         }

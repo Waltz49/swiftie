@@ -61,6 +61,10 @@ final class AppState {
     var jobsPanelAlwaysOnTop = false
     var measuredJobsCardStackHeight: CGFloat = 0
     var measuredActiveJobStripHeight: CGFloat = 0
+    /// Bumps SwiftUI job queue layout when AppKit remeasures card stack height.
+    var jobsQueuePanelLayoutRevision = 0
+    /// Bumps when async queue status views finish building (mount job cards after this).
+    var jobsQueueStatusDetailsRevision = 0
     /// Last strip structure used for pane refit; avoids 500ms progress ticks resizing the jobs pane.
     var lastStripHeightRefitStructureKey: String?
     var isAdjustingJobsPaneGeometry = false
@@ -73,6 +77,8 @@ final class AppState {
     var jobsPaneRefitDeferred = false
     var jobsPaneResizeDebounce: DispatchWorkItem?
     var jobsPaneGeometryForceRefit = false
+    /// Coalesces post-queue / post-generation layout passes (port of Qt ``singleShot(0)`` deferred geometry).
+    var jobsPaneLayoutSettleToken = 0
     /// Remaining layout passes that should snap the showing jobs surface to the measured height.
     var jobsSurfaceExactSnapPasses = 0
     var progressiveRefreshTask: Task<Void, Never>?
@@ -384,10 +390,15 @@ final class AppState {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.jobsQueuePanelSync?()
-                if self.shouldShrinkWrapJobsClient() {
-                    self.syncJobsPaneGeometry(forceRefit: true)
-                }
+                guard self.jobsDisplayMode == .pane else { return }
+                self.scheduleJobsPaneLayoutSettleRefresh()
             }
+        }
+        imageGen.onQueueStatusDetailsReady = { [weak self] in
+            guard let self else { return }
+            self.jobsQueueStatusDetailsRevision += 1
+            self.jobsQueuePanelSync?()
+            self.scheduleJobsPaneLayoutSettleRefresh()
         }
         imageGen.onDeferredQuitComplete = { [weak self] in
             self?.closeMainWindowAfterDeferredQuit()

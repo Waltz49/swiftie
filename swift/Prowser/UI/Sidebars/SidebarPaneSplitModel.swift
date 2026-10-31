@@ -307,21 +307,19 @@ final class SidebarPaneSplitModel {
         guard side == .right, extraContentHeight > 0 else { return }
         guard appState.jobsDisplayMode == .pane else { return }
         guard paneExpanded(configKey: "jobs_visible", default: true) else { return }
+        guard !jobsIsSoleVisiblePane(appState: appState) else { return }
 
         appState.beginJobsPaneGeometryAdjustment()
         defer { appState.endJobsPaneGeometryAdjustment() }
 
-        let mode = appState.jobsQueueSizeMode
-        let jobCount = appState.visibleJobsQueueRowCount()
-        if mode == .all, jobCount > 1 {
-            resizePaneToHeight(
-                paneIndex: 2,
-                targetHeight: sizes[2] + extraContentHeight,
-                appState: appState,
-                applyJobsAutoHeightCap: false
-            )
-        } else {
-            ensureJobsPaneFitsContent(appState: appState, forceRefit: false)
+        resizePaneToHeight(
+            paneIndex: 2,
+            targetHeight: sizes[2] + extraContentHeight,
+            appState: appState,
+            applyJobsAutoHeightCap: false
+        )
+        if appState.jobsQueueSizeMode == .one {
+            appState.jobsQueuePanelSync?()
         }
     }
 
@@ -348,6 +346,27 @@ final class SidebarPaneSplitModel {
         appState.beginJobsPaneGeometryAdjustment()
         defer { appState.endJobsPaneGeometryAdjustment() }
 
+        appState.refreshJobsPaneLiveMeasurements()
+
+        if !forceRefit, !appState.jobsPaneFitMeasurementsReady() {
+            jobsPaneDebug("ensureFits deferred (measurements not ready)")
+            let earlyTarget = appState.jobsPaneTargetPaneHeight()
+            let current = sizes[2]
+            let earlyTolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: earlyTarget)
+            if earlyTarget > current + earlyTolerance {
+                resizePaneToHeight(
+                    paneIndex: 2,
+                    targetHeight: earlyTarget,
+                    appState: appState,
+                    applyJobsAutoHeightCap: true
+                )
+            }
+            // Do not reschedule refit here — that looped on the main queue while measurements
+            // were pending. Status-ready and layout callbacks call syncJobsPaneGeometry instead.
+            return
+        }
+
+        // Remeasure after prepare_size_measure-style reflow (Python may iterate up to 4 passes).
         appState.refreshJobsPaneLiveMeasurements()
 
         let mode = appState.jobsQueueSizeMode

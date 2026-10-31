@@ -1313,14 +1313,12 @@ final class JobCardNSView: NSView {
             inlineRefs: useInline
         )
         let statusView: QueueJobStatusView
-        if let view = row.statusView, !view.isEmpty {
-            statusView = view
-        } else {
-            statusView = QueueJobStatusView.degradedFallback(
-                prompt: row.fullPrompt,
-                copiesTotal: row.copiesTotal
-            )
+        guard let resolved = resolvedCardStatusView(for: row) else {
+            updateJobNumberDisplay(row: row)
+            updateChrome(selected: selected, running: row.isActive)
+            return
         }
+        statusView = resolved
         let fingerprint = statusFingerprint(
             textWidth: textWidth,
             copiesTotal: row.copiesTotal,
@@ -1455,14 +1453,10 @@ final class JobCardNSView: NSView {
             scrollWidth: scrollWidth,
             inlineRefs: useInline
         )
-        let statusView: QueueJobStatusView
-        if let view = row.statusView, !view.isEmpty {
-            statusView = view
-        } else {
-            statusView = QueueJobStatusView.degradedFallback(
-                prompt: row.fullPrompt,
-                copiesTotal: row.copiesTotal
-            )
+        guard let statusView = resolvedCardStatusView(for: row) else {
+            updateJobNumberDisplay(row: row)
+            updateChrome(selected: selected, running: row.isActive)
+            return
         }
         lastJobNumber = row.jobNumber
         lastJobNumberHeld = row.held
@@ -1500,6 +1494,12 @@ final class JobCardNSView: NSView {
         "\(textWidth)|c:\(copiesTotal)|\(statusView.fingerprint())"
     }
 
+    /// Plugin-built status only; avoid the short degraded placeholder used for pane sizing.
+    private func resolvedCardStatusView(for row: QueueRowSnapshot) -> QueueJobStatusView? {
+        guard let view = row.statusView, !view.isEmpty else { return nil }
+        return view
+    }
+
     private func updateJobNumberDisplay(row: QueueRowSnapshot) {
         lastJobNumber = row.jobNumber
         lastJobNumberHeld = row.held
@@ -1531,6 +1531,7 @@ final class JobCardNSView: NSView {
         selected: Bool
     ) -> Bool {
         guard boundJobID == row.jobID else { return false }
+        guard let statusView = resolvedCardStatusView(for: row) else { return false }
         if !statusWidget.hasRenderedView() { return false }
         let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
         let refs = row.thumbnailPaths
@@ -1539,15 +1540,6 @@ final class JobCardNSView: NSView {
             paths: refs,
             referencesInvalid: row.referencesInvalid
         )
-        let statusView: QueueJobStatusView
-        if let view = row.statusView, !view.isEmpty {
-            statusView = view
-        } else {
-            statusView = QueueJobStatusView.degradedFallback(
-                prompt: row.fullPrompt,
-                copiesTotal: row.copiesTotal
-            )
-        }
         let textWidth = Self.statusTextWidth(
             contentWidth: contentWidth,
             scrollWidth: scrollWidth,
@@ -1792,6 +1784,7 @@ final class JobQueuePanelHostView: NSView {
         super.layout()
         panel.syncQueueScrollGeometry()
         guard let appState = panel.paneContextMenuAppState else { return }
+        guard appState.jobsQueueCardDetailsReadyForSizing() else { return }
         let width = panel.layoutViewportWidth()
         let mode = appState.jobsQueueSizeMode
         let panelH = panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
@@ -1832,6 +1825,12 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         let height: CGFloat
         if fillsAvailableHeight {
             height = max(proposal.height ?? panel.bounds.height, 40)
+        } else if !appState.jobsQueueCardDetailsReadyForSizing(), appState.jobsQueueSizeMode != .strip {
+            height = max(
+                appState.measuredJobsCardStackHeight,
+                appState.jobsQueuePanelIntrinsicHeight,
+                40
+            )
         } else if panel.isLaidOutAtPlaceholderWidth {
             // Inflated placeholder-width layout; use the last real measurement until the reflow lands.
             height = max(appState.measuredJobsCardStackHeight, 40)
@@ -1874,6 +1873,8 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
     @MainActor
     private func syncPanelToController(_ panel: JobQueuePanelNSView) {
         let mode = appState.jobsQueueSizeMode
+        appState.imageGen.prepareQueueRowsForSidebarDisplay()
+        guard mode == .strip || appState.jobsQueueCardDetailsReadyForSizing() else { return }
         let rows = appState.jobsQueueRowsForDisplay(mode: mode)
         panel.applyTheme(appState.theme.colors)
         let scrollWidth = resolvedLayoutWidth(proposal: nil, panel: panel)
@@ -1974,6 +1975,10 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         // skip snapshots taken before the panel has real bounds (``layout()`` reflows and re-reports).
         if mode != .strip, panel.isLaidOutAtPlaceholderWidth {
             jobsPaneDebug("report skipped (placeholder width) mode=\(mode) cards=\(panel.cardLayoutHeightsForDebug)")
+            return
+        }
+        if mode != .strip, !appState.jobsQueueCardDetailsReadyForSizing() {
+            jobsPaneDebug("report skipped (status details pending) mode=\(mode)")
             return
         }
         // A panel that still shows the previous mode's rows (e.g. ONE → ALL before the new
