@@ -621,19 +621,54 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     func invalidateThumbnail(path: String) {
-        thumbnails.removeValue(forKey: path)
-        loadingPaths.remove(path)
+        invalidateThumbnails(for: [path])
+    }
+
+    /// Keys in view-layer caches that refer to the same file as ``path`` (Python ``_canvas_paths_matching``).
+    private func pathsMatchingDisplayedFile(_ path: String) -> [String] {
+        var keys = Set<String>()
+        for listPath in imagePaths where FileDataModel.pathsReferToSameFile(listPath, path) {
+            keys.insert(listPath)
+        }
+        for key in thumbnails.keys where FileDataModel.pathsReferToSameFile(key, path) {
+            keys.insert(key)
+        }
+        for key in loadingPaths where FileDataModel.pathsReferToSameFile(key, path) {
+            keys.insert(key)
+        }
+        for key in imageDimensionCache.keys where FileDataModel.pathsReferToSameFile(key, path) {
+            keys.insert(key)
+        }
+        if keys.isEmpty {
+            keys.insert(path)
+        }
+        return Array(keys)
     }
 
     func invalidateThumbnails(for paths: [String]) {
         guard !paths.isEmpty else { return }
-        invalidateThumbnailLoadingSession()
+        var keysToClear = Set<String>()
         for path in paths {
-            thumbnails.removeValue(forKey: path)
-            loadingPaths.remove(path)
-            imageDimensionCache.removeValue(forKey: path)
+            for key in pathsMatchingDisplayedFile(path) {
+                keysToClear.insert(key)
+            }
         }
-        needsDisplay = true
+        guard !keysToClear.isEmpty else { return }
+        for key in keysToClear {
+            thumbnails.removeValue(forKey: key)
+            loadingPaths.remove(key)
+            imageDimensionCache.removeValue(forKey: key)
+        }
+        var repainted = false
+        for key in keysToClear {
+            if let index = FileDataModel.indexOfPath(key, in: imagePaths) {
+                setNeedsDisplay(thumbnailRect(for: index))
+                repainted = true
+            }
+        }
+        if !repainted {
+            needsDisplay = true
+        }
         scheduleLoadVisibleThumbnails(debounced: false)
     }
 

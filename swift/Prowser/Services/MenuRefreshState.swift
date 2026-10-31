@@ -20,7 +20,6 @@ final class MenuRefreshState {
     var excludeFilesFromViewVisible = false
     var moveToTrashMenuTitle = "Move File to Trash"
     var undoMenuTitle = "Undo"
-    var undoMenuEnabled = false
     var quickMassRenameMenuVisible = false
     var lockUnlockMenuVisible = false
     private var keyWindowObservers: [NSObjectProtocol] = []
@@ -97,21 +96,17 @@ final class MenuRefreshState {
     func refreshUndoMenu(appState: AppState) {
         if appState.wallpaperManager.canUndoWallpaper {
             undoMenuTitle = "Undo Wallpaper"
-            undoMenuEnabled = true
             return
         }
         guard let operation = appState.fileOperations.pendingFileUndoOperation else {
             undoMenuTitle = "Undo"
-            undoMenuEnabled = false
             return
         }
         switch operation {
         case .move:
             undoMenuTitle = "Undo Move"
-            undoMenuEnabled = true
         case .delete:
             undoMenuTitle = "Undo Delete"
-            undoMenuEnabled = true
         }
     }
 

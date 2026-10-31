@@ -8,7 +8,10 @@ struct JobQueuePanelView: View {
     var compactForFloating: Bool = false
 
     private var fillsAvailableHeight: Bool {
-        appState.jobsQueueSizeMode == .all && appState.visibleJobsQueueRowCount() > 1
+        if appState.rightSidebarSplit.jobsIsSoleVisiblePane(appState: appState) {
+            return true
+        }
+        return appState.jobsQueueSizeMode == .all && appState.visibleJobsQueueRowCount() > 1
     }
 
     var body: some View {
@@ -112,24 +115,8 @@ struct JobQueuePanelView: View {
         switch mode {
         case .strip:
             stripModeBody(controller: controller)
-        case .one:
-            JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
-                .frame(
-                    minHeight: max(appState.jobsQueuePanelIntrinsicHeight, appState.measuredJobsCardStackHeight, 40),
-                    alignment: .topLeading
-                )
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .contentShape(Rectangle())
-        case .all:
-            if appState.visibleJobsQueueRowCount() <= 1 {
-                JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
-                    .frame(
-                        minHeight: max(appState.jobsQueuePanelIntrinsicHeight, appState.measuredJobsCardStackHeight, 40),
-                        alignment: .topLeading
-                    )
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .contentShape(Rectangle())
-            } else {
+        case .one, .all:
+            if fillsAvailableHeight {
                 ExpandingLayout {
                     JobQueuePanelNSViewRepresentable(
                         compactForFloating: compactForFloating,
@@ -138,6 +125,18 @@ struct JobQueuePanelView: View {
                     .contentShape(Rectangle())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                JobQueuePanelNSViewRepresentable(compactForFloating: compactForFloating)
+                    .frame(
+                        minHeight: max(
+                            appState.jobsQueuePanelIntrinsicHeight,
+                            appState.measuredJobsCardStackHeight,
+                            40
+                        ),
+                        alignment: .topLeading
+                    )
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .contentShape(Rectangle())
             }
         }
     }

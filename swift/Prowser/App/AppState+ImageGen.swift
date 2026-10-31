@@ -153,9 +153,22 @@ extension AppState {
                 fileData.setViewMode(.browse)
             }
         }
-        DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [path])
+        if !inPlace {
+            let listed = listedDisplayedPath(for: path)
+            DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [listed])
+        }
         reloadBrowseImageIfCurrent(path: path)
         imageGen.noteProgressiveBrowseOpened()
+    }
+
+    private func listedDisplayedPath(for path: String) -> String {
+        guard let normalized = FileDataModel.normalizePath(path) else { return path }
+        if let listed = fileData.displayedImages.first(where: {
+            FileDataModel.pathsReferToSameFile($0, normalized)
+        }) {
+            return listed
+        }
+        return normalized
     }
 
     /// Python ``_try_in_place_progressive_refresh`` — thumbnail/list/browse pixels + directory listing sync.
@@ -180,22 +193,23 @@ extension AppState {
             }
         }
 
+        let refreshPath = listedPath ?? normalized
         switch mode {
         case .thumbnail, .list:
             if listedPath != nil {
-                DirectoryRefreshService.refreshDisplayedFileIfListed(appState: self, path: normalized)
+                DirectoryRefreshService.refreshDisplayedFileIfListed(appState: self, path: refreshPath)
             } else {
-                DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [normalized])
+                DirectoryRefreshService.invalidateThumbnails(appState: self, paths: [refreshPath])
             }
             thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
             return true
         case .browse:
-            guard DirectoryRefreshService.refreshDisplayedFileIfListed(appState: self, path: normalized) else {
+            guard DirectoryRefreshService.refreshDisplayedFileIfListed(appState: self, path: refreshPath) else {
                 return false
             }
             guard let current = fileData.currentImagePath,
                   FileDataModel.pathsReferToSameFile(current, normalized) else { return false }
-            reloadBrowseImageIfCurrent(path: normalized)
+            reloadBrowseImageIfCurrent(path: refreshPath)
             return true
         default:
             return false
@@ -313,6 +327,12 @@ extension AppState {
     }
 
     func applyJobsQueueSizeMode(_ mode: JobsQueueSizeMode, forceRefit: Bool) {
+        var mode = mode
+        var forceRefit = forceRefit
+        if rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) {
+            mode = .all
+            forceRefit = true
+        }
         if jobsQueueSizeMode == mode, !forceRefit { return }
         if jobsQueueSizeMode != mode {
             // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
@@ -447,8 +467,23 @@ extension AppState {
         return false
     }
 
+    /// Port of ``right_sidebar_combined._enforce_jobs_all_mode_for_sole_pane``.
+    func enforceJobsAllModeForSolePane() {
+        guard BundleCapabilities.imageGenUIEnabled else { return }
+        guard jobsDisplayMode == .pane else { return }
+        guard rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) else { return }
+        guard config.bool(forKey: "jobs_visible", default: true) else { return }
+        if jobsQueueSizeMode != .all {
+            applyJobsQueueSizeMode(.all, forceRefit: true)
+            return
+        }
+        config.updateSetting("jobs_pane_compact", value: false)
+        rightSidebarSplit.ensureJobsSolePaneFill(appState: self)
+    }
+
     /// Whether ``ensureJobsPaneFitsContent`` should run (includes multijob grow-only refit).
     func shouldInvokeJobsPaneEnsureFitsRefit(forceRefit: Bool) -> Bool {
+        if rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) { return true }
         if forceRefit { return true }
         if shouldAutoResizeJobsSidebarPane() { return true }
         if jobsQueueSizeMode == .all,

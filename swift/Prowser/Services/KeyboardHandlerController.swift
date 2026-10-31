@@ -155,6 +155,13 @@ final class KeyboardHandlerController {
             appState.selection.resetCmdMulti()
         }
 
+        // ⌘Z — file / wallpaper undo (Python `event_handler` / main window: invoke even when menu action disabled).
+        if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "z" {
+            appState.fileOperations.undoLastFileOperation()
+            return true
+        }
+
         // ⌘1…9 / ⌘0 use destination_menu_action; ⌥⌘ forces copy (Python Alt+Ctrl+N / Alt+Ctrl+0).
         if hasCommand, !hasShift {
             if event.keyCode == 29 {

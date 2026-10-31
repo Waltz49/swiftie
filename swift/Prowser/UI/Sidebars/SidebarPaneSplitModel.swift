@@ -282,6 +282,10 @@ final class SidebarPaneSplitModel {
         if !paneExpanded(configKey: "jobs_visible", default: true) {
             setPaneExpanded(true, configKey: "jobs_visible")
         }
+        if jobsIsSoleVisiblePane(appState: appState) {
+            appState.enforceJobsAllModeForSolePane()
+            return
+        }
 
         let startHeight = sizes[2]
         let startMode = appState.jobsQueueSizeMode
@@ -328,6 +332,10 @@ final class SidebarPaneSplitModel {
         guard side == .right else { return }
         guard appState.jobsDisplayMode == .pane else { return }
         guard paneExpanded(configKey: "jobs_visible", default: true) else { return }
+        if jobsIsSoleVisiblePane(appState: appState) {
+            ensureJobsSolePaneFill(appState: appState)
+            return
+        }
         appState.beginJobsPaneGeometryAdjustment()
         defer { appState.endJobsPaneGeometryAdjustment() }
         appState.refreshJobsPaneLiveMeasurements()
@@ -340,9 +348,29 @@ final class SidebarPaneSplitModel {
         )
     }
 
+    /// Port of ``right_sidebar_combined._ensure_jobs_sole_pane_fill``.
+    func ensureJobsSolePaneFill(appState: AppState) {
+        guard jobsIsSoleVisiblePane(appState: appState) else { return }
+        guard appState.jobsDisplayMode == .pane else { return }
+        guard paneExpanded(configKey: "jobs_visible", default: true) else { return }
+        if appState.isAdjustingJobsPaneGeometry { return }
+
+        appState.beginJobsPaneGeometryAdjustment()
+        defer { appState.endJobsPaneGeometryAdjustment() }
+
+        let total = sizes.reduce(0, +)
+        guard total > SidebarPaneLayout.headerHeight else { return }
+        let newSizes: [CGFloat] = [0, 0, total]
+        applySizes(newSizes, appState: appState, persist: true)
+    }
+
     /// Port of ``right_sidebar_combined.ensure_jobs_pane_fits_content``.
     func ensureJobsPaneFitsContent(appState: AppState, forceRefit: Bool) {
         guard side == .right else { return }
+        if jobsIsSoleVisiblePane(appState: appState) {
+            appState.enforceJobsAllModeForSolePane()
+            return
+        }
         appState.beginJobsPaneGeometryAdjustment()
         defer { appState.endJobsPaneGeometryAdjustment() }
 
@@ -490,6 +518,9 @@ final class SidebarPaneSplitModel {
         if applyJobsAutoHeightCap, side == .right, paneIndex == 2, !jobsIsSoleVisiblePane(appState: appState) {
             let maxJobs = total * SidebarPaneLayout.jobsPaneAutoResizeMaxFraction
             cappedTarget = min(cappedTarget, maxJobs)
+        }
+        if side == .right, paneIndex == 2, jobsIsSoleVisiblePane(appState: appState) {
+            cappedTarget = max(cappedTarget, total)
         }
         let collapseFlags = SidebarPaneLayout.collapseFlagsForTarget(
             targetIdx: paneIndex,

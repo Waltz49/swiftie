@@ -175,6 +175,11 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             updated[bottomIndex] = max(SidebarPaneLayout.headerHeight, updated[bottomIndex] + drift)
         }
         model.applySizes(updated, appState: appState, persist: false)
+        if model.side == .right,
+           appState.jobsDisplayMode == .pane,
+           model.jobsIsSoleVisiblePane(appState: appState) {
+            appState.enforceJobsAllModeForSolePane()
+        }
         refitJobsPaneIfNeeded(appState: appState)
     }
 

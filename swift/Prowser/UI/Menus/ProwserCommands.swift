@@ -575,10 +575,9 @@ private struct UndoMenuButton: View {
 
     var body: some View {
         Button(appState.menuRefresh.undoMenuTitle) {
-            Task { @MainActor in appState.fileOperations.undoLastFileOperation() }
+            appState.fileOperations.undoLastFileOperation()
         }
         .keyboardShortcut("z", modifiers: .command)
-        .disabled(!appState.menuRefresh.undoMenuEnabled)
     }
 }
 

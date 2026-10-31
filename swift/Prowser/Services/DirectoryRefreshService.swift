@@ -372,10 +372,12 @@ enum DirectoryRefreshService {
     static func refreshDisplayedFileIfListed(appState: AppState, path: String) -> Bool {
         guard let normalized = FileDataModel.normalizePath(path),
               FileManager.default.fileExists(atPath: normalized),
-              FileDataModel.indexOfPath(normalized, in: appState.fileData.displayedImages) != nil else {
+              let listed = appState.fileData.displayedImages.first(where: {
+                  FileDataModel.pathsReferToSameFile($0, normalized)
+              }) else {
             return false
         }
-        invalidateThumbnails(appState: appState, paths: [normalized])
+        invalidateThumbnails(appState: appState, paths: [listed])
         return true
     }
 
@@ -417,6 +419,7 @@ enum DirectoryRefreshService {
         for path in paths {
             appState.metadataCache.invalidate(path: path)
             appState.previewPaneCache.invalidate(path: path)
+            appState.metadataCache.recordDiskSnapshot(path: path)
         }
         appState.backgroundImageRecognition.noteThumbnailDiskCacheInvalidated()
         appState.thumbnailInvalidationGeneration += 1

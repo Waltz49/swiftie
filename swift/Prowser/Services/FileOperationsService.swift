@@ -31,11 +31,6 @@ final class FileOperationsService {
         ExternalEditorSession.shared.bind(appState: appState)
     }
 
-    var canUndoFileOperation: Bool {
-        if appState?.wallpaperManager.canUndoWallpaper == true { return true }
-        return undoStack.canUndo
-    }
-
     var pendingFileUndoOperation: FileUndoOperation? { undoStack.peekLast }
 
     func revealInFinder(_ paths: [String]) {
@@ -756,7 +751,11 @@ final class FileOperationsService {
         } else if !sourcesFromCurrent, !targetIsCurrent {
             return
         }
-        appState.loadDirectory(currentDirectory, saveHistory: false)
+        if appState.fileData.currentViewMode == .browse {
+            appState.refreshDirectory()
+        } else {
+            appState.loadDirectory(currentDirectory, saveHistory: false)
+        }
     }
 
     func moveToLastDropLocation(copyOnly: Bool? = nil) {
@@ -895,6 +894,7 @@ final class FileOperationsService {
         var restored = 0
         var errors: [String] = []
         var restoredDetails: [(path: String, sourceDirectory: String, renamed: Bool)] = []
+        var restoredForUI: [(path: String, originalPath: String, originalIndex: Int?)] = []
 
         for entry in entries {
             guard FileManager.default.fileExists(atPath: entry.targetPath) else {
@@ -931,6 +931,11 @@ final class FileOperationsService {
                     sourceDirectory: sourceDir,
                     renamed: restorePath != entry.sourcePath
                 ))
+                restoredForUI.append((
+                    path: restorePath,
+                    originalPath: entry.sourcePath,
+                    originalIndex: entry.originalPosition
+                ))
                 appState.metadataCache.invalidate(path: entry.targetPath)
                 appState.metadataCache.invalidate(path: restorePath)
             } catch {
@@ -939,6 +944,7 @@ final class FileOperationsService {
         }
 
         if restored > 0 {
+            applyUndoRestoredFilesToView(appState: appState, restored: restoredForUI)
             appState.status.showFileOperation(undoMoveStatusMessage(restoredDetails: restoredDetails, errorCount: errors.count))
             refreshAfterChange()
         } else {
@@ -1002,7 +1008,7 @@ final class FileOperationsService {
             let integrateItems = zip(restoredPaths, ordered).map { path, entry in
                 (path: path, originalPath: entry.originalPath, originalIndex: entry.originalIndex)
             }
-            DirectoryRefreshService.integrateRestoredFiles(appState: appState, restored: integrateItems)
+            applyUndoRestoredFilesToView(appState: appState, restored: integrateItems)
             appState.status.showFileOperation(
                 restoreFromTrashStatusMessage(
                     restoredPaths: restoredPaths,
@@ -1011,7 +1017,6 @@ final class FileOperationsService {
                 )
             )
             refreshAfterChange()
-            appState.refreshMenuState()
         } else {
             if ordered.count == 1, let name = ordered.first?.originalPath {
                 let base = (name as NSString).lastPathComponent
@@ -1323,17 +1328,12 @@ final class FileOperationsService {
             let displayed = appState.fileData.displayedImages
             let activePath = appState.fileData.currentImagePath
             if !removedPaths.isEmpty {
-                DirectoryRefreshService.applyRemovedFiles(
+                applyRemovedPathsToCurrentView(
                     appState: appState,
-                    removed: Set(removedPaths),
+                    removedPaths: removedPaths,
                     displayed: displayed,
                     activePath: activePath
                 )
-                let removedSet = Set(removedPaths)
-                if !appState.selection.selectedFiles.isEmpty {
-                    appState.selection.selectedFiles.subtract(removedSet)
-                }
-                appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
             } else {
                 DirectoryRefreshService.refreshSpecificFilesList(appState: appState, force: false)
             }
@@ -1345,7 +1345,100 @@ final class FileOperationsService {
         }
 
         guard let directory = appState.fileData.currentDirectory else { return }
+
+        if appState.fileData.currentViewMode == .browse {
+            refreshBrowseAfterFileChange(appState: appState, directory: directory, removedPaths: removedPaths)
+            return
+        }
+
         appState.loadDirectory(directory, saveHistory: false, showLoadingState: false)
         appState.eventBus.emit(.filesChangedOnDisk, payload: .string(directory))
+    }
+
+    /// In browse, avoid `loadDirectory` without an explicit pin — that exits browse (`exitBrowseForExternalDirectoryLoadIfNeeded`).
+    private func refreshBrowseAfterFileChange(
+        appState: AppState,
+        directory: String,
+        removedPaths: [String]
+    ) {
+        if !removedPaths.isEmpty {
+            applyRemovedPathsToCurrentView(
+                appState: appState,
+                removedPaths: removedPaths,
+                displayed: appState.fileData.displayedImages,
+                activePath: appState.fileData.currentImagePath
+            )
+        }
+        appState.refreshMenuState()
+        appState.eventBus.emit(.filesChangedOnDisk, payload: .string(directory))
+        appState.refreshDirectory()
+    }
+
+    private func applyRemovedPathsToCurrentView(
+        appState: AppState,
+        removedPaths: [String],
+        displayed: [String],
+        activePath: String?
+    ) {
+        guard !removedPaths.isEmpty else { return }
+        DirectoryRefreshService.applyRemovedFiles(
+            appState: appState,
+            removed: Set(removedPaths),
+            displayed: displayed,
+            activePath: activePath
+        )
+        let removedSet = Set(removedPaths)
+        if !appState.selection.selectedFiles.isEmpty {
+            appState.selection.selectedFiles.subtract(removedSet)
+        }
+        appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
+    }
+
+    /// Re-list restored paths and refresh thumbnails (Python `add_thumbnails_for_files` / undo list insert).
+    /// In browse, keep the image on screen — only update `displayedImages` and indices (Python debounced refresh).
+    private func applyUndoRestoredFilesToView(
+        appState: AppState,
+        restored: [(path: String, originalPath: String, originalIndex: Int?)]
+    ) {
+        guard !restored.isEmpty else { return }
+        let browsePinnedPath = appState.fileData.currentViewMode == .browse
+            ? appState.fileData.currentImagePath
+            : nil
+
+        DirectoryRefreshService.integrateRestoredFiles(appState: appState, restored: restored)
+
+        if let browsePinnedPath {
+            if let match = appState.fileData.displayedImages.first(where: {
+                FileDataModel.pathsReferToSameFile($0, browsePinnedPath)
+            }) {
+                appState.fileData.setCurrentImagePath(match)
+            }
+            return
+        }
+
+        focusThumbnailSelectionAfterUndoRestore(
+            appState: appState,
+            restoredPaths: restored.map(\.path)
+        )
+    }
+
+    /// Python `undo_move_operation` highlight/selection — thumbnail and list modes only (not browse).
+    private func focusThumbnailSelectionAfterUndoRestore(appState: AppState, restoredPaths: [String]) {
+        let displayed = appState.fileData.displayedImages
+        let pathsInView = restoredPaths.compactMap { restored in
+            displayed.first { FileDataModel.pathsReferToSameFile($0, restored) }
+        }
+        guard !pathsInView.isEmpty else { return }
+
+        if pathsInView.count == 1 {
+            appState.fileData.setCurrentImagePath(pathsInView[0])
+            return
+        }
+
+        appState.selection.selectedFiles = Set(pathsInView)
+        if let last = pathsInView.last {
+            appState.fileData.setCurrentImagePath(last)
+        }
+        appState.selection.emitSelectionChanged(highlightIndex: appState.fileData.currentIndex)
     }
 }
