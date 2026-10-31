@@ -19,7 +19,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onReorder: ((String, String?) -> Void)?
     var onEdit: ((String) -> Void)?
     var onCancel: ((String, Bool) -> Void)?
-    var onSelect: ((String?) -> Void)?
     var onOpenReferences: (([String]) -> Void)?
     /// Card heights changed after a width reflow; the measured pane geometry must be re-reported.
     var onCardGeometryChanged: (() -> Void)?
@@ -32,7 +31,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onActionBarEmbedded: ((CGFloat) -> Void)?
 
     var themeColors: ThemeColors = .dark
-    var selectedJobID: String?
+    /// Card under the pointer; drives selection chrome and the shared action bar.
+    private var hoveredJobID: String?
 
     private let scrollView = JobsPaneNonFocusScrollView()
     private let documentView = FlippedView()
@@ -58,8 +58,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var pendingScrollWidth: CGFloat?
     private var scrollWidthReconfigureScheduled = false
     private var actionBarVisible = false
-    /// Job id for the card that currently hosts ``sharedActionBar`` (toolbar actions target this, not a stale selection).
-    private var actionBarHostJobID = ""
     private let sharedActionBar = JobQueueActionBarNSView()
     var paneContextMenuKind: SidebarPaneContextMenuKind?
     weak var paneContextMenuAppState: AppState?
@@ -147,8 +145,23 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     private func actionBarTargetJobID() -> String? {
-        if !actionBarHostJobID.isEmpty { return actionBarHostJobID }
-        return selectedJobID
+        hoveredJobID
+    }
+
+    private func setHoveredJobID(_ jobID: String?) {
+        guard hoveredJobID != jobID else { return }
+        hoveredJobID = jobID
+        applyHoverSelection()
+    }
+
+    private func applyHoverSelection() {
+        var hoveredCard: JobCardNSView?
+        for card in cardViews {
+            let isHovered = card.boundJobID == hoveredJobID
+            card.updateHoverSelected(isHovered, colors: themeColors)
+            if isHovered { hoveredCard = card }
+        }
+        attachActionBar(to: hoveredCard)
     }
 
     private func wireActionBar() {
@@ -189,12 +202,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     func updateRows(
         _ rows: [QueueRowSnapshot],
-        selectedJobID: String?,
         scrollWidth: CGFloat,
         imageGenUIRevision: Int
     ) {
         self.rows = rows
-        self.selectedJobID = selectedJobID
+        if let hoveredJobID, !rows.contains(where: { $0.jobID == hoveredJobID }) {
+            self.hoveredJobID = nil
+        }
         let cardScrollWidth = scrollWidthForRowLayout(proposed: scrollWidth)
         if cardScrollWidth > 0 {
             lastConfiguredScrollWidth = cardScrollWidth
@@ -213,14 +227,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             } else if activeJobChanged || !cardsAlignWithSnapshot(rows) {
                 rebuildRows(
                     rows,
-                    selectedJobID: selectedJobID,
                     scrollWidth: cardScrollWidth,
                     forceContentRefresh: true
                 )
             } else {
                 refreshAlignedRows(
                     rows,
-                    selectedJobID: selectedJobID,
                     scrollWidth: cardScrollWidth,
                     forceContentRefresh: forceCardContentRefresh
                 )
@@ -228,6 +240,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             syncStackTrailingInsetForScrollbar()
             updateDocumentHeight()
         }
+        applyHoverSelection()
         refreshActionBarState()
         syncQueueScrollGeometry()
         invalidateIntrinsicContentSize()
@@ -243,14 +256,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     private func refreshAlignedRows(
         _ rows: [QueueRowSnapshot],
-        selectedJobID: String?,
         scrollWidth: CGFloat,
         forceContentRefresh: Bool
     ) {
-        var selectedCard: JobCardNSView?
         for (index, row) in rows.enumerated() {
             let card = cardViews[index]
-            let isSelected = row.jobID == selectedJobID
+            let isSelected = row.jobID == hoveredJobID
             wireCardCallbacks(card, row: row)
             card.configure(
                 row: row,
@@ -262,16 +273,12 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 // repaint when a newly submitted job becomes current.
                 skipUnchanged: !forceContentRefresh && !row.isActive
             )
-            if isSelected { selectedCard = card }
         }
-        attachActionBar(to: selectedCard)
-        refreshActionBarState()
         notifyCardGeometryChangedIfNeeded()
     }
 
     private func rebuildRows(
         _ rows: [QueueRowSnapshot],
-        selectedJobID: String?,
         scrollWidth: CGFloat,
         forceContentRefresh: Bool
     ) {
@@ -285,14 +292,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
         let previousCards = cardViews
         var nextCards: [JobCardNSView] = []
-        var selectedCard: JobCardNSView?
 
         for (index, row) in rows.enumerated() {
             let card = lookup[row.jobID] ?? takePooledCard()
             if let poolIndex = cardPool.firstIndex(where: { $0 === card }) {
                 cardPool.remove(at: poolIndex)
             }
-            let isSelected = row.jobID == selectedJobID
+            let isSelected = row.jobID == hoveredJobID
             wireCardCallbacks(card, row: row)
             card.configure(
                 row: row,
@@ -303,7 +309,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                 skipUnchanged: !forceContentRefresh && !row.isActive
             )
             nextCards.append(card)
-            if isSelected { selectedCard = card }
         }
 
         cardViews = nextCards
@@ -313,8 +318,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             // reorderCardsInStack already detached these; only return to pool.
             poolCard(card)
         }
-        attachActionBar(to: selectedCard)
-        refreshActionBarState()
         notifyCardGeometryChangedIfNeeded()
     }
 
@@ -323,7 +326,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         card.onCancel = { [weak self] skipConfirmation in
             self?.onCancel?(row.jobID, skipConfirmation)
         }
-        card.onSelect = { [weak self] in self?.onSelect?(row.jobID) }
         card.onOpenReferences = { [weak self] paths in self?.onOpenReferences?(paths) }
         card.onJobNumberClick = { [weak self] in self?.onJobNumberClick?(row.jobID) }
     }
@@ -342,6 +344,14 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             guard let self else { return }
             let source = self.cardViews.first(where: { $0.boundJobID == jobID }) ?? card
             self.beginDrag(jobID: jobID, event: event, from: source)
+        }
+        card.onHoverChanged = { [weak self, weak card] isHovered in
+            guard let self, let card else { return }
+            if isHovered {
+                setHoveredJobID(card.boundJobID)
+            } else if hoveredJobID == card.boundJobID {
+                setHoveredJobID(nil)
+            }
         }
         return card
     }
@@ -368,6 +378,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             parkCard(card)
         }
         cardViews.removeAll()
+        hoveredJobID = nil
         attachActionBar(to: nil)
         refreshActionBarState()
     }
@@ -603,7 +614,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
                   zip(cardViews, rows).allSatisfy({ $0.matchesSnapshotRow($1) }) else {
                 rebuildRows(
                     rows,
-                    selectedJobID: selectedJobID,
                     scrollWidth: scrollWidth,
                     forceContentRefresh: true
                 )
@@ -612,7 +622,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             }
             for (index, row) in rows.enumerated() {
                 let card = cardViews[index]
-                let isSelected = row.jobID == selectedJobID
+                let isSelected = row.jobID == hoveredJobID
                 card.applyScrollWidth(
                     scrollWidth,
                     row: row,
@@ -674,12 +684,10 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         let wasVisible = actionBarVisible
         detachActionBarFromAllCards()
         if let card {
-            actionBarHostJobID = card.boundJobID
             actionBarVisible = true
             card.attachActionBar(sharedActionBar)
             sharedActionBar.applyTheme(themeColors)
         } else {
-            actionBarHostJobID = ""
             actionBarVisible = false
             sharedActionBar.isHidden = true
             sharedActionBar.removeFromSuperview()
@@ -1048,7 +1056,7 @@ final class JobCardNSView: NSView {
     var onBeginDrag: ((String, NSEvent) -> Void)?
     var onEdit: (() -> Void)?
     var onCancel: ((Bool) -> Void)?
-    var onSelect: (() -> Void)?
+    var onHoverChanged: ((Bool) -> Void)?
     var onOpenReferences: (([String]) -> Void)?
     var onJobNumberClick: (() -> Void)?
 
@@ -1091,6 +1099,7 @@ final class JobCardNSView: NSView {
     private(set) var layoutHeight: CGFloat = 40
     private weak var embeddedActionBar: JobQueueActionBarNSView?
     private var actionBarLayoutConstraints: [NSLayoutConstraint] = []
+    private var hoverTrackingArea: NSTrackingArea?
 
     var hasEmbeddedActionBar: Bool { embeddedActionBar != nil }
 
@@ -1217,6 +1226,35 @@ final class JobCardNSView: NSView {
         contentFillsCardBottomConstraint?.isActive = true
         statusWidget.setContentCompressionResistancePriority(.required, for: .vertical)
         column.setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
+
+    func updateHoverSelected(_ selected: Bool, colors: ThemeColors) {
+        guard selected != lastSelected else { return }
+        self.colors = colors
+        updateChrome(selected: selected, running: lastActive)
     }
 
     required init?(coder: NSCoder) {
@@ -1662,14 +1700,6 @@ final class JobCardNSView: NSView {
         if event.clickCount >= 2 || clickCount >= 2 {
             jobsPaneDebug("card dbl-click edit job=\(boundJobID)")
             onEdit?()
-            return
-        }
-        let current = event.locationInWindow
-        let dx = current.x - mouseDownLocation.x
-        let dy = current.y - mouseDownLocation.y
-        if (dx * dx + dy * dy) <= 16 {
-            jobsPaneDebug("card select job=\(boundJobID)")
-            onSelect?()
         }
     }
 
@@ -1843,22 +1873,12 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
 
     @MainActor
     private func syncPanelToController(_ panel: JobQueuePanelNSView) {
-        let controller = appState.imageGen
         let mode = appState.jobsQueueSizeMode
         let rows = appState.jobsQueueRowsForDisplay(mode: mode)
-        // Python ``_ensure_single_job_auto_selection``: a sole visible card is always selected
-        // (one-job mode or single queue row), so its action bar shows without a click.
-        var selectedJobID = controller.selectedJobID
-        if let sole = rows.first, mode == .one || rows.count == 1, selectedJobID != sole.jobID {
-            selectedJobID = sole.jobID
-            // Deferred: this runs inside SwiftUI's update pass; selectJob bumps observed state.
-            DispatchQueue.main.async { controller.selectJob(id: sole.jobID) }
-        }
         panel.applyTheme(appState.theme.colors)
         let scrollWidth = resolvedLayoutWidth(proposal: nil, panel: panel)
         panel.updateRows(
             rows,
-            selectedJobID: selectedJobID,
             scrollWidth: scrollWidth,
             imageGenUIRevision: appState.imageGenUIRevision
         )
@@ -1878,25 +1898,6 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         }
         panel.onCancel = { jobID, skipConfirmation in
             appState.confirmCancelJob(id: jobID, skipConfirmation: skipConfirmation)
-        }
-        panel.onSelect = { jobID in
-            let gen = appState.imageGen
-            guard let jobID else {
-                gen.selectJob(id: nil)
-                syncPanelToController(panel)
-                return
-            }
-            let mode = appState.jobsQueueSizeMode
-            let rowCount = appState.visibleJobsQueueRowCount()
-            let soleVisible = mode != .strip && (mode == .one || rowCount == 1)
-            if soleVisible {
-                gen.selectJob(id: jobID)
-            } else if gen.selectedJobID == jobID {
-                gen.selectJob(id: nil)
-            } else {
-                gen.selectJob(id: jobID)
-            }
-            syncPanelToController(panel)
         }
         panel.onOpenReferences = { paths in
             appState.openReferenceThumbnailPaths(paths)

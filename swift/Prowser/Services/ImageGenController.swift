@@ -27,7 +27,6 @@ final class ImageGenController {
     private(set) var holdJobQueue = false
     private(set) var queueRevision = 0
     private(set) var dialogBuildPauseCount = 0
-    private(set) var selectedJobID: String?
     private(set) var activeStripView = ActiveJobStripStatusView()
     private(set) var skipSeriesCopyInFlight = false
     private(set) var cooldownSecondsRemaining = 0
@@ -271,11 +270,6 @@ final class ImageGenController {
                 swiftRegistry.prewarmDialogPluginLists()
             }
         }
-    }
-
-    func selectJob(id: String?) {
-        selectedJobID = id
-        bumpQueueRevision()
     }
 
     func jobsPaneTitleSuffix() -> String {
@@ -808,9 +802,6 @@ final class ImageGenController {
             return
         }
         queue.jobs.removeAll { $0.jobID == id }
-        if selectedJobID == id {
-            selectedJobID = nil
-        }
         persistQueue()
         bumpQueueRevision()
     }
@@ -2045,9 +2036,6 @@ final class ImageGenController {
             queue.jobs.removeAll { $0.jobID == finishedJobID }
             if queue.jobs.count != before, !queuePersistSuppressed {
                 persistQueue()
-            }
-            if selectedJobID == finishedJobID {
-                selectJob(id: queue.jobs.first?.jobID)
             }
         }
         removeAspectPadTemps()

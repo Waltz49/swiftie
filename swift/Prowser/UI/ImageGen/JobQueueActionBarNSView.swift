@@ -12,8 +12,8 @@ struct JobQueueActionBarState {
     static let empty = JobQueueActionBarState()
 }
 
-/// Shared action bar for the selected queue row. Port of `JobQueueActionBar` in Python.
-/// Embedded at the bottom of the selected job card.
+/// Shared action bar for the hovered queue row. Port of `JobQueueActionBar` in Python.
+/// Embedded at the bottom of the hovered job card.
 @MainActor
 final class JobQueueActionBarNSView: NSView {
     var onEdit: (() -> Void)?

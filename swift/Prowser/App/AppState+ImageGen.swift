@@ -629,9 +629,6 @@ extension AppState {
         jobsShowHeldJobs = show
         config.updateSetting("jobs_show_held_jobs", value: show)
         config.applySettingsChange(emit: eventBus)
-        if !show, let selected = imageGen.selectedJobID, selected != imageGen.activeJobID, imageGen.jobHeld(jobID: selected) {
-            imageGen.selectJob(id: nil)
-        }
         jobsQueuePanelSync?()
         syncJobsPaneGeometry()
     }
