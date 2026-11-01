@@ -43,15 +43,19 @@ final class LmStudioCaptionService {
     }
 
     /// Single coalesced LM Studio reachability probe (shared by flux + foreground task bridges).
-    func probeServicesIfNeeded(config: AppConfig) async -> Bool {
+    func probeServicesIfNeeded(config: AppConfig, forceRefresh: Bool = false) async -> Bool {
         let hostKey = captionHost(config: config).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let cached = lastProbeCache,
+        if !forceRefresh,
+           let cached = lastProbeCache,
            cached.hostKey == hostKey,
            Date().timeIntervalSince(cached.checked) < Self.probeCacheTTL {
             sessionState = cached.ok ? .available : .unavailable
             return cached.ok
         }
-        if let inFlightProbe {
+        if forceRefresh {
+            lastProbeCache = nil
+        }
+        if let inFlightProbe, !forceRefresh {
             return await inFlightProbe.value
         }
         let task = Task { @MainActor in
@@ -557,7 +561,8 @@ final class LmStudioCaptionService {
     // MARK: - Network
 
     private func networkProbe(config: AppConfig) async -> Bool {
-        guard let base = apiBaseURL(host: captionHost(config: config)) else { return false }
+        let host = captionHost(config: config)
+        guard let base = apiBaseURL(host: host) else { return false }
         let modelsURL = base.appending(path: "models")
         SessionViewLog.logLMStudioCall(
             method: "GET \(modelsURL.path)",
@@ -581,10 +586,34 @@ final class LmStudioCaptionService {
             }
             let ids = parseModelIDs(from: data)
             if !ids.isEmpty { return true }
-            let saved = savedModelKey(config: config)
-            return !saved.isEmpty
+            if !savedModelKey(config: config).isEmpty { return true }
+            if await probeNativeLoadedModels(host: host, config: config) {
+                return true
+            }
+            return false
         } catch {
             SessionViewLog.logLMStudioError("Probe failed", detail: error.localizedDescription, config: config)
+            return false
+        }
+    }
+
+    /// Native ``GET /api/v1/models`` — detects loaded instances when OpenAI ``/v1/models`` is empty.
+    private func probeNativeLoadedModels(host: String, config: AppConfig) async -> Bool {
+        guard let nativeBase = nativeAPIBaseURL(host: host) else { return false }
+        let url = nativeBase.appending(path: "models")
+        SessionViewLog.logLMStudioCall(
+            method: "GET \(url.path)",
+            payload: ["url": url.absoluteString],
+            config: config
+        )
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+                return false
+            }
+            logHTTPResponseData(data, status: http.statusCode, config: config)
+            return !parseLoadedNativeModelIDs(from: data).isEmpty
+        } catch {
             return false
         }
     }

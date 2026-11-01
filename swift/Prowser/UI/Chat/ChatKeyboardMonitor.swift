@@ -21,6 +21,10 @@ final class ChatKeyboardMonitor {
                   event.charactersIgnoringModifiers?.lowercased() == "r" else {
                 return event
             }
+            if appState.chat.showUnavailableOnly {
+                appState.chat.refreshConnection()
+                return nil
+            }
             appState.chat.redoLastUserMessage()
             return nil
         }

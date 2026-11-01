@@ -22,10 +22,15 @@ struct ChatPaneView: View {
                         .multilineTextAlignment(.center)
                         .foregroundStyle(appState.theme.colors.sidebarHeaderText)
                         .padding(.horizontal, 16)
-                    Button("LM Studio") {
-                        appState.openLmStudioOrShowInstallHelp()
+                    HStack(spacing: 12) {
+                        Button("Refresh") {
+                            chat.refreshConnection()
+                        }
+                        Button("LM Studio") {
+                            chat.openLmStudioAndPollAvailability()
+                        }
+                        .keyboardShortcut(.defaultAction)
                     }
-                    .keyboardShortcut(.defaultAction)
                     Spacer(minLength: 8)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -70,10 +70,31 @@ final class ChatController {
     }
 
     func refreshLmStudioAvailability() async {
-        let ok = await LmStudioCaptionService.shared.probeServicesIfNeeded(config: appState.config)
+        let ok = await LmStudioCaptionService.shared.probeServicesIfNeeded(
+            config: appState.config,
+            forceRefresh: true
+        )
         lmAvailableOnShow = ok
         if !ok, !chatStarted {
             showUnavailableOnly = true
+        } else {
+            showUnavailableOnly = false
+        }
+    }
+
+    func refreshConnection() {
+        Task { await refreshLmStudioAvailability() }
+    }
+
+    func openLmStudioAndPollAvailability() {
+        appState.openLmStudioOrShowInstallHelp()
+        Task {
+            let delaysSeconds: [Double] = [2, 4, 8]
+            for delay in delaysSeconds {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                await refreshLmStudioAvailability()
+                if lmAvailableOnShow { break }
+            }
         }
     }
 
@@ -205,6 +226,9 @@ final class ChatController {
             temporaryFilesDirectory: temporaryFilesDirectory()
         )
         bumpScroll()
+        if !lmAvailableOnShow, !chatStarted {
+            showUnavailableOnly = true
+        }
     }
 
     func setCopyImagesToAssistant(_ enabled: Bool) {

@@ -2156,14 +2156,15 @@ final class ImageGenController {
     private func completeSuccessfulGenerationUnit() async {
         guard !copyBatchCancelled else { return }
         completeRunningStepAfterCopy(outputPath: activeOutputPath ?? "")
+        // Match Python: deferred quit-after-current runs before series/hold demote clears the batch.
+        if finishCurrentUnitAndMaybeQuit() {
+            return
+        }
         if seriesContinues() {
             syncNextCopyChainFromCompletedCycle(
                 completedCopyValues: copyCycleExifValues,
                 outputPath: activeOutputPath ?? ""
             )
-        }
-        if finishCurrentUnitAndMaybeQuit() {
-            return
         }
         if holdJobQueue {
             if seriesContinues() {
@@ -4303,6 +4304,7 @@ final class ImageGenController {
             JobStepPersistence.saveActiveRunning(nil, config: config)
         }
         finishCopyBatch(cancelled: false)
+        maybeQuitAfterCurrentWorker()
         return true
     }
 
