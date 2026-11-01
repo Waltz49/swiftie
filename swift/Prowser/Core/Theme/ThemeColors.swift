@@ -14,6 +14,7 @@ struct ThemeColors: Equatable {
 
     var sidebarBackground: Color
     var sidebarText: Color
+    var sidebarEmphasizedText: Color
     var sidebarMutedText: Color
     var sidebarHeaderBackground: Color
     var sidebarHeaderBorder: Color
@@ -178,6 +179,7 @@ struct ThemeColors: Equatable {
             dialogMutedText: Color(hex: dialogMutedHex) ?? .gray,
             sidebarBackground: resolvedColor("sidebar_background_color_hex", "#000000"),
             sidebarText: resolvedColor("sidebar_text_color_hex", "#b6b6b6"),
+            sidebarEmphasizedText: resolvedColor("sidebar_emphasized_text_color_hex", "#ffff00"),
             sidebarMutedText: Color(hex: sidebarMutedHex) ?? .gray,
             sidebarHeaderBackground: resolvedColor("sidebar_header_bg_hex", "#2b2b2b"),
             sidebarHeaderBorder: Color(hex: borderHex) ?? Color(white: 0.25),

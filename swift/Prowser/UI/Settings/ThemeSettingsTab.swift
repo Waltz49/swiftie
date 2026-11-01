@@ -170,6 +170,11 @@ struct ThemeSettingsTab: View {
                 hex: stringValue(merged, "sidebar_text_color_hex"),
                 onColorChange: { setOverride(editID, "sidebar_text_color_hex", $0) }
             )
+            ThemeColorSwatchRow(
+                label: "Emphasized text color:",
+                hex: stringValue(merged, "sidebar_emphasized_text_color_hex"),
+                onColorChange: { setOverride(editID, "sidebar_emphasized_text_color_hex", $0) }
+            )
             ThemeMutedBlendRow(
                 label: "Sidebar muted text:",
                 percent: intValue(merged, "sidebar_muted_blend_percent", default: 50),

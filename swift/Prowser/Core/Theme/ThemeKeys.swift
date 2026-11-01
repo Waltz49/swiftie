@@ -23,6 +23,7 @@ enum ThemeKeys {
         "sidebar_header_bg_hex",
         "sidebar_background_color_hex",
         "sidebar_text_color_hex",
+        "sidebar_emphasized_text_color_hex",
         "status_bar_background_color_hex",
         "status_bar_text_color_hex",
         "default_border_color_hex",

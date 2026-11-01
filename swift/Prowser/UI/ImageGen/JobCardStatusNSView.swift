@@ -93,8 +93,13 @@ final class JobCardStatusNSView: NSView {
         for row in view.rows {
             switch row {
             case .title(let title, let rowRunning):
-                let display = (rowRunning || view.running) ? "\(title) (Running)" : title
-                let field = makeLabel(display, muted: false, bold: true)
+                let running = rowRunning || view.running
+                let field: NSTextField
+                if running {
+                    field = makeRunningTitleLabel(title: title)
+                } else {
+                    field = makeLabel(title, muted: false, bold: true)
+                }
                 field.alignment = .center
                 field.lineBreakMode = .byTruncatingTail
                 let wrap = NSView()
@@ -218,6 +223,32 @@ final class JobCardStatusNSView: NSView {
         row.addArrangedSubview(val)
         row.widthAnchor.constraint(equalToConstant: width).isActive = true
         return row
+    }
+
+    private func makeRunningTitleLabel(title: String) -> NSTextField {
+        let font = NSFont.boldSystemFont(ofSize: JobQueueLayout.fontSize)
+        let suffix = " (Running)"
+        let attr = NSMutableAttributedString(
+            string: title,
+            attributes: [
+                .font: font,
+                .foregroundColor: colors.sidebarText.nsColor,
+            ]
+        )
+        attr.append(NSAttributedString(
+            string: suffix,
+            attributes: [
+                .font: font,
+                .foregroundColor: colors.sidebarEmphasizedText.nsColor,
+            ]
+        ))
+        let field = NSTextField(labelWithString: "")
+        field.attributedStringValue = attr
+        field.isEditable = false
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.lineBreakMode = .byTruncatingTail
+        return field
     }
 
     private func makeLabel(

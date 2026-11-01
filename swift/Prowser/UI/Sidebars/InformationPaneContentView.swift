@@ -208,9 +208,7 @@ struct InformationPaneContentView: View {
                             .padding(.leading, 2)
                             .padding(.trailing, 4)
                             .overlay(Rectangle().stroke(colors.sidebarMutedText, lineWidth: 1))
-                        Text(row.value)
-                            .font(monospaceFont(bodyFontSize))
-                            .foregroundStyle(colors.sidebarText)
+                        fieldValueView(label: row.label, value: row.value)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 8)
@@ -222,9 +220,7 @@ struct InformationPaneContentView: View {
                             .font(monospaceFont(bodyFontSize))
                             .foregroundStyle(colors.sidebarText)
                             .fixedSize(horizontal: true, vertical: false)
-                        Text(row.value)
-                            .font(monospaceFont(bodyFontSize))
-                            .foregroundStyle(colors.sidebarText)
+                        fieldValueView(label: row.label, value: row.value)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -239,12 +235,12 @@ struct InformationPaneContentView: View {
                 if row.fullWidth {
                     Text(modelValueText(row.value))
                         .font(monospaceFont(bodyFontSize))
-                        .foregroundStyle(colors.sidebarText)
+                        .foregroundStyle(modelValueForeground(row.value, fullWidth: true))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if row.label.isEmpty, row.elideValue {
                     Text(modelValueText(row.value))
                         .font(monospaceFont(bodyFontSize))
-                        .foregroundStyle(colors.sidebarText)
+                        .foregroundStyle(colors.sidebarEmphasizedText)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     HStack(alignment: .top, spacing: 4) {
@@ -252,7 +248,10 @@ struct InformationPaneContentView: View {
                             .font(monospaceFont(bodyFontSize))
                             .foregroundStyle(colors.sidebarText)
                             .fixedSize(horizontal: true, vertical: false)
-                        modelValueView(row.value)
+                        modelValueView(
+                            row.value,
+                            emphasizedPlain: row.label.lowercased().hasPrefix("lora:")
+                        )
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -261,7 +260,7 @@ struct InformationPaneContentView: View {
     }
 
     @ViewBuilder
-    private func modelValueView(_ value: InformationModelValue) -> some View {
+    private func modelValueView(_ value: InformationModelValue, emphasizedPlain: Bool = false) -> some View {
         switch value {
         case .copySeed(let seed):
             Button {
@@ -270,7 +269,7 @@ struct InformationPaneContentView: View {
                 InformationPaneHoverUnderlineLabel(
                     text: seed,
                     font: monospaceFont(bodyFontSize),
-                    color: colors.sidebarText
+                    color: colors.sidebarEmphasizedText
                 )
             }
             .buttonStyle(.plain)
@@ -278,11 +277,11 @@ struct InformationPaneContentView: View {
         case .bold(let text):
             Text(text)
                 .font(monospaceFont(bodyFontSize).weight(.bold))
-                .foregroundStyle(colors.sidebarText)
+                .foregroundStyle(colors.sidebarEmphasizedText)
         case .plain(let text):
             Text(text)
                 .font(monospaceFont(bodyFontSize))
-                .foregroundStyle(colors.sidebarText)
+                .foregroundStyle(emphasizedPlain ? colors.sidebarEmphasizedText : colors.sidebarText)
         }
     }
 
@@ -320,6 +319,41 @@ struct InformationPaneContentView: View {
 
     private func monospaceFont(_ size: CGFloat) -> Font {
         .system(size: size, design: .monospaced)
+    }
+
+    @ViewBuilder
+    private func fieldValueView(label: String, value: String) -> some View {
+        if label == "Image Size" {
+            if let newline = value.firstIndex(of: "\n") {
+                let dimensions = String(value[..<newline])
+                let area = String(value[value.index(after: newline)...])
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(dimensions)
+                        .font(monospaceFont(bodyFontSize))
+                        .foregroundStyle(colors.sidebarEmphasizedText)
+                    if !area.isEmpty {
+                        Text(area)
+                            .font(monospaceFont(bodyFontSize))
+                            .foregroundStyle(colors.sidebarText)
+                    }
+                }
+            } else {
+                Text(value)
+                    .font(monospaceFont(bodyFontSize))
+                    .foregroundStyle(colors.sidebarEmphasizedText)
+            }
+        } else {
+            Text(value)
+                .font(monospaceFont(bodyFontSize))
+                .foregroundStyle(colors.sidebarText)
+        }
+    }
+
+    private func modelValueForeground(_ value: InformationModelValue, fullWidth: Bool) -> Color {
+        if fullWidth, case .plain = value {
+            return colors.sidebarEmphasizedText
+        }
+        return colors.sidebarText
     }
 }
 
