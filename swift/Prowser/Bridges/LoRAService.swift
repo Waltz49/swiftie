@@ -498,15 +498,23 @@ final class LoRAService {
         filename: String,
         sourcePath: String
     ) async throws {
+        var tw = triggerWord
+        var c = comment
+        var r = referencePrompt
+        ImageGenPromptSentenceCase.flushLoraMetadataStrings(
+            triggerWord: &tw,
+            comment: &c,
+            referencePrompt: &r
+        )
         let store = try store()
         var lc = try await loadCatalog()
         guard let raw = (lc[LoRACatalogSettings.userEntriesKey] as? [String: Any])?[loraID] as? [String: Any],
               var entry = LoRAEntry.fromDictionary(raw) else { return }
         entry.displayName = displayName
-        entry.triggerWord = triggerWord.isEmpty ? nil : triggerWord
+        entry.triggerWord = tw.isEmpty ? nil : tw
         entry.bestGuess = bestGuess
-        entry.comment = comment.isEmpty ? nil : comment
-        entry.referencePrompt = referencePrompt.isEmpty ? nil : referencePrompt
+        entry.comment = c.isEmpty ? nil : c
+        entry.referencePrompt = r.isEmpty ? nil : r
         entry.repoID = repoID
         entry.filename = filename
         entry.sourcePath = sourcePath.isEmpty ? nil : sourcePath
@@ -521,6 +529,7 @@ final class LoRAService {
         onProgress: @escaping @Sendable (String, Int, Int) -> Void
     ) async throws -> [String: Any] {
         var cmd = payload
+        ImageGenPromptSentenceCase.flushLoraImportPayload(&cmd)
         cmd["command"] = "import_lora"
         let result = try await opsRequest(cmd, awaitFinalResult: true) { message in
             let activity = message["activity"] as? String ?? ""

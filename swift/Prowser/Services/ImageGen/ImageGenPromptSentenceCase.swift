@@ -14,8 +14,39 @@ enum ImageGenPromptSentenceCase {
 
     /// Full blur/submit normalization (prepare + capitalize).
     static func normalized(_ text: String, perLine: Bool = false) -> String {
-        let prepared = perLine ? prepareForSentenceCaseLines(text) : prepareForSentenceCase(text)
+        let prepared = perLine ? prepareForSentenceCaseLines(text) : prepareForSentenceCase(text, addTrailingPeriod: true)
         return perLine ? sentenceCaseLines(prepared) : sentenceCase(prepared)
+    }
+
+    /// LoRA trigger words: same prepare/capitalize as prompts, without a trailing period.
+    static func normalizedTriggerWord(_ text: String) -> String {
+        let prepared = prepareForSentenceCase(text, addTrailingPeriod: false)
+        return sentenceCase(prepared)
+    }
+
+    static func flushLoraMetadataStrings(
+        triggerWord: inout String,
+        comment: inout String,
+        referencePrompt: inout String
+    ) {
+        let tw = normalizedTriggerWord(triggerWord)
+        if tw != triggerWord { triggerWord = tw }
+        let c = normalized(comment)
+        if c != comment { comment = c }
+        let r = normalized(referencePrompt)
+        if r != referencePrompt { referencePrompt = r }
+    }
+
+    static func flushLoraImportPayload(_ values: inout [String: Any]) {
+        if let raw = values["trigger_word"] as? String {
+            let normalized = normalizedTriggerWord(raw)
+            if normalized != raw { values["trigger_word"] = normalized }
+        }
+        for key in ["comment", "reference_prompt"] {
+            guard let raw = values[key] as? String else { continue }
+            let normalized = normalized(raw, perLine: false)
+            if normalized != raw { values[key] = normalized }
+        }
     }
 
     /// Re-capitalize after AI exit output without lowercasing (``apply_sentence_case_after_prompt_exit``).
@@ -59,13 +90,14 @@ enum ImageGenPromptSentenceCase {
         }.joined(separator: "\n")
     }
 
-    private static func prepareForSentenceCase(_ text: String) -> String {
+    private static func prepareForSentenceCase(_ text: String, addTrailingPeriod: Bool) -> String {
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
             let s = String(line)
             return s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : normalizeLineContent(s)
         }
         lines = collapseConsecutiveBlankLines(lines)
-        return ensureTrailingPeriod(lines.joined(separator: "\n"))
+        let joined = lines.joined(separator: "\n")
+        return addTrailingPeriod ? ensureTrailingPeriod(joined) : joined
     }
 
     private static func prepareForSentenceCaseLines(_ text: String) -> String {
@@ -153,9 +185,36 @@ private struct ImageGenPromptSentenceCaseOnBlurModifier: ViewModifier {
     }
 }
 
+private struct ImageGenPromptTriggerSentenceCaseOnBlurModifier: ViewModifier {
+    @Binding var text: String
+    @FocusState private var isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focused($isFocused)
+            .onChange(of: isFocused) { wasFocused, nowFocused in
+                if wasFocused, !nowFocused {
+                    commitTriggerSentenceCase()
+                }
+            }
+    }
+
+    private func commitTriggerSentenceCase() {
+        let normalized = ImageGenPromptSentenceCase.normalizedTriggerWord(text)
+        if normalized != text {
+            text = normalized
+        }
+    }
+}
+
 extension View {
     /// Apply Python ``install_image_gen_prompt_sentence_case_on_blur`` when the field loses focus.
     func imageGenPromptSentenceCaseOnBlur(_ text: Binding<String>, perLine: Bool = false) -> some View {
         modifier(ImageGenPromptSentenceCaseOnBlurModifier(text: text, perLine: perLine))
+    }
+
+    /// LoRA trigger field blur normalization (no trailing period).
+    func imageGenPromptTriggerSentenceCaseOnBlur(_ text: Binding<String>) -> some View {
+        modifier(ImageGenPromptTriggerSentenceCaseOnBlurModifier(text: text))
     }
 }

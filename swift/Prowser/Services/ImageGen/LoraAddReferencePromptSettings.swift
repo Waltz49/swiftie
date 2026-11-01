@@ -16,8 +16,10 @@ enum LoraAddReferencePromptSettings {
     }
 
     static func save(_ referencePrompt: String, config: AppConfig) {
-        let trimmed = referencePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = trimmed.isEmpty ? defaultPrompt : trimmed
+        let normalized = ImageGenPromptSentenceCase.normalized(referencePrompt)
+        let value = normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? defaultPrompt
+            : normalized
         var imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         var loraAdd = imagegen[loraAddKey] as? [String: Any] ?? [:]
         loraAdd[referencePromptKey] = value

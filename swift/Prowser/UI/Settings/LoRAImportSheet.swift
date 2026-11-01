@@ -36,6 +36,7 @@ struct LoRAImportSheet: View {
                 TextField("Safetensors path", text: $sourcePath)
                 TextField("Display name", text: $displayName)
                 TextField("Trigger word", text: $triggerWord)
+                    .imageGenPromptTriggerSentenceCaseOnBlur($triggerWord)
                 LabeledContent("Default weight") {
                     AppNumericSpinBox(
                         value: $bestGuess,
@@ -48,7 +49,9 @@ struct LoRAImportSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 TextField("Comment", text: $comment)
+                    .imageGenPromptSentenceCaseOnBlur($comment)
                 TextField("Reference prompt (compatibility test)", text: $referencePrompt)
+                    .imageGenPromptSentenceCaseOnBlur($referencePrompt)
             }
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
@@ -219,6 +222,11 @@ struct LoRAImportSheet: View {
     private func importAdd(skipCompatibilityProbe: Bool) async {
         guard !isImporting else { return }
         errorMessage = nil
+        ImageGenPromptSentenceCase.flushLoraMetadataStrings(
+            triggerWord: &triggerWord,
+            comment: &comment,
+            referencePrompt: &referencePrompt
+        )
         let path = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
             errorMessage = "Choose a .safetensors file."
