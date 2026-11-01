@@ -111,11 +111,13 @@ final class JobCardStatusNSView: NSView {
                 rowsStack.addArrangedSubview(wrap)
 
             case .labelValue(let label, let value):
+                let wrapValue = label == "LoRA:" || label.isEmpty
                 rowsStack.addArrangedSubview(makeLabelValueRow(
                     label: label,
                     value: value,
                     valueWidth: valueWidth,
-                    width: width
+                    width: width,
+                    wrapping: wrapValue
                 ))
 
             case .prompt(let label, let value):

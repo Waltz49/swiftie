@@ -244,7 +244,7 @@ enum QueueJobStatusBuilder {
             rows.append(.labelValue(label: "Model:", value: fields.model))
         }
         if !fields.lora.isEmpty {
-            rows.append(.labelValue(label: "LoRA:", value: fields.lora))
+            appendLoraJobCardRows(to: &rows, combined: fields.lora)
         }
         var quantOnSize = false
         if !fields.size.isEmpty {
@@ -274,6 +274,15 @@ enum QueueJobStatusBuilder {
             rows.append(.labelValue(label: "Neg:", value: fields.neg))
         }
         return rows
+    }
+
+    /// One card row per LoRA; combined EXIF/import tokens stay ``a + b`` elsewhere.
+    private static func appendLoraJobCardRows(to rows: inout [QueueStatusRowKind], combined: String) {
+        let tokens = ImageGenExifCommentFormatting.exifLoraNames(from: combined)
+        let names = tokens.isEmpty ? [combined] : tokens
+        for (index, token) in names.enumerated() {
+            rows.append(.labelValue(label: index == 0 ? "LoRA:" : "", value: token))
+        }
     }
 
     // MARK: - Helpers

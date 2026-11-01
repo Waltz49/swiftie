@@ -346,6 +346,9 @@ final class AppState {
         observeDirectoryLoadedForDeferredBrowseExitScroll()
         fileOperations.bind(self)
         wallpaperManager.bind(self)
+        imageGen.ensureHeldJobsVisibleInPanel = { [weak self] in
+            self?.setJobsShowHeldJobs(true)
+        }
         exifOperations.bind(self)
         searchOperations.bind(self)
         backgroundImageRecognition.bind(self)

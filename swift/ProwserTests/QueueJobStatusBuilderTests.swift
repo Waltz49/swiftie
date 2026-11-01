@@ -93,6 +93,25 @@ final class QueueJobStatusBuilderTests: XCTestCase {
         }))
     }
 
+    func testMultiLoraJobCardUsesSeparateRowsNotPlusJoin() {
+        let result = QueueJobStatusBuilder.build(
+            pluginID: "realistic_vision_v4_sd15",
+            function: "create",
+            values: [
+                "prompt": "test",
+                "width": 512,
+                "height": 512,
+                "steps": 20,
+            ],
+            copiesTotal: 1,
+            loraLabel: "First [1] + Second [0.5]"
+        )
+        let fp = result.statusView.fingerprint()
+        XCTAssertTrue(fp.contains("lv:LoRA::First [1]"), fp)
+        XCTAssertTrue(fp.contains("lv::Second [0.5]"), fp)
+        XCTAssertFalse(fp.contains(" + "), fp)
+    }
+
     func testKleinEditJobCardSizeMatchesSourceNotSliderDefaults() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("queue-status-\(UUID().uuidString)", isDirectory: true)
