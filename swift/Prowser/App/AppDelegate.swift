@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchCompleted = false
     private var pendingOpenFlush: DispatchWorkItem?
     private var menuBarDedupObserver: NSObjectProtocol?
+    private var chatToggleShortcutMonitor: Any?
 
     override init() {
         launchOptions = LaunchOptions.parse()
@@ -66,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         applyApplicationIcon()
         NSApp.activate(ignoringOtherApps: true)
+        installChatToggleShortcutMonitor()
         installMenuBarDeduplication()
         installMainWindowGuard()
         applyLaunchOptions()
@@ -141,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         appState.config.saveSettings()
         appState.persistAllSidebarLayout()
+        appState.chat.persistOnQuitIfNeeded()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -302,6 +305,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         WindowFullscreen.installRestoreTracking(config: appState.config)
         scheduleStartupMenuRefresh()
+    }
+
+    /// Registered last so it runs first — F9/, must not fall through to SwiftUI menu shortcuts (e.g. jobs pane).
+    private func installChatToggleShortcutMonitor() {
+        guard chatToggleShortcutMonitor == nil else { return }
+        chatToggleShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let appState = self?.appState else { return event }
+            if appState.keyboardHandler.consumeChatToggleShortcut(event) {
+                return nil
+            }
+            return event
+        }
     }
 
     /// Python `MenuManager.schedule_startup_menu_shortcut_priming` — menus may stay disabled until layout settles.

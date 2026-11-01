@@ -237,6 +237,8 @@ struct SidebarPaneBody<Content: View>: View {
             InformationActionBarView()
         case .jobs:
             JobsToolbarView()
+        case .chat:
+            EmptyView()
         }
     }
 
@@ -257,6 +259,8 @@ struct SidebarPaneBody<Content: View>: View {
             return appState.informationMenuBarVisible
         case .jobs:
             return appState.jobsToolbarVisible
+        case .chat:
+            return false
         }
     }
 }

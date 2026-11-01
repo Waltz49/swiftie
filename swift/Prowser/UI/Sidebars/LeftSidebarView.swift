@@ -31,8 +31,10 @@ struct LeftSidebarView: View {
                 title: "",
                 expandedConfigKey: "chat_visible",
                 defaultExpanded: false,
-                isDisplayed: false,
-                omitLeftBorder: true
+                isDisplayed: displayVis[2],
+                omitLeftBorder: true,
+                contextMenuKind: .chat,
+                preferredFitContentHeight: { appState.chat.preferredSidebarContentHeight() }
             ),
         ]
 
@@ -41,7 +43,7 @@ struct LeftSidebarView: View {
             descriptors: descriptors,
             pane0: { FileTreeView().frame(minHeight: 80) },
             pane1: { PreviewPaneView().frame(minHeight: 64) },
-            pane2: { EmptyView() }
+            pane2: { ChatPaneView().frame(minHeight: ChatPaneLayout.minContentHeight) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

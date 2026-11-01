@@ -179,6 +179,7 @@ struct SettingsPreferenceCompactToggleColumnGrid<Item: Hashable, RowContent: Vie
 struct SettingsPreferenceCompactToggleRow: View {
     let title: String
     var tooltip: String?
+    var titleColor: Color = SettingsDialogChrome.rowTitle
     /// When true, label grows so the switch sits on the trailing edge of the column.
     var expandLabel = true
     @Binding var isOn: Bool
@@ -187,7 +188,7 @@ struct SettingsPreferenceCompactToggleRow: View {
         HStack(spacing: SettingsPreferenceCompactToggleMetrics.labelSwitchSpacing) {
             Text(title)
                 .font(.system(size: SettingsPreferenceCompactToggleMetrics.fontSize))
-                .foregroundStyle(SettingsDialogChrome.rowTitle)
+                .foregroundStyle(titleColor)
                 .lineLimit(1)
                 .frame(maxWidth: expandLabel ? .infinity : nil, alignment: .leading)
             SettingsPreferenceSwitch(isOn: $isOn)

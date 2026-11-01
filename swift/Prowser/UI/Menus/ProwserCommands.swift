@@ -191,6 +191,10 @@ struct ProwserCommands: Commands {
                 PaneToggleButton(appState: appState, pane: .preview)
                     .keyboardShortcut("p", modifiers: [])
 
+                if BundleCapabilities.chatUIEnabled {
+                    ChatToggleMenuButton(appState: appState)
+                }
+
                 if BundleCapabilities.imageGenUIEnabled {
                     PaneToggleButton(appState: appState, pane: .jobsSidebar)
                         .keyboardShortcut("j", modifiers: [])
@@ -425,6 +429,16 @@ struct ProwserCommands: Commands {
                     Task { @MainActor in appState.openHomeDirectory() }
                 }
                 .keyboardShortcut("h", modifiers: .control)
+
+                if BundleCapabilities.chatUIEnabled {
+                    Divider()
+                    Button("Favorite user prompts…") {
+                        Task { @MainActor in appState.chat.openFavoriteUserPrompts() }
+                    }
+                    Button("Prefix and Postfix text…") {
+                        Task { @MainActor in appState.chat.openPrefixPostfixLibrary() }
+                    }
+                }
 
                 Button("Cache Subdirectories' Thumbnails") {
                     Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
@@ -934,6 +948,23 @@ private enum PaneToggleKind {
     case informationSidebar
     case jobsSidebar
     case statusBar
+}
+
+private struct ChatToggleMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { appState.isChatVisible },
+            set: { newValue in
+                if newValue != appState.isChatVisible {
+                    appState.toggleChat()
+                }
+            }
+        )) {
+            Text(appState.isChatVisible ? "Hide Chat" : "Show Chat")
+        }
+    }
 }
 
 @MainActor

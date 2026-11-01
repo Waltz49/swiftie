@@ -5,6 +5,7 @@ enum SidebarPaneContextMenuKind: Equatable {
     case fileTree
     case information
     case jobs(floating: Bool)
+    case chat
 }
 
 /// Control-click / right-click menus for sidebar panes.
@@ -42,6 +43,8 @@ enum SidebarPaneContextMenus {
             return informationMenu(appState: appState)
         case .jobs(let floating):
             return jobsMenu(appState: appState, floating: floating)
+        case .chat:
+            return chatMenu(appState: appState)
         }
     }
 
@@ -120,6 +123,37 @@ enum SidebarPaneContextMenus {
             title: "Show Toolbar",
             checked: appState.fileTreeToolbarVisible,
             action: #selector(PaneMenuActions.treeShowToolbar(_:))
+        )
+        stripMenuIcons(menu)
+        return menu
+    }
+
+    private static func chatMenu(appState: AppState) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let chat = appState.chat
+        addAction(menu, title: "System prompt for chat", action: #selector(PaneMenuActions.chatSystemPrompt(_:)))
+        addCheckable(
+            menu,
+            title: "Copy images to Assistant's reply",
+            checked: chat.sessionSettings.copyImagesToAssistant,
+            action: #selector(PaneMenuActions.chatCopyImages(_:))
+        )
+        addAction(menu, title: "Clear Chat", action: #selector(PaneMenuActions.chatClear(_:)))
+        menu.addItem(.separator())
+        addCheckable(
+            menu,
+            title: "Preserve Chat Across Sessions",
+            checked: chat.sessionSettings.preserveAcrossSessions,
+            action: #selector(PaneMenuActions.chatPreserve(_:))
+        )
+        addAction(menu, title: "Tips…", action: #selector(PaneMenuActions.chatTips(_:)))
+        menu.addItem(.separator())
+        addCheckable(
+            menu,
+            title: "Show Toolbar",
+            checked: chat.showToolbar,
+            action: #selector(PaneMenuActions.chatShowToolbar(_:))
         )
         stripMenuIcons(menu)
         return menu
@@ -256,6 +290,30 @@ final class PaneMenuActions: NSObject {
 
     @objc func jobsShowToolbar(_ sender: NSMenuItem) {
         appState?.setJobsToolbarVisible(toggledValue(sender))
+    }
+
+    @objc func chatSystemPrompt(_ sender: NSMenuItem) {
+        appState?.chat.editSystemPrompt()
+    }
+
+    @objc func chatCopyImages(_ sender: NSMenuItem) {
+        appState?.chat.setCopyImagesToAssistant(toggledValue(sender))
+    }
+
+    @objc func chatClear(_ sender: NSMenuItem) {
+        appState?.chat.clearChat()
+    }
+
+    @objc func chatPreserve(_ sender: NSMenuItem) {
+        appState?.chat.setPreserveAcrossSessions(toggledValue(sender))
+    }
+
+    @objc func chatTips(_ sender: NSMenuItem) {
+        appState?.chat.showTips = true
+    }
+
+    @objc func chatShowToolbar(_ sender: NSMenuItem) {
+        appState?.chat.setShowToolbar(toggledValue(sender))
     }
 
 }
@@ -479,6 +537,7 @@ final class PaneToolsButtonView: NSView {
         case .fileTree: return "File tree tools"
         case .information: return "File information tools"
         case .jobs: return "Job control tools"
+        case .chat: return "Chat tools"
         }
     }
 

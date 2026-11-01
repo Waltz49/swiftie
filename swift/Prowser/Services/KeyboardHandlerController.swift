@@ -32,6 +32,9 @@ final class KeyboardHandlerController {
             if self.tryHandleJobsPanelToggleShortcut(event) {
                 return nil
             }
+            if self.tryHandleToggleChatShortcut(event) {
+                return nil
+            }
             if self.tryHandleFileTreeKeyboard(event) {
                 return nil
             }
@@ -60,6 +63,51 @@ final class KeyboardHandlerController {
         guard event.charactersIgnoringModifiers?.lowercased() == "j" else { return false }
         appState.toggleJobsPanel()
         return true
+    }
+
+    /// F9 and `,` toggle chat (Python View ▸ Show Chat / ``ToggleChatShortcutFilter`` for F9).
+    func consumeChatToggleShortcut(_ event: NSEvent) -> Bool {
+        tryHandleToggleChatShortcut(event)
+    }
+
+    private func tryHandleToggleChatShortcut(_ event: NSEvent) -> Bool {
+        guard BundleCapabilities.chatUIEnabled, let appState else { return false }
+        guard Self.toggleChatShortcutContextOK(appState: appState, event: event) else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.command), !flags.contains(.control),
+              !flags.contains(.option), !flags.contains(.shift) else { return false }
+
+        if Self.isF9Key(event) {
+            appState.toggleChat()
+            return true
+        }
+        if Self.isToggleChatCommaKey(event) {
+            if isTextInputFocused(in: event.window) { return false }
+            appState.toggleChat()
+            return true
+        }
+        return false
+    }
+
+    private static func toggleChatShortcutContextOK(appState: AppState, event: NSEvent) -> Bool {
+        if NSApp.modalWindow != nil { return false }
+        if settingsPreferencesShouldReceiveKeyboard(appState: appState, event: event) { return false }
+        if appState.hasModalSheetPresented { return false }
+        return BrowserWindowIdentity.browserWindowOwnsShortcuts(event: event)
+    }
+
+    private static func isF9Key(_ event: NSEvent) -> Bool {
+        if event.keyCode == 101 || event.specialKey == .f9 { return true }
+        if let chars = event.charactersIgnoringModifiers,
+           chars.unicodeScalars.count == 1,
+           chars.unicodeScalars.first!.value == NSF9FunctionKey {
+            return true
+        }
+        return false
+    }
+
+    private static func isToggleChatCommaKey(_ event: NSEvent) -> Bool {
+        event.charactersIgnoringModifiers == "," || event.keyCode == 43
     }
 
     /// Tree forwards unhandled keys here (Python `keyboard_handler_manager.handle_key_event` from the tree view).
@@ -427,6 +475,19 @@ final class KeyboardHandlerController {
             }
         }
 
+        // F9 / , — toggle chat (also handled in ``tryHandleToggleChatShortcut``; comma here when monitor order differs).
+        if !hasCommand, !hasControl, !hasShift, !hasOption {
+            if Self.isF9Key(event), BundleCapabilities.chatUIEnabled {
+                appState.toggleChat()
+                return true
+            }
+            if Self.isToggleChatCommaKey(event), BundleCapabilities.chatUIEnabled,
+               !isTextInputFocused(in: event.window) {
+                appState.toggleChat()
+                return true
+            }
+        }
+
         // F3 — Image History (Python File ▸ Image History WindowShortcut).
         if !hasCommand, !hasControl, !hasShift, !hasOption, Self.isF3Key(event) {
             let mode = appState.fileData.currentViewMode
@@ -493,11 +554,11 @@ final class KeyboardHandlerController {
         }
         if !fromTreeFocus, appState!.fileTreePaneHasKeyboardFocus(in: event.window) {
             // Python Image History is a WindowShortcut; still handle F3 when the tree has focus.
-            if !Self.isF3Key(event) {
+            if !Self.isF3Key(event), !Self.isF9Key(event) {
                 return false
             }
         }
-        if isTextInputFocused(in: event.window) { return false }
+        if isTextInputFocused(in: event.window), !Self.isF9Key(event) { return false }
         if NSApp.keyWindow == nil { return false }
         return true
     }

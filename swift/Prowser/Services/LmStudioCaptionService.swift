@@ -214,6 +214,118 @@ final class LmStudioCaptionService {
         throw CaptionError.runtime(finalMessage)
     }
 
+    /// Full conversation turn for sidebar chat (port of ``chat_lmstudio.stream_chat_response``).
+    func streamChatSessionTurn(
+        messages: [ChatMessage],
+        systemPrompt: String,
+        config: AppConfig,
+        onChunk: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        guard let base = apiBaseURL(host: captionHost(config: config)) else {
+            throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
+        }
+        let settings = captionSettings(config: config)
+        var filteredSystem = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        filteredSystem = AIPromptExitService.applyTextAIExit(filteredSystem, config: config)
+        let modelID = try await resolveModelID(baseURL: base, config: config)
+
+        let apiMessages = try await buildChatAPIMessages(
+            history: messages,
+            systemPrompt: filteredSystem,
+            config: config
+        )
+
+        SessionViewLog.logModelInput(
+            tag: "chat_plugins.chat_lmstudio",
+            payload: [
+                "system_prompt": filteredSystem,
+                "messages": apiMessages.count,
+                "config": ["temperature": settings.temperature, "model": modelID],
+            ],
+            config: config
+        )
+
+        let url = base.appending(path: "chat/completions")
+        let body: [String: Any] = [
+            "model": modelID,
+            "stream": true,
+            "temperature": settings.temperature,
+            "messages": apiMessages,
+        ]
+
+        let lastUserText = messages.last(where: { $0.role == .user })?.text ?? ""
+        return try await performStreamingChatRequest(
+            url: url,
+            body: body,
+            baseURL: base,
+            modelID: modelID,
+            systemPrompt: filteredSystem,
+            userPrompt: lastUserText,
+            temperature: settings.temperature,
+            imageURL: nil,
+            config: config,
+            onChunk: onChunk,
+            retriedModelLoad: false
+        )
+    }
+
+    private func userTextForChatLLM(_ raw: String, config: AppConfig) -> String {
+        var text = ChatSelectionImageTrigger.stripTrigger(raw)
+        text = ChatImageGenTrigger.stripImageGenCommands(text)
+        text = PrefixPostfixStore.applyRules(text, forImages: false, config: config)
+        return AIPromptExitService.applyTextAIExit(text, config: config)
+    }
+
+    private func buildChatAPIMessages(
+        history: [ChatMessage],
+        systemPrompt: String,
+        config: AppConfig
+    ) async throws -> [[String: Any]] {
+        var apiMessages: [[String: Any]] = [
+            ["role": "system", "content": systemPrompt],
+        ]
+        for msg in history {
+            switch msg.role {
+            case .assistant:
+                apiMessages.append(["role": "assistant", "content": msg.text])
+            case .user:
+                let userText = userTextForChatLLM(msg.text, config: config)
+                let visionPaths = ChatImagePaths.pathsForVisionModel(msg)
+                if visionPaths.isEmpty {
+                    apiMessages.append(["role": "user", "content": userText])
+                } else {
+                    var parts: [[String: Any]] = [["type": "text", "text": userText]]
+                    for path in visionPaths {
+                        let encoded = try prepareVisionImagePayloads(imagePath: path)
+                        var attached = false
+                        for imageURL in lmStudioImageURLCandidates(
+                            jpegBase64: encoded.jpegBase64,
+                            pngBase64: encoded.pngBase64
+                        ) {
+                            parts.append([
+                                "type": "image_url",
+                                "image_url": ["url": imageURL],
+                            ])
+                            attached = true
+                            break
+                        }
+                        if !attached {
+                            throw CaptionError.runtime(
+                                "Could not prepare image for the model.\n\nPath: \(path)"
+                            )
+                        }
+                    }
+                    apiMessages.append(["role": "user", "content": parts])
+                }
+            }
+        }
+        return apiMessages
+    }
+
+    static func finalizeChatResponse(_ accumulated: String) -> String {
+        stripThinkTags(accumulated).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func streamTextChatRequest(
         baseURL: URL,
         modelID: String,

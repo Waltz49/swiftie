@@ -43,6 +43,8 @@ final class AppState {
     let browseImageHistory = BrowseImageHistoryController()
     let workers: ImageGenServices
     let imageGen: ImageGenController
+    /// Reserved for finer-grained chat keyboard routing.
+    var chatPaneHasKeyboardFocus = false
     let checkLorasFlow = CheckLorasFlowState()
     var jobsDisplayMode: JobsDisplayMode = .pane
     var jobsQueueSizeMode: JobsQueueSizeMode = .all
@@ -266,6 +268,9 @@ final class AppState {
 
     let launchOptions: LaunchOptions
     private(set) var directoryLoader: DirectoryLoadCoordinator!
+    @ObservationIgnored
+    private var chatBacking: ChatController!
+    var chat: ChatController { chatBacking }
 
     init(launchOptions: LaunchOptions = LaunchOptions.parse()) {
         self.launchOptions = launchOptions
@@ -327,17 +332,18 @@ final class AppState {
             registry: workers.imageGenRegistry
         )
         imageGen.bind(loraBridge: workers.lora)
-        renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
         fileOperations = FileOperationsService()
         theme = ThemeService(config: config)
         informationSectionState = InformationSectionState(config: config)
+        renameStatusManager = RenameStatusManager(dataDirectory: config.dataDirectory)
+        directoryLoader = DirectoryLoadCoordinator(appState: self)
+        chatBacking = ChatController(appState: self)
         loadSidebarToolbarSettings()
         // Python `apply_saved_jobs_display_mode`: panel mode hides the sidebar jobs pane; the
         // floating panel itself stays closed until the user shows it (⌘J).
         jobsDisplayMode = JobsDisplayMode.normalize(config.string(forKey: "jobs_display_mode", default: "pane"))
         observeViewModeChanges()
         observeDirectoryLoadedForDeferredBrowseExitScroll()
-        directoryLoader = DirectoryLoadCoordinator(appState: self)
         fileOperations.bind(self)
         wallpaperManager.bind(self)
         exifOperations.bind(self)
@@ -368,6 +374,7 @@ final class AppState {
         renamePrefixService.bind(self)
         menuRefresh.bind(self)
         keyboardHandler.bind(self)
+        bindChatNotifications()
         statusBarPeekMonitor.bind(self)
         browseImageHistory.bind(self)
         imageGen.scheduleStartupQueueRelease()

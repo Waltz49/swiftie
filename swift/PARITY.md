@@ -201,7 +201,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [~] Toggle information sidebar (**I**; ⌘I still cycles overlay in browse)
 - [~] Toggle jobs pane (**J**; ⌘J opens floating panel)
 - [x] Show one sidebar pane only (**⌥T**, **⌥P**, **⌥O**, **⌥I** — hide siblings on that column)
-- [~] Show Chat (View menu + **,** key; F9 deferred)
+- [x] Show Chat (View menu + **,** + **F9**; keyboard handler + menu shortcuts)
 - [~] Toggle status bar (**B**)
 - [~] Hide/Show Panes (**F4**, **.**, **⌃.** — `toggleChrome`)
 - [x] Toggle list view (**F12**)

@@ -81,7 +81,7 @@ struct ImageGenPromptActionButtons: View {
     }
 
     private func appendFavoritePrompt() {
-        appState.status.show("Favorite prompts: use chat prompt library (not yet ported).")
+        appState.chat.openFavoriteUserPrompts()
     }
 
     private func voiceInputStub() {

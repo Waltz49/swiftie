@@ -37,6 +37,8 @@ struct AppAssetIconButton: View {
     var hoverFileExtension: String? = nil
     var size: CGFloat = 26
     var iconSize: CGFloat? = nil
+    /// Checked / pressed toolbar state (e.g. chat copy-images toggle).
+    var isSelected: Bool = false
     var tooltip: String = ""
     let action: () -> Void
 
@@ -71,11 +73,11 @@ struct AppAssetIconButton: View {
         .frame(width: size, height: size)
         .background(
             RoundedRectangle(cornerRadius: 3)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(isSelected ? 0.65 : 0.35))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(Color.secondary.opacity(isHovered ? 0.8 : 0.45), lineWidth: 1)
+                .strokeBorder(Color.secondary.opacity(isHovered || isSelected ? 0.8 : 0.45), lineWidth: 1)
         )
         .onHover { isHovered = $0 }
         .graphicButtonTooltip(text: tooltip, icon: tooltipIcon)

@@ -1405,6 +1405,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                   imagePaths.contains(path) else { return }
             gridDelegate?.thumbnailGridDidOpenBrowse(path: path)
         default:
+            if let appState, appState.keyboardHandler.consumeChatToggleShortcut(event) {
+                return
+            }
             super.keyDown(with: event)
         }
     }

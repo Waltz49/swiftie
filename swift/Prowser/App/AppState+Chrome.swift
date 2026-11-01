@@ -198,6 +198,10 @@ extension AppState {
 
     /// True when at least one left sidebar pane is open.
     var leftSidebarPaneActive: Bool {
+        if BundleCapabilities.chatUIEnabled,
+           config.bool(forKey: "chat_visible", default: false) {
+            return true
+        }
         if fileData.currentViewMode == .browse { return false }
         if config.bool(forKey: "file_tree_visible", default: true) { return true }
         if config.bool(forKey: "preview_visible", default: true) { return true }
@@ -404,7 +408,9 @@ extension AppState {
         config.updateSetting("status_bar_visible", value: true)
         config.updateSetting("file_tree_visible", value: true)
         config.updateSetting("preview_visible", value: true)
-        config.updateSetting("chat_visible", value: true)
+        if BundleCapabilities.chatUIEnabled {
+            config.updateSetting("chat_visible", value: false)
+        }
         config.updateSetting("shortcuts_sidebar_visible", value: true)
         config.updateSetting("information_sidebar_visible", value: true)
         if BundleCapabilities.imageGenUIEnabled {

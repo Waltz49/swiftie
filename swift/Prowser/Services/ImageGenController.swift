@@ -2028,6 +2028,7 @@ final class ImageGenController {
                 let lmBusy = fluxPromptTasks.isBusy
                     || foregroundTasks.isBusy
                     || LmStudioCaptionService.shared.isCaptionInProgress
+                    || ChatLMStudioActivity.predictionActive
                 await LmStudioCaptionService.shared.unloadAllModelsBeforeImageGeneration(
                     config: config,
                     skipUnload: lmBusy
@@ -2853,7 +2854,7 @@ final class ImageGenController {
         let delta = clampedAfter - current
         do {
             if delta > 0 {
-                var template = pendingValues
+                let template = pendingValues
                 for _ in 0..<delta {
                     let newSteps = try JobStepQueue.materializePendingStepsFromUpdate(
                         pluginID: activePluginID,
