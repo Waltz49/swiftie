@@ -481,6 +481,13 @@ enum JobStepQueue {
         return out
     }
 
+    /// Port of ``replace_pending_steps``.
+    static func replacePendingSteps(_ doc: [String: Any], steps: [[String: Any]]) -> [String: Any] {
+        var out = doc
+        out["steps"] = steps
+        return out
+    }
+
     static func syncChainStateToPendingDoc(
         _ doc: [String: Any]?,
         outputPath: String = "",

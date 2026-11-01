@@ -121,7 +121,7 @@ final class JobQueueActionBarNSView: NSView {
             hoverName: "series_plus_icon_hover",
             tooltip: """
             Add another image to this series
-            Option+click to set copies to 51 (runs continuously).
+            ⌥+click to set copies to 51 (runs continuously).
             """,
             action: #selector(addAction)
         )
@@ -133,7 +133,7 @@ final class JobQueueActionBarNSView: NSView {
             hoverName: "series_minus_icon_hover",
             tooltip: """
             Remove one pending image from the series.
-            Option+click to remove all remaining images.
+            ⌥+click to remove all remaining images.
             """,
             action: #selector(subAction)
         )
@@ -145,7 +145,7 @@ final class JobQueueActionBarNSView: NSView {
             hoverName: "trash_icon_hover",
             tooltip: """
             Cancel job
-            Option+click to cancel without confirmation.
+            ⌥+click to cancel without confirmation.
             """,
             action: #selector(cancelAction(_:))
         )

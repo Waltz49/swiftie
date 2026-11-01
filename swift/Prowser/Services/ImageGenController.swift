@@ -1175,54 +1175,33 @@ final class ImageGenController {
     @discardableResult
     private func clearActiveSeriesRemaining() -> Bool {
         guard activeSeriesRemainingAfter() > 0 else { return false }
-        subtractActiveSeriesRemaining(removeAll: true)
+        setActiveSeriesRemainingAfter(after: 0)
         return true
     }
 
     func addActiveSeriesCycle(delta: Int = 1) {
-        guard activeJobID != nil else { return }
-        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return }
-        let proposed = copiesTotal + delta
-        if JobStepQueue.isSeriesContinuousCopies(proposed) {
-            setActiveSeriesContinuous()
-            return
-        }
-        copiesTotal = min(JobStepQueue.seriesContinuousCopies - 1, proposed)
-        copyBatchActive = copiesTotal > 1
-        appendPendingSteps(count: delta)
-        persistStepState()
-        Task { await refreshActiveJobStatusView() }
-        bumpQueueRevision()
+        _ = adjustActiveSeriesRemainingAfter(delta: delta)
     }
 
     func subtractActiveSeriesRemaining(delta: Int = 1, removeAll: Bool = false) {
         guard activeJobID != nil else { return }
         if removeAll {
-            clearPendingSteps()
-            copiesTotal = copiesDone + (isProcessing ? 1 : 0)
-        } else {
-            let pending = JobStepQueue.pendingStepCount(stepPendingDoc)
-            let remove = min(delta, pending)
-            trimPendingSteps(count: remove)
-            copiesTotal = max(copiesDone + (isProcessing ? 1 : 0), copiesTotal - remove)
+            if activeSeriesRemainingAfter() <= 0 { return }
+            setActiveSeriesRemainingAfter(after: 0)
+            return
         }
-        copyBatchActive = copiesTotal > 1
-        persistStepState()
-        Task { await refreshActiveJobStatusView() }
-        bumpQueueRevision()
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+            _ = leaveActiveContinuousSeries(targetTotal: JobStepQueue.seriesContinuousCopies - 1)
+            return
+        }
+        _ = adjustActiveSeriesRemainingAfter(delta: -delta)
     }
 
     func setActiveSeriesContinuous() {
         guard activeJobID != nil else { return }
-        copiesTotal = JobStepQueue.seriesContinuousCopies
-        copyBatchActive = true
-        pendingValues["copies"] = JobStepQueue.seriesContinuousCopies
-        if var doc = stepPendingDoc {
-            activateContinuousSeriesPendingDoc(&doc)
-            stepPendingDoc = doc
-        }
-        persistStepState()
-        bumpQueueRevision()
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return }
+        let maxAfter = JobStepQueue.seriesContinuousCopies - copiesDone - 1
+        setActiveSeriesRemainingAfter(after: max(0, maxAfter))
     }
 
     func setActiveSeriesRefinement(image: Bool, text: Bool) {
@@ -1318,9 +1297,7 @@ final class ImageGenController {
 
     private func canAddSeriesCycle(for jobID: String) -> Bool {
         if jobID == activeJobID {
-            guard activeJobID != nil else { return false }
-            guard !JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return false }
-            return copiesTotal < JobStepQueue.seriesContinuousCopies
+            return canAddActiveSeriesCycle()
         }
         guard let job = queue.jobs.first(where: { $0.jobID == jobID }) else { return false }
         if job.pluginUnavailable { return false }
@@ -1336,13 +1313,23 @@ final class ImageGenController {
         return seriesRemainingAfter(for: jobID) > 0
     }
 
-    private func canSubtractActiveSeriesCycle() -> Bool {
-        activeSeriesRemainingAfter() > 0
+    private func canAddActiveSeriesCycle() -> Bool {
+        guard activeJobID != nil else { return false }
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return false }
+        let maxAfter = JobStepQueue.seriesContinuousCopies - copiesDone - 1
+        return activeSeriesRemainingAfter() < maxAfter
     }
 
+    private func canSubtractActiveSeriesCycle() -> Bool {
+        guard activeJobID != nil else { return false }
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return true }
+        return activeSeriesRemainingAfter() > 0
+    }
+
+    /// Port of ``active_series_remaining_after`` (pending steps only).
     private func activeSeriesRemainingAfter() -> Int {
-        let inProgress = isProcessing ? 1 : 0
-        return max(0, copiesTotal - copiesDone - inProgress)
+        guard activeJobID != nil else { return 0 }
+        return JobStepQueue.pendingStepCount(stepPendingDoc)
     }
 
     private func seriesRefinementEnabled(for jobID: String) -> Bool {
@@ -2817,30 +2804,162 @@ final class ImageGenController {
 
     /// Port of ``ImageGenController._append_continuous_pending_step`` (before ``_promote_next_step_to_running``).
     private func appendContinuousPendingStepIfNeeded(_ doc: inout [String: Any]) {
-        guard JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return }
+        guard activeBatchContinuousMode() else { return }
         guard JobStepQueue.pendingStepCount(doc) <= 0 else { return }
         guard let template = doc[JobStepQueue.continuousTemplateKey] as? [String: Any] else { return }
         doc = JobStepQueue.appendContinuousStep(to: doc, templateStep: template)
+        syncBatchCountersFromSteps()
     }
 
-    private func appendPendingSteps(count: Int) {
-        guard var doc = stepPendingDoc, count > 0 else { return }
-        Task {
-            do {
-                let steps = try await registry.materializeSteps(
-                    pluginID: activePluginID,
-                    values: pendingValues,
-                    copies: count
-                )
-                var existing = doc["steps"] as? [[String: Any]] ?? []
-                existing.append(contentsOf: steps)
-                doc["steps"] = existing
-                stepPendingDoc = doc
-                persistStepState()
-            } catch {
-                lastError = error.localizedDescription
+    /// Port of ``ImageGenController._active_batch_continuous_mode``.
+    private func activeBatchContinuousMode() -> Bool {
+        guard JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return false }
+        guard let doc = stepPendingDoc else { return false }
+        if doc[JobStepQueue.continuousModeKey] as? Bool == true { return true }
+        return doc[JobStepQueue.continuousTemplateKey] as? [String: Any] != nil
+    }
+
+    /// Port of ``ImageGenController._deactivate_continuous_series_pending_doc``.
+    private func deactivateContinuousSeriesPendingDoc() {
+        guard var doc = stepPendingDoc else { return }
+        doc.removeValue(forKey: JobStepQueue.continuousModeKey)
+        doc.removeValue(forKey: JobStepQueue.continuousTemplateKey)
+        stepPendingDoc = doc
+    }
+
+    private func stepsDoneCount() -> Int {
+        max(0, stepPendingDoc?["steps_done"] as? Int ?? 0)
+    }
+
+    /// Port of ``ImageGenController._adjust_active_series_remaining_after``.
+    @discardableResult
+    private func adjustActiveSeriesRemainingAfter(delta: Int) -> Bool {
+        guard activeJobID != nil, delta != 0 else { return false }
+        let maxAfter = JobStepQueue.seriesContinuousCopies - copiesDone - 1
+        let after = activeSeriesRemainingAfter()
+        let newAfter = max(0, min(maxAfter, after + delta))
+        guard newAfter != after else { return false }
+        setActiveSeriesRemainingAfter(after: newAfter)
+        return true
+    }
+
+    /// Port of ``ImageGenController._set_active_series_remaining_after``.
+    private func setActiveSeriesRemainingAfter(after: Int) {
+        guard activeJobID != nil else { return }
+        let maxAfter = JobStepQueue.seriesContinuousCopies - copiesDone - 1
+        let clampedAfter = max(0, min(maxAfter, after))
+        guard var doc = stepPendingDoc else { return }
+        let current = JobStepQueue.pendingStepCount(doc)
+        let delta = clampedAfter - current
+        do {
+            if delta > 0 {
+                var template = pendingValues
+                for _ in 0..<delta {
+                    let newSteps = try JobStepQueue.materializePendingStepsFromUpdate(
+                        pluginID: activePluginID,
+                        templateValues: template,
+                        count: 1
+                    )
+                    if let step = newSteps.first {
+                        doc = JobStepQueue.appendPendingStep(doc: doc, step: step)
+                    }
+                }
+            } else if delta < 0 {
+                let raw = doc["steps"] as? [[String: Any]] ?? []
+                let trimmed = raw.prefix(clampedAfter).map { $0 }
+                doc = JobStepQueue.replacePendingSteps(doc, steps: trimmed)
+            }
+            stepPendingDoc = doc
+        } catch {
+            lastError = error.localizedDescription
+            return
+        }
+        let running = stepRunning != nil ? 1 : 0
+        let stepsDone = stepsDoneCount()
+        var newTotal = stepsDone + running + clampedAfter
+        if JobStepQueue.isSeriesContinuousCopies(newTotal) {
+            newTotal = JobStepQueue.seriesContinuousCopies
+            if var pendingDoc = stepPendingDoc {
+                activateContinuousSeriesPendingDoc(&pendingDoc)
+                stepPendingDoc = pendingDoc
+            }
+        } else {
+            deactivateContinuousSeriesPendingDoc()
+        }
+        copiesTotal = newTotal
+        pendingValues["copies"] = newTotal
+        syncCopiesDoneDisplay()
+        copyBatchActive = newTotal > 1 || stepsDone > 0
+        stampActiveRunningStepCopies(newTotal)
+        syncPendingValuesFromRunningStep()
+        syncBatchCountersFromSteps()
+        if let jobID = activeJobID,
+           let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) {
+            queue.jobs[index].copiesTotal = copiesTotal
+            queue.jobs[index].values["copies"] = copiesTotal
+            if let steps = stepPendingDoc?["steps"] as? [[String: Any]] {
+                queue.jobs[index].steps = steps
             }
         }
+        persistStepState()
+        persistQueue()
+        let pluginID = activePluginID
+        let function = activeFunction
+        let values = pendingValues
+        let total = copiesTotal
+        Task {
+            await syncActiveJobQueueRow(
+                pluginID: pluginID,
+                function: function,
+                values: values,
+                copiesTotal: total
+            )
+            await refreshActiveJobStatusView()
+        }
+        bumpQueueRevision()
+    }
+
+    /// Port of ``ImageGenController._sync_batch_counters_from_steps``.
+    private func syncBatchCountersFromSteps() {
+        guard activeJobID != nil else { return }
+        let pending = JobStepQueue.pendingStepCount(stepPendingDoc)
+        let running = stepRunning != nil ? 1 : 0
+        if activeBatchContinuousMode() {
+            let fromValues = intFromAny(pendingValues["copies"]) ?? JobStepQueue.seriesContinuousCopies
+            copiesTotal = JobStepQueue.isSeriesContinuousCopies(fromValues)
+                ? JobStepQueue.seriesContinuousCopies
+                : max(1, fromValues)
+            pendingValues["copies"] = copiesTotal
+            copyBatchActive = true
+            syncCopiesDoneDisplay()
+            return
+        }
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+            deactivateContinuousSeriesPendingDoc()
+        }
+        let stepsDone = stepsDoneCount()
+        let total = max(1, stepsDone + pending + running)
+        copiesTotal = total
+        pendingValues["copies"] = total
+        copyBatchActive = copiesTotal > 1 || stepsDone > 0
+    }
+
+    /// Port of ``ImageGenController._sync_pending_values_from_running_step``.
+    private func syncPendingValuesFromRunningStep() {
+        guard var step = stepRunning else { return }
+        var values = JobStepQueue.stepValues(step)
+        values["copies"] = copiesTotal
+        step["values"] = values
+        stepRunning = step
+        pendingValues = values
+    }
+
+    private func stampActiveRunningStepCopies(_ copies: Int) {
+        guard var step = stepRunning else { return }
+        var values = JobStepQueue.stepValues(step)
+        values["copies"] = copies
+        step["values"] = values
+        stepRunning = step
     }
 
     private func trimPendingSteps(count: Int) {
@@ -2853,6 +2972,108 @@ final class ImageGenController {
         }
         doc["steps"] = steps
         stepPendingDoc = doc
+    }
+
+    /// Port of ``ImageGenController._leave_active_continuous_series``.
+    @discardableResult
+    private func leaveActiveContinuousSeries(targetTotal: Int) -> Bool {
+        guard activeJobID != nil else { return false }
+        guard JobStepQueue.isSeriesContinuousCopies(copiesTotal) else { return false }
+        let target = max(1, min(JobStepQueue.seriesContinuousCopies - 1, targetTotal))
+        if var doc = stepPendingDoc {
+            doc.removeValue(forKey: JobStepQueue.continuousModeKey)
+            doc.removeValue(forKey: JobStepQueue.continuousTemplateKey)
+            stepPendingDoc = doc
+        }
+        var templateValues = pendingValues
+        templateValues["copies"] = target
+        let running = stepRunning != nil ? 1 : 0
+        copiesDone = 0
+        if var doc = stepPendingDoc {
+            doc["steps_done"] = 0
+            stepPendingDoc = doc
+        }
+        let pendingNeeded = max(0, target - running)
+        do {
+            try rewriteActivePendingSteps(templateValues: templateValues, count: pendingNeeded)
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+        copiesTotal = target
+        copiesDone = 0
+        pendingValues["copies"] = target
+        copyBatchActive = target > 1 || running > 0
+        stampActiveRunningStepCopies(target)
+        syncPendingValuesFromRunningStep()
+        syncBatchCountersFromSteps()
+        if let jobID = activeJobID,
+           let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) {
+            queue.jobs[index].copiesTotal = target
+            queue.jobs[index].values["copies"] = target
+            if let steps = stepPendingDoc?["steps"] as? [[String: Any]] {
+                queue.jobs[index].steps = steps
+            }
+        }
+        syncCopiesDoneDisplay()
+        persistStepState()
+        persistQueue()
+        let pluginID = activePluginID
+        let function = activeFunction
+        let values = pendingValues
+        Task {
+            await syncActiveJobQueueRow(
+                pluginID: pluginID,
+                function: function,
+                values: values,
+                copiesTotal: target
+            )
+            await refreshActiveJobStatusView()
+        }
+        bumpQueueRevision()
+        return true
+    }
+
+    /// Port of ``ImageGenController._rewrite_active_pending_steps``.
+    private func rewriteActivePendingSteps(templateValues: [String: Any], count: Int) throws {
+        let steps = try JobStepQueue.materializePendingStepsFromUpdate(
+            pluginID: activePluginID,
+            templateValues: templateValues,
+            count: count
+        )
+        var doc = stepPendingDoc
+        if doc == nil, let jobID = activeJobID {
+            doc = JobStepQueue.buildPendingJobDoc(
+                jobID: jobID,
+                pluginID: activePluginID,
+                function: activeFunction,
+                steps: [],
+                fullPrompt: FluxPromptJob.effectiveJobPromptForTooltip(templateValues),
+                thumbnailPaths: activeThumbnailPaths,
+                stepsDone: copiesDone,
+                jobNumber: resolvedActiveJobNumber(),
+                held: activeJobHeld()
+            )
+        }
+        guard var doc else { return }
+        doc["steps"] = steps
+        doc["steps_done"] = copiesDone
+        var display = doc["display"] as? [String: Any] ?? [:]
+        display["full_prompt"] = FluxPromptJob.effectiveJobPromptForTooltip(templateValues)
+        let thumbs = JobCardThumbnailPaths.paths(pluginID: activePluginID, values: templateValues)
+        if !thumbs.isEmpty {
+            display["thumbnail_paths"] = thumbs
+            let cardPaths = cardThumbnailPaths(thumbs)
+            activeThumbnailPaths = cardPaths
+            activeJobCardThumbnailPathsCache = cardPaths
+        }
+        doc["display"] = display
+        stepPendingDoc = doc
+        if JobStepQueue.isSeriesContinuousCopies(templateValues["copies"] as? Int ?? 0) {
+            activateContinuousSeriesPendingDoc(&doc)
+            stepPendingDoc = doc
+        }
+        syncChainStateToPendingDoc()
     }
 
     private func clearPendingSteps() {
@@ -3444,6 +3665,9 @@ final class ImageGenController {
             steps: queue.jobs[index].steps,
             statusView: queue.jobs[index].statusView
         )
+        if let steps = stepPendingDoc?["steps"] as? [[String: Any]] {
+            queue.jobs[index].steps = steps
+        }
         let thumbs = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
         queue.jobs[index].thumbnailPaths = thumbs
         queue.jobs[index].statusView = nil
@@ -4133,7 +4357,7 @@ final class ImageGenController {
 
     /// Port of ``ImageGenController._sync_copies_done_display``.
     private func syncCopiesDoneDisplay() {
-        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) {
+        if activeBatchContinuousMode() {
             copiesDone = 0
         } else if let doc = stepPendingDoc {
             copiesDone = max(0, doc["steps_done"] as? Int ?? 0)

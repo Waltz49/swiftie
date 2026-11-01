@@ -42,6 +42,66 @@ final class ExifProgressivePreviewTests: XCTestCase {
         XCTAssertTrue(comment.contains("Seed: 542559250"))
     }
 
+    func testProgressiveExifFromMfluxJsonMatchesFinalStyleForKleinKV() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-klein-\(UUID().uuidString)").path
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: dir) }
+
+        let output = (dir as NSString).appendingPathComponent("imagegen-0002.webp")
+        let mfluxJSON = """
+        {"prompt":"scene","seed":1335284087,"steps":4,"quantize":4,"model":"black-forest-labs/FLUX.2-klein-9b-kv","lora_paths":["/tmp/a.safetensors"],"lora_scales":[1.0]}
+        """
+        try writeMinimalPNG(at: output)
+        try await ExifService.writeUserComment(path: output, text: mfluxJSON)
+
+        let values: [String: Any] = [
+            "prompt": "scene",
+            "seed": 1_335_284_087,
+            "steps": 4,
+            "mflux_quantize": 4,
+            "hf_model_id": LoRAHFModelIDs.flux2Klein9BKV,
+            "mflux_lora_stack": ["BallgagV2"],
+            "mflux_lora_scales": [1.0],
+        ]
+
+        let wrote = try await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
+            pluginID: "flux_klein_9b_kv_create",
+            outputPath: output,
+            values: values,
+            elapsedSeconds: 42,
+            completedStep: 2,
+            totalSteps: 4,
+            fallbackSourcePaths: [],
+            tempRoot: dir,
+            lora: "F2K9B_BallgagV2_2020E10 [1]"
+        )
+        XCTAssertTrue(wrote)
+
+        let comment = ExifService.userComment(path: output) ?? ""
+        XCTAssertTrue(comment.hasPrefix("Image Model:"))
+        XCTAssertTrue(comment.contains("FLUX 2 klein 9B KV"))
+        XCTAssertTrue(comment.contains("Seed: 1335284087"))
+        XCTAssertTrue(comment.contains("Steps: 4"))
+        XCTAssertTrue(comment.contains("Quantization: 4"))
+        XCTAssertTrue(comment.contains("LoRA: F2K9B_BallgagV2_2020E10 [1]"))
+        XCTAssertTrue(comment.contains("Prompt:"))
+        XCTAssertTrue(comment.contains("scene"))
+        XCTAssertFalse(comment.contains("{"))
+
+        let finalStyle = ImageGenGenerationExifService.formatGenerationExifComment(
+            pluginID: "flux_klein_9b_kv_create",
+            values: values,
+            workerResult: ["seed": 1_335_284_087],
+            elapsedSeconds: 42,
+            lora: "F2K9B_BallgagV2_2020E10 [1]"
+        )
+        XCTAssertEqual(
+            comment.components(separatedBy: "\n\nPrompt:").first,
+            finalStyle.components(separatedBy: "\n\nPrompt:").first
+        )
+    }
+
     private func writeMinimalPNG(at path: String) throws {
         let url = URL(fileURLWithPath: path)
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),

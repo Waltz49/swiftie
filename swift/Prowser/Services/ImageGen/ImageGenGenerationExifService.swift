@@ -2,6 +2,7 @@ import Foundation
 
 /// Generation EXIF comment formatting and reference repair (no Python registry).
 enum ImageGenGenerationExifService {
+    /// Final output EXIF body (unchanged contract — used by ``writeGenerationExifFallback``).
     static func formatGenerationExifComment(
         pluginID: String,
         values: [String: Any],
@@ -97,13 +98,19 @@ enum ImageGenGenerationExifService {
               ExifService.canWriteExifToOnDiskRaster(path: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
 
+        let resolvedLora = resolvedLoraForExif(plugin: plugin, values: values, override: lora)
+        if shouldSkipProgressiveExifRewrite(at: outputPath, resolvedLora: resolvedLora) {
+            return false
+        }
+
         let comment = formatGenerationExifComment(
             pluginID: pluginID,
             values: values,
-            workerResult: [:],
+            workerResult: progressiveWorkerResult(fromExistingCommentAt: outputPath),
             elapsedSeconds: elapsedSeconds,
             lora: lora
         )
+
         var finalComment = comment
         let entries = referenceEntries(
             plugin: plugin,
@@ -197,6 +204,28 @@ enum ImageGenGenerationExifService {
             outputPath: outputPath,
             tempRoot: tempRoot
         )
+    }
+
+    /// Port of Python progressive EXIF skip when comment is already final-form.
+    private static func shouldSkipProgressiveExifRewrite(at path: String, resolvedLora: String?) -> Bool {
+        guard let existing = ExifService.userComment(path: path)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              existing.hasPrefix("Image Model:") else {
+            return false
+        }
+        let hasLora = existing.contains("LoRA:")
+        let expectLora = !(resolvedLora ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasLora || !expectLora
+    }
+
+    /// Stepwise PNGs may carry MFLUX JSON; use its seed when job values omit one (``random_seed``).
+    private static func progressiveWorkerResult(fromExistingCommentAt path: String) -> [String: Any] {
+        guard let raw = ExifService.userComment(path: path),
+              let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(raw),
+              let metaSeed = intValue(meta["seed"]) else {
+            return [:]
+        }
+        return ["seed": metaSeed]
     }
 
     private static func promptTextForExif(_ values: [String: Any]) -> String {

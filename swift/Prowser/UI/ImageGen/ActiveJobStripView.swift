@@ -447,7 +447,7 @@ final class ActiveJobStripNSView: NSView {
             hoverName: "series_plus_icon_hover",
             tooltip: """
             Add another image to this series
-            Option+click to set copies to 51 (runs continuously).
+            ⌥+click to set copies to 51 (runs continuously).
             """,
             action: #selector(addSeriesAction)
         )
@@ -459,7 +459,7 @@ final class ActiveJobStripNSView: NSView {
             hoverName: "series_minus_icon_hover",
             tooltip: """
             Remove one pending image from the series.
-            Option+click to remove all remaining images.
+            ⌥+click to remove all remaining images.
             """,
             action: #selector(subtractSeriesAction)
         )
