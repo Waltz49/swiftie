@@ -16,6 +16,46 @@ enum FileMoveConflictResolver {
         var applyToAll = false
     }
 
+    /// Standardized destination path for a source basename (matches transfer loop expectations).
+    static func normalizedTargetPath(sourcePath: String, targetDirectory: String) -> String {
+        let dir = URL(fileURLWithPath: (targetDirectory as NSString).expandingTildeInPath).standardizedFileURL
+        let name = (sourcePath as NSString).lastPathComponent
+        return dir.appendingPathComponent(name).standardizedFileURL.path
+    }
+
+    private static func isExistingFile(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+        return !isDir.boolValue
+    }
+
+    /// Path of an existing file at the destination that should trigger the overwrite dialog.
+    static func existingConflictTarget(sourcePath: String, targetDirectory: String) -> String? {
+        let primary = normalizedTargetPath(sourcePath: sourcePath, targetDirectory: targetDirectory)
+        if isExistingFile(primary) {
+            return primary
+        }
+
+        let dirURL = URL(fileURLWithPath: (targetDirectory as NSString).expandingTildeInPath).standardizedFileURL
+        let sourceName = (sourcePath as NSString).lastPathComponent
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: dirURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for entry in entries {
+            guard (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                continue
+            }
+            if entry.lastPathComponent.caseInsensitiveCompare(sourceName) == .orderedSame {
+                return entry.standardizedFileURL.path
+            }
+        }
+        return nil
+    }
+
     /// `generate_renamed_path` — `basename-{NNNNN}.ext` using `rename_increment_length`.
     static func generateRenamedPath(
         targetDirectory: String,
@@ -28,14 +68,14 @@ enum FileMoveConflictResolver {
         var incrementLength = config.int(forKey: "rename_increment_length", default: 5)
         incrementLength = max(3, min(6, incrementLength))
         let maxNumber = Int(pow(10.0, Double(incrementLength))) - 1
-        let dir = targetDirectory as NSString
+        let dir = (targetDirectory as NSString).expandingTildeInPath as NSString
 
         for i in 1 ... maxNumber {
             let formatted = String(format: "%0*d", incrementLength, i)
             let newFilename = ext.isEmpty ? "\(name)-\(formatted)" : "\(name)-\(formatted).\(ext)"
             let newPath = dir.appendingPathComponent(newFilename)
             if !FileManager.default.fileExists(atPath: newPath) {
-                return newPath
+                return URL(fileURLWithPath: newPath).standardizedFileURL.path
             }
         }
         return nil
@@ -55,10 +95,10 @@ enum FileMoveConflictResolver {
         }
 
         let sourceFilename = (sourcePath as NSString).lastPathComponent
-        let targetPath = (targetDirectory as NSString).appendingPathComponent(sourceFilename)
+        let defaultTarget = normalizedTargetPath(sourcePath: sourcePath, targetDirectory: targetDirectory)
 
-        guard FileManager.default.fileExists(atPath: targetPath) else {
-            return (targetPath, false)
+        guard let existingTarget = existingConflictTarget(sourcePath: sourcePath, targetDirectory: targetDirectory) else {
+            return (defaultTarget, false)
         }
 
         if applyToAllState.applyToAll, let saved = applyToAllState.action {
@@ -66,7 +106,7 @@ enum FileMoveConflictResolver {
             case .skip:
                 return (nil, false)
             case .replace:
-                return (targetPath, false)
+                return (existingTarget, false)
             case .rename:
                 let renamed = generateRenamedPath(
                     targetDirectory: targetDirectory,
@@ -81,7 +121,7 @@ enum FileMoveConflictResolver {
 
         let dialogResult = FileAlreadyExistsDialogController.present(
             sourcePath: sourcePath,
-            targetPath: targetPath,
+            targetPath: existingTarget,
             parentWindow: parentWindow
         )
 
@@ -96,7 +136,7 @@ enum FileMoveConflictResolver {
         case .skip:
             return (nil, false)
         case .replace:
-            return (targetPath, false)
+            return (existingTarget, false)
         case .rename:
             let renamed = generateRenamedPath(
                 targetDirectory: targetDirectory,

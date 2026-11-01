@@ -248,6 +248,15 @@ final class AppState {
     private let directoryWatcher = DirectoryWatcher()
     private var pipeListener: NamedPipeListener?
     private var suppressDirectoryRefreshUntil: Date?
+    /// Coalesces overlapping disk refresh scans (`DirectoryRefreshService.checkAndRefreshIfChanged`).
+    private(set) var diskRefreshGeneration = 0
+
+    func bumpDiskRefreshGeneration() -> Int {
+        diskRefreshGeneration += 1
+        return diskRefreshGeneration
+    }
+    private var manualDirectoryRefreshGeneration = 0
+    private var manualDirectoryRefreshTask: Task<Void, Never>?
     /// While > 0, file tree must not re-sync expansion/scroll to the active image (thumbnail drag-drop).
     private var fileTreeHighlightSyncSuspendCount = 0
 
@@ -1203,11 +1212,15 @@ final class AppState {
             sortReversed: config.bool(forKey: "sort_reversed", default: false),
             useExifDate: config.useExifDate
         )
-        Task { @MainActor [weak self] in
+        manualDirectoryRefreshTask?.cancel()
+        manualDirectoryRefreshGeneration += 1
+        let generation = manualDirectoryRefreshGeneration
+        manualDirectoryRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let images = await Task.detached(priority: .userInitiated) {
                 DirectoryLoadBackgroundWork.scanAndSort(snapshot)
             }.value
+            guard !Task.isCancelled, generation == self.manualDirectoryRefreshGeneration else { return }
             guard self.fileData.currentDirectory == dir else { return }
             let currentDisplayed = self.fileData.displayedImages
             let hasStalePaths = !self.isFormattedListMode()

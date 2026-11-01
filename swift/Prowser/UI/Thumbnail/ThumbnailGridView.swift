@@ -330,6 +330,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 thumbnailLockPaintRevision: appState.thumbnailLockPaintRevision
             )
             if !force, fingerprint == lastGridSyncFingerprint {
+                reconcileGridPathsIfNeeded()
                 syncSelectionVisualsIfNeeded(to: gridView)
                 return
             }
@@ -359,7 +360,7 @@ struct ThumbnailGridView: NSViewRepresentable {
                 if directoryChanged {
                     updateKind = .fullReplace
                 } else {
-                    updateKind = Self.displayedPathsUpdateKind(
+                    updateKind = ThumbnailDisplayedPathsUpdateKind.transition(
                         from: gridView.imagePaths,
                         to: paths
                     )
@@ -452,16 +453,9 @@ struct ThumbnailGridView: NSViewRepresentable {
                 && gridView.referenceGraph == nil
         }
 
-        private static func displayedPathsUpdateKind(
-            from old: [String],
-            to new: [String]
-        ) -> ThumbnailDisplayedPathsUpdateKind {
-            let oldSet = Set(old)
-            let newSet = Set(new)
-            if oldSet == newSet {
-                return .reorderOnly
-            }
-            return .membershipChanged(removed: oldSet.subtracting(newSet))
+        /// Repair grid paths when the model changed during loading-canvas suppress (fingerprint unchanged).
+        private func reconcileGridPathsIfNeeded() {
+            DirectoryRefreshService.reconcileThumbnailGridListing(appState: appState)
         }
 
         private func resolvedHighlightIndex(in paths: [String]) -> Int {

@@ -75,6 +75,7 @@ enum DirectoryRefreshService {
 
         let extensions = appState.config.imageExtensions
         let filterPattern = appState.filterSettings.filterPattern
+        let generation = appState.bumpDiskRefreshGeneration()
         Task { @MainActor in
             let scanned = await Task.detached(priority: .utility) {
                 DirectoryScanner.scanDirectory(
@@ -83,6 +84,7 @@ enum DirectoryRefreshService {
                     filterPattern: filterPattern
                 )
             }.value
+            guard generation == appState.diskRefreshGeneration else { return }
             guard appState.fileData.currentDirectory == directory else { return }
 
             let displayed = appState.fileData.displayedImages
@@ -406,9 +408,20 @@ enum DirectoryRefreshService {
     /// Light refresh when directory listing is unchanged (⌘R) — avoid O(n) main-thread stats + full pixmap drop.
     static func refreshThumbnailPresentation(appState: AppState) {
         refreshModifiedDisplayedImagesIfNeeded(appState: appState)
+        reconcileThumbnailGridListing(appState: appState)
         appState.thumbnailInvalidationGeneration += 1
         appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
         appState.thumbnailGridHost?.setNeedsDisplay(appState.thumbnailGridHost?.bounds ?? .zero)
+    }
+
+    /// Grid can lag `displayedImages` when the loading canvas suppresses path sync; repair without a full rescan.
+    static func reconcileThumbnailGridListing(appState: AppState) {
+        guard appState.fileData.currentViewMode == .thumbnail else { return }
+        guard !appState.showThumbnailDirectoryLoadingCanvas else { return }
+        guard !appState.shouldSuppressStaleThumbnailGrid else { return }
+        let displayed = appState.fileData.displayedImages
+        guard let grid = appState.thumbnailGridHost, grid.imagePaths != displayed else { return }
+        grid.reconcileDisplayedPathsIfNeeded(displayed)
     }
 
     static func invalidateThumbnails(appState: AppState, paths: [String]) {

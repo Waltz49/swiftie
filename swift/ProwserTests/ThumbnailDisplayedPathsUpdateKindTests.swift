@@ -14,4 +14,25 @@ final class ThumbnailDisplayedPathsUpdateKindTests: XCTestCase {
         let removed = Set(old).subtracting(new)
         XCTAssertEqual(removed, ["/a/2.jpg"])
     }
+
+    func testTransitionReorderOnlyWhenMultisetUnchanged() {
+        let kind = ThumbnailDisplayedPathsUpdateKind.transition(
+            from: ["/a/1.jpg", "/a/2.jpg"],
+            to: ["/a/2.jpg", "/a/1.jpg"]
+        )
+        guard case .reorderOnly = kind else {
+            return XCTFail("expected reorderOnly")
+        }
+    }
+
+    func testTransitionAddOnlyRecordsNoRemovals() {
+        let kind = ThumbnailDisplayedPathsUpdateKind.transition(
+            from: ["/a/1.jpg", "/a/2.jpg"],
+            to: ["/a/1.jpg", "/a/2.jpg", "/a/3.jpg"]
+        )
+        guard case .membershipChanged(let removed) = kind else {
+            return XCTFail("expected membershipChanged")
+        }
+        XCTAssertTrue(removed.isEmpty)
+    }
 }

@@ -106,7 +106,10 @@ struct ShortcutsSidebarView: View {
                         copyMode: copyMode,
                         actionEnabled: destinationClicksEnabled,
                         action: {
-                            appState.fileOperations.moveToDestination(slot: slot.number, copyOnly: nil)
+                            appState.fileOperations.moveToDestination(
+                                slot: slot.number,
+                                copyOnly: organizationPaneLinkCopyOnly()
+                            )
                         }
                     )
                 }
@@ -119,7 +122,7 @@ struct ShortcutsSidebarView: View {
                     palette: palette,
                     copyMode: copyMode,
                     actionEnabled: destinationClicksEnabled,
-                    action: { appState.fileOperations.moveToLastDropLocation(copyOnly: nil) }
+                    action: { appState.fileOperations.moveToLastDropLocation(copyOnly: organizationPaneLinkCopyOnly()) }
                 )
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -254,6 +257,11 @@ struct ShortcutsSidebarView: View {
 
     private func moveKeysMode() -> String {
         appState.config.string(forKey: "move_keys_mode", default: "not_links")
+    }
+
+    /// Python organize sidebar: link clicks use ``move_keys_mode`` only (not ``destination_menu_action``).
+    private func organizationPaneLinkCopyOnly() -> Bool {
+        moveKeysMode() == "copy"
     }
 
     private func clickModeBinding() -> Binding<String> {

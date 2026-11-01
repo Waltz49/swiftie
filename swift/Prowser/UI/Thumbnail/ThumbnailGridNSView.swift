@@ -34,6 +34,15 @@ enum ThumbnailDisplayedPathsUpdateKind {
     case fullReplace
     case reorderOnly
     case membershipChanged(removed: Set<String>)
+
+    static func transition(from old: [String], to new: [String]) -> Self {
+        let oldSet = Set(old)
+        let newSet = Set(new)
+        if oldSet == newSet {
+            return .reorderOnly
+        }
+        return .membershipChanged(removed: oldSet.subtracting(newSet))
+    }
 }
 
 /// Custom-painted thumbnail grid. Port of `thumbnails/thumbnail_canvas.py` (phase 1).
@@ -70,9 +79,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             if !removed.isEmpty {
                 ThumbnailFilenameOverlayCache.shared.removeEntries(forPaths: removed)
+                invalidateThumbnailLoadingSession()
             }
             basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
-            invalidateThumbnailLoadingSession()
         }
 
         let forceRelayout: Bool
@@ -82,6 +91,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             forceRelayout = false
         }
         reloadLayoutIfNeeded(force: forceRelayout)
+    }
+
+    /// Apply `displayedImages` when the model changed but the grid missed a sync (loading canvas, coalesced refresh).
+    func reconcileDisplayedPathsIfNeeded(_ paths: [String]) {
+        guard imagePaths != paths else { return }
+        let updateKind = ThumbnailDisplayedPathsUpdateKind.transition(from: imagePaths, to: paths)
+        if case .reorderOnly = updateKind {
+            applyDisplayedPaths(paths, updateKind: .reorderOnly)
+            return
+        }
+        pruneThumbnails(keeping: Set(paths))
+        applyDisplayedPaths(paths, updateKind: updateKind)
     }
 
     private var pathsOrderFingerprint: UInt64 = 0

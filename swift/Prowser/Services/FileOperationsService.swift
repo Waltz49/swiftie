@@ -7,6 +7,8 @@ struct FileBatchTransferOutcome {
     var undoEntries: [MovedFileUndoEntry] = []
     var successCount = 0
     var skippedCount = 0
+    var skippedSourceEqualsDestinationCount = 0
+    var inputFileCount = 0
     var userCancelled = false
     var failedFilenames: [String] = []
 }
@@ -425,6 +427,7 @@ final class FileOperationsService {
 
         let opLabel = copyOnly ? "Copying" : "Moving"
         appState.config.debugLog("transferFiles starting \(files.count) file(s) copyOnly=\(copyOnly)")
+        outcome.inputFileCount = files.count
 
         for (idx, sourcePath) in files.enumerated() {
             progress?.update(
@@ -434,6 +437,7 @@ final class FileOperationsService {
 
             let sourceDir = RenamePrefixPlanner.realPath((sourcePath as NSString).deletingLastPathComponent)
             if sourceDir == targetReal {
+                outcome.skippedSourceEqualsDestinationCount += 1
                 outcome.skippedCount += 1
                 appState.status.show("file \(copyOnly ? "copy" : "move") skipped, src=dest")
                 progress?.update(value: idx + 1)
@@ -543,7 +547,7 @@ final class FileOperationsService {
 
     func moveToDestination(slot: Int, copyOnly: Bool? = nil) {
         guard let appState else { return }
-        let paths = selectedPaths(appState: appState)
+        let paths = transferableFilePaths(from: selectedPaths(appState: appState))
         guard !paths.isEmpty else {
             appState.status.show("No files selected")
             return
@@ -570,7 +574,13 @@ final class FileOperationsService {
             shouldCopy = action == "copy"
         }
 
-        let outcome = transferFiles(paths: paths, to: expanded, copyOnly: shouldCopy, refreshWhenDone: true)
+        let outcome = transferFiles(
+            paths: paths,
+            to: expanded,
+            copyOnly: shouldCopy,
+            refreshWhenDone: true,
+            parentWindow: BrowserWindowIdentity.resolveMainBrowserWindow()
+        )
         reportBatchTransferOutcome(
             outcome,
             copyOnly: shouldCopy,
@@ -654,9 +664,11 @@ final class FileOperationsService {
         }
 
         guard outcome.successCount > 0 else {
-            if !outcome.userCancelled,
+            if outcome.inputFileCount > 0,
+               !outcome.userCancelled,
                outcome.failedFilenames.isEmpty,
-               outcome.skippedCount == 0 {
+               outcome.skippedCount == 0,
+               outcome.skippedSourceEqualsDestinationCount < outcome.inputFileCount {
                 let title = copyOnly ? "Cannot Copy Files" : "Cannot Move Files"
                 let text = """
                 Cannot \(copyOnly ? "copy" : "move") files to destination:
@@ -764,7 +776,7 @@ final class FileOperationsService {
             appState.status.show("No last drop location")
             return
         }
-        let paths = selectedPaths(appState: appState)
+        let paths = transferableFilePaths(from: selectedPaths(appState: appState))
         guard !paths.isEmpty else {
             appState.status.show("No files selected")
             return
@@ -779,7 +791,13 @@ final class FileOperationsService {
             shouldCopy = action == "copy"
         }
 
-        let outcome = transferFiles(paths: paths, to: lastDrop, copyOnly: shouldCopy, refreshWhenDone: true)
+        let outcome = transferFiles(
+            paths: paths,
+            to: lastDrop,
+            copyOnly: shouldCopy,
+            refreshWhenDone: true,
+            parentWindow: BrowserWindowIdentity.resolveMainBrowserWindow()
+        )
         reportBatchTransferOutcome(
             outcome,
             copyOnly: shouldCopy,
@@ -1153,6 +1171,15 @@ final class FileOperationsService {
         return []
     }
 
+    /// Regular files that exist on disk (same filter as ``transferFiles``).
+    private func transferableFilePaths(from paths: [String]) -> [String] {
+        paths.filter { path in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+            return !isDir.boolValue
+        }
+    }
+
     private static func applicationURL(named name: String) -> URL? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -1279,7 +1306,11 @@ final class FileOperationsService {
 
         if outcome.failedFilenames.isEmpty, outcome.skippedCount > 0 {
             appState.status.show(copyOnly ? "No files copied" : "No files moved")
-        } else if outcome.failedFilenames.isEmpty, outcome.skippedCount == 0 {
+        } else if outcome.inputFileCount > 0,
+                  outcome.successCount == 0,
+                  outcome.skippedSourceEqualsDestinationCount < outcome.inputFileCount,
+                  outcome.failedFilenames.isEmpty,
+                  outcome.skippedCount == 0 {
             let title = copyOnly ? "Cannot Copy Files" : "Cannot Move Files"
             let text = """
             Cannot \(copyOnly ? "copy" : "move") files to destination:
