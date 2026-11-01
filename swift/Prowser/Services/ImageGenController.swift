@@ -1640,14 +1640,28 @@ final class ImageGenController {
 
     private func startNextQueuedJobIfIdle() async {
         if !isEnabled { return }
+        if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
+            maybeQuitAfterCurrentWorker()
+            return
+        }
         if modelTasks.isBusy {
             deferTryStartNextQueuedJob(delayMs: gpuCleanupPollMs)
             return
         }
         if activeJobID != nil { return }
-        if holdJobQueue { return }
+        if holdJobQueue {
+            if quitAfterCurrentWorker, deferredQuitWaitAllJobs {
+                maybeQuitAfterCurrentWorker()
+            }
+            return
+        }
         if startupQueueHold { return }
-        if queueAdvanceSuppressed { return }
+        if queueAdvanceSuppressed {
+            if quitAfterCurrentWorker, deferredQuitWaitAllJobs {
+                maybeQuitAfterCurrentWorker()
+            }
+            return
+        }
         if modelTasks.workerNeedsCleanup {
             Task {
                 try? await Task.sleep(nanoseconds: 250_000_000)
@@ -1657,6 +1671,9 @@ final class ImageGenController {
         }
         guard let nextID = jobIDNextInLine(),
               let index = queue.jobs.firstIndex(where: { $0.jobID == nextID }) else {
+            if quitAfterCurrentWorker, deferredQuitWaitAllJobs, !isRunning() {
+                maybeQuitAfterCurrentWorker()
+            }
             return
         }
         let head = queue.jobs[index]
@@ -2661,8 +2678,16 @@ final class ImageGenController {
 
     /// Port of ``ImageGenController._defer_try_start_next_queued_job``.
     private func deferTryStartNextQueuedJob(delayMs: Int = 0) {
-        if queueAdvanceSuppressed || holdJobQueue || startupQueueHold { return }
-        if queue.jobs.isEmpty { return }
+        if holdJobQueue || startupQueueHold { return }
+        if queueAdvanceSuppressed {
+            if quitAfterCurrentWorker, deferredQuitWaitAllJobs {
+                Task { @MainActor in
+                    maybeQuitAfterCurrentWorker()
+                }
+            }
+            return
+        }
+        if queue.jobs.isEmpty, !(quitAfterCurrentWorker && deferredQuitWaitAllJobs) { return }
         if activeJobID != nil { return }
         deferTryStartQueuedJobTask?.cancel()
         deferTryStartQueuedJobTask = Task { @MainActor [weak self] in
@@ -4135,9 +4160,6 @@ final class ImageGenController {
         } else {
             setDeferredQuitWaitAllJobs()
         }
-        if windowForDeferredQuit {
-            deferredQuitDialog.refresh(imageGen: self)
-        }
     }
 
     func cancelDeferredQuit() {
@@ -4153,6 +4175,7 @@ final class ImageGenController {
         queueAdvanceSuppressed = true
         persistJobQueueForExit()
         Task { @MainActor in
+            presentDeferredQuitDialogIfNeeded()
             tryCompleteDeferredQuitAfterCurrentCopy()
         }
     }
@@ -4162,6 +4185,7 @@ final class ImageGenController {
         queueAdvanceSuppressed = false
         exitQueuePersisted = false
         queuePersistSuppressed = false
+        refreshDeferredQuitDialog()
         resumeDeferredQuitQueueAdvance()
     }
 
@@ -4169,6 +4193,7 @@ final class ImageGenController {
         deferredQuitWaitAllJobs = false
         queueAdvanceSuppressed = true
         persistJobQueueForExit()
+        refreshDeferredQuitDialog()
         tryCompleteDeferredQuitAfterCurrentCopy()
     }
 
@@ -4182,14 +4207,7 @@ final class ImageGenController {
         guard quitAfterCurrentWorker else { return }
         if deferredQuitWaitAllJobs { return }
         if jobAIStageActive || modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || cooldownSecondsRemaining > 0 {
-            if let appState = deferredQuitAppState {
-                if !windowForDeferredQuit {
-                    deferredQuitDialog.show(imageGen: self, appState: appState)
-                    windowForDeferredQuit = true
-                } else {
-                    deferredQuitDialog.refresh(imageGen: self)
-                }
-            }
+            presentDeferredQuitDialogIfNeeded()
             return
         }
         if copyBatchActive {
@@ -4230,6 +4248,31 @@ final class ImageGenController {
         return pendingBatchCopies() > 1
     }
 
+    /// Python ``ImageGenController._refresh_deferred_quit_dialog``.
+    private func refreshDeferredQuitDialog() {
+        if !deferredQuitShowWaitForAllOption(), deferredQuitWaitAllJobs {
+            deferredQuitWaitAllJobs = false
+            queueAdvanceSuppressed = true
+        }
+        guard windowForDeferredQuit else { return }
+        deferredQuitDialog.refresh(imageGen: self)
+    }
+
+    private func presentDeferredQuitDialogIfNeeded() {
+        guard quitAfterCurrentWorker else { return }
+        guard let appState = deferredQuitAppState else { return }
+        let workerActive = jobAIStageActive || modelTasks.isBusy || fluxPromptTasks.isBusy
+            || foregroundTasks.isBusy || cooldownSecondsRemaining > 0
+        let hasDeferredWork = copyBatchActive || deferredQuitHasMoreWorkAfterCurrent()
+        guard workerActive || hasDeferredWork || deferredQuitWaitAllJobs else { return }
+        if !windowForDeferredQuit {
+            deferredQuitDialog.show(imageGen: self, appState: appState)
+            windowForDeferredQuit = true
+        } else {
+            refreshDeferredQuitDialog()
+        }
+    }
+
     private func deferredQuitWorkIncludesContinuous() -> Bool {
         if JobStepQueue.pendingDocIsContinuous(stepPendingDoc, runningStep: stepRunning) {
             return true
@@ -4240,8 +4283,11 @@ final class ImageGenController {
         return queue.jobs.contains { JobStepQueue.isSeriesContinuousCopies($0.copiesTotal) }
     }
 
+    /// Python ``ImageGenController._pending_batch_copies``.
     private func pendingBatchCopies() -> Int {
-        JobStepQueue.pendingStepCount(stepPendingDoc) + (stepRunning != nil ? 1 : 0)
+        guard copyBatchActive, activeJobID != nil else { return 0 }
+        if JobStepQueue.isSeriesContinuousCopies(copiesTotal) { return 1 }
+        return JobStepQueue.pendingStepCount(stepPendingDoc)
     }
 
     @discardableResult
