@@ -61,6 +61,7 @@ struct LoRAImportSheet: View {
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 360)
+        .imageGenPromptSentenceCaseClickAwayCommit()
         .onAppear {
             if !initialSourcePath.isEmpty {
                 sourcePath = initialSourcePath

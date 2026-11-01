@@ -206,6 +206,7 @@ struct ImageGenUnifiedDialog: View {
                 performClose()
             }
         }
+        .imageGenPromptSentenceCaseClickAwayCommit()
     }
 
     private var titleText: String {

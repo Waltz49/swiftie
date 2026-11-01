@@ -51,14 +51,13 @@ struct ChatMessageRowView: View {
                 }
                 .font(.caption)
             } else {
-                Text(message.text)
-                    .textSelection(.enabled)
-                    .font(.body)
-                    .foregroundStyle(colors.dialogText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .onTapGesture(count: 2) {
-                        Task { @MainActor in beginEdit() }
-                    }
+                ChatMessageBodyTextView(
+                    text: message.text,
+                    textColor: colors.dialogText.nsColor,
+                    onDoubleClick: { Task { @MainActor in beginEdit() } }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(8)

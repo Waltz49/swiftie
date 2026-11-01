@@ -1,5 +1,11 @@
+import AppKit
 import Foundation
 import SwiftUI
+
+extension Notification.Name {
+    /// End inline prompt / LoRA text edits and apply sentence-case normalization (click-away + explicit flush).
+    static let prowserCommitImageGenPromptSentenceCase = Notification.Name("prowser.commitImageGenPromptSentenceCase")
+}
 
 /// Blur-time prompt normalization (port of ``image_gen_form_layout`` sentence-case helpers).
 enum ImageGenPromptSentenceCase {
@@ -65,6 +71,48 @@ enum ImageGenPromptSentenceCase {
                 values[key] = normalized
             }
         }
+    }
+
+    /// Apply pending blur normalization for AppKit prompt fields and SwiftUI sentence-case hooks.
+    @MainActor
+    static func commitAllPendingFieldEdits() {
+        ImageGenPromptPlainTextEditSession.commitAllRegistered()
+        if let window = NSApp.keyWindow {
+            window.endEditing(for: nil)
+        }
+        NotificationCenter.default.post(name: .prowserCommitImageGenPromptSentenceCase, object: nil)
+    }
+
+    /// Port of Qt ``FocusOut`` plus click-away: any mouse-down outside the active field commits recasing.
+    @MainActor
+    static func commitPendingFieldEditsOnClickAway(in window: NSWindow, event: NSEvent) {
+        guard event.type == .leftMouseDown, let contentView = window.contentView else { return }
+        let point = contentView.convert(event.locationInWindow, from: nil)
+        guard let hit = contentView.hitTest(point) else {
+            commitAllPendingFieldEdits()
+            return
+        }
+        if let active = activeEditableTextView(in: window),
+           isHitInsideEditableTextEntry(hit, textView: active) {
+            return
+        }
+        commitAllPendingFieldEdits()
+    }
+
+    private static func activeEditableTextView(in window: NSWindow) -> NSTextView? {
+        guard let first = window.firstResponder as? NSTextView else { return nil }
+        guard first.isEditable else { return nil }
+        return first
+    }
+
+    private static func isHitInsideEditableTextEntry(_ hit: NSView, textView: NSTextView) -> Bool {
+        var view: NSView? = hit
+        while let current = view {
+            if current === textView { return true }
+            if let scrollView = textView.enclosingScrollView, current === scrollView { return true }
+            view = current.superview
+        }
+        return false
     }
 
     static func sentenceCase(_ text: String) -> String {
@@ -175,6 +223,9 @@ private struct ImageGenPromptSentenceCaseOnBlurModifier: ViewModifier {
                     commitSentenceCase()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .prowserCommitImageGenPromptSentenceCase)) { _ in
+                commitSentenceCase()
+            }
     }
 
     private func commitSentenceCase() {
@@ -197,6 +248,9 @@ private struct ImageGenPromptTriggerSentenceCaseOnBlurModifier: ViewModifier {
                     commitTriggerSentenceCase()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .prowserCommitImageGenPromptSentenceCase)) { _ in
+                commitTriggerSentenceCase()
+            }
     }
 
     private func commitTriggerSentenceCase() {
@@ -217,4 +271,54 @@ extension View {
     func imageGenPromptTriggerSentenceCaseOnBlur(_ text: Binding<String>) -> some View {
         modifier(ImageGenPromptTriggerSentenceCaseOnBlurModifier(text: text))
     }
+
+    /// Commits sentence-case fields when the user clicks anywhere in the dialog outside the active text entry.
+    func imageGenPromptSentenceCaseClickAwayCommit() -> some View {
+        background(ImageGenPromptSentenceCaseClickAwayMonitor())
+    }
+}
+
+// MARK: - Dialog click-away
+
+@MainActor
+private final class ImageGenPromptSentenceCaseClickAwayMonitorView: NSView {
+    private var mouseMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        removeMouseMonitor()
+        guard let window else { return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
+            guard let window, event.window === window else { return event }
+            MainActor.assumeIsolated {
+                ImageGenPromptSentenceCase.commitPendingFieldEditsOnClickAway(in: window, event: event)
+            }
+            return event
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    deinit {
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+        }
+    }
+
+    private func removeMouseMonitor() {
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+            self.mouseMonitor = nil
+        }
+    }
+}
+
+private struct ImageGenPromptSentenceCaseClickAwayMonitor: NSViewRepresentable {
+    func makeNSView(context: Context) -> ImageGenPromptSentenceCaseClickAwayMonitorView {
+        ImageGenPromptSentenceCaseClickAwayMonitorView()
+    }
+
+    func updateNSView(_ nsView: ImageGenPromptSentenceCaseClickAwayMonitorView, context: Context) {}
 }

@@ -141,6 +141,14 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             self.maxLines = maxLines
             self.sentenceCasePerLine = sentenceCasePerLine
             self.streamSession = streamSession
+            super.init()
+            ImageGenPromptPlainTextEditSession.register(self)
+        }
+
+        deinit {
+            MainActor.assumeIsolated {
+                ImageGenPromptPlainTextEditSession.unregister(self)
+            }
         }
 
         func attach(host: ImageGenPromptPlainTextHostView) {
@@ -163,6 +171,10 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
         }
 
         func textDidEndEditing(_ notification: Notification) {
+            commitSentenceCaseOnBlur()
+        }
+
+        func commitSentenceCaseOnBlur() {
             guard let textView else { return }
             if streamSession?.isActive == true { return }
             let normalized = ImageGenPromptSentenceCase.normalized(
@@ -459,5 +471,24 @@ final class ImageGenPromptPlainTextHostView: NSView {
             lineCount += 1
         }
         return max(1, lineCount)
+    }
+}
+
+@MainActor
+enum ImageGenPromptPlainTextEditSession {
+    private static let coordinators = NSHashTable<ImageGenPromptPlainTextEdit.Coordinator>.weakObjects()
+
+    static func register(_ coordinator: ImageGenPromptPlainTextEdit.Coordinator) {
+        coordinators.add(coordinator)
+    }
+
+    static func unregister(_ coordinator: ImageGenPromptPlainTextEdit.Coordinator) {
+        coordinators.remove(coordinator)
+    }
+
+    static func commitAllRegistered() {
+        for coordinator in coordinators.allObjects {
+            coordinator.commitSentenceCaseOnBlur()
+        }
     }
 }

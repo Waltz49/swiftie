@@ -46,6 +46,7 @@ struct ImageGenCreateSheet: View {
             minWidth: 420,
             minHeight: 280
         )
+        .imageGenPromptSentenceCaseClickAwayCommit()
     }
 
     @MainActor
