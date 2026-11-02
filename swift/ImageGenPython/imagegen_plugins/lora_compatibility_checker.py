@@ -2750,20 +2750,7 @@ def run_lora_compatibility_check(
     stats.loras_total = loras_per_model
     stats.models_for_lora = len(local_models)
 
-    from imagegen_plugins.lora_trigger_resolve import check_loras_shared_probe_prompt
-
-    shared_probe_prompt, shared_triggers = check_loras_shared_probe_prompt(
-        opts.probe_prompt,
-        [(state.entry, state.lora_path) for state in lora_states],
-        allow_online=False,
-    )
-    stats.probe_prompt = shared_probe_prompt
-    print(
-        f"[Check LoRAs] Shared probe prompt "
-        f"({len(shared_triggers)} known trigger"
-        f"{'' if len(shared_triggers) == 1 else 's'}): "
-        f"{shared_probe_prompt!r}"
-    )
+    from imagegen_plugins.lora_trigger_resolve import check_loras_probe_prompt_for_model
 
     probe_idx = 0
     baseline_cache = LoraProbeBaselineCache()
@@ -2774,6 +2761,25 @@ def run_lora_compatibility_check(
 
         stats.model_index_for_lora = model_i
         stats.last_result = ""
+
+        entries_for_model = [
+            (state.entry, state.lora_path)
+            for state in lora_states
+            if model_key in state.plan_item.models
+        ]
+        model_probe_prompt, model_triggers = check_loras_probe_prompt_for_model(
+            opts.probe_prompt,
+            entries_for_model,
+            allow_online=False,
+        )
+        stats.probe_prompt = model_probe_prompt
+        print(
+            f"[Check LoRAs] Probe prompt for "
+            f"{lora_model_display_name(model_key)} "
+            f"({len(model_triggers)} known trigger"
+            f"{'' if len(model_triggers) == 1 else 's'}): "
+            f"{model_probe_prompt!r}"
+        )
 
         gpu_lora_indices = [
             idx
@@ -2928,7 +2934,7 @@ def run_lora_compatibility_check(
                     cancel_check,
                     entry=state.entry,
                     keep_model_loaded=keep_model_loaded,
-                    probe_prompt=shared_probe_prompt,
+                    probe_prompt=model_probe_prompt,
                     baseline_cache=baseline_cache,
                     activity_callback=report_activity,
                 )

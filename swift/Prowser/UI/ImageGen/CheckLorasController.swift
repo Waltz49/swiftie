@@ -132,6 +132,14 @@ enum CheckLorasController {
 
             func applyProgressUI(message: [String: Any]) {
                 let stats = message["stats"] as? [String: Any] ?? [:]
+                let phase = message["phase"] as? String ?? ""
+                if phase == "probe" {
+                    let effectivePrompt = (stats["probe_prompt"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !effectivePrompt.isEmpty {
+                        progress.setPromptAccessoryText(effectivePrompt)
+                    }
+                }
                 let gpuDone = (stats["gpu_probes_done"] as? NSNumber)?.intValue
                     ?? (stats["gpu_probes_done"] as? Int)
                     ?? 0

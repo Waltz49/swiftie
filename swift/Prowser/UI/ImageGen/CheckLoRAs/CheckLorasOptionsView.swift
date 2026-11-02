@@ -18,8 +18,16 @@ struct CheckLorasOptionsView: View {
         installedModels.map(\.modelKey)
     }
 
-    private var modelDisplayName: [String: String] {
-        Dictionary(uniqueKeysWithValues: installedModels.map { ($0.modelKey, $0.displayName) })
+    private var allLoraChoiceKeys: Set<String> {
+        Set(choices.map(\.key))
+    }
+
+    private var allModelsSelected: Bool {
+        !modelKeys.isEmpty && selectedModelKeys == Set(modelKeys)
+    }
+
+    private var allLorasSelected: Bool {
+        !choices.isEmpty && selectedLoraKeys == allLoraChoiceKeys
     }
 
     @State private var selectedModelKeys: Set<String>
@@ -178,23 +186,24 @@ struct CheckLorasOptionsView: View {
             .pickerStyle(.radioGroup)
             HStack(spacing: 8) {
                 Button("Select all") { selectedModelKeys = Set(modelKeys) }
-                    .disabled(allModels || modelKeys.isEmpty)
+                    .disabled(allModels || modelKeys.isEmpty || allModelsSelected)
                 Button("Clear all") { selectedModelKeys = [] }
-                    .disabled(allModels || modelKeys.isEmpty)
+                    .disabled(allModels || modelKeys.isEmpty || selectedModelKeys.isEmpty)
             }
             .padding(.leading, 20)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(installedModels) { model in
-                    Toggle(
-                        model.displayName,
-                        isOn: Binding(
-                            get: { selectedModelKeys.contains(model.modelKey) },
-                            set: { on in
-                                if on { selectedModelKeys.insert(model.modelKey) }
-                                else { selectedModelKeys.remove(model.modelKey) }
-                            }
-                        )
-                    )
+                    Toggle(isOn: Binding(
+                        get: { selectedModelKeys.contains(model.modelKey) },
+                        set: { on in
+                            if on { selectedModelKeys.insert(model.modelKey) }
+                            else { selectedModelKeys.remove(model.modelKey) }
+                        }
+                    )) {
+                        Text(model.displayName)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .toggleStyle(.checkbox)
                     .disabled(allModels)
                 }
             }
@@ -215,10 +224,10 @@ struct CheckLorasOptionsView: View {
             )
             .padding(.leading, 20)
             HStack(spacing: 8) {
-                Button("Select all") { selectedLoraKeys = Set(choices.map(\.key)) }
-                    .disabled(allLoras || choices.isEmpty)
+                Button("Select all") { selectedLoraKeys = allLoraChoiceKeys }
+                    .disabled(allLoras || choices.isEmpty || allLorasSelected)
                 Button("Clear all") { selectedLoraKeys = [] }
-                    .disabled(allLoras || choices.isEmpty)
+                    .disabled(allLoras || choices.isEmpty || selectedLoraKeys.isEmpty)
             }
             .padding(.leading, 20)
             if choices.isEmpty {
@@ -229,16 +238,17 @@ struct CheckLorasOptionsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(choices) { choice in
-                            Toggle(
-                                choice.label,
-                                isOn: Binding(
-                                    get: { selectedLoraKeys.contains(choice.key) },
-                                    set: { on in
-                                        if on { selectedLoraKeys.insert(choice.key) }
-                                        else { selectedLoraKeys.remove(choice.key) }
-                                    }
-                                )
-                            )
+                            Toggle(isOn: Binding(
+                                get: { selectedLoraKeys.contains(choice.key) },
+                                set: { on in
+                                    if on { selectedLoraKeys.insert(choice.key) }
+                                    else { selectedLoraKeys.remove(choice.key) }
+                                }
+                            )) {
+                                Text(choice.label)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .toggleStyle(.checkbox)
                             .disabled(allLoras)
                             .help(choice.fromDownloads
                                 ? "Unregistered .safetensors (cache or Downloads)"

@@ -15,6 +15,7 @@ final class CancellableProgressPanelController {
     private let cancelButton: FocusableDialogButton
     private let cancelTarget = CancelTarget()
     private let accessoryButton: FocusableDialogButton?
+    private let promptAccessoryView: JobQueuePromptAccessoryNSView?
     private let accessoryTarget = AccessoryTarget()
     private var keyboardMonitor: Any?
     private var isClosed = false
@@ -93,6 +94,7 @@ final class CancellableProgressPanelController {
         } else {
             promptAccessory = nil
         }
+        promptAccessoryView = promptAccessory
         let panelWidth: CGFloat = promptAccessory == nil ? 440 : 480
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
@@ -403,6 +405,11 @@ final class CancellableProgressPanelController {
 
     func setAccessoryButtonEnabled(_ enabled: Bool) {
         accessoryButton?.isEnabled = enabled
+    }
+
+    /// Updates the scrollable prompt block (e.g. Check LoRAs effective probe prompt).
+    func setPromptAccessoryText(_ text: String) {
+        promptAccessoryView?.setPrompt(text)
     }
 
     /// Switch to an indeterminate bar after feature extraction (sorting / thumbnail rebuild).

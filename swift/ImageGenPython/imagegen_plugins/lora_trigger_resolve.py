@@ -136,6 +136,36 @@ def lora_probe_prompt_with_resolved_trigger(
     return ensure_triggers_in_prompt(fb, [trigger])
 
 
+def check_loras_probe_prompt_for_model(
+    user_prompt: str,
+    entries: Iterable[Tuple[FluxLoraEntry, Optional[str | Path]]],
+    *,
+    allow_online: bool = False,
+) -> Tuple[str, List[str]]:
+    """
+    One Check LoRAs render prompt for a single base model (baseline + each LoRA).
+
+    Collects known triggers from LoRAs planned on that model, prepends any
+    missing triggers above the user text with simple ``\\n\\n`` separation
+    (no generation-job ``------`` separator).
+    """
+    from imagegen_plugins.lora_compatibility_checker import (
+        normalize_check_loras_probe_prompt,
+    )
+    from imagegen_plugins.lora_trigger_prompt_guard import prompt_contains_lora_trigger
+
+    user = normalize_check_loras_probe_prompt(user_prompt)
+    triggers = collect_known_lora_triggers(entries, allow_online=allow_online)
+    missing: List[str] = []
+    for trigger in triggers:
+        if not prompt_contains_lora_trigger(user, trigger):
+            missing.append(trigger)
+    if not missing:
+        return user, triggers
+    block = "\n\n".join(missing)
+    return f"{block}\n\n{user}", triggers
+
+
 def check_loras_shared_probe_prompt(
     user_prompt: str,
     entries: Iterable[Tuple[FluxLoraEntry, Optional[str | Path]]],
@@ -143,16 +173,15 @@ def check_loras_shared_probe_prompt(
     allow_online: bool = False,
 ) -> Tuple[str, List[str]]:
     """
-    One prompt for every Check LoRAs render (baseline + each LoRA).
+    One prompt for every Check LoRAs render when all entries share the same scope.
 
-    Collects all known triggers, ensures each is present in the user prompt,
-    and returns (shared_prompt, triggers_used).
+    Prefer ``check_loras_probe_prompt_for_model`` per base model during a run.
     """
-    from imagegen_plugins.lora_trigger_prompt_guard import ensure_triggers_in_prompt
-
-    fb = (user_prompt or "test").strip() or "test"
-    triggers = collect_known_lora_triggers(entries, allow_online=allow_online)
-    return ensure_triggers_in_prompt(fb, triggers), triggers
+    return check_loras_probe_prompt_for_model(
+        user_prompt,
+        entries,
+        allow_online=allow_online,
+    )
 
 
 def _resolve_weights_path(

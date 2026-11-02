@@ -66,6 +66,12 @@ final class JobQueuePromptAccessoryNSView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func setPrompt(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard textView.string != trimmed else { return }
+        textView.string = trimmed
+    }
+
     override func layout() {
         super.layout()
         let width = max(scrollView.bounds.width, scrollView.contentSize.width)
