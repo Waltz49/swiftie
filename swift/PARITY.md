@@ -70,6 +70,9 @@ Swift panes have **+/−** collapse only. Python `HeaderWidget` panes also expos
 
 - [x] Toolbar actions: system prompt, copy images, clear chat (`chat_tools_menu.py`)
 - [x] Menu extras: preserve chat across sessions, tips dialog, show toolbar toggle
+- [x] Inline message edit: double-click; Escape cancel; ⌘Return save (`chat_message_widgets.py` event filter)
+- [~] `{}` selection-image trigger — attach/replace images from browse/thumbnail selection (see intentional difference on submit below)
+- [x] LM Studio chat stream rejected-phrase retry (max 5; abort stream and restart on match)
 
 ### Information pane
 
@@ -415,6 +418,8 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 |-----|--------|-------|
 | Chat messages / system prompts (`chat_system_prompts.json`) | done | done |
 | LM Studio rejected response phrases (`CHAT_REJECTED_RESPONSE_PHRASES`) | hardcoded; chat worker retry (max 5) | Swift: editable list + enable toggle; `ChatRejectedPhraseStreamRetry` for chat stream only |
+| `{}` in stored user message after **new** submit | removed (`keep_selection_trigger=False` in `prepare_user_message_for_storage`) | **kept** in message text (`keepSelectionTrigger` default `true`); LM Studio payload still strips `{}` at send time |
+| `{}` on edit save / redo | kept in text (`keep_selection_trigger=True`) | same |
 | CNN / known-person search last directory settings (`find_person_*`) | done | done |
 
 ### On-disk caches (not in `settings.json`)
@@ -515,6 +520,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 
 ## Intentional Swift differences (documented)
 
+- Chat **new submit** keeps the `{}` selection trigger in stored user message text (Python strips it on first submit; both keep it on edit save and redo). Images still come from the current selection when `{}` is present; LM Studio requests omit the token via `stripTrigger` / `userTextForChatLLM`.
 - Resize appears in thumbnail **context menu** (Swift-only; Python Edit menu only).
 - Resize resampling uses Core Graphics interpolation (Python: Pillow); filter names match, output may differ slightly.
 - Image-gen submit still delegates final dim alignment to Python `buildPayload`; Swift UI now mirrors live limit math.

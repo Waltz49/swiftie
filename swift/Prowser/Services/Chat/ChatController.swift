@@ -129,10 +129,17 @@ final class ChatController {
         }
     }
 
+    func refreshComposeAttachmentsForSelectionTrigger(in text: String) {
+        guard ChatSelectionImageTrigger.hasSelectionTrigger(text) else { return }
+        let selected = ChatSelectionImageTrigger.selectedImagesForChat(appState: appState)
+        guard !selected.isEmpty else { return }
+        composeAttachmentPaths = Array(selected.prefix(ChatSelectionImageTrigger.maxChatImages))
+    }
+
     func prepareUserMessage(
         text: String,
         imagePaths: [String],
-        keepSelectionTrigger: Bool = false
+        keepSelectionTrigger: Bool = true
     ) -> (text: String, imagePaths: [String], mode: ChatImageGenTrigger.Mode?) {
         let applied = ChatSelectionImageTrigger.applySelectionTrigger(
             text: text,
@@ -206,9 +213,7 @@ final class ChatController {
                             messages: history,
                             systemPrompt: self.session.systemPrompt,
                             config: self.appState.config,
-                            onChunk: { piece in
-                                guard emit(piece) else { return }
-                            }
+                            onChunk: emit
                         )
                     }
                 )
@@ -479,7 +484,7 @@ final class ChatController {
     func updateMessage(messageID: String, text: String, imagePaths: [String]) {
         guard let idx = session.indexOf(messageID: messageID) else { return }
         var msg = session.messages[idx]
-        let prepared = prepareUserMessage(text: text, imagePaths: imagePaths, keepSelectionTrigger: true)
+        let prepared = prepareUserMessage(text: text, imagePaths: imagePaths)
         msg.text = prepared.text
         msg.imageGenAuto = prepared.mode.map { $0 == .create ? .create : .edit }
         if msg.role == .user {

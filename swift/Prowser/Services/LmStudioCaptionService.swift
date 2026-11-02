@@ -26,6 +26,18 @@ final class LmStudioCaptionService {
 
     private static let logTag = "imagegen_plugins.lmstudio_caption"
 
+    /// Return `false` to stop reading the LM Studio SSE stream (e.g. chat rejected-phrase retry).
+    private typealias StreamChunkHandler = @MainActor (String) -> Bool
+
+    private func continuingStreamChunks(
+        _ handler: @escaping @MainActor (String) -> Void
+    ) -> StreamChunkHandler {
+        { chunk in
+            handler(chunk)
+            return true
+        }
+    }
+
     var isCaptionInProgress: Bool { activeTask != nil }
 
     private init() {}
@@ -173,6 +185,7 @@ final class LmStudioCaptionService {
             config: config
         )
 
+        let chunkHandler = continuingStreamChunks(onChunk)
         if uniquePaths.isEmpty {
             return try await streamTextChatRequest(
                 baseURL: base,
@@ -181,7 +194,7 @@ final class LmStudioCaptionService {
                 userPrompt: user,
                 temperature: settings.temperature,
                 config: config,
-                onChunk: onChunk
+                onChunk: chunkHandler
             )
         }
 
@@ -198,7 +211,7 @@ final class LmStudioCaptionService {
                         temperature: settings.temperature,
                         imageURL: imageURL,
                         config: config,
-                        onChunk: onChunk
+                        onChunk: chunkHandler
                     )
                 } catch CaptionError.runtime(let message) {
                     if impliesVisionRequired(message) {
@@ -223,7 +236,7 @@ final class LmStudioCaptionService {
         messages: [ChatMessage],
         systemPrompt: String,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void
+        onChunk: @escaping @MainActor (String) -> Bool
     ) async throws -> String {
         guard let base = apiBaseURL(host: captionHost(config: config)) else {
             throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
@@ -337,7 +350,7 @@ final class LmStudioCaptionService {
         userPrompt: String,
         temperature: Double,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping StreamChunkHandler,
         retriedModelLoad: Bool = false
     ) async throws -> String {
         let url = baseURL.appending(path: "chat/completions")
@@ -373,7 +386,7 @@ final class LmStudioCaptionService {
         temperature: Double,
         imageURL: String,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping StreamChunkHandler,
         retriedModelLoad: Bool = false
     ) async throws -> String {
         let url = baseURL.appending(path: "chat/completions")
@@ -417,7 +430,7 @@ final class LmStudioCaptionService {
         temperature: Double,
         imageURL: String?,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping StreamChunkHandler,
         retriedModelLoad: Bool
     ) async throws -> String {
         var request = URLRequest(url: url)
@@ -485,6 +498,7 @@ final class LmStudioCaptionService {
         }
 
         var accumulated = ""
+        var stoppedEarly = false
         for try await line in bytes.lines {
             try Task.checkCancellation()
             guard line.hasPrefix("data:") else { continue }
@@ -501,18 +515,23 @@ final class LmStudioCaptionService {
                 continue
             }
             accumulated += chunk
-            onChunk(chunk)
+            if !onChunk(chunk) {
+                stoppedEarly = true
+                break
+            }
         }
 
         let final = Self.stripThinkTags(accumulated).trimmingCharacters(in: .whitespacesAndNewlines)
-        if final.isEmpty {
+        if final.isEmpty, !stoppedEarly {
             throw CaptionError.runtime(
                 "The model returned an empty response.\n\n"
                     + "Try a different prompt or check the loaded model."
             )
         }
-        SessionViewLog.logModelOutput(tag: Self.logTag, text: final, config: config)
-        persistLastModelKey(modelID, config: config)
+        if !final.isEmpty, !stoppedEarly {
+            SessionViewLog.logModelOutput(tag: Self.logTag, text: final, config: config)
+            persistLastModelKey(modelID, config: config)
+        }
         return final
     }
 
@@ -624,6 +643,7 @@ final class LmStudioCaptionService {
         config: AppConfig,
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> String {
+        let chunkHandler = continuingStreamChunks(onChunk)
         guard let base = apiBaseURL(host: captionHost(config: config)) else {
             throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
         }
@@ -670,7 +690,7 @@ final class LmStudioCaptionService {
                     temperature: settings.temperature,
                     imageURL: imageURL,
                     config: config,
-                    onChunk: onChunk
+                    onChunk: chunkHandler
                 )
             } catch CaptionError.runtime(let message) {
                 if impliesVisionRequired(message) {
@@ -704,7 +724,7 @@ final class LmStudioCaptionService {
         temperature: Double,
         imageURL: String,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping StreamChunkHandler,
         retriedModelLoad: Bool = false
     ) async throws -> String {
         let url = baseURL.appending(path: "chat/completions")
@@ -789,6 +809,7 @@ final class LmStudioCaptionService {
         }
 
         var accumulated = ""
+        var stoppedEarly = false
         for try await line in bytes.lines {
             try Task.checkCancellation()
             guard line.hasPrefix("data:") else { continue }
@@ -805,16 +826,21 @@ final class LmStudioCaptionService {
                 continue
             }
             accumulated += chunk
-            onChunk(chunk)
+            if !onChunk(chunk) {
+                stoppedEarly = true
+                break
+            }
         }
 
         let final = Self.stripThinkTags(accumulated).trimmingCharacters(in: .whitespacesAndNewlines)
-        if final.isEmpty {
+        if final.isEmpty, !stoppedEarly {
             SessionViewLog.logLMStudioError("Empty caption.", config: config)
             throw CaptionError.runtime("Empty caption.")
         }
-        SessionViewLog.logModelOutput(tag: Self.logTag, text: final, config: config)
-        persistLastModelKey(modelID, config: config)
+        if !final.isEmpty, !stoppedEarly {
+            SessionViewLog.logModelOutput(tag: Self.logTag, text: final, config: config)
+            persistLastModelKey(modelID, config: config)
+        }
         return final
     }
 
@@ -827,7 +853,7 @@ final class LmStudioCaptionService {
         temperature: Double,
         imageURL: String,
         config: AppConfig,
-        onChunk: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping StreamChunkHandler,
         retriedModelLoad: Bool,
         onFailure: () throws -> Void
     ) async throws -> String {

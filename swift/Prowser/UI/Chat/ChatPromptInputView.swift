@@ -32,7 +32,10 @@ struct ChatPromptInputView: View {
                 }
                 TextEditor(text: Binding(
                     get: { chat.composePromptText },
-                    set: { chat.composePromptText = $0 }
+                    set: { newValue in
+                        chat.composePromptText = newValue
+                        chat.refreshComposeAttachmentsForSelectionTrigger(in: newValue)
+                    }
                 ))
                     .frame(minHeight: 44, maxHeight: 140)
                     .font(.body)

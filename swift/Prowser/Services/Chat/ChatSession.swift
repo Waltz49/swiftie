@@ -37,6 +37,7 @@ struct ChatMessage: Identifiable, Equatable {
     }
 }
 
+@Observable
 @MainActor
 final class ChatSession {
     private(set) var messages: [ChatMessage] = []

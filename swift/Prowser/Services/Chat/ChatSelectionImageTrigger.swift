@@ -21,11 +21,12 @@ enum ChatSelectionImageTrigger {
         ImageGenEditSourcePaths.activeImagePathsForEdit(appState: appState)
     }
 
+    /// When ``keepTriggerInText`` is true (stored user messages), ``{}`` stays in the prompt for redo and edits; LM Studio text still strips it at send time.
     static func applySelectionTrigger(
         text: String,
         imagePaths: [String],
         appState: AppState,
-        keepTriggerInText: Bool = false
+        keepTriggerInText: Bool = true
     ) -> (text: String, imagePaths: [String]) {
         guard hasSelectionTrigger(text) else { return (text, imagePaths) }
         var outText = text

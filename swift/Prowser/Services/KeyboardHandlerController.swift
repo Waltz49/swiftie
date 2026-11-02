@@ -44,7 +44,10 @@ final class KeyboardHandlerController {
             if self.tryHandleImageGenUnifiedCmdArrow(event) {
                 return nil
             }
-            if Self.isolateNonBrowserKeyDown(event) {
+            if self.tryHandleChatMessageEditEscape(event) {
+                return nil
+            }
+            if Self.isolateNonBrowserKeyDown(event, appState: self.appState) {
                 return nil
             }
             let handled = self.handleKeyDown(event)
@@ -578,7 +581,7 @@ final class KeyboardHandlerController {
 
     /// Consume Command shortcuts that would otherwise hit browser menus while a dialog
     /// is key or a text field is first responder (⌘A select-all thumbnails, ⌘C copy path, …).
-    static func isolateNonBrowserKeyDown(_ event: NSEvent) -> Bool {
+    static func isolateNonBrowserKeyDown(_ event: NSEvent, appState: AppState?) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.command), !flags.contains(.control) else { return false }
 
@@ -600,6 +603,7 @@ final class KeyboardHandlerController {
 
         if isTextNavigationCommand(event) { return false }
         if dialogOwns, isDialogSaveCommand(event) { return false }
+        if isChatMessageEditSaveCommand(event, appState: appState) { return false }
 
         if isStandardEditingShortcut(event) {
             // When sendAction fails, pass the event through so NSTextView can undo/redo.
@@ -629,6 +633,44 @@ final class KeyboardHandlerController {
 
     private static func isDialogSaveCommand(_ event: NSEvent) -> Bool {
         event.keyCode == 36 || event.keyCode == 76
+    }
+
+    /// Escape in chat inline message edit (same as Cancel); must not fall through to thumbnail back navigation.
+    private func tryHandleChatMessageEditEscape(_ event: NSEvent) -> Bool {
+        guard ChatKeyCommand.isPlainEscape(event) else { return false }
+        guard let appState, appState.chat.editingMessageID != nil else { return false }
+        guard let responder = NSApp.keyWindow?.firstResponder,
+              Self.isChatMessageEditResponder(responder) else { return false }
+        appState.chat.cancelMessageEdit()
+        return true
+    }
+
+    /// ⌘Return in chat inline message edit (same as Save); must reach ``ChatMessageEditNSTextView``.
+    private static func isChatMessageEditSaveCommand(_ event: NSEvent, appState: AppState?) -> Bool {
+        guard let appState, appState.chat.editingMessageID != nil else { return false }
+        guard ChatKeyCommand.isCommandReturn(event) else { return false }
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        return isChatMessageEditResponder(responder)
+    }
+
+    private static func isChatMessageEditResponder(_ responder: NSResponder) -> Bool {
+        if responder is ChatMessageEditNSTextView { return true }
+        if let textView = responder as? NSTextView,
+           textView.delegate is ChatMessageEditTextView.Coordinator {
+            return true
+        }
+        if let view = responder as? NSView {
+            var current: NSView? = view
+            while let candidate = current {
+                if candidate is ChatMessageEditNSTextView { return true }
+                if let scroll = candidate as? NSScrollView,
+                   scroll.documentView is ChatMessageEditNSTextView {
+                    return true
+                }
+                current = candidate.superview
+            }
+        }
+        return false
     }
 
     private static func isTextNavigationCommand(_ event: NSEvent) -> Bool {

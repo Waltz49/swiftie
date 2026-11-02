@@ -32,22 +32,23 @@ struct ChatMessageRowView: View {
             }
 
             if isEditing {
-                TextEditor(text: $editText)
-                    .frame(minHeight: 72, maxHeight: 180)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .padding(6)
-                    .background(colors.sidebarBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(colors.defaultBorder, lineWidth: 1)
-                    )
-                    .onChange(of: editText) { _, newValue in
-                        appState.chat.syncPendingEditText(newValue)
-                    }
+                ChatMessageEditTextView(
+                    text: $editText,
+                    seedText: message.text,
+                    textColor: colors.dialogText.nsColor,
+                    backgroundColor: colors.sidebarBackground.nsColor,
+                    onCommandReturn: { commitEdit() },
+                    onEscape: { appState.chat.cancelMessageEdit() },
+                    onTextChange: { appState.chat.syncPendingEditText($0) }
+                )
+                .background(colors.sidebarBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(colors.defaultBorder, lineWidth: 1)
+                )
                 HStack(spacing: 8) {
-                    Button("Save") { Task { @MainActor in commitEdit() } }
-                    Button("Cancel") { Task { @MainActor in appState.chat.cancelMessageEdit() } }
+                    Button("Save") { commitEdit() }
+                    Button("Cancel") { appState.chat.cancelMessageEdit() }
                 }
                 .font(.caption)
             } else {
