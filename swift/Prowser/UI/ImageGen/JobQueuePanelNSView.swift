@@ -161,7 +161,40 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             card.updateHoverSelected(isHovered, colors: themeColors)
             if isHovered { hoveredCard = card }
         }
+        let reservedHeightsChanged = syncActionBarSpaceReservation()
+        let stackHeightBefore = measuredCardStackHeight()
         attachActionBar(to: hoveredCard)
+        if reservedHeightsChanged, abs(measuredCardStackHeight() - stackHeightBefore) > 0.5 {
+            notifyCardGeometryChangedIfNeeded()
+        }
+    }
+
+    /// Port of Python ``JobQueuePanelWidget._should_show_action_bar`` — reserve the action-bar
+    /// slot up front so hover embed does not grow the pane and shift the titlebar.
+    private func shouldReserveActionBarSpace(for card: JobCardNSView) -> Bool {
+        guard let appState = paneContextMenuAppState else { return false }
+        let mode = appState.jobsQueueSizeMode
+        if mode == .strip { return false }
+        if card.boundJobID.isEmpty { return false }
+        if mode == .one, card === cardViews.first { return true }
+        if rows.count == 1, card === cardViews.first { return true }
+        if let hoveredJobID, card.boundJobID == hoveredJobID { return true }
+        return false
+    }
+
+    @discardableResult
+    private func syncActionBarSpaceReservation() -> Bool {
+        var changed = false
+        for card in cardViews {
+            let reserve = shouldReserveActionBarSpace(for: card)
+            if card.setReservesActionBarSpace(reserve) {
+                changed = true
+            }
+        }
+        if changed {
+            updateDocumentHeight()
+        }
+        return changed
     }
 
     private func wireActionBar() {
@@ -682,6 +715,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     private func attachActionBar(to card: JobCardNSView?) {
         let wasVisible = actionBarVisible
+        let hostHadReservedSlot = card?.reservesActionBarSpace == true
         detachActionBarFromAllCards()
         if let card {
             actionBarVisible = true
@@ -694,7 +728,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         }
         refreshActionBarState()
         updateDocumentHeight()
-        if actionBarVisible, !wasVisible {
+        if actionBarVisible, !wasVisible, !hostHadReservedSlot {
             onActionBarEmbedded?(JobQueueLayout.actionBarHeight)
         }
         needsLayout = true
@@ -1100,8 +1134,34 @@ final class JobCardNSView: NSView {
     private weak var embeddedActionBar: JobQueueActionBarNSView?
     private var actionBarLayoutConstraints: [NSLayoutConstraint] = []
     private var hoverTrackingArea: NSTrackingArea?
+    private(set) var reservesActionBarSpace = false
 
     var hasEmbeddedActionBar: Bool { embeddedActionBar != nil }
+
+    /// Keeps card height stable when the shared action bar embeds on hover (empty slot until then).
+    @discardableResult
+    func setReservesActionBarSpace(_ reserve: Bool) -> Bool {
+        guard reservesActionBarSpace != reserve else { return false }
+        reservesActionBarSpace = reserve
+        syncContentBottomLayout()
+        resyncHeightAfterActionBarChange()
+        return true
+    }
+
+    private func actionBarBlockHeight() -> CGFloat {
+        let showsBar = embeddedActionBar != nil && embeddedActionBar?.isHidden == false
+        if showsBar || reservesActionBarSpace {
+            return JobQueueLayout.cardInnerSpacing + JobQueueLayout.actionBarHeight
+        }
+        return 0
+    }
+
+    private func syncContentBottomLayout() {
+        guard embeddedActionBar == nil else { return }
+        let margin = JobQueueLayout.cardOuterMargin
+        let bottomInset = margin + actionBarBlockHeight()
+        contentFillsCardBottomConstraint?.constant = -bottomInset
+    }
 
     func attachActionBar(_ bar: JobQueueActionBarNSView) {
         if embeddedActionBar === bar {
@@ -1142,6 +1202,7 @@ final class JobCardNSView: NSView {
         embeddedActionBar?.removeFromSuperview()
         embeddedActionBar?.isHidden = true
         embeddedActionBar = nil
+        syncContentBottomLayout()
         contentFillsCardBottomConstraint?.isActive = true
         resyncHeightAfterActionBarChange()
     }
@@ -1618,12 +1679,7 @@ final class JobCardNSView: NSView {
         let estimatedContentH = inlineRefs ? max(statusH, refsH) + 2 : statusH + refsH + 2
         let contentH = max(ceil(column.fittingSize.height), estimatedContentH, 1)
 
-        let actionBarBlock: CGFloat
-        if embeddedActionBar != nil, embeddedActionBar?.isHidden == false {
-            actionBarBlock = JobQueueLayout.cardInnerSpacing + JobQueueLayout.actionBarHeight
-        } else {
-            actionBarBlock = 0
-        }
+        let actionBarBlock = actionBarBlockHeight()
         // Must match content top/bottom + optional action bar. Extra border height
         // conflicts with those constraints and collapses the card.
         let frameH = JobQueueLayout.cardOuterMargin * 2 + contentH + actionBarBlock
