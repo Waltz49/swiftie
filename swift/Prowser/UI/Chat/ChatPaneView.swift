@@ -62,13 +62,6 @@ struct ChatPaneView: View {
                 .environment(appState)
         }
         .sheet(isPresented: Binding(
-            get: { appState.chat.showUserPromptLibrary },
-            set: { appState.chat.showUserPromptLibrary = $0 }
-        )) {
-            ChatUserPromptLibrarySheet()
-                .environment(appState)
-        }
-        .sheet(isPresented: Binding(
             get: { appState.chat.showTips },
             set: { appState.chat.showTips = $0 }
         )) {

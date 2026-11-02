@@ -56,6 +56,7 @@ struct MainWindowView: View {
         .background(MainWindowIdentityAnchor())
         .background(AuxiliaryDialogBridge())
         .background(ImageGenUnifiedWindowPresentationBridge())
+        .chatUserPromptSheets(host: .mainWindow)
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
             appState.refreshSidebarLayout()

@@ -207,6 +207,7 @@ struct ImageGenUnifiedDialog: View {
             }
         }
         .imageGenPromptSentenceCaseClickAwayCommit()
+        .chatUserPromptSheets(host: .imageGenUnified)
     }
 
     private var titleText: String {

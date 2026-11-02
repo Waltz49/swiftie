@@ -26,6 +26,10 @@ enum ChatUserPromptStore {
         return defaultConfig
     }
 
+    static func newEntryID() -> String {
+        String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10))
+    }
+
     static func save(_ config: Config, dataDirectory: URL) {
         let payload: [String: Any] = [
             "selected_favorite_prompt_id": config.selectedFavoriteID,
@@ -49,7 +53,9 @@ enum ChatUserPromptStore {
         if let items = raw["favorite_prompts"] as? [[String: Any]] {
             config.favoritePrompts = items.compactMap { item in
                 guard let id = item["id"] as? String, !id.isEmpty else { return nil }
-                let paths = (item["image_paths"] as? [String])?.filter { !$0.isEmpty } ?? []
+                let paths = (item["image_paths"] as? [String])?.filter { path in
+                    !path.isEmpty && FileManager.default.fileExists(atPath: path)
+                } ?? []
                 let name = (item["name"] as? String) ?? (item["label"] as? String) ?? "Untitled"
                 return ChatFavoritePrompt(
                     id: id,

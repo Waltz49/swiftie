@@ -472,7 +472,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 2. **Slideshow3 full parity** (floating frames)
 3. **Rename-prefix CNN/CLIP/face MD5 cache hand-off** after bulk rename
 4. **PF Keys / Hidden Gems help** dialogs
-5. **Image-gen voice input / favorite prompts** (stubs remain in `ImageGenActionButtons`)
+5. **Image-gen voice input** (stub remains in `ImageGenActionButtons`; favorite user prompts library ported)
 ## Build variants
 
 - [~] Full build (all AI features)
@@ -527,4 +527,4 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 - Profile round-trip: open settings.json in Python after Swift session
 - `--min` build hides imagegen/chat/faces UI end-to-end
 - Remove PySide6 `ImageBrowserWindow` launch (keep `prowser.py` workers only)
-- Chat named system prompt library; imagegen favorite prompts (acceptable Python-bridge deferrals)
+- Chat named system prompt library (favorite user prompts library ported in Swift)

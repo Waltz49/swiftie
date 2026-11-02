@@ -5,10 +5,19 @@ import Foundation
 enum ChatProfileMigration {
     private static let pythonProfileDirectoryName = ".prowser"
     private static let systemPromptsFileName = "chat_system_prompts.json"
-    private static let migrationSettingsKey = "chat_system_prompts_migrated_from_prowser"
+    private static let userPromptsFileName = "chat_user_prompts.json"
+    private static let favoriteImagesDirectoryName = "chat_favorite_images"
+    private static let systemMigrationSettingsKey = "chat_system_prompts_migrated_from_prowser"
+    private static let userMigrationSettingsKey = "chat_user_prompts_migrated_from_prowser"
+
+    /// Run before any ``ChatUserPromptStore.load`` / ``ChatSystemPromptStore`` first write.
+    static func migrateFromPythonProfile(config: AppConfig) {
+        migrateSystemPromptsFromPythonProfile(config: config)
+        migrateUserPromptsFromPythonProfile(config: config)
+    }
 
     static func migrateSystemPromptsFromPythonProfile(config: AppConfig) {
-        guard !config.bool(forKey: migrationSettingsKey, default: false) else { return }
+        guard !config.bool(forKey: systemMigrationSettingsKey, default: false) else { return }
 
         let legacyURL = pythonReferenceDataDirectory
             .appendingPathComponent(systemPromptsFileName)
@@ -16,7 +25,7 @@ enum ChatProfileMigration {
 
         let destURL = config.dataDirectory.appendingPathComponent(systemPromptsFileName)
         guard shouldCopyLegacySystemPrompts(legacyURL: legacyURL, destURL: destURL) else {
-            config.updateSetting(migrationSettingsKey, value: true)
+            config.updateSetting(systemMigrationSettingsKey, value: true)
             return
         }
 
@@ -29,10 +38,70 @@ enum ChatProfileMigration {
                 try FileManager.default.removeItem(at: destURL)
             }
             try FileManager.default.copyItem(at: legacyURL, to: destURL)
-            config.updateSetting(migrationSettingsKey, value: true)
+            config.updateSetting(systemMigrationSettingsKey, value: true)
         } catch {
             // Leave flag unset so a later launch can retry.
         }
+    }
+
+    static func migrateUserPromptsFromPythonProfile(config: AppConfig) {
+        guard !config.bool(forKey: userMigrationSettingsKey, default: false) else { return }
+
+        let legacyURL = pythonReferenceDataDirectory.appendingPathComponent(userPromptsFileName)
+        guard FileManager.default.fileExists(atPath: legacyURL.path) else {
+            config.updateSetting(userMigrationSettingsKey, value: true)
+            return
+        }
+
+        let destURL = config.dataDirectory.appendingPathComponent(userPromptsFileName)
+        guard shouldCopyLegacyUserPrompts(legacyURL: legacyURL, destURL: destURL) else {
+            config.updateSetting(userMigrationSettingsKey, value: true)
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: config.dataDirectory, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                try FileManager.default.removeItem(at: destURL)
+            }
+            try FileManager.default.copyItem(at: legacyURL, to: destURL)
+
+            let legacyImages = pythonReferenceDataDirectory.appendingPathComponent(
+                favoriteImagesDirectoryName,
+                isDirectory: true
+            )
+            let destImages = config.dataDirectory.appendingPathComponent(
+                favoriteImagesDirectoryName,
+                isDirectory: true
+            )
+            if FileManager.default.fileExists(atPath: legacyImages.path) {
+                if FileManager.default.fileExists(atPath: destImages.path) {
+                    try FileManager.default.removeItem(at: destImages)
+                }
+                try FileManager.default.copyItem(at: legacyImages, to: destImages)
+            }
+
+            config.updateSetting(userMigrationSettingsKey, value: true)
+        } catch {
+            // Leave flag unset so a later launch can retry.
+        }
+    }
+
+    private static func shouldCopyLegacyUserPrompts(legacyURL: URL, destURL: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: destURL.path),
+              let destData = try? Data(contentsOf: destURL),
+              let destJSON = try? JSONSerialization.jsonObject(with: destData) as? [String: Any] else {
+            return true
+        }
+        let favorites = destJSON["favorite_prompts"] as? [[String: Any]] ?? []
+        if !favorites.isEmpty { return false }
+
+        guard let legacyData = try? Data(contentsOf: legacyURL),
+              let legacyJSON = try? JSONSerialization.jsonObject(with: legacyData) as? [String: Any] else {
+            return false
+        }
+        let legacyFavorites = legacyJSON["favorite_prompts"] as? [[String: Any]] ?? []
+        return !legacyFavorites.isEmpty
     }
 
     /// Skip when Swift already has a non-default named prompt library.

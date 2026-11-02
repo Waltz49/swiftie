@@ -11,21 +11,18 @@ enum ChatPromptInputLayout {
 struct ChatPromptInputView: View {
     @Environment(AppState.self) private var appState
 
-    @State private var promptText = ""
-    @State private var attachmentPaths: [String] = []
-
     private static let automaticCreateTooltip =
         "When on, chat messages with images or /create automatically submit an image-generation job."
 
     var body: some View {
         let chat = appState.chat
         VStack(alignment: .leading, spacing: 4) {
-            if !attachmentPaths.isEmpty {
-                ChatMessageThumbRow(paths: attachmentPaths)
+            if !chat.composeAttachmentPaths.isEmpty {
+                ChatMessageThumbRow(paths: chat.composeAttachmentPaths)
             }
 
             ZStack(alignment: .topLeading) {
-                if promptText.isEmpty {
+                if chat.composePromptText.isEmpty {
                     Text("Message… (Return to send, Shift+Return for newline)")
                         .font(.body)
                         .foregroundStyle(.secondary)
@@ -33,7 +30,10 @@ struct ChatPromptInputView: View {
                         .padding(.vertical, 8)
                         .allowsHitTesting(false)
                 }
-                TextEditor(text: $promptText)
+                TextEditor(text: Binding(
+                    get: { chat.composePromptText },
+                    set: { chat.composePromptText = $0 }
+                ))
                     .frame(minHeight: 44, maxHeight: 140)
                     .font(.body)
                     .scrollContentBackground(.hidden)
@@ -73,28 +73,21 @@ struct ChatPromptInputView: View {
         .padding(.horizontal, 6)
         .padding(.top, 4)
         .padding(.bottom, 0)
-        .onChange(of: appState.chat.pendingFavoritePromptText) { _, text in
-            guard let text, !text.isEmpty else { return }
-            promptText = text
-            appState.chat.pendingFavoritePromptText = nil
-            let paths = appState.chat.pendingFavoritePromptImagePaths
-            if !paths.isEmpty {
-                attachmentPaths = Array(paths.prefix(ChatSelectionImageTrigger.maxChatImages))
-                appState.chat.pendingFavoritePromptImagePaths = []
-            }
-        }
     }
 
     @MainActor
     private func submit() {
-        let text = promptText
-        let paths = attachmentPaths
-        promptText = ""
-        attachmentPaths = []
+        let chat = appState.chat
+        let text = chat.composePromptText
+        let paths = chat.composeAttachmentPaths
+        chat.composePromptText = ""
+        chat.composeAttachmentPaths = []
         appState.chat.submitUserMessage(text: text, imagePaths: paths)
     }
 
+    @MainActor
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        let chat = appState.chat
         var accepted = false
         for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             accepted = true
@@ -105,8 +98,9 @@ struct ChatPromptInputView: View {
                 let path = url.standardizedFileURL.path
                 Task { @MainActor in
                     guard FileManager.default.isReadableFile(atPath: path) else { return }
-                    if !attachmentPaths.contains(path), attachmentPaths.count < ChatSelectionImageTrigger.maxChatImages {
-                        attachmentPaths.append(path)
+                    if !chat.composeAttachmentPaths.contains(path),
+                       chat.composeAttachmentPaths.count < ChatSelectionImageTrigger.maxChatImages {
+                        chat.composeAttachmentPaths.append(path)
                     }
                 }
             }

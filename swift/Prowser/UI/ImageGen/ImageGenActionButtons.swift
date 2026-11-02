@@ -40,7 +40,7 @@ struct ImageGenPromptActionButtons: View {
                     normalName: "chatfav",
                     hoverName: "chatfav_hover",
                     size: ImageGenChrome.fieldButtonSize,
-                    tooltip: "Append from favorite prompts",
+                    tooltip: "Favorite prompts...",
                     action: appendFavoritePrompt
                 )
             }
@@ -81,7 +81,10 @@ struct ImageGenPromptActionButtons: View {
     }
 
     private func appendFavoritePrompt() {
-        appState.chat.openFavoriteUserPrompts()
+        appState.chat.openFavoriteUserPromptsForImageGen(existingPrompt: text) { combined in
+            onTextChanged?(combined)
+            ImageGenPromptPlainTextEditSession.moveSelectionToEndInAllRegistered()
+        }
     }
 
     private func voiceInputStub() {

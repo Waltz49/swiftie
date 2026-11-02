@@ -2037,11 +2037,7 @@ final class ImageGenController {
             }
             progressMessage = "Generating…"
             taskStatusHTML = progressMessage
-            if let steps = payload["steps"] as? Int {
-                liveStepTotal = steps
-            } else if let steps = payload["steps"] as? NSNumber {
-                liveStepTotal = steps.intValue
-            }
+            liveStepTotal = intFromAny(payload["steps"]) ?? 0
             generationStartTime = Date()
             stepProgressStartTime = Date()
             launchRefinedPrompt = ""
@@ -3284,7 +3280,7 @@ final class ImageGenController {
             if kind == "generate" {
                 self.progressMessage = "Generating…"
                 self.taskStatusHTML = self.progressMessage
-                Task { await self.beginGenerationProgressTracking(values: self.pendingValues) }
+                Task { await self.beginGenerationProgressTracking(values: self.copyCycleExifValues) }
                 self.rebuildActiveStripViewLocally()
                 self.publishActiveStrip(preferLiveFields: true)
             }
@@ -3394,18 +3390,16 @@ final class ImageGenController {
     }
 
     private func beginGenerationProgressTracking(values: [String: Any]) async {
+        // Port of ``ImageGenController._on_job_processing_started`` (generate): drop AI-refine
+        // progress (100 pseudo-steps) before reading inference steps from copy-cycle values.
+        resetLiveQueueProgress()
         let now = Date()
         stepProgressStartTime = now
         generationStartTime = now
-        liveStep = 0
         liveEstimateSeconds = nil
         generationStepTiming.reset()
         stepProgressCompletedAt = nil
-        if let steps = values["steps"] as? Int {
-            liveStepTotal = steps
-        } else if let steps = values["steps"] as? NSNumber {
-            liveStepTotal = steps.intValue
-        }
+        liveStepTotal = intFromAny(values["steps"]) ?? 0
         guard !activePluginID.isEmpty else { return }
         let timing = GenerationTimingKeyBuilder.build(
             pluginID: activePluginID,

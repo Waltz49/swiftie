@@ -432,7 +432,7 @@ struct ProwserCommands: Commands {
 
                 if BundleCapabilities.chatUIEnabled {
                     Divider()
-                    Button("Favorite user prompts…") {
+                    Button("Favorite prompts…") {
                         Task { @MainActor in appState.chat.openFavoriteUserPrompts() }
                     }
                     Button("Prefix and Postfix text…") {

@@ -19,16 +19,6 @@ extension AppState {
                 self.openChatImagePaths(note: note)
             }
         }
-        NotificationCenter.default.addObserver(
-            forName: .prowserChatInsertUserPrompt,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let self else { return }
-            Task { @MainActor in
-                self.chat.applyFavoriteUserPrompt(note: note)
-            }
-        }
     }
 
     func openChatImagePaths(note: Notification) {

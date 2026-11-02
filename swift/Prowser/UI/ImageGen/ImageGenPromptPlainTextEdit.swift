@@ -195,6 +195,13 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             return false
         }
 
+        func moveSelectionToEnd() {
+            guard let textView else { return }
+            let length = (textView.string as NSString).length
+            textView.setSelectedRange(NSRange(location: length, length: 0))
+            textView.scrollRangeToVisible(NSRange(location: length, length: 0))
+        }
+
         func applyExternalText(_ newText: String, host: ImageGenPromptPlainTextHostView) {
             guard let textView else { return }
             if isEditing || textView.hasMarkedText() { return }
@@ -489,6 +496,12 @@ enum ImageGenPromptPlainTextEditSession {
     static func commitAllRegistered() {
         for coordinator in coordinators.allObjects {
             coordinator.commitSentenceCaseOnBlur()
+        }
+    }
+
+    static func moveSelectionToEndInAllRegistered() {
+        for coordinator in coordinators.allObjects {
+            coordinator.moveSelectionToEnd()
         }
     }
 }

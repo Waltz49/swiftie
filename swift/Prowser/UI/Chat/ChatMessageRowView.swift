@@ -233,7 +233,7 @@ struct ChatMessageThumbRow: View {
     }
 }
 
-private struct ChatThumbImage: View {
+struct ChatThumbImage: View {
     let path: String
     @State private var image: NSImage?
 

@@ -290,6 +290,7 @@ final class AppState {
         }
 
         config.loadSettings()
+        ChatProfileMigration.migrateFromPythonProfile(config: config)
         config.applyLaunchDebugFlag(launchOptions.debug)
         sessionViewLogURL = SessionViewLog.logFileURL(config: config)
         config.bindSessionViewLogURL(sessionViewLogURL)

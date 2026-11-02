@@ -22,6 +22,37 @@ final class ChatController {
     var showUserPromptLibrary = false
     var showTips = false
     var showPrefixPostfixLibrary = false
+
+    enum UserPromptLibraryApplyMode: Equatable {
+        case chatCompose
+        case imageGenAppend
+        case manageOnly
+    }
+
+    enum UserPromptLibraryPresentationHost: Equatable {
+        case mainWindow
+        case imageGenUnified
+    }
+
+    struct UserPromptSaveDraft: Equatable {
+        var defaultName: String
+        var text: String
+        var imagePaths: [String]
+    }
+
+    var userPromptLibraryApplyMode: UserPromptLibraryApplyMode = .chatCompose
+    var userPromptLibraryPresentationHost: UserPromptLibraryPresentationHost = .mainWindow
+    var userPromptLibrarySuggestionText = ""
+    var userPromptLibrarySuggestionImages: [String] = []
+    private var imageGenAppendExistingPrompt = ""
+    var userPromptLibraryImageGenOnApplied: ((String) -> Void)?
+
+    var composePromptText = ""
+    var composeAttachmentPaths: [String] = []
+
+    var showUserPromptSave = false
+    var userPromptSaveDraft: UserPromptSaveDraft?
+
     var editingMessageID: String?
     private var pendingEditText = ""
     private var pendingEditImagePaths: [String] = []
@@ -290,30 +321,106 @@ final class ChatController {
         ChatSystemPromptStore.save(systemPromptConfig, dataDirectory: appState.config.dataDirectory)
     }
 
-    func openFavoriteUserPrompts() {
+    func openFavoriteUserPrompts(
+        mode: UserPromptLibraryApplyMode? = nil,
+        presentationHost: UserPromptLibraryPresentationHost = .mainWindow
+    ) {
+        let resolvedMode = mode ?? (BundleCapabilities.chatUIEnabled ? .chatCompose : .manageOnly)
+        userPromptLibraryApplyMode = resolvedMode
+        userPromptLibraryPresentationHost = presentationHost
+        switch resolvedMode {
+        case .chatCompose:
+            userPromptLibrarySuggestionText = composePromptText
+            userPromptLibrarySuggestionImages = composeAttachmentPaths
+        case .imageGenAppend:
+            userPromptLibrarySuggestionText = imageGenAppendExistingPrompt
+            userPromptLibrarySuggestionImages = []
+        case .manageOnly:
+            userPromptLibrarySuggestionText = ""
+            userPromptLibrarySuggestionImages = []
+        }
         showUserPromptLibrary = true
+    }
+
+    func openFavoriteUserPromptsForImageGen(
+        existingPrompt: String,
+        onApplied: @escaping (String) -> Void
+    ) {
+        imageGenAppendExistingPrompt = existingPrompt
+        userPromptLibraryImageGenOnApplied = onApplied
+        openFavoriteUserPrompts(mode: .imageGenAppend, presentationHost: .imageGenUnified)
+    }
+
+    func userPromptLibraryDidDismiss(cancelled: Bool) {
+        _ = cancelled
+        showUserPromptLibrary = false
+        userPromptLibraryImageGenOnApplied = nil
+        userPromptLibraryApplyMode = .chatCompose
+        imageGenAppendExistingPrompt = ""
+        userPromptLibraryPresentationHost = .mainWindow
+    }
+
+    func finishUserPromptLibraryOK(config: ChatUserPromptStore.Config, selectedEntry: ChatFavoritePrompt?) {
+        var updated = config
+        if let selectedEntry {
+            updated.selectedFavoriteID = selectedEntry.id
+        }
+        ChatUserPromptStore.save(updated, dataDirectory: appState.config.dataDirectory)
+
+        switch userPromptLibraryApplyMode {
+        case .chatCompose:
+            if let entry = selectedEntry {
+                composePromptText = entry.text
+                composeAttachmentPaths = ChatUserPromptFavoriteImages.existingImagePaths(entry.imagePaths)
+            }
+        case .imageGenAppend:
+            if let entry = selectedEntry {
+                let combined = ChatUserPromptAppendLogic.append(
+                    existing: imageGenAppendExistingPrompt,
+                    addition: entry.text
+                )
+                if combined != imageGenAppendExistingPrompt {
+                    userPromptLibraryImageGenOnApplied?(combined)
+                }
+            }
+        case .manageOnly:
+            break
+        }
+        userPromptLibraryDidDismiss(cancelled: false)
     }
 
     func saveUserMessageAsFavorite(messageID: String) {
         guard let idx = session.indexOf(messageID: messageID),
               session.messages[idx].role == .user else { return }
-        appState.status.show("Save favorite user prompt dialog is not yet ported.")
+        let msg = session.messages[idx]
+        var paths = msg.imagePaths
+        if paths.isEmpty, editingMessageID == messageID {
+            paths = pendingEditImagePaths
+        }
+        userPromptSaveDraft = UserPromptSaveDraft(defaultName: "", text: msg.text, imagePaths: paths)
+        showUserPromptSave = true
+    }
+
+    func commitSaveUserPrompt(name: String, text: String, imagePaths: [String]) {
+        let id = ChatUserPromptStore.newEntryID()
+        let stored = ChatUserPromptFavoriteImages.persistFavoriteImagePaths(
+            favoriteID: id,
+            sourcePaths: imagePaths,
+            dataDirectory: appState.config.dataDirectory,
+            imageExtensions: appState.config.imageExtensions
+        )
+        var config = ChatUserPromptStore.load(dataDirectory: appState.config.dataDirectory)
+        let entry = ChatFavoritePrompt(id: id, label: name, text: text, imagePaths: stored)
+        config.favoritePrompts.append(entry)
+        config.selectedFavoriteID = id
+        ChatUserPromptStore.save(config, dataDirectory: appState.config.dataDirectory)
+        showUserPromptSave = false
+        userPromptSaveDraft = nil
     }
 
     func openPrefixPostfixLibrary() {
         showPrefixPostfixLibrary = true
     }
-
-    func applyFavoriteUserPrompt(note: Notification) {
-        guard let text = note.userInfo?["text"] as? String else { return }
-        pendingFavoritePromptText = text
-        let paths = note.userInfo?["paths"] as? [String] ?? []
-        pendingFavoritePromptImagePaths = paths.filter { FileManager.default.isReadableFile(atPath: $0) }
-    }
-
-    /// Consumed by ``ChatPromptInputView`` when the user picks a library entry.
-    var pendingFavoritePromptText: String?
-    var pendingFavoritePromptImagePaths: [String] = []
 
     func deleteMessage(messageID: String) {
         guard let idx = session.indexOf(messageID: messageID) else { return }
