@@ -20,6 +20,25 @@ final class FileDataModel {
     func getDisplayedImages() -> [String] { displayedImages }
 
     func setDisplayedImages(_ images: [String], notify: Bool = true) {
+        if images == displayedImages { return }
+
+        // Same membership, new order — paths are already canonical (skip O(n) standardizedFileURL).
+        if Set(images) == Set(displayedImages) {
+            let oldIndex = currentIndex
+            displayedImages = images
+            syncCurrentIndexFromPath()
+            if notify {
+                eventBridge?.displayedImagesChanged(displayedImages)
+                if currentIndex != oldIndex {
+                    eventBridge?.currentIndexChanged(currentIndex)
+                }
+                if let currentImagePath {
+                    eventBridge?.currentImageChanged(currentImagePath)
+                }
+            }
+            return
+        }
+
         let normalized = images.compactMap { Self.normalizePath($0) }
         guard normalized != displayedImages else { return }
 

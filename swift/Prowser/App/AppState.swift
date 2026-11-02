@@ -1234,9 +1234,29 @@ final class AppState {
             guard !Task.isCancelled, generation == self.manualDirectoryRefreshGeneration else { return }
             guard self.fileData.currentDirectory == dir else { return }
             let currentDisplayed = self.fileData.displayedImages
+            let sortMode = SortMode(
+                rawValue: self.config.string(forKey: "sort_mode", default: "date")
+            ) ?? .date
+            let candidateList: [String]
+            if sortMode == .random, !currentDisplayed.isEmpty {
+                // Python `_simple_refresh`: preserve shuffle; drop missing files; append new ones.
+                let diskSet = Set(images)
+                var merged = currentDisplayed.filter { path in
+                    FileManager.default.fileExists(atPath: path) && diskSet.contains(path)
+                }
+                let displayedSet = Set(currentDisplayed)
+                merged.append(contentsOf: images.filter { !displayedSet.contains($0) })
+                candidateList = merged
+            } else {
+                candidateList = DisplayOrderService.applyDisplayOrder(
+                    images,
+                    appState: self,
+                    trustPreSortedFromDirectoryLoad: true
+                )
+            }
             let hasStalePaths = !self.isFormattedListMode()
                 && currentDisplayed.contains { !FileManager.default.fileExists(atPath: $0) }
-            if images == currentDisplayed, !hasStalePaths {
+            if candidateList == currentDisplayed, !hasStalePaths {
                 DirectoryRefreshService.refreshThumbnailPresentation(appState: self)
                 return
             }
