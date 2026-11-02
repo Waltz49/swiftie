@@ -3,7 +3,12 @@ import SwiftUI
 @MainActor
 struct CacheSettingsTab: View {
     @Environment(AppState.self) private var appState
-    @State private var totals = CacheManagementService.CacheTotals(thumbnails: 0, metadata: 0, imageRecognition: 0)
+    @State private var totals = CacheManagementService.CacheTotals(
+        thumbnails: 0,
+        metadata: 0,
+        imageRecognition: 0,
+        searchModels: 0
+    )
     @State private var statusMessage = ""
     @State private var sourceDirectories = ""
     @State private var backgroundEnabled = false
@@ -147,7 +152,11 @@ struct CacheSettingsTab: View {
         let thumbs = formatter.string(fromByteCount: totals.thumbnails)
         let meta = formatter.string(fromByteCount: totals.metadata)
         let ir = formatter.string(fromByteCount: totals.imageRecognition)
+        let models = formatter.string(fromByteCount: totals.searchModels)
         let total = formatter.string(fromByteCount: totals.total)
+        if totals.searchModels > 0 {
+            return "Total \(total): \(thumbs) Thumbs, \(meta) Metadata, \(ir) Image Rec, \(models) Models"
+        }
         return "Total \(total): \(thumbs) Thumbs, \(meta) Metadata, \(ir) Image Rec"
     }
 
@@ -190,7 +199,7 @@ struct CacheSettingsTab: View {
     private func clearImageRecognition() {
         guard confirm(
             "Clear Image Recognition Cache",
-            "This will clear all cached CNN and CLIP feature data. Features will be recalculated as needed, which may temporarily slow similarity searches."
+            "This will clear all cached CNN and CLIP feature data. Downloaded search models are not removed. Features will be recalculated as needed, which may temporarily slow similarity searches."
         ) else { return }
         do {
             let removed = try CacheManagementService.clearImageRecognitionCache(
@@ -215,9 +224,11 @@ struct CacheSettingsTab: View {
             for path in paths {
                 cacheKeyForPath[path] = await appState.thumbnailCache.cacheKey(for: path)
             }
+            let targetSize = CacheManagementService.scrubTargetThumbnailPixelSize(config: appState.config)
             let result = CacheManagementService.scrubCaches(
                 paths: appState.config.profilePaths,
-                cacheKeyForPath: cacheKeyForPath
+                cacheKeyForPath: cacheKeyForPath,
+                targetThumbnailPixelSize: targetSize
             )
             if result.thumbnailsRemoved > 0 {
                 appState.refreshThumbnailsAfterDiskCacheMutation()

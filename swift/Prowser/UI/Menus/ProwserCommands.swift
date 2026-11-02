@@ -481,9 +481,6 @@ struct ProwserCommands: Commands {
                     .keyboardShortcut("i", modifiers: [.command, .shift])
 
                     if BundleCapabilities.imageGenUIEnabled {
-                        Button("Test LoRAs") {
-                            Task { @MainActor in CheckLorasController.present(from: appState) }
-                        }
                         Button("Map LoRAs") {
                             Task { @MainActor in LoraMapWindowController.shared.show(appState: appState) }
                         }
@@ -1130,6 +1127,11 @@ struct ProwserImageCommands: Commands {
 
             Button("Manage models…") {
                 Task { @MainActor in appState.showManageModelsDialog() }
+            }
+            .disabled(!BundleCapabilities.imageGenUIEnabled)
+
+            Button("Test LoRAs") {
+                Task { @MainActor in CheckLorasController.present(from: appState) }
             }
             .disabled(!BundleCapabilities.imageGenUIEnabled)
         }

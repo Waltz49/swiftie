@@ -410,6 +410,10 @@ enum DirectoryRefreshService {
         refreshModifiedDisplayedImagesIfNeeded(appState: appState)
         reconcileThumbnailGridListing(appState: appState)
         appState.thumbnailInvalidationGeneration += 1
+        appState.listViewHost?.thumbnailRefreshToken = appState.thumbnailInvalidationGeneration
+        if appState.fileData.currentViewMode == .thumbnail {
+            appState.thumbnailGridHost?.invalidateUndersizedLoadedThumbnailsForRefresh()
+        }
         appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
         appState.thumbnailGridHost?.setNeedsDisplay(appState.thumbnailGridHost?.bounds ?? .zero)
     }

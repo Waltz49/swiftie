@@ -161,7 +161,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [x] Face Recognition — `FaceRecognitionSettingsTab` (native dlib; `--min` hidden; remove installed models + cache coordination)
 - [x] Captioning — `CaptioningSettingsTab` (`--min` hidden)
 - [~] LoRA — disk-first (LoRA files found → works with base model → in Create menu). `LoRASettingsTab` unified list + filters; Test LoRAs; `LoRABridge`, run-dialog stack picker, Map LoRAs (Debug)
-- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; face model artifacts excluded from generic cache clear when appropriate; idle CLIP/CNN indexing toggles when models installed)
+- [~] Caches (`CacheSettingsTab` — clear thumbnails, image rec, scrub; scrub drops orphan thumbs and sizes ≠ target (manual cell size or 150px default); face model artifacts excluded from generic cache clear when appropriate; idle CLIP/CNN indexing toggles when models installed)
 
 ## Menus — File
 
@@ -174,7 +174,7 @@ Mac-style collapsible groups (`CollapsibleSettingsSection`, `SettingsPreferenceC
 - [x] Preferences… (⌘, — **Prowser Preferences** window)
 - [~] Reveal in Finder (⇧⌘R)
 - [~] Move File to Trash (⌘Delete; `confirm_delete`)
-- [~] Refresh (⌘R)
+- [~] Refresh (⌘R) — light refresh reloads undersized thumbs after +/- cell/row resize (Python force-refreshes all pixmaps)
 - [x] View Copy of Trash… (⌘⇧T, when trash has images)
 - [x] Last Image (⌘; browse history swap)
 - [x] Image History (F3)

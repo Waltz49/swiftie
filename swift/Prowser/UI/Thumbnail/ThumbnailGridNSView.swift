@@ -693,6 +693,30 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         scheduleLoadVisibleThumbnails(debounced: false)
     }
 
+    /// ⌘R light refresh: drop loaded pixmaps smaller than the current generation size so decode can upsize.
+    func invalidateUndersizedLoadedThumbnailsForRefresh() {
+        let target = thumbnailGenerationPixelSize()
+        var undersized: [String] = []
+        for (path, image) in thumbnails {
+            let maxDim = Self.maxPixelDimension(of: image)
+            guard maxDim > 0 else { continue }
+            if maxDim < target {
+                undersized.append(path)
+            }
+        }
+        invalidateThumbnails(for: undersized)
+    }
+
+    static func maxPixelDimension(of image: NSImage) -> Int {
+        if let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+           rep.pixelsWide > 0, rep.pixelsHigh > 0 {
+            return max(rep.pixelsWide, rep.pixelsHigh)
+        }
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return 0 }
+        return Int(max(size.width, size.height).rounded(.up))
+    }
+
     /// Drop view-layer pixmaps for paths no longer in the list (Python `reorder_thumbnails` reuse).
     func pruneThumbnails(keeping paths: Set<String>) {
         guard !paths.isEmpty || !thumbnails.isEmpty || !loadingPaths.isEmpty else { return }

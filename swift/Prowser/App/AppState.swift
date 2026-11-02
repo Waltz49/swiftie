@@ -1455,13 +1455,13 @@ final class AppState {
         let current = config.int(forKey: "list_view_row_height", default: 48)
         let next = min(64, max(28, current + delta))
         config.updateSetting("list_view_row_height", value: next)
-        config.applySettingsChange(emit: eventBus)
+        listViewHost?.rowHeight = CGFloat(next)
         status.show("List row height: \(next)px")
     }
 
     func resetListRowHeight() {
         config.updateSetting("list_view_row_height", value: 48)
-        config.applySettingsChange(emit: eventBus)
+        listViewHost?.rowHeight = 48
         status.show("List row height reset")
     }
 
@@ -2136,7 +2136,6 @@ final class AppState {
         )
         config.updateSetting("thumbnail_cell_size", value: newSize)
         config.updateSetting("manual_thumbnail_size", value: true)
-        config.applySettingsChange(emit: eventBus)
         thumbnailGridHost?.reloadLayout()
         status.show(String(format: "Thumbnail size: %.0f", newSize))
     }
@@ -2144,7 +2143,6 @@ final class AppState {
     func resetThumbnailCellSize() {
         config.updateSetting("manual_thumbnail_size", value: false)
         config.updateSetting("thumbnail_cell_size", value: ThumbnailLayout.defaultCellSize)
-        config.applySettingsChange(emit: eventBus)
         thumbnailGridHost?.reloadLayout()
         status.show("Thumbnail size reset")
     }
