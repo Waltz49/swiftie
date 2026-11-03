@@ -203,18 +203,12 @@ private struct LoraMapView: View {
 
             HStack(spacing: 4) {
                 Text("Filter:")
-                TextField("Filter LoRAs or models…", text: $filter)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 220)
-                Button {
-                    filter = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .disabled(filter.isEmpty)
-                .help("Clear filter")
+                ClearableFilterField(
+                    placeholder: "Filter LoRAs or models…",
+                    text: $filter,
+                    minFieldWidth: 220,
+                    clearHelp: "Clear filter"
+                )
                 Spacer()
             }
 

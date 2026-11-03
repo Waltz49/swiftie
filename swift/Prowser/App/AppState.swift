@@ -1889,6 +1889,15 @@ final class AppState {
         }
     }
 
+    /// Presents the Test LoRAs options dialog and keys it above the main browser window.
+    func presentCheckLorasOptionsDialog() {
+        syncAuxiliaryDialogs()
+        auxiliaryDialogs.bringToFront(DialogID.checkLorasOptions)
+        DispatchQueue.main.async { [weak self] in
+            self?.auxiliaryDialogs.bringToFront(DialogID.checkLorasOptions)
+        }
+    }
+
     private func syncDialog<Content: View>(
         id: String,
         show: Bool,
@@ -1900,7 +1909,10 @@ final class AppState {
         @ViewBuilder content: () -> Content
     ) {
         if show {
-            guard !auxiliaryDialogs.isVisible(id) else { return }
+            if auxiliaryDialogs.isVisible(id) {
+                auxiliaryDialogs.bringToFront(id)
+                return
+            }
             auxiliaryDialogs.present(
                 id: id,
                 title: title,

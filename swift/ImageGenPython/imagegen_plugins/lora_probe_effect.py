@@ -121,15 +121,28 @@ def measure_probe_image_delta(
     )
 
 
-def probe_images_effectively_identical(delta: ProbeImageDelta) -> bool:
+def probe_images_effectively_identical(
+    delta: ProbeImageDelta,
+    *,
+    strict: bool = False,
+) -> bool:
     """
     True when two renders are effectively the same (LoRA had no effect).
 
     Prefers ResNet CNN cosine (⌘K stack) so color-matched but structurally
     different images are not treated as identical. Falls back to pixel/phash
     only when CNN is unavailable.
+
+    ``strict`` tightens thresholds for cross-family probes (wrong architecture
+    often produces decode noise that CNN treats as a weak effect).
     """
     threshold = _probe_cnn_identical_min_cosine()
+    if strict:
+        threshold = max(threshold, 0.99)
+        if delta.mean_diff < 0.12 and delta.max_diff < 8:
+            return True
+        if delta.mean_diff < 0.015 and delta.max_diff < 3:
+            return True
     if delta.cnn_cosine is not None:
         return delta.cnn_cosine >= threshold
 

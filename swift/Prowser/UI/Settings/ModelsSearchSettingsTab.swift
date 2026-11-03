@@ -15,7 +15,7 @@ struct ModelsSearchSettingsTab: View {
     }
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Models for Search").font(.title2)
 
@@ -25,9 +25,12 @@ struct ModelsSearchSettingsTab: View {
                         Text("Euclidean").tag("euclidean")
                         Text("Manhattan").tag("manhattan")
                     }
+                    .preferencesScanRecordsLabel("Similarity Metric")
                     .pickerStyle(.menu)
 
-                    Text("ResNet Model").font(.subheadline.weight(.semibold))
+                    Text("ResNet Model")
+                        .font(.subheadline.weight(.semibold))
+                        .preferencesScanRecordsLabel("ResNet Model")
                     RadioRow(title: "ResNet18 (fastest)", tag: "resnet18", selection: $resnetModel)
                     RadioRow(title: "ResNet50 (balanced)", tag: "resnet50", selection: $resnetModel)
                     RadioRow(title: "ResNet101 (best quality)", tag: "resnet101", selection: $resnetModel)
@@ -52,6 +55,7 @@ struct ModelsSearchSettingsTab: View {
                 SettingsSection(title: "Model delivery") {
                     Text("Download base URL")
                         .font(.subheadline.weight(.semibold))
+                        .preferencesScanRecordsLabel("Download base URL")
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         TextField("https://…", text: $modelDownloadBaseURL)
                             .textFieldStyle(.roundedBorder)
@@ -182,6 +186,7 @@ struct ModelsSearchSettingsTab: View {
                 }
             }
             .buttonStyle(.plain)
+            .preferencesScanRecordsLabel(title)
         }
     }
 }

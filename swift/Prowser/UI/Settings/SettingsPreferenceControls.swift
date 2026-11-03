@@ -58,6 +58,8 @@ struct SettingsPreferenceSubsectionHeader: View {
     let title: String
     var trailingNote: String?
     var verticalPadding: CGFloat = 8
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
+    @Environment(\.preferencesScanStringRecorder) private var preferencesScanStringRecorder
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -73,6 +75,10 @@ struct SettingsPreferenceSubsectionHeader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, verticalPadding)
+        .onAppear {
+            guard preferencesStringScanMode, let preferencesScanStringRecorder else { return }
+            preferencesScanStringRecorder.record(title)
+        }
     }
 }
 
@@ -83,6 +89,8 @@ struct SettingsPreferenceToggleRow: View {
     var verticalPadding: CGFloat = 10
     var leadingInset: CGFloat = 0
     @Binding var isOn: Bool
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
+    @Environment(\.preferencesScanStringRecorder) private var preferencesScanStringRecorder
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -106,6 +114,10 @@ struct SettingsPreferenceToggleRow: View {
         .padding(.trailing, 20)
         .padding(.vertical, verticalPadding)
         .help(tooltip ?? title)
+        .onAppear {
+            guard preferencesStringScanMode, let preferencesScanStringRecorder else { return }
+            preferencesScanStringRecorder.record(title)
+        }
     }
 }
 
@@ -183,6 +195,8 @@ struct SettingsPreferenceCompactToggleRow: View {
     /// When true, label grows so the switch sits on the trailing edge of the column.
     var expandLabel = true
     @Binding var isOn: Bool
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
+    @Environment(\.preferencesScanStringRecorder) private var preferencesScanStringRecorder
 
     var body: some View {
         HStack(spacing: SettingsPreferenceCompactToggleMetrics.labelSwitchSpacing) {
@@ -197,6 +211,10 @@ struct SettingsPreferenceCompactToggleRow: View {
         .padding(.vertical, 5)
         .frame(maxWidth: expandLabel ? .infinity : nil, alignment: .leading)
         .help(tooltip ?? title)
+        .onAppear {
+            guard preferencesStringScanMode, let preferencesScanStringRecorder else { return }
+            preferencesScanStringRecorder.record(title)
+        }
     }
 }
 
@@ -204,6 +222,8 @@ struct SettingsPreferenceFormRow<Control: View>: View {
     let label: String
     var subtitle: String?
     var tooltip: String?
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
+    @Environment(\.preferencesScanStringRecorder) private var preferencesScanStringRecorder
     @ViewBuilder let control: () -> Control
 
     var body: some View {
@@ -226,6 +246,10 @@ struct SettingsPreferenceFormRow<Control: View>: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .help(tooltip ?? label)
+        .onAppear {
+            guard preferencesStringScanMode, let preferencesScanStringRecorder else { return }
+            preferencesScanStringRecorder.record(label)
+        }
     }
 }
 

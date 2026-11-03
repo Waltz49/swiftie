@@ -18,7 +18,7 @@ struct CacheSettingsTab: View {
     @State private var faceIndexingAvailable = false
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack() {
                 Text("Caches").font(.title2)
 
@@ -44,6 +44,9 @@ struct CacheSettingsTab: View {
                     }
                     Button("Clear All") { clearAll() }
                         .buttonStyle(.bordered)
+                    Button("Rescan Pref Strings") { rescanPreferenceStrings() }
+                        .buttonStyle(.bordered)
+                        .help("Rebuild the Preferences sidebar search index from dialog labels")
                     Text("This may temporarily slow down the application as caches are rebuilt.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -250,6 +253,14 @@ struct CacheSettingsTab: View {
         reloadIndexingAvailability()
         statusMessage = "Cleared \(removed) cache entries."
         refreshTotals()
+    }
+
+    private func rescanPreferenceStrings() {
+        statusMessage = "Scanning preference labels…"
+        Task { @MainActor in
+            let metrics = await PreferencesStringIndex.shared.forceRescan(appState: appState)
+            statusMessage = "Preference search index rebuilt (\(metrics.elapsedMs) ms)."
+        }
     }
 
     private func confirm(_ title: String, _ message: String) -> Bool {

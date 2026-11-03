@@ -246,8 +246,6 @@ def lora_needs_compatibility_check(
         return False
     if not entry_matches_lora_model(entry, model_key, settings=settings):
         return False
-    if entry.mflux_compatible is True:
-        return False
     return not lora_probe_passed_for_model(lora_id, model_key, settings)
 
 
@@ -449,35 +447,27 @@ def lora_probe_passed_for_model(
     model_support: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
-    Whether this LoRA may be shown for the base model.
+    Whether Check LoRAs recorded a successful probe for this LoRA on model_key.
 
-    Catalog entries with mflux_compatible=True are always shown (curated for MFLUX).
-    Other entries: after Check LoRAs, only those with a successful probe on model_key;
-    before any check, only mflux_compatible=True (same as above).
+    Requires persisted ``model_support`` from a GPU probe that showed a visual
+    effect vs the no-LoRA baseline. ``mflux_compatible=False`` entries are
+    excluded; ``mflux_compatible=True`` does not bypass the probe requirement.
     """
     resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
     if resolved is None or resolved.mflux_compatible is False:
         return False
-    if not entry_matches_lora_model(
-        resolved,
-        model_key,
+    ms = _raw_model_support_dict(
         model_support=model_support,
         settings=None if model_support is not None else settings,
-    ):
-        return False
-    if resolved.mflux_compatible is True:
+    )
+    if _probe_supported_on_model(resolved, model_key, ms):
         return True
-    if model_support is not None:
-        from imagegen_plugins.lora_model_registry import _probe_supported_on_model
+    if settings is None:
+        from config import get_config
 
-        return _probe_supported_on_model(resolved, model_key, model_support)
-    support = lora_model_support(settings)
-    if not support:
-        return False
-    passed = support.get(lora_id)
-    if passed is None:
-        return False
-    return any(m in passed for m in klein_lora_model_aliases(model_key))
+        settings = get_config().load_settings()
+    cross = lora_cross_family_models(settings).get(resolved.lora_id, ())
+    return model_key in {str(m) for m in cross}
 
 
 
@@ -558,8 +548,6 @@ def lora_probe_state_for_model(
     resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
     if resolved is None or resolved.mflux_compatible is False:
         return "fail"
-    if resolved.mflux_compatible is True:
-        return "pass"
     if lora_probe_passed_for_model(
         lora_id,
         model_key,

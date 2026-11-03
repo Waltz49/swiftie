@@ -6,7 +6,7 @@ struct DestinationsSettingsTab: View {
     @State private var destinations: [String?] = Array(repeating: nil, count: 9)
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Destinations").font(.title2)
                 Text("Move/copy destination folders (menu and keyboard shortcuts).")

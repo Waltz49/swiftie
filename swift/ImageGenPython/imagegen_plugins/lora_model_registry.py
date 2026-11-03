@@ -390,6 +390,18 @@ def cross_family_models_for_entry(
     )
 
 
+def same_host_supported_models(
+    entry: FluxLoraEntry,
+    supported_model_keys: Iterable[str],
+) -> Tuple[str, ...]:
+    """Probe passes on the entry's host family (excludes cross-family keys)."""
+    return tuple(
+        str(mk)
+        for mk in supported_model_keys
+        if not is_cross_family_lora_model(entry, str(mk))
+    )
+
+
 def host_id_for_lora_model(model_key: str) -> Optional[str]:
     if model_key in (FLUX1_SCHNELL, FLUX1_DEV):
         return HOST_FLUX1_T2I

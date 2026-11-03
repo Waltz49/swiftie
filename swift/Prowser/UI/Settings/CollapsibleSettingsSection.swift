@@ -184,6 +184,7 @@ struct CollapsibleSettingsSectionsToolbar: View {
 struct SettingsCollapsibleTabLayout<Content: View>: View {
     let onExpandAll: () -> Void
     let onCollapseAll: () -> Void
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -192,12 +193,20 @@ struct SettingsCollapsibleTabLayout<Content: View>: View {
                 onExpandAll: onExpandAll,
                 onCollapseAll: onCollapseAll
             )
-            ScrollView {
+            if preferencesStringScanMode {
                 content()
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
                     .padding(.bottom, 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView {
+                    content()
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 20)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }
@@ -208,11 +217,17 @@ struct CollapsibleSettingsSection<Content: View>: View {
     let title: String
     let stateKey: String
     @Binding var isExpanded: Bool
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
+    @Environment(\.preferencesScanStringRecorder) private var preferencesScanStringRecorder
     @ViewBuilder let content: () -> Content
+
+    private var effectivelyExpanded: Bool {
+        preferencesStringScanMode || isExpanded
+    }
 
     var body: some View {
         Group {
-            if isExpanded {
+            if effectivelyExpanded {
                 SettingsOutlinedGroupBox {
                     CollapsibleSettingsSectionHeader(
                         title: title,
@@ -242,6 +257,8 @@ struct CollapsibleSettingsSection<Content: View>: View {
         }
         .padding(.vertical, 4)
         .onAppear {
+            guard preferencesStringScanMode, let preferencesScanStringRecorder else { return }
+            preferencesScanStringRecorder.record(title)
             CollapsibleSettingsSectionKeyboard.register(stateKey: stateKey, isExpanded: isExpanded) { newValue in
                 withAnimation(.easeInOut(duration: 0.15)) {
                     isExpanded = newValue

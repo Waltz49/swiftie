@@ -8,7 +8,7 @@ lora_catalog_store.py so it can be backed up separately from settings.json.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from imagegen_plugins.lora_entry import FluxLoraEntry
 
@@ -358,6 +358,164 @@ def _migrate_legacy_z_image_lora_catalog(lc: Dict[str, Any]) -> None:
                     )
 
 
+
+def _entry_from_lc(lc: Dict[str, Any], lora_id: str) -> Optional[FluxLoraEntry]:
+    """Resolve a catalog entry from ``lc`` without re-running migrate (avoids recursion)."""
+    entry = _catalog_for_lc(lc).get(str(lora_id))
+    if entry is None:
+        return None
+    overrides = entry_overrides_from_lc(lc).get(str(lora_id))
+    return apply_entry_overrides(entry, overrides)
+
+
+def _split_model_support_cross_family(lc: Dict[str, Any]) -> None:
+    """
+    Keep only same-host probe passes in model_support.
+
+    Legacy catalogs stored cross-host passes in model_support. Cross-host keys
+    are removed from model_support; matching cross_family_models entries from
+    that legacy data are dropped (fresh cross passes come from Test LoRAs only).
+    """
+    raw_ms = lc.get("model_support")
+    if not isinstance(raw_ms, dict) or not raw_ms:
+        return
+    from imagegen_plugins.lora_model_registry import (
+        is_cross_family_lora_model,
+        same_host_supported_models,
+    )
+
+    cf = lc.get(CROSS_FAMILY_MODELS_KEY)
+    if not isinstance(cf, dict):
+        cf = {}
+        lc[CROSS_FAMILY_MODELS_KEY] = cf
+
+    new_ms: Dict[str, Any] = {}
+    for lid, models in raw_ms.items():
+        lid_s = str(lid)
+        if not isinstance(models, list):
+            continue
+        supported = [str(m) for m in models]
+        entry = _entry_from_lc(lc, lid_s)
+        if entry is None:
+            new_ms[lid_s] = supported
+            continue
+        same_host = list(same_host_supported_models(entry, supported))
+        new_ms[lid_s] = same_host
+        if set(supported) != set(same_host):
+            cf.pop(lid_s, None)
+    lc["model_support"] = new_ms
+
+    for lid_s, cross_list in list(cf.items()):
+        entry = _entry_from_lc(lc, str(lid_s))
+        raw_list = raw_ms.get(lid_s) or raw_ms.get(str(lid_s))
+        raw_supported = (
+            [str(m) for m in raw_list] if isinstance(raw_list, list) else []
+        )
+        ms_list = new_ms.get(str(lid_s), [])
+        if entry is None or not isinstance(cross_list, list):
+            cf.pop(lid_s, None)
+            continue
+        kept: List[str] = []
+        for model_key in cross_list:
+            mk = str(model_key)
+            if not is_cross_family_lora_model(entry, mk):
+                continue
+            if mk in raw_supported and mk not in ms_list:
+                continue
+            kept.append(mk)
+        if kept:
+            cf[lid_s] = kept
+        else:
+            cf.pop(lid_s, None)
+
+
+def _probe_history_probed_keys(
+    history_slice: Dict[str, Any],
+    *,
+    allowed: Optional[Iterable[str]] = None,
+) -> FrozenSet[str]:
+    """Model keys recorded as probed in a probe_history slice."""
+    allowed_set = {str(m) for m in allowed} if allowed is not None else None
+    raw = history_slice.get("models_probed")
+    if isinstance(raw, list) and raw:
+        out = {str(m) for m in raw if str(m)}
+        if allowed_set is not None:
+            out &= allowed_set
+        return frozenset(out)
+    return frozenset()
+
+
+def _sanitize_probe_history_model_support(lc: Dict[str, Any]) -> None:
+    """Strip cross-host keys from probe_history model_support (skip-unchanged cache)."""
+    ph = lc.get(PROBE_HISTORY_KEY)
+    if not isinstance(ph, dict) or not ph:
+        return
+    from imagegen_plugins.lora_model_registry import same_host_supported_models
+
+    for hist_key, slice_ in ph.items():
+        if not isinstance(slice_, dict):
+            continue
+        raw = slice_.get("model_support")
+        if not isinstance(raw, list):
+            continue
+        lid_s = str(hist_key)
+        if lid_s.startswith("md5:"):
+            continue
+        entry = _entry_from_lc(lc, lid_s)
+        if entry is None:
+            continue
+        same_host = list(
+            same_host_supported_models(entry, [str(m) for m in raw])
+        )
+        probed = _probe_history_probed_keys(slice_)
+        if probed:
+            same_host = [m for m in same_host if m in probed]
+        slice_["model_support"] = same_host
+
+
+def _trim_model_support_to_probe_history(lc: Dict[str, Any]) -> None:
+    """Drop model_support keys that probe_history never probed on this LoRA file."""
+    ph = lc.get(PROBE_HISTORY_KEY)
+    ms = lc.get("model_support")
+    if not isinstance(ph, dict) or not ph or not isinstance(ms, dict):
+        return
+    for lid_s, models in list(ms.items()):
+        if not isinstance(models, list):
+            continue
+        hist = ph.get(lid_s) or ph.get(str(lid_s))
+        if not isinstance(hist, dict):
+            continue
+        probed = _probe_history_probed_keys(hist)
+        if not probed:
+            continue
+        ms[lid_s] = [str(m) for m in models if str(m) in probed]
+
+
+def _prune_by_model_enabled_to_probe_support(lc: Dict[str, Any]) -> None:
+    raw_ms = lc.get("model_support")
+    if not isinstance(raw_ms, dict):
+        return
+    cf = lc.get(CROSS_FAMILY_MODELS_KEY)
+    if not isinstance(cf, dict):
+        cf = {}
+    by_model = lc.get(_BY_MODEL_KEY)
+    if not isinstance(by_model, dict):
+        return
+    for mk, slice_ in by_model.items():
+        if not isinstance(slice_, dict):
+            continue
+        enabled = slice_.get("enabled_ids")
+        if not isinstance(enabled, list):
+            continue
+        kept = [
+            str(lid)
+            for lid in enabled
+            if mk in raw_ms.get(str(lid), ())
+            or mk in cf.get(str(lid), ())
+        ]
+        slice_["enabled_ids"] = kept
+
+
 def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure by_host + by_model exist with normalized slices."""
     if not isinstance(lc, dict):
@@ -396,6 +554,10 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
     elif not isinstance(lc.get(ENTRY_OVERRIDES_KEY), dict):
         lc[ENTRY_OVERRIDES_KEY] = {}
     lc[PROBE_HISTORY_KEY] = probe_history_from_lc(lc)
+    _split_model_support_cross_family(lc)
+    _sanitize_probe_history_model_support(lc)
+    _trim_model_support_to_probe_history(lc)
+    _prune_by_model_enabled_to_probe_support(lc)
     return lc
 
 

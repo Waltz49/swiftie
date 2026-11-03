@@ -40,7 +40,8 @@ enum LoRACatalog {
         loraID: String,
         modelKey: String,
         entry: LoRAEntry?,
-        modelSupport: [String: [String]]
+        modelSupport: [String: [String]],
+        lc: [String: Any]
     ) -> Bool {
         let resolved = entry ?? LoRAEntry(
             hostID: "", loraID: loraID, displayName: loraID, repoID: "", filename: "",
@@ -48,19 +49,14 @@ enum LoRACatalog {
             mfluxCompatible: nil, triggerWord: nil, comment: nil, referencePrompt: nil, sourcePath: nil
         )
         if resolved.mfluxCompatible == false { return false }
-        if !LoRAModelRegistry.entryMatchesModel(resolved, modelKey: modelKey, modelSupport: modelSupport) {
-            if LoRAEntry.isUserLoraID(resolved.loraID) {
-                let expected = LoRAModelRegistry.hostID(forModelKey: modelKey)
-                if expected == resolved.hostID {
-                    return resolved.mfluxCompatible == true
-                        || LoRAModelRegistry.probeSupportedOnModel(entry: resolved, modelKey: modelKey, modelSupport: modelSupport)
-                }
-            }
-            if resolved.mfluxCompatible == true { return true }
-            return LoRAModelRegistry.probeSupportedOnModel(entry: resolved, modelKey: modelKey, modelSupport: modelSupport)
+        if LoRAModelRegistry.probeSupportedOnModel(
+            entry: resolved,
+            modelKey: modelKey,
+            modelSupport: modelSupport
+        ) {
+            return true
         }
-        if resolved.mfluxCompatible == true { return true }
-        return LoRAModelRegistry.probeSupportedOnModel(entry: resolved, modelKey: modelKey, modelSupport: modelSupport)
+        return crossFamily(entry: resolved, loraID: resolved.loraID, modelKey: modelKey, lc: lc)
     }
 
     static func entryVisibleInSettings(
@@ -130,7 +126,13 @@ enum LoRACatalog {
     ) -> Bool {
         if entry.mfluxCompatible == false { return false }
         if !enabled.contains(entry.loraID) { return false }
-        if !probePassed(loraID: entry.loraID, modelKey: modelKey, entry: entry, modelSupport: modelSupport) {
+        if !probePassed(
+            loraID: entry.loraID,
+            modelKey: modelKey,
+            entry: entry,
+            modelSupport: modelSupport,
+            lc: lc
+        ) {
             return false
         }
         return LoRAPathResolver.localWeightsPath(loraID: entry.loraID, entry: entry) != nil
@@ -157,6 +159,7 @@ enum LoRACatalog {
         modelKey: String,
         lc: [String: Any]
     ) -> String {
+        if entry.mfluxCompatible == false { return "fail" }
         let ms = LoRACatalogSettings.modelSupportDict(lc)
         if LoRAModelRegistry.probeSupportedOnModel(entry: entry, modelKey: modelKey, modelSupport: ms) {
             return "pass"

@@ -16,7 +16,7 @@ struct ExcludesSettingsTab: View {
     }
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Exclude Files from Specified Directories").font(.title2)
                 Text("In thumbnail view, press press ⌘X to exclude images from these directories.")

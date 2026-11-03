@@ -59,6 +59,11 @@ struct ProfilePaths: Sendable {
         return url
     }
 
+    /// Cached searchable labels for Preferences sidebar filter (`preferences_strings.json`).
+    var preferencesStringsCacheFile: URL {
+        cacheDirectory.appendingPathComponent("preferences_strings.json")
+    }
+
     /// Python-compatible image recognition root (`~/.prowser/cache/image_recognition/`). Swift only
     /// writes the shared `face_cache/` subtree here — never CNN/CLIP `.npz` files.
     var pythonCompatibleImageRecognitionCacheDirectory: URL {

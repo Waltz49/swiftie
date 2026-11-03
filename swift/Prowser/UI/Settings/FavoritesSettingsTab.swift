@@ -6,7 +6,7 @@ struct FavoritesSettingsTab: View {
     @State private var favorites: [String?] = Array(repeating: nil, count: 9)
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Favorites").font(.title2)
                 Text("Favorite directories or image files accessible via ⌃1–⌃9.")

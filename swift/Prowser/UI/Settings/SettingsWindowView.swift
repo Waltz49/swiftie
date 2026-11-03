@@ -11,6 +11,8 @@ struct SettingsWindowView: View {
     private let onClose: (SettingsWindowDismissOutcome) -> Void
     @State private var selectedTab: SettingsTab = .general
     @State private var dismissAction: SettingsDismissAction?
+    @State private var tabSearchQuery = ""
+    @State private var sidebarTabList: [SettingsTab] = []
     @FocusState private var isTabSelectorFocused: Bool
 
     init(onClose: @escaping (SettingsWindowDismissOutcome) -> Void = { _ in }) {
@@ -20,11 +22,23 @@ struct SettingsWindowView: View {
     var body: some View {
         VStack(spacing: 0) {
             NavigationSplitView {
-                List(SettingsTab.visibleTabs(minBundle: appState.launchOptions.minBundle), selection: $selectedTab) { tab in
-                    Label(tab.title, systemImage: tab.systemImage)
-                        .tag(tab)
+                VStack(spacing: 0) {
+                    List(sidebarTabList, selection: $selectedTab) { tab in
+                        Label(tab.title, systemImage: tab.systemImage)
+                            .tag(tab)
+                    }
+                    .animation(.none, value: sidebarTabList)
+                    .focused($isTabSelectorFocused)
+                    Divider()
+                    ClearableFilterField(
+                        placeholder: "Filter tabs…",
+                        text: $tabSearchQuery,
+                        minFieldWidth: 100,
+                        clearHelp: "Clear filter"
+                    )
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                 }
-                .focused($isTabSelectorFocused)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
             } detail: {
                 settingsDetail(for: selectedTab)
@@ -63,7 +77,16 @@ struct SettingsWindowView: View {
         .onAppear {
             selectedTab = appState.requestedSettingsTab
             startSettingsSessionIfNeeded()
+            PreferencesStringIndex.shared.ensureLoaded(appState: appState)
+            applySidebarTabFilter()
             focusTabSelector()
+        }
+        .onChange(of: tabSearchQuery) { _, _ in
+            PreferencesStringIndex.shared.ensureLoaded(appState: appState)
+            applySidebarTabFilter()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserPreferencesStringIndexDidUpdate)) { _ in
+            applySidebarTabFilter()
         }
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             selectedTab = appState.requestedSettingsTab
@@ -98,6 +121,22 @@ struct SettingsWindowView: View {
         dismissAction = nil
         appState.config.beginSettingsSession()
         appState.theme.beginSettingsSession()
+    }
+
+    private func tabsMatchingSearchQuery(_ query: String) -> [SettingsTab] {
+        let base = SettingsTab.visibleTabs(minBundle: appState.launchOptions.minBundle)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return base }
+        return base.filter { PreferencesStringIndex.shared.tabMatches(tab: $0, query: trimmed) }
+    }
+
+    /// Keep list selection valid before row count changes (avoids NSTableView reentrant delegate updates).
+    private func applySidebarTabFilter() {
+        let visible = tabsMatchingSearchQuery(tabSearchQuery)
+        if !visible.isEmpty, !visible.contains(selectedTab) {
+            selectedTab = visible[0]
+        }
+        sidebarTabList = visible
     }
 
     private func focusTabSelector() {
@@ -156,36 +195,7 @@ struct SettingsWindowView: View {
 
     @ViewBuilder
     private func settingsDetail(for tab: SettingsTab) -> some View {
-        switch tab {
-        case .general:
-            GeneralSettingsTab()
-        case .favorites:
-            FavoritesSettingsTab()
-        case .directories:
-            DirectoriesSettingsTab()
-        case .extensions:
-            ExtensionsSettingsTab()
-        case .destinations:
-            DestinationsSettingsTab()
-        case .excludes:
-            ExcludesSettingsTab()
-        case .theme:
-            ThemeSettingsTab()
-        case .maps:
-            MapsEditorSettingsTab()
-        case .slideshow:
-            SlideshowSettingsTab()
-        case .caches:
-            CacheSettingsTab()
-        case .modelsSearch:
-            ModelsSearchSettingsTab()
-        case .faceRecognition:
-            FaceRecognitionSettingsTab()
-        case .imageGeneration:
-            ImageGenerationSettingsTab()
-        case .lora:
-            LoRASettingsTab()
-        }
+        SettingsTabContent.detail(for: tab)
     }
 }
 

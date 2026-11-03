@@ -5,7 +5,7 @@ struct MapsEditorSettingsTab: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Maps and Editor").font(.title2)
 
@@ -15,10 +15,14 @@ struct MapsEditorSettingsTab: View {
                         .foregroundStyle(.secondary)
                     Picker("Open GPS locations in", selection: mapAppBinding) {
                         Text("Apple Maps").tag("apple_maps")
+                            .preferencesScanRecordsLabel("Apple Maps")
                         Text("Google Maps").tag("google_maps")
+                            .preferencesScanRecordsLabel("Google Maps")
                         Text("Google Earth").tag("google_earth")
+                            .preferencesScanRecordsLabel("Google Earth")
                     }
                     .pickerStyle(.radioGroup)
+                    .preferencesScanRecordsLabel("Open GPS locations in")
                 }
 
                 SettingsSection(title: "External Image Editor") {

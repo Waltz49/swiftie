@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 from pathlib import Path
 from prowser_temp_files import ensure_temporary_files_directory
 import time
@@ -126,6 +127,12 @@ _PROBEABLE_MODEL_KEYS = frozenset(
         *SD15_LORA_MODEL_KEYS,
     }
 )
+
+_probe_run_context = threading.local()
+
+
+def _probe_strict_identical_comparison() -> bool:
+    return bool(getattr(_probe_run_context, "strict_identical", False))
 
 
 @dataclass
@@ -606,7 +613,12 @@ def _history_support_models(
     if not isinstance(models_raw, (list, tuple)):
         return []
     allowed = set(local_models)
-    return [str(m) for m in models_raw if str(m) in allowed]
+    probed = _history_models_probed(history_slice, local_models)
+    return [
+        str(m)
+        for m in models_raw
+        if str(m) in allowed and str(m) in probed
+    ]
 
 
 def _resolve_catalog_weight_path(
@@ -1506,7 +1518,9 @@ def _lora_probe_has_effect(
         return False
     delta = measure_probe_image_delta(baseline_path, out_path)
     cnn_threshold = _probe_cnn_identical_min_cosine()
-    if probe_images_effectively_identical(delta):
+    if probe_images_effectively_identical(
+        delta, strict=_probe_strict_identical_comparison()
+    ):
         print(
             f"[Check LoRAs] Probe: no effect for {label!r} on "
             f"{lora_model_display_name(model_key)} "
@@ -2079,7 +2093,43 @@ def probe_lora_on_model(
 
     lora_label = _probe_lora_display_label(entry, weights_path)
     cache = baseline_cache
+    from imagegen_plugins.lora_model_registry import is_cross_family_lora_model
 
+    previous_strict = getattr(_probe_run_context, "strict_identical", False)
+    _probe_run_context.strict_identical = entry is not None and (
+        is_cross_family_lora_model(entry, model_key)
+        or model_key in SD15_LORA_MODEL_KEYS
+    )
+    try:
+        return _probe_lora_on_model_impl(
+            model_key=model_key,
+            weights_path=weights_path,
+            lora_scale=lora_scale,
+            cancel_check=cancel_check,
+            render_prompt=render_prompt,
+            lora_label=lora_label,
+            cache=cache,
+            entry=entry,
+            keep_model_loaded=keep_model_loaded,
+            activity_callback=activity_callback,
+        )
+    finally:
+        _probe_run_context.strict_identical = previous_strict
+
+
+def _probe_lora_on_model_impl(
+    *,
+    model_key: str,
+    weights_path: str,
+    lora_scale: float,
+    cancel_check: Callable[[], bool],
+    render_prompt: str,
+    lora_label: str,
+    cache: Optional[LoraProbeBaselineCache],
+    entry: Optional[FluxLoraEntry],
+    keep_model_loaded: bool,
+    activity_callback: Optional[Callable[[str], None]],
+) -> bool:
     if model_key == FLUX1_SCHNELL:
         return _probe_t2i(
             model_key=model_key,
@@ -2228,6 +2278,25 @@ def probe_lora_on_model(
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
 
 
+def _prune_enabled_to_saved_probe_support(
+    by_model_enabled: Dict[str, List[str]],
+    *,
+    model_support: Dict[str, List[str]],
+    cross_family_models: Dict[str, List[str]],
+) -> None:
+    """Drop Create-menu enables that no longer have a same-host or cross-family pass."""
+    for mk in list(by_model_enabled.keys()):
+        kept: List[str] = []
+        for lid in by_model_enabled.get(mk, []):
+            if mk in model_support.get(lid, ()):
+                kept.append(lid)
+                continue
+            cf = cross_family_models.get(lid, ())
+            if mk in cf:
+                kept.append(lid)
+        by_model_enabled[mk] = kept
+
+
 def _init_lora_probe_states(
     plan: List[LoraProbePlanItem],
     *,
@@ -2304,6 +2373,31 @@ def _probe_history_record(
     }
 
 
+def _merged_cross_family_after_probe(
+    *,
+    entry: FluxLoraEntry,
+    supported: List[str],
+    plan_models: Iterable[str],
+    settings: Optional[Dict[str, Any]],
+    lora_id: str,
+) -> List[str]:
+    """Cross-family passes from this run, plus prior cross keys not re-probed."""
+    from imagegen_plugins.lora_catalog import lora_cross_family_models
+    from imagegen_plugins.lora_model_registry import cross_family_models_for_entry
+
+    plan_set = {str(m) for m in plan_models}
+    prev_cf = lora_cross_family_models(settings).get(lora_id, ())
+    preserved = [str(m) for m in prev_cf if str(m) not in plan_set]
+    from_run = list(cross_family_models_for_entry(entry, supported))
+    out: List[str] = []
+    seen: set[str] = set()
+    for mk in preserved + from_run:
+        if mk not in seen:
+            seen.add(mk)
+            out.append(mk)
+    return out
+
+
 def _sync_probe_history_slice(
     state: _LoraProbeState,
     result: LoraCheckResult,
@@ -2312,6 +2406,8 @@ def _sync_probe_history_slice(
 ) -> None:
     if not state.fingerprint or not state.models_completed:
         return
+    from imagegen_plugins.lora_model_registry import same_host_supported_models
+
     complete = _lora_probe_complete(
         state,
         cancelled=cancelled,
@@ -2321,7 +2417,7 @@ def _sync_probe_history_slice(
     hist_rec = _probe_history_record(
         history_key=state.history_key,
         fingerprint=state.fingerprint,
-        supported=state.supported,
+        supported=list(same_host_supported_models(state.entry, state.supported)),
         models_probed=sorted(state.models_completed),
         complete=complete,
     )
@@ -2445,6 +2541,11 @@ def _record_probe_result(
     else:
         stats.last_result = "fail"
         stats.failed_probe_count += 1
+        if model_key in state.supported:
+            state.supported.remove(model_key)
+        enabled = by_model_enabled.setdefault(model_key, [])
+        if lora_id in enabled:
+            enabled.remove(lora_id)
         if not plan_item.from_downloads:
             result.changes.append(
                 LoraCheckChange(
@@ -2480,14 +2581,13 @@ def _finalize_lora_probe_state(
     registration_mode: str,
     cancelled: bool = False,
 ) -> None:
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_model_registry import (
+        cross_family_models_for_entry,
+        same_host_supported_models,
+    )
+
     plan_item = state.plan_item
-    # On cancel, keep prior support for models we never finished testing.
-    if cancelled:
-        for model_key in plan_item.models:
-            if model_key in state.models_completed:
-                continue
-            if model_key in state.prev_models and model_key not in state.supported:
-                state.supported.append(model_key)
     supported = state.supported
     lora_label = state.lora_label
     registered_lora_id = state.lora_id
@@ -2557,18 +2657,29 @@ def _finalize_lora_probe_state(
             registered_lora_id = ""
 
     if registered_lora_id and registered_lora_id != _PENDING_DOWNLOAD_LORA_ID:
-        model_support[registered_lora_id] = supported
-        from imagegen_plugins.lora_catalog import get_lora_entry
-        from imagegen_plugins.lora_model_registry import cross_family_models_for_entry
-
         entry_for_cross = get_lora_entry(registered_lora_id, settings) or state.entry
-        result.cross_family_models[registered_lora_id] = list(
-            cross_family_models_for_entry(entry_for_cross, supported)
-        )
-        if supported:
-            stats.supported_loras += 1
-        elif not plan_item.from_downloads:
-            stats.removed_loras += 1
+        if entry_for_cross is None:
+            model_support[registered_lora_id] = []
+            result.cross_family_models[registered_lora_id] = []
+        else:
+            completed = set(state.models_completed)
+            supported_for_save = [m for m in supported if m in completed]
+            same_host = list(
+                same_host_supported_models(entry_for_cross, supported_for_save)
+            )
+            cross = _merged_cross_family_after_probe(
+                entry=entry_for_cross,
+                supported=supported_for_save,
+                plan_models=plan_item.models,
+                settings=settings,
+                lora_id=registered_lora_id,
+            )
+            model_support[registered_lora_id] = same_host
+            result.cross_family_models[registered_lora_id] = cross
+            if same_host:
+                stats.supported_loras += 1
+            elif not plan_item.from_downloads:
+                stats.removed_loras += 1
 
     if state.fingerprint and state.models_completed:
         hist_key = registered_lora_id
@@ -2583,7 +2694,12 @@ def _finalize_lora_probe_state(
         hist_rec = _probe_history_record(
             history_key=hist_key,
             fingerprint=state.fingerprint,
-            supported=supported,
+            supported=list(
+                same_host_supported_models(
+                    get_lora_entry(registered_lora_id, settings) or state.entry,
+                    [m for m in supported if m in state.models_completed],
+                )
+            ),
             models_probed=sorted(state.models_completed),
             complete=complete,
         )
@@ -3002,6 +3118,12 @@ def run_lora_compatibility_check(
             cancelled=result.cancelled,
         )
     stats.loras_done = len(lora_states)
+
+    _prune_enabled_to_saved_probe_support(
+        by_model_enabled,
+        model_support=model_support,
+        cross_family_models=result.cross_family_models,
+    )
 
     result.model_support = model_support
     result.by_model = {

@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct LoRASettingsTab: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
     @State private var viewModel = LoRASettingsViewModel()
     @State private var showAddSheet = false
     @State private var editTarget: LoRAEditTarget?
@@ -18,6 +19,7 @@ struct LoRASettingsTab: View {
             }
         }
         .task(id: appState.workers.pythonAvailable) {
+            guard !preferencesStringScanMode else { return }
             viewModel.bind(bridge: appState.workers.lora, config: appState.config)
             guard appState.workers.lora.isAvailable else { return }
             await viewModel.loadInitial()
@@ -167,7 +169,7 @@ struct LoRASettingsTab: View {
     }
 
     private var entriesList: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if viewModel.filteredRows.isEmpty {
                     Text("No LoRAs match this filter.")

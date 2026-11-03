@@ -312,6 +312,8 @@ struct SettingsPathRow: View {
 
 struct SettingsSection<Content: View>: View {
     let title: String
+    @Environment(\.preferencesStringScanMode) private var preferencesStringScanMode
+    @Environment(\.preferencesScanStringRecorder) private var preferencesScanStringRecorder
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -320,6 +322,10 @@ struct SettingsSection<Content: View>: View {
                 content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear {
+            guard preferencesStringScanMode, let preferencesScanStringRecorder else { return }
+            preferencesScanStringRecorder.record(title)
         }
     }
 }

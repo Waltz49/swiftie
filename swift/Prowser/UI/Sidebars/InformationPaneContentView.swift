@@ -327,7 +327,7 @@ struct InformationPaneContentView: View {
             if let newline = value.firstIndex(of: "\n") {
                 let dimensions = String(value[..<newline])
                 let area = String(value[value.index(after: newline)...])
-                VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 20) {
                     Text(dimensions)
                         .font(monospaceFont(bodyFontSize))
                         .foregroundStyle(colors.sidebarEmphasizedText)

@@ -42,6 +42,7 @@ struct ImageGenerationSettingsSection: View {
 
             HStack {
                 Text("Max generation dimension")
+                    .preferencesScanRecordsLabel("Max generation dimension")
                 AppMiniSlider(
                     value: dimensionSliderBinding,
                     in: 0...Double(ImageGenDimLimits.sliderMaxIndex),
@@ -83,16 +84,19 @@ struct ImageGenerationSettingsSection: View {
                     Text(format.uppercased()).tag(format)
                 }
             }
+            .preferencesScanRecordsLabel("Output format")
             .pickerStyle(.segmented)
             .frame(maxWidth: 200)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("MFLUX generation backend")
                     .font(.headline)
+                    .preferencesScanRecordsLabel("MFLUX generation backend")
                 Picker("MFLUX generation backend", selection: stringBinding("imagegen_execution_backend", default: "optimized")) {
                     Text("Optimized").tag("optimized")
                     Text("MFLUX CLI").tag("mflux_cli")
                 }
+                .preferencesScanRecordsLabel("MFLUX generation backend")
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 Text(
@@ -105,14 +109,18 @@ struct ImageGenerationSettingsSection: View {
             }
 
             Toggle("Low RAM mode", isOn: boolBinding("imagegen_low_ram", default: true))
+                .preferencesScanRecordsLabel("Low RAM mode")
             Toggle("Include triggers in final exif data", isOn: boolBinding("imagegen_include_triggers_in_exif"))
+                .preferencesScanRecordsLabel("Include triggers in final exif data")
             Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))
+                .preferencesScanRecordsLabel("Unload image Models when queue is held")
             if BundleCapabilities.lmStudioUIEnabled {
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle(
                         "Unload LMStudio models before generation",
                         isOn: boolBinding("imagegen_unload_lmstudio_models_before_generation", default: true)
                     )
+                    .preferencesScanRecordsLabel("Unload LMStudio models before generation")
                     Text(
                         "Frees memory for image models before each generation job. "
                             + "LM Studio can reload the saved caption model on next use."
@@ -209,6 +217,7 @@ struct ImageGenerationSettingsSection: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Generated images folder")
                 .font(.headline)
+                .preferencesScanRecordsLabel("Generated images folder")
             Text(
                 "When enabled, new images are saved in the folder below. "
                     + "When disabled, images are saved to \(defaultDir)."
@@ -298,6 +307,7 @@ struct ImageGenerationSettingsSection: View {
             .buttonStyle(.borderless)
             .help("Edit settings")
         }
+        .preferencesScanRecordsLabel(title)
     }
 
     private func cooldownSlider(title: String, key: String, defaultValue: Int) -> some View {
@@ -319,6 +329,7 @@ struct ImageGenerationSettingsSection: View {
                 .monospacedDigit()
                 .frame(width: 40)
         }
+        .preferencesScanRecordsLabel(title)
     }
 
     private func boolBinding(_ key: String, default defaultValue: Bool = false) -> Binding<Bool> {
@@ -350,6 +361,7 @@ struct ImageGenerationSettingsSection: View {
                 }
             }
         }
+        .preferencesScanRecordsLabel(title)
     }
 
     private func choosePath(into key: String) {

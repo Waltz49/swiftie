@@ -22,7 +22,8 @@ enum LoRAMapRows {
                     loraID: entry.loraID,
                     modelKey: mk,
                     entry: entry,
-                    modelSupport: ms
+                    modelSupport: ms,
+                    lc: lc
                 ) else { continue }
                 var modelLabel = LoRAHFModelIDs.displayName(for: mk)
                 let isCross = LoRACatalog.crossFamily(entry: entry, loraID: entry.loraID, modelKey: mk, lc: lc)

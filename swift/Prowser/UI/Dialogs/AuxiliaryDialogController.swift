@@ -39,6 +39,7 @@ final class AuxiliaryDialogController: NSObject, NSWindowDelegate {
         guard let window = sessions[id]?.window, window.isVisible else { return }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func present<Content: View>(
@@ -55,6 +56,7 @@ final class AuxiliaryDialogController: NSObject, NSWindowDelegate {
             if existing.window.isVisible {
                 NSApp.activate(ignoringOtherApps: true)
                 existing.window.makeKeyAndOrderFront(nil)
+                existing.window.orderFrontRegardless()
                 if focusTextOnShow {
                     DispatchQueue.main.async {
                         BrowserWindowIdentity.focusFirstTextInput(in: existing.window)
@@ -92,6 +94,7 @@ final class AuxiliaryDialogController: NSObject, NSWindowDelegate {
         sessions[id] = Session(window: window, onClose: onClose)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         if focusTextOnShow {
             DispatchQueue.main.async {
                 BrowserWindowIdentity.focusFirstTextInput(in: window)

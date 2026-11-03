@@ -31,9 +31,9 @@ enum CheckLorasController {
             throttleProgressUpdates: false
         )
         prescanPanel.show()
-        defer { prescanPanel.close() }
         do {
             let prescan = try await bridge.checkLorasPrescan()
+            prescanPanel.close()
             if prescan.installedModels.isEmpty {
                 StyledMessageDialog.showWarning(
                     title: "Test LoRAs",
@@ -44,8 +44,9 @@ enum CheckLorasController {
                 return
             }
             appState.checkLorasFlow.optionsPrescan = prescan
-            appState.syncAuxiliaryDialogs()
+            appState.presentCheckLorasOptionsDialog()
         } catch {
+            prescanPanel.close()
             StyledMessageDialog.showWarning(
                 title: "Test LoRAs",
                 message: error.localizedDescription

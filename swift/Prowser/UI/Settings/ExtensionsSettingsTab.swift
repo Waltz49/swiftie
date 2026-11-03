@@ -6,7 +6,7 @@ struct ExtensionsSettingsTab: View {
     @State private var enabledExtensions: Set<String> = []
 
     var body: some View {
-        ScrollView {
+        SettingsTabScrollContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text("File Types").font(.title2)
 
