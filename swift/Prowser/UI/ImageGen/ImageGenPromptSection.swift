@@ -40,14 +40,16 @@ struct ImageGenPromptSection: View {
 
             ImageGenPromptPlainTextEdit(
                 text: promptBinding,
-                streamSession: promptStreamSession
+                streamSession: promptStreamSession,
+                onEditingEnded: { onValuesChanged?() }
             )
 
             if showNegativePrompt {
                 ImageGenPromptPlainTextEdit(
                     text: negativePromptBinding,
                     minLines: ImageGenPromptLayout.negativeMinLines,
-                    maxLines: ImageGenPromptLayout.negativeMaxLines
+                    maxLines: ImageGenPromptLayout.negativeMaxLines,
+                    onEditingEnded: { onValuesChanged?() }
                 )
             }
 

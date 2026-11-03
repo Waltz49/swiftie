@@ -265,7 +265,8 @@ struct ImageGenPanelShell: View {
                         layout: filteredLayout,
                         compactSliderTracks: compactSliderTracks,
                         copiesSliderMax: compactSliderTracks ? JobStepQueue.seriesContinuousCopies : nil,
-                        values: $values
+                        values: $values,
+                        onValuesChanged: onValuesChanged
                     )
                 }
                 .padding(.top, 2)

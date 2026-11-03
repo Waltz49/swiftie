@@ -62,7 +62,7 @@ struct ImageGenUnifiedDialog: View {
                         selectedPluginID: $selectedPluginID,
                         sourcePaths: selectedFunction == "edit" ? lockedEditSourcePaths : [],
                         sourcePath: panelSourcePath,
-                        onValuesChanged: nil,
+                        onValuesChanged: clearSubmitNotice,
                         onPluginImported: { prepareImportedPluginSelection($0) },
                         onEditSourcePathsChanged: selectedFunction == "edit" ? { paths in
                             lockedEditSourcePaths = paths
@@ -76,17 +76,23 @@ struct ImageGenUnifiedDialog: View {
                         infillMaskPNGData: session.infillMaskPNGData(),
                         onInfillMaskPNGDataChanged: { data in
                             session.setInfillMaskPNGData(data)
+                            clearSubmitNotice()
                         },
-                        onInfillHasPaintChanged: { infillHasPaint = $0 },
+                        onInfillHasPaintChanged: { hasPaint in
+                            infillHasPaint = hasPaint
+                            clearSubmitNotice()
+                        },
                         onInfillPixelmatorDocPathChanged: { path in
                             session.setInfillPixelmatorDocPath(path)
                             if let path, !path.isEmpty {
                                 values["pixelmator_doc_path"] = path
                                 values["pixelmator_doc_name"] = (path as NSString).lastPathComponent
                             }
+                            clearSubmitNotice()
                         },
                         onInfillPixelmatorExportChanged: { meta in
                             adoptInfillPixelmatorExportMeta(meta)
+                            clearSubmitNotice()
                         },
                         fluxContext: fluxContext,
                         fluxRefineCoordinator: fluxRefineCoordinator,
@@ -150,7 +156,7 @@ struct ImageGenUnifiedDialog: View {
                             appState: appState,
                             context: fluxContext,
                             values: $values,
-                            onValuesChanged: nil,
+                            onValuesChanged: clearSubmitNotice,
                             queueJobWithAI: { Task { await submit(replace: false, forceFluxAIJob: true) } }
                         )
                         return true
@@ -159,7 +165,7 @@ struct ImageGenUnifiedDialog: View {
                 },
                 onShiftOptionReturn: {
                     if fluxRefineCoordinator.undoShortcutActive(context: fluxContext) {
-                        fluxRefineCoordinator.undoRefine(values: $values, onValuesChanged: nil)
+                        fluxRefineCoordinator.undoRefine(values: $values, onValuesChanged: clearSubmitNotice)
                         return true
                     }
                     return false
@@ -615,6 +621,9 @@ struct ImageGenUnifiedDialog: View {
                 return false
             }
         }
+        if !oldFunction.isEmpty, oldFunction != newFunction {
+            clearSubmitNotice()
+        }
         let sessionValues = session.values(for: newFunction)
         let persistedPath = sessionValues["source_image_path"] as? String
             ?? values["source_image_path"] as? String
@@ -731,6 +740,7 @@ struct ImageGenUnifiedDialog: View {
         default:
             return
         }
+        clearSubmitNotice()
     }
 
     /// Drop paint/Pixelmator export paths tied to a previous infill source (dialog-only batch dirs).
@@ -1346,6 +1356,11 @@ struct ImageGenUnifiedDialog: View {
                 session.setInfillMaskPNGData(data)
             }
         }
+    }
+
+    private func clearSubmitNotice() {
+        guard !submitNotice.isEmpty else { return }
+        submitNotice = ""
     }
 
     private func submit(replace: Bool, forceFluxAIJob: Bool = false, queueAtHead: Bool = false) async {

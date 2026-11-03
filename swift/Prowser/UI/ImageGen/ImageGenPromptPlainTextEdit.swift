@@ -82,6 +82,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
     var maxLines: Int = ImageGenPromptLayout.defaultMaxLines
     var sentenceCasePerLine = false
     var streamSession: ImageGenPromptStreamSession?
+    var onEditingEnded: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -89,7 +90,8 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             minLines: minLines,
             maxLines: maxLines,
             sentenceCasePerLine: sentenceCasePerLine,
-            streamSession: streamSession
+            streamSession: streamSession,
+            onEditingEnded: onEditingEnded
         )
     }
 
@@ -110,6 +112,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
         context.coordinator.maxLines = maxLines
         context.coordinator.sentenceCasePerLine = sentenceCasePerLine
         context.coordinator.streamSession = streamSession
+        context.coordinator.onEditingEnded = onEditingEnded
         context.coordinator.applyExternalText(text, host: host)
         host.setLineLimits(minLines: minLines, maxLines: maxLines)
         host.refreshHeightAndScrollPolicy()
@@ -122,6 +125,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
         var maxLines: Int
         var sentenceCasePerLine: Bool
         weak var streamSession: ImageGenPromptStreamSession?
+        var onEditingEnded: (() -> Void)?
 
         private weak var textView: NSTextView?
         private weak var host: ImageGenPromptPlainTextHostView?
@@ -134,13 +138,15 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             minLines: Int,
             maxLines: Int,
             sentenceCasePerLine: Bool,
-            streamSession: ImageGenPromptStreamSession?
+            streamSession: ImageGenPromptStreamSession?,
+            onEditingEnded: (() -> Void)?
         ) {
             _text = text
             self.minLines = minLines
             self.maxLines = maxLines
             self.sentenceCasePerLine = sentenceCasePerLine
             self.streamSession = streamSession
+            self.onEditingEnded = onEditingEnded
             super.init()
             ImageGenPromptPlainTextEditSession.register(self)
         }
@@ -172,6 +178,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         func textDidEndEditing(_ notification: Notification) {
             commitSentenceCaseOnBlur()
+            onEditingEnded?()
         }
 
         func commitSentenceCaseOnBlur() {

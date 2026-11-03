@@ -170,6 +170,7 @@ struct ImageGenIntSliderRow: View {
     /// When set, show a "Continuous" hint beside the value at this slider value (copies = 51).
     var continuousAt: Int? = nil
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private var includesReset: Bool { resetDefault != nil }
     private var valueControlWidth: CGFloat {
@@ -266,6 +267,7 @@ struct ImageGenIntSliderRow: View {
     private func setValue(_ raw: Int) {
         let clamped = snap(max(minValue, min(maxValue, raw)))
         values[key] = clamped
+        onValuesChanged?()
     }
 
     private func snap(_ value: Int) -> Int {
@@ -290,6 +292,7 @@ struct ImageGenFloatSliderRow: View {
     var hideLabel: Bool = false
     var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private var includesReset: Bool { resetDefault != nil }
     private let decimalPlaces = 2
@@ -381,6 +384,7 @@ struct ImageGenFloatSliderRow: View {
     private func setValue(_ raw: Double) {
         let clamped = snap(max(minValue, min(maxValue, raw)))
         values[key] = clamped
+        onValuesChanged?()
     }
 
     private func snap(_ value: Double) -> Double {

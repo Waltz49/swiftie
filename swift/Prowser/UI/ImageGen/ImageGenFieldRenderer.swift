@@ -7,6 +7,7 @@ struct ImageGenFieldRenderer: View {
     /// When set (unified dialog / panel mode), copies slider max is 51 (continuous).
     var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -15,7 +16,8 @@ struct ImageGenFieldRenderer: View {
                     node: layout[index],
                     compactSliderTracks: compactSliderTracks,
                     copiesSliderMax: copiesSliderMax,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
             }
         }
@@ -30,6 +32,7 @@ private struct ImageGenFieldNodeView: View {
     /// Sliders inside a ``labeled`` group use the group label only (Python ``_mount_node``).
     var omitSliderLabels: Bool = false
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     var body: some View {
         let type = node["type"] as? String ?? "field"
@@ -39,14 +42,16 @@ private struct ImageGenFieldNodeView: View {
                 ImageGenSeedRowGroup(
                     node: node,
                     inlineLabel: compactSliderTracks,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
             } else if layout == "steps_quant_row" {
                 ImageGenStepsQuantRowGroup(
                     node: node,
                     compactSliderTracks: compactSliderTracks,
                     copiesSliderMax: copiesSliderMax,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
             } else if layout == "prompt_block" {
                 EmptyView()
@@ -55,7 +60,8 @@ private struct ImageGenFieldNodeView: View {
                     node: node,
                     compactSliderTracks: compactSliderTracks,
                     copiesSliderMax: copiesSliderMax,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
             } else {
                 VStack(alignment: .leading, spacing: 6) {
@@ -71,7 +77,8 @@ private struct ImageGenFieldNodeView: View {
                                 node: children[idx],
                                 compactSliderTracks: compactSliderTracks,
                                 copiesSliderMax: copiesSliderMax,
-                                values: $values
+                                values: $values,
+                                onValuesChanged: onValuesChanged
                             )
                         }
                     }
@@ -83,7 +90,8 @@ private struct ImageGenFieldNodeView: View {
                 compactSliderTracks: compactSliderTracks,
                 copiesSliderMax: copiesSliderMax,
                 omitSliderLabels: omitSliderLabels,
-                values: $values
+                values: $values,
+                onValuesChanged: onValuesChanged
             )
         }
     }
@@ -95,6 +103,7 @@ private struct ImageGenLabeledFieldGroup: View {
     var compactSliderTracks: Bool = false
     var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private var groupLabel: String {
         node["label"] as? String ?? ""
@@ -112,7 +121,8 @@ private struct ImageGenLabeledFieldGroup: View {
                     compactSliderTracks: compactSliderTracks,
                     copiesSliderMax: copiesSliderMax,
                     omitSliderLabels: true,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
             }
         }
@@ -136,7 +146,8 @@ private struct ImageGenLabeledFieldGroup: View {
                         compactSliderTracks: compactSliderTracks,
                         copiesSliderMax: copiesSliderMax,
                         omitSliderLabels: true,
-                        values: $values
+                        values: $values,
+                        onValuesChanged: onValuesChanged
                     )
                 }
             }
@@ -148,7 +159,8 @@ private struct ImageGenLabeledFieldGroup: View {
                         compactSliderTracks: compactSliderTracks,
                         copiesSliderMax: copiesSliderMax,
                         omitSliderLabels: true,
-                        values: $values
+                        values: $values,
+                        onValuesChanged: onValuesChanged
                     )
                 }
             }
@@ -195,6 +207,7 @@ private struct ImageGenFieldSpecView: View {
     var copiesSliderMax: Int? = nil
     var omitSliderLabels: Bool = false
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private func effectiveIntSliderMax(spec: [String: Any], key: String) -> Int {
         if key == "copies", let copiesSliderMax {
@@ -267,7 +280,8 @@ private struct ImageGenFieldSpecView: View {
                 continuousAt: key == "copies" && copiesSliderMax != nil
                     ? JobStepQueue.seriesContinuousCopies
                     : nil,
-                values: $values
+                values: $values,
+                onValuesChanged: onValuesChanged
             )
         case "float_slider":
             ImageGenFloatSliderRow(
@@ -280,7 +294,8 @@ private struct ImageGenFieldSpecView: View {
                 compactTrack: compactSliderTracks,
                 inlineLabel: compactSliderTracks && !omitSliderLabels,
                 hideLabel: omitSliderLabels,
-                values: $values
+                values: $values,
+                onValuesChanged: onValuesChanged
             )
         case "choice":
             ImageGenChoiceRow(
@@ -288,10 +303,11 @@ private struct ImageGenFieldSpecView: View {
                 key: key,
                 spec: spec,
                 inlineLabel: compactSliderTracks,
-                values: $values
+                values: $values,
+                onValuesChanged: onValuesChanged
             )
         case "seed":
-            ImageGenSeedRow(spec: spec, values: $values)
+            ImageGenSeedRow(spec: spec, values: $values, onValuesChanged: onValuesChanged)
         default:
             EmptyView()
         }
@@ -306,7 +322,10 @@ private struct ImageGenFieldSpecView: View {
     private func bindingString(_ key: String, default defaultValue: String) -> Binding<String> {
         Binding(
             get: { values[key] as? String ?? defaultValue },
-            set: { values[key] = $0 }
+            set: {
+                values[key] = $0
+                onValuesChanged?()
+            }
         )
     }
 
@@ -321,6 +340,7 @@ private struct ImageGenFieldSpecView: View {
                 var updated = values
                 updated[key] = newValue
                 values = updated
+                onValuesChanged?()
             }
         )
     }
@@ -334,6 +354,7 @@ private struct ImageGenChoiceRow: View {
     var inlineLabel: Bool = false
     var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private var options: [(title: String, tag: String)] {
         if let pairs = spec["choices"] as? [[Any]] {
@@ -412,6 +433,7 @@ private struct ImageGenChoiceRow: View {
                 } else {
                     values[key] = newValue
                 }
+                onValuesChanged?()
             }
         )
     }
@@ -432,6 +454,7 @@ private struct ImageGenChoiceRow: View {
         } else {
             values[key] = ImageGenFieldResetLogic.stringify(resetDefault)
         }
+        onValuesChanged?()
     }
 }
 
@@ -441,6 +464,7 @@ private struct ImageGenSeedRowGroup: View {
     var inlineLabel: Bool = false
     var inlineLabelWidth: CGFloat = ImageGenInlineFieldLayout.parameterLabelWidth
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private var childSpecs: [[String: Any]] {
         (node["children"] as? [[String: Any]] ?? []).compactMap { child in
@@ -454,7 +478,7 @@ private struct ImageGenSeedRowGroup: View {
         let seedLabel = seedSpec?["label"] as? String ?? "Seed"
         let controls = HStack(alignment: .center, spacing: 10) {
             if let seedSpec {
-                ImageGenSeedInput(spec: seedSpec, values: $values)
+                ImageGenSeedInput(spec: seedSpec, values: $values, onValuesChanged: onValuesChanged)
             }
             if let randomSpec {
                 let label = randomSpec["bool_label_override"] as? String
@@ -491,7 +515,10 @@ private struct ImageGenSeedRowGroup: View {
     private func bindingBool(_ spec: [String: Any], key: String, default defaultValue: Bool) -> Binding<Bool> {
         Binding(
             get: { values[key] as? Bool ?? spec["default"] as? Bool ?? defaultValue },
-            set: { values[key] = $0 }
+            set: {
+                values[key] = $0
+                onValuesChanged?()
+            }
         )
     }
 }
@@ -502,6 +529,7 @@ private struct ImageGenStepsQuantRowGroup: View {
     var compactSliderTracks: Bool = false
     var copiesSliderMax: Int? = nil
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     private var childSpecs: [[String: Any]] {
         (node["children"] as? [[String: Any]] ?? []).compactMap { child in
@@ -516,7 +544,8 @@ private struct ImageGenStepsQuantRowGroup: View {
                     spec: stepsSpec,
                     compactSliderTracks: compactSliderTracks,
                     copiesSliderMax: copiesSliderMax,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
                 .fixedSize(horizontal: compactSliderTracks, vertical: false)
             }
@@ -525,7 +554,8 @@ private struct ImageGenStepsQuantRowGroup: View {
                     spec: quantSpec,
                     compactSliderTracks: compactSliderTracks,
                     copiesSliderMax: copiesSliderMax,
-                    values: $values
+                    values: $values,
+                    onValuesChanged: onValuesChanged
                 )
                 .fixedSize(horizontal: compactSliderTracks, vertical: false)
             }
@@ -537,6 +567,7 @@ private struct ImageGenStepsQuantRowGroup: View {
 private struct ImageGenSeedRow: View {
     let spec: [String: Any]
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -544,7 +575,7 @@ private struct ImageGenSeedRow: View {
                 .font(ImageGenInlineFieldLayout.stackedFieldLabelFont)
                 .foregroundStyle(.primary)
                 .padding(.top, 4)
-            ImageGenSeedInput(spec: spec, values: $values)
+            ImageGenSeedInput(spec: spec, values: $values, onValuesChanged: onValuesChanged)
         }
     }
 }
@@ -553,6 +584,7 @@ private struct ImageGenSeedRow: View {
 private struct ImageGenSeedInput: View {
     let spec: [String: Any]
     @Binding var values: [String: Any]
+    var onValuesChanged: (() -> Void)? = nil
 
     @State private var seedText = ""
     @FocusState private var isEditing: Bool
@@ -588,5 +620,6 @@ private struct ImageGenSeedInput: View {
         let clamped = max(0, min(seedMaximum, parsed))
         values["seed"] = clamped
         seedText = String(clamped)
+        onValuesChanged?()
     }
 }
