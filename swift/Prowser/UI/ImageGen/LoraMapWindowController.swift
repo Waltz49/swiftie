@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Tools → Debug → Map LoRAs. Loads the same rows as Python ``_lora_map_rows``.
+/// Image → Map LoRAs. Loads the same rows as Python ``_lora_map_rows``.
 @MainActor
 enum LoraMapService {
     static func fetchRows(config: AppConfig) async throws -> [LoraMapRow] {
@@ -12,7 +12,13 @@ enum LoraMapService {
             LoraMapRow(
                 loraID: row.loraID,
                 loraLabel: row.loraLabel,
-                models: row.models.map { LoraMapModel(label: $0.label, crossFamily: $0.crossFamily) }
+                models: row.models.map {
+                    LoraMapModel(
+                        modelKey: $0.modelKey,
+                        label: $0.label,
+                        crossFamily: $0.crossFamily
+                    )
+                }
             )
         }
     }
@@ -37,6 +43,7 @@ private final class CollectedPipe: @unchecked Sendable {
 }
 
 struct LoraMapModel: Hashable {
+    let modelKey: String
     let label: String
     let crossFamily: Bool
 }
@@ -54,7 +61,10 @@ struct LoraMapRow: Identifiable, Hashable {
         let modelsRaw = dict["models"] as? [[String: Any]] ?? []
         let models = modelsRaw.compactMap { item -> LoraMapModel? in
             guard let name = item["label"] as? String else { return nil }
-            return LoraMapModel(label: name, crossFamily: item["cross_family"] as? Bool ?? false)
+            let cross = item["cross_family"] as? Bool ?? false
+            let modelKey = (item["model_key"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? LoraMapFormatting.modelKey(matchingDisplayLabel: name)
+            return LoraMapModel(modelKey: modelKey, label: name, crossFamily: cross)
         }
         return LoraMapRow(loraID: loraID, loraLabel: label, models: models)
     }
@@ -62,6 +72,58 @@ struct LoraMapRow: Identifiable, Hashable {
 
 /// Filter and plain-text export matching ``filter_lora_map_rows`` / ``build_lora_map_text``.
 enum LoraMapFormatting {
+    struct LoraMapModelGroupLora: Hashable, Identifiable {
+        let loraID: String
+        let loraLabel: String
+        let crossFamily: Bool
+        var id: String { loraID }
+    }
+
+    struct LoraMapModelGroup: Hashable, Identifiable {
+        let modelKey: String
+        let displayName: String
+        let loras: [LoraMapModelGroupLora]
+        var id: String { modelKey }
+    }
+
+    /// Resolve probe model key from a map model display label (strips trailing cross-family ``*``).
+    static func modelKey(matchingDisplayLabel label: String) -> String {
+        let stripped = label.hasSuffix(" *") ? String(label.dropLast(2)) : label
+        for mk in LoRAHFModelIDs.probeModelOrder {
+            if LoRAHFModelIDs.displayName(for: mk) == stripped {
+                return mk
+            }
+        }
+        return stripped
+    }
+
+    static func modelGroups(from rows: [LoraMapRow]) -> [LoraMapModelGroup] {
+        var byKey: [String: [LoraMapModelGroupLora]] = [:]
+        for row in rows where !row.models.isEmpty {
+            for model in row.models {
+                let entry = LoraMapModelGroupLora(
+                    loraID: row.loraID,
+                    loraLabel: row.loraLabel,
+                    crossFamily: model.crossFamily
+                )
+                byKey[model.modelKey, default: []].append(entry)
+            }
+        }
+        var groups: [LoraMapModelGroup] = []
+        for mk in LoRAHFModelIDs.probeModelOrder {
+            guard var loras = byKey[mk], !loras.isEmpty else { continue }
+            loras.sort { $0.loraLabel.localizedCaseInsensitiveCompare($1.loraLabel) == .orderedAscending }
+            groups.append(
+                LoraMapModelGroup(
+                    modelKey: mk,
+                    displayName: LoRAHFModelIDs.displayName(for: mk),
+                    loras: loras
+                )
+            )
+        }
+        return groups
+    }
+
     static func filter(_ rows: [LoraMapRow], needle: String) -> [LoraMapRow] {
         let query = needle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return rows }
@@ -181,18 +243,29 @@ final class LoraMapWindowController: NSObject, NSWindowDelegate {
 
 @MainActor
 private struct LoraMapView: View {
+    private enum MapTab: String, CaseIterable, Identifiable {
+        case byLora = "By LoRA"
+        case byModel = "By model"
+        var id: String { rawValue }
+    }
+
     @Environment(AppState.self) private var appState
     @Environment(\.themeColors) private var colors
     var onClose: () -> Void
 
     @State private var rows: [LoraMapRow] = []
     @State private var filter = ""
+    @State private var mapTab: MapTab = .byLora
     @State private var isLoading = true
     @State private var loadError: String?
     @State private var errorMessage: String?
 
     private var filteredRows: [LoraMapRow] {
         LoraMapFormatting.filter(rows, needle: filter)
+    }
+
+    private var filteredModelGroups: [LoraMapFormatting.LoraMapModelGroup] {
+        LoraMapFormatting.modelGroups(from: filteredRows)
     }
 
     var body: some View {
@@ -262,12 +335,35 @@ private struct LoraMapView: View {
                     .foregroundStyle(colors.dialogMutedText)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if loadError != nil {
+            Text(loadError ?? "")
+                .font(.system(size: 12))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
-            ScrollView {
-                LoraMapContent(rows: filteredRows, loadError: loadError)
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("View", selection: $mapTab) {
+                    ForEach(MapTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                ScrollView {
+                    Group {
+                        switch mapTab {
+                        case .byLora:
+                            LoraMapContent(rows: filteredRows, loadError: nil)
+                        case .byModel:
+                            LoraMapModelContent(rows: filteredRows, modelGroups: filteredModelGroups)
+                        }
+                    }
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
@@ -389,6 +485,49 @@ private struct LoraMapContent: View {
                         .font(.system(size: 12, weight: .bold))
                         .padding(.bottom, 8)
                 }
+            }
+
+            Text(
+                "* cross-family — Test LoRAs found this LoRA "
+                    + "working on a base model outside its usual family."
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(colors.dialogMutedText)
+            .padding(.top, 4)
+        }
+    }
+}
+
+private struct LoraMapModelContent: View {
+    @Environment(\.themeColors) private var colors
+    let rows: [LoraMapRow]
+    let modelGroups: [LoraMapFormatting.LoraMapModelGroup]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(LoraMapFormatting.summary(for: rows))
+                .font(.system(size: 12))
+                .foregroundStyle(colors.dialogMutedText)
+                .padding(.bottom, 12)
+
+            if rows.isEmpty {
+                Text("(No LoRA model-support map yet. Run Test LoRAs first.)")
+                    .font(.system(size: 12))
+            }
+
+            ForEach(modelGroups) { group in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.displayName)
+                        .font(.system(size: 12, weight: .bold))
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(group.loras) { lora in
+                            Text("• \(lora.loraLabel)\(lora.crossFamily ? " *" : "")")
+                                .font(.system(size: 12))
+                        }
+                    }
+                    .padding(.leading, 16)
+                }
+                .padding(.bottom, 8)
             }
 
             Text(

@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional
 
 _retained_probe_temps: List[str] = []
 _retained_lock = threading.Lock()
@@ -17,6 +17,15 @@ _cnn_sorter_lock = threading.Lock()
 # ResNet cosine similarity above this => baseline and with-LoRA renders match (no effect).
 # Identical copies ~1.0; strong LoRA effects are often <0.9 (e.g. pillory ~0.6).
 _DEFAULT_CNN_IDENTICAL_MIN_COSINE = 0.98
+
+# Pass Check LoRAs only when CNN similarity is below this (lower = stronger visible effect).
+PROBE_MIN_EFFECT_CNN_COSINE = 0.88
+
+# Cross-family identical checks (strict mode) also use these pixel caps:
+_STRICT_IDENTICAL_MEAN_DIFF = 0.12
+_STRICT_IDENTICAL_MAX_DIFF = 8
+_STRICT_IDENTICAL_TIGHT_MEAN = 0.015
+_STRICT_IDENTICAL_TIGHT_MAX = 3
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,79 @@ def _probe_cnn_identical_min_cosine() -> float:
     except (TypeError, ValueError):
         value = _DEFAULT_CNN_IDENTICAL_MIN_COSINE
     return max(0.0, min(1.0, value))
+
+
+def effective_identical_cnn_threshold(*, strict: bool) -> float:
+    """CNN cosine at or above this => treated as no LoRA effect (identical)."""
+    base = _probe_cnn_identical_min_cosine()
+    if strict:
+        return max(base, 0.99)
+    return base
+
+
+def build_probe_effect_threshold_lines(*, check_cross_families: bool) -> List[str]:
+    """Human-readable threshold summary for console + report."""
+    from imagegen_plugins.hf_model_ids import SD15_LORA_MODEL_KEYS
+
+    configured_ident = _probe_cnn_identical_min_cosine()
+    cross_ident = effective_identical_cnn_threshold(strict=True)
+    sd15_keys = ", ".join(SD15_LORA_MODEL_KEYS)
+    return [
+        "=== Probe effect thresholds ===",
+        (
+            "cnn_identical_min_cosine (imagegen.check_loras; "
+            f"default {_DEFAULT_CNN_IDENTICAL_MIN_COSINE}): {configured_ident}"
+        ),
+        (
+            f"PROBE_MIN_EFFECT_CNN_COSINE: pass requires cnn_cosine < "
+            f"{PROBE_MIN_EFFECT_CNN_COSINE} (SD15 checkpoints + cross-family when enabled)"
+        ),
+        f"Same-host identical: cnn_cosine >= {configured_ident} => fail (no effect)",
+        (
+            "Cross-family identical (check_cross_families="
+            f"{check_cross_families}): cnn_cosine >= {cross_ident} => fail; "
+            f"pixel mean<{_STRICT_IDENTICAL_MEAN_DIFF} max<{_STRICT_IDENTICAL_MAX_DIFF} "
+            f"or mean<{_STRICT_IDENTICAL_TIGHT_MEAN} max<{_STRICT_IDENTICAL_TIGHT_MAX} => fail"
+        ),
+        (
+            "Cross-family effect: CNN required; same min_effect cosine gate when CNN runs"
+        ),
+        (
+            f"SD15 min_effect applies to: {sd15_keys}; CNN missing => pixel path may pass "
+            "(no min cosine gate)"
+        ),
+        (
+            "Create menu / Map valid: model_support same-host passes only "
+            "(cross_family_models excluded)"
+        ),
+        "",
+    ]
+
+
+def build_probe_effect_outcome_lines(stats: Any) -> List[str]:
+    """Effect decision counts from a finished run (for report footer)."""
+    return [
+        "=== Probe effect outcomes (GPU compare) ===",
+        f"effect OK (pass): {getattr(stats, 'probe_effect_pass', 0)}",
+        f"no effect (identical): {getattr(stats, 'probe_effect_no_effect', 0)}",
+        f"weak effect (below min cosine): {getattr(stats, 'probe_effect_weak', 0)}",
+        (
+            "CNN required but missing (cross-family): "
+            f"{getattr(stats, 'probe_effect_cnn_required_fail', 0)}"
+        ),
+        (
+            "SD15 pass without CNN (pixel path only): "
+            f"{getattr(stats, 'probe_effect_cnn_missing_pass', 0)}"
+        ),
+        "",
+    ]
+
+
+def format_probe_effect_metrics(delta: ProbeImageDelta) -> str:
+    return (
+        f"mean={delta.mean_diff:.3f} max={delta.max_diff} "
+        f"phash={delta.phash_distance} cnn_cosine={delta.cnn_cosine}"
+    )
 
 
 def _probe_cnn_sorter():
@@ -136,12 +218,14 @@ def probe_images_effectively_identical(
     ``strict`` tightens thresholds for cross-family probes (wrong architecture
     often produces decode noise that CNN treats as a weak effect).
     """
-    threshold = _probe_cnn_identical_min_cosine()
+    threshold = effective_identical_cnn_threshold(strict=strict)
     if strict:
-        threshold = max(threshold, 0.99)
-        if delta.mean_diff < 0.12 and delta.max_diff < 8:
+        if delta.mean_diff < _STRICT_IDENTICAL_MEAN_DIFF and delta.max_diff < _STRICT_IDENTICAL_MAX_DIFF:
             return True
-        if delta.mean_diff < 0.015 and delta.max_diff < 3:
+        if (
+            delta.mean_diff < _STRICT_IDENTICAL_TIGHT_MEAN
+            and delta.max_diff < _STRICT_IDENTICAL_TIGHT_MAX
+        ):
             return True
     if delta.cnn_cosine is not None:
         return delta.cnn_cosine >= threshold
@@ -156,6 +240,24 @@ def probe_images_effectively_identical(
     ):
         return True
     return False
+
+
+def probe_lora_effect_is_strong_enough(
+    delta: ProbeImageDelta,
+    *,
+    require_cnn_if_missing: bool = False,
+    apply_min_cnn: bool = True,
+) -> bool:
+    """
+    True when the with-LoRA image differs enough to count as a real effect.
+
+    Call only after ``probe_images_effectively_identical`` returned False.
+    """
+    if delta.cnn_cosine is None:
+        return not require_cnn_if_missing
+    if not apply_min_cnn:
+        return True
+    return float(delta.cnn_cosine) < PROBE_MIN_EFFECT_CNN_COSINE
 
 
 def retain_lora_probe_temp(path: Optional[str]) -> None:

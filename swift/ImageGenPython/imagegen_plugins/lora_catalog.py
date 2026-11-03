@@ -449,9 +449,9 @@ def lora_probe_passed_for_model(
     """
     Whether Check LoRAs recorded a successful probe for this LoRA on model_key.
 
-    Requires persisted ``model_support`` from a GPU probe that showed a visual
-    effect vs the no-LoRA baseline. ``mflux_compatible=False`` entries are
-    excluded; ``mflux_compatible=True`` does not bypass the probe requirement.
+    Requires persisted ``model_support`` from a same-host GPU probe that showed a
+    clear visual effect vs the no-LoRA baseline. Cross-family probe results are
+    stored separately and do not count here (Create menu / Map LoRAs).
     """
     resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
     if resolved is None or resolved.mflux_compatible is False:
@@ -462,12 +462,7 @@ def lora_probe_passed_for_model(
     )
     if _probe_supported_on_model(resolved, model_key, ms):
         return True
-    if settings is None:
-        from config import get_config
-
-        settings = get_config().load_settings()
-    cross = lora_cross_family_models(settings).get(resolved.lora_id, ())
-    return model_key in {str(m) for m in cross}
+    return False
 
 
 

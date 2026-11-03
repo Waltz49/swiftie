@@ -96,6 +96,29 @@ final class AppConfig {
         var lastMacOSSpaceMode: Bool?
     }
 
+    enum LaunchRestoreMissingTarget {
+        case image(String)
+        case directory(String)
+    }
+
+    /// Saved launch restore path that is gone (nil when restore can still run or nothing was saved).
+    func launchRestoreMissingTarget() -> LaunchRestoreMissingTarget? {
+        let dict = restoreStateDict()
+        let lastFile = (dict["last_file"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let lastDirectory = (dict["last_directory"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        guard lastFile != nil || lastDirectory != nil else { return nil }
+        if getRestoreState() != nil { return nil }
+
+        let fileManager = FileManager.default
+        if let file = lastFile, !fileManager.fileExists(atPath: file) {
+            return .image(file)
+        }
+        if let directory = lastDirectory, !fileManager.fileExists(atPath: directory) {
+            return .directory(directory)
+        }
+        return nil
+    }
+
     /// Python `get_restore_state` (nil when no usable paths).
     func getRestoreState() -> RestoreStateSnapshot? {
         let dict = restoreStateDict()

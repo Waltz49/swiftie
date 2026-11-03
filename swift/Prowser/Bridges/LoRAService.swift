@@ -615,7 +615,23 @@ final class LoRAService {
             return CheckLorasInstalledModel(modelKey: key, displayName: dict["display_name"] as? String ?? key)
         }
         let saved = CheckLorasOptions.fromDictionary(result["saved_options"] as? [String: Any] ?? [:])
-        return CheckLorasPrescanResult(choices: choices, installedModels: installed, savedOptions: saved)
+        return CheckLorasPrescanResult(
+            choices: Self.checkLorasOptionsSortedChoices(choices),
+            installedModels: Self.checkLorasOptionsSortedModels(installed),
+            savedOptions: saved
+        )
+    }
+
+    private static func checkLorasOptionsSortedChoices(_ choices: [CheckLorasProbeChoice]) -> [CheckLorasProbeChoice] {
+        choices.sorted {
+            $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending
+        }
+    }
+
+    private static func checkLorasOptionsSortedModels(_ models: [CheckLorasInstalledModel]) -> [CheckLorasInstalledModel] {
+        models.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
     }
 
     func checkLorasSaveOptions(options: CheckLorasOptions) async throws {

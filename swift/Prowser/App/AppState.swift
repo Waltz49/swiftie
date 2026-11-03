@@ -238,6 +238,8 @@ final class AppState {
     /// First thumbnail folder open this session — show loading canvas.
     var showThumbnailDirectoryLoadingCanvas = false
     private(set) var hasCompletedInitialThumbnailDirectoryLoad = false
+    /// Shown on the thumbnail grid when launch restore could not reopen a saved path.
+    var launchRestoreMissingMessage: String?
 
     func noteInitialThumbnailDirectoryLoadCompleted() {
         hasCompletedInitialThumbnailDirectoryLoad = true
@@ -1101,6 +1103,7 @@ final class AppState {
     }
 
     func openPaths(_ paths: [String]) {
+        clearLaunchRestoreMissingMessage()
         directoryLoader.open(paths: paths)
     }
 
@@ -1120,8 +1123,10 @@ final class AppState {
         saveHistory: Bool = true,
         pinnedImagePath: String? = nil,
         showLoadingState: Bool = true,
+        scanFilterPattern: String? = nil,
         onComplete: (() -> Void)? = nil
     ) {
+        clearLaunchRestoreMissingMessage()
         setSpecificFilesActive(false)
         clearDeletedPlaceholders()
         backgroundImageRecognition.notePriorityDirectory(path)
@@ -1130,6 +1135,7 @@ final class AppState {
             saveHistory: saveHistory,
             pinnedImagePath: pinnedImagePath,
             showLoadingState: showLoadingState,
+            scanFilterPattern: scanFilterPattern,
             onComplete: onComplete
         )
     }
@@ -1159,16 +1165,17 @@ final class AppState {
         guard FileManager.default.fileExists(atPath: tempDir, isDirectory: &isDir), isDir.boolValue else {
             return
         }
+        let hadFilter = filterSettings.filterPattern != "*"
+        filterSettings.setFilterPattern("*", persist: true)
+        if hadFilter {
+            status.show("New directory opened, filter cleared")
+        }
         config.updateSetting("sort_mode", value: SortMode.date.rawValue)
         config.updateSetting("sort_reversed", value: false)
         if fileData.currentViewMode == .list {
             fileData.setViewMode(.thumbnail)
         }
-        if filterSettings.filterPattern != "*" {
-            filterSettings.setFilterPattern("*", persist: true)
-            status.show("New directory opened, filter cleared")
-        }
-        loadDirectory(tempDir, saveHistory: true)
+        loadDirectory(tempDir, saveHistory: true, scanFilterPattern: "*")
     }
 
     /// After browse, align `currentDirectory` with the active image so the file tree can highlight correctly.

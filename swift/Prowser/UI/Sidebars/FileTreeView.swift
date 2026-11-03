@@ -2010,7 +2010,7 @@ final class FileTreeNode: NSObject {
                 !PathExclusions.isExcluded(entry.path, excluded: excluded)
             }
             .sorted { AppConfig.comparePathsForFileTreeSort($0.path, $1.path) }
-            .filter { !FileTreeExcludedExtensions.shouldExcludeDirectory(named: $0.lastPathComponent) }
+            .filter { !FileTreeFilter.shouldOmitPackageDirectoryFromTree(at: $0.path) }
             .compactMap { entry -> FileTreeNode? in
                 let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
                 guard isDir else { return nil }

@@ -14,8 +14,20 @@ struct CheckLorasOptionsView: View {
     @State private var showClearHistoryConfirm = false
     @State private var clearHistoryCount = 0
     @State private var clearHistoryAlert: String?
+    private var sortedInstalledModels: [CheckLorasInstalledModel] {
+        installedModels.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    private var sortedChoices: [CheckLorasProbeChoice] {
+        choices.sorted {
+            $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending
+        }
+    }
+
     private var modelKeys: [String] {
-        installedModels.map(\.modelKey)
+        sortedInstalledModels.map(\.modelKey)
     }
 
     private var allLoraChoiceKeys: Set<String> {
@@ -58,7 +70,11 @@ struct CheckLorasOptionsView: View {
         self.onCancel = onCancel
         self.onRun = onRun
 
-        let modelKeys = installedModels.map(\.modelKey)
+        let modelKeys = installedModels
+            .sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+            .map(\.modelKey)
         let local = Self.localState(from: options.wrappedValue, choices: choices, modelKeys: modelKeys)
         _selectedModelKeys = State(initialValue: local.selectedModelKeys)
         _selectedLoraKeys = State(initialValue: local.selectedLoraKeys)
@@ -192,7 +208,7 @@ struct CheckLorasOptionsView: View {
             }
             .padding(.leading, 20)
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(installedModels) { model in
+                ForEach(sortedInstalledModels) { model in
                     Toggle(isOn: Binding(
                         get: { selectedModelKeys.contains(model.modelKey) },
                         set: { on in
@@ -237,7 +253,7 @@ struct CheckLorasOptionsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(choices) { choice in
+                        ForEach(sortedChoices) { choice in
                             Toggle(isOn: Binding(
                                 get: { selectedLoraKeys.contains(choice.key) },
                                 set: { on in

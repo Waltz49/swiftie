@@ -495,9 +495,6 @@ def _prune_by_model_enabled_to_probe_support(lc: Dict[str, Any]) -> None:
     raw_ms = lc.get("model_support")
     if not isinstance(raw_ms, dict):
         return
-    cf = lc.get(CROSS_FAMILY_MODELS_KEY)
-    if not isinstance(cf, dict):
-        cf = {}
     by_model = lc.get(_BY_MODEL_KEY)
     if not isinstance(by_model, dict):
         return
@@ -511,7 +508,6 @@ def _prune_by_model_enabled_to_probe_support(lc: Dict[str, Any]) -> None:
             str(lid)
             for lid in enabled
             if mk in raw_ms.get(str(lid), ())
-            or mk in cf.get(str(lid), ())
         ]
         slice_["enabled_ids"] = kept
 

@@ -286,6 +286,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.openPaths(launchOptions.paths)
         } else if let snapshot = appState.config.getRestoreState() {
             appState.restoreSession(snapshot)
+        } else if let missing = appState.config.launchRestoreMissingTarget() {
+            appState.presentLaunchRestoreMissing(missing)
         } else if let lastDir = appState.config.lastDirectory,
                   FileManager.default.fileExists(atPath: lastDir) {
             appState.loadDirectory(lastDir)

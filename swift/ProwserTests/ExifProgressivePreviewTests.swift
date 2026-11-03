@@ -37,7 +37,7 @@ final class ExifProgressivePreviewTests: XCTestCase {
 
         let comment = ExifService.userComment(path: output) ?? ""
         XCTAssertTrue(comment.contains("Z-Image Turbo (4-bit)"))
-        XCTAssertTrue(comment.contains("Guidance: 0"))
+        XCTAssertFalse(comment.contains("Guidance:"))
         XCTAssertFalse(comment.contains("Quantization:"))
         XCTAssertTrue(comment.contains("Seed: 542559250"))
     }
@@ -100,6 +100,87 @@ final class ExifProgressivePreviewTests: XCTestCase {
             comment.components(separatedBy: "\n\nPrompt:").first,
             finalStyle.components(separatedBy: "\n\nPrompt:").first
         )
+    }
+
+    func testProgressiveExifRewritesElapsedWhenLoraLinePresent() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-elapsed-\(UUID().uuidString)").path
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: dir) }
+
+        let output = (dir as NSString).appendingPathComponent("imagegen-0003.webp")
+        try writeMinimalPNG(at: output)
+
+        let values: [String: Any] = [
+            "prompt": "scene",
+            "seed": 42,
+            "steps": 4,
+            "mflux_quantize": 4,
+            "hf_model_id": LoRAHFModelIDs.flux2Klein9BKV,
+            "mflux_lora_stack": ["BallgagV2"],
+            "mflux_lora_scales": [1.0],
+        ]
+        let lora = "F2K9B_BallgagV2_2020E10 [1]"
+
+        _ = try await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
+            pluginID: "flux_klein_9b_kv_create",
+            outputPath: output,
+            values: values,
+            elapsedSeconds: 10,
+            completedStep: 1,
+            totalSteps: 4,
+            fallbackSourcePaths: [],
+            tempRoot: dir,
+            lora: lora
+        )
+        _ = try await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
+            pluginID: "flux_klein_9b_kv_create",
+            outputPath: output,
+            values: values,
+            elapsedSeconds: 99,
+            completedStep: 2,
+            totalSteps: 4,
+            fallbackSourcePaths: [],
+            tempRoot: dir,
+            lora: lora
+        )
+
+        let comment = ExifService.userComment(path: output) ?? ""
+        XCTAssertTrue(comment.contains("Elapsed: 1:39"))
+        XCTAssertTrue(comment.contains("LoRA: F2K9B_BallgagV2_2020E10 [1]"))
+    }
+
+    func testProgressiveExifPreservesSeedAfterFormattedRewrite() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-seed-\(UUID().uuidString)").path
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: dir) }
+
+        let output = (dir as NSString).appendingPathComponent("imagegen-seed.webp")
+        try writeMinimalPNG(at: output)
+
+        let values: [String: Any] = [
+            "prompt": "cat",
+            "random_seed": true,
+            "seed": 0,
+            "steps": 4,
+            "hf_model_id": LoRAHFModelIDs.flux2Klein9BKV,
+        ]
+
+        _ = try await ImageGenGenerationExifService.makeReadableUserCommentBeforeBrowse(
+            pluginID: "flux_klein_9b_kv_create",
+            outputPath: output,
+            values: values,
+            elapsedSeconds: 5,
+            completedStep: 1,
+            totalSteps: 4,
+            fallbackSourcePaths: [],
+            tempRoot: dir,
+            supplementalWorkerResult: ["seed": 9_876_543_210]
+        )
+
+        let comment = ExifService.userComment(path: output) ?? ""
+        XCTAssertTrue(comment.contains("Seed: 9876543210"))
     }
 
     private func writeMinimalPNG(at path: String) throws {

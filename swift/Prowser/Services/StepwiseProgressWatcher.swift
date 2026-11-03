@@ -7,7 +7,7 @@ enum StepwiseProgressName {
         options: .caseInsensitive
     )
 
-    static func parse(_ name: String) -> (step: Int, total: Int)? {
+    static func parse(_ name: String) -> (seed: Int, step: Int, total: Int)? {
         guard let pattern,
               !name.lowercased().contains("composite") else {
             return nil
@@ -15,14 +15,16 @@ enum StepwiseProgressName {
         let range = NSRange(name.startIndex..<name.endIndex, in: name)
         guard let match = pattern.firstMatch(in: name, options: [], range: range),
               match.numberOfRanges >= 4,
+              let seedRange = Range(match.range(at: 1), in: name),
               let stepRange = Range(match.range(at: 2), in: name),
               let totalRange = Range(match.range(at: 3), in: name),
+              let seed = Int(name[seedRange]),
               let step = Int(name[stepRange]),
               let total = Int(name[totalRange]),
               step <= total else {
             return nil
         }
-        return (step, total)
+        return (seed, step, total)
     }
 }
 
@@ -106,19 +108,22 @@ final class StepwiseProgressWatcher {
                 atomicCopy(from: path, to: progressiveOutputPath)
             }
             let outPath = progressiveOutputPath ?? path
-            onProgress(stepProgressPayload(path: outPath, step: parsed.step, total: parsed.total))
+            onProgress(stepProgressPayload(path: outPath, seed: parsed.seed, step: parsed.step, total: parsed.total))
             added += 1
         }
         return added
     }
 
-    private func stepProgressPayload(path: String, step: Int, total: Int) -> [String: Any] {
+    private func stepProgressPayload(path: String, seed: Int? = nil, step: Int, total: Int) -> [String: Any] {
         var payload: [String: Any] = [
             "type": "progress",
             "path": path,
             "step": step,
             "step_total": total,
         ]
+        if let seed {
+            payload["seed"] = seed
+        }
         if let progressiveOutputPath, !progressiveOutputPath.isEmpty {
             payload["progressive_output_path"] = progressiveOutputPath
         }

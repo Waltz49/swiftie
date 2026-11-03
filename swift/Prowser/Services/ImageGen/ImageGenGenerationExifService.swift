@@ -8,7 +8,8 @@ enum ImageGenGenerationExifService {
         values: [String: Any],
         workerResult: [String: Any],
         elapsedSeconds: Double?,
-        lora: String? = nil
+        lora: String? = nil,
+        mfluxMeta: [String: Any]? = nil
     ) -> String {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else {
             return (values["prompt"] as? String) ?? ""
@@ -16,11 +17,22 @@ enum ImageGenGenerationExifService {
         let modelID = ImageGenModelDisplay.generationModelID(plugin: plugin, effective: values)
         let display = ImageGenModelDisplay.modelDisplayName(pipelineID: plugin.pipelineID, hfModelID: modelID)
         let modelName = display.isEmpty ? plugin.displayName : display
+        let resolvedLora = resolvedLoraForExif(plugin: plugin, values: values, override: lora)
         let seed = extractUsedSeed(workerResult: workerResult, values: values)
-        let quant: Int? = {
-            guard plugin.reportsQuantization else { return nil }
-            return intValue(values[plugin.quantizeStatusKey])
-        }()
+
+        if let meta = mfluxMeta {
+            return ImageGenExifCommentFormatting.formatExifCommentFromMfluxMetadata(
+                meta,
+                modelName: modelName.isEmpty ? plugin.displayName : modelName,
+                values: values,
+                plugin: plugin,
+                elapsedSeconds: elapsedSeconds,
+                seed: seed,
+                loraOverride: resolvedLora
+            )
+        }
+
+        let quant = ImageGenExifPluginFields.quantizationForExif(plugin: plugin, values: values)
         return ImageGenExifCommentFormatting.formatImageExifPrompt(
             modelName: modelName.isEmpty ? plugin.displayName : modelName,
             promptText: promptTextForExif(values),
@@ -28,8 +40,8 @@ enum ImageGenGenerationExifService {
             seed: seed,
             steps: intValue(values["steps"]),
             quantization: quant,
-            lora: resolvedLoraForExif(plugin: plugin, values: values, override: lora),
-            guidance: doubleValue(values["guidance_scale"])
+            lora: resolvedLora,
+            guidance: ImageGenExifPluginFields.guidanceForExif(plugin: plugin, values: values)
         )
     }
 
@@ -91,24 +103,29 @@ enum ImageGenGenerationExifService {
         totalSteps: Int,
         fallbackSourcePaths: [String],
         tempRoot: String,
-        lora: String? = nil
+        lora: String? = nil,
+        supplementalWorkerResult: [String: Any] = [:]
     ) async throws -> Bool {
         guard completedStep < totalSteps,
               FileManager.default.isReadableFile(atPath: outputPath),
               ExifService.canWriteExifToOnDiskRaster(path: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
 
-        let resolvedLora = resolvedLoraForExif(plugin: plugin, values: values, override: lora)
-        if shouldSkipProgressiveExifRewrite(at: outputPath, resolvedLora: resolvedLora) {
-            return false
-        }
-
+        let existingRaw = ExifService.userComment(path: outputPath)
+        let meta = mfluxMetadataFromUserComment(at: outputPath)
+        let workerResult = progressiveWorkerResult(
+            meta: meta,
+            values: values,
+            existingFormattedComment: meta == nil ? existingRaw : nil,
+            supplemental: supplementalWorkerResult
+        )
         let comment = formatGenerationExifComment(
             pluginID: pluginID,
             values: values,
-            workerResult: progressiveWorkerResult(fromExistingCommentAt: outputPath),
+            workerResult: workerResult,
             elapsedSeconds: elapsedSeconds,
-            lora: lora
+            lora: lora,
+            mfluxMeta: meta
         )
 
         var finalComment = comment
@@ -206,26 +223,36 @@ enum ImageGenGenerationExifService {
         )
     }
 
-    /// Port of Python progressive EXIF skip when comment is already final-form.
-    private static func shouldSkipProgressiveExifRewrite(at path: String, resolvedLora: String?) -> Bool {
-        guard let existing = ExifService.userComment(path: path)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              existing.hasPrefix("Image Model:") else {
-            return false
-        }
-        let hasLora = existing.contains("LoRA:")
-        let expectLora = !(resolvedLora ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasLora || !expectLora
+    private static func mfluxMetadataFromUserComment(at path: String) -> [String: Any]? {
+        guard let raw = ExifService.userComment(path: path) else { return nil }
+        return ImageGenExifCommentFormatting.parseMfluxMetadataJSON(raw)
     }
 
-    /// Stepwise PNGs may carry MFLUX JSON; use its seed when job values omit one (``random_seed``).
-    private static func progressiveWorkerResult(fromExistingCommentAt path: String) -> [String: Any] {
-        guard let raw = ExifService.userComment(path: path),
-              let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(raw),
-              let metaSeed = intValue(meta["seed"]) else {
-            return [:]
+    private static func progressiveWorkerResult(
+        meta: [String: Any]?,
+        values: [String: Any],
+        existingFormattedComment: String?,
+        supplemental: [String: Any]
+    ) -> [String: Any] {
+        var out = supplemental
+        if let seed = extractUsedSeed(workerResult: out, values: values) {
+            out["seed"] = seed
+            return out
         }
-        return ["seed": metaSeed]
+        if let meta, let metaSeed = intValue(meta["seed"]) {
+            out["seed"] = metaSeed
+            return out
+        }
+        if let existingFormattedComment,
+           let prior = ImageGenExifCommentFormatting.seedFromFormattedGenerationComment(existingFormattedComment) {
+            out["seed"] = prior
+            return out
+        }
+        if values["random_seed"] as? Bool == true { return out }
+        if let seed = intValue(values["seed"]) {
+            out["seed"] = seed
+        }
+        return out
     }
 
     private static func promptTextForExif(_ values: [String: Any]) -> String {
@@ -235,6 +262,7 @@ enum ImageGenGenerationExifService {
     private static func extractUsedSeed(workerResult: [String: Any], values: [String: Any]) -> Int? {
         if let seed = intValue(workerResult["seed"]) { return seed }
         if let seed = intValue(workerResult["used_seed"]) { return seed }
+        if let seed = intValue(values["resolved_seed"]) { return seed }
         if values["random_seed"] as? Bool == true { return nil }
         return intValue(values["seed"])
     }
@@ -242,6 +270,8 @@ enum ImageGenGenerationExifService {
     private static func intValue(_ any: Any?) -> Int? {
         if let n = any as? Int { return n }
         if let n = any as? NSNumber { return n.intValue }
+        if let d = any as? Double { return Int(d) }
+        if let s = any as? String, let i = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) { return i }
         return nil
     }
 

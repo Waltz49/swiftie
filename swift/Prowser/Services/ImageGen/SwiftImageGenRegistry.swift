@@ -194,9 +194,24 @@ final class SwiftImageGenRegistry: ImageGenRegistry {
         }
         switch availability {
         case .fast:
-            return ImageGenMfluxPluginFilter.applyingMfluxAvailabilityFast(out, config: config)
+            return Self.sortedByModelLabel(
+                ImageGenMfluxPluginFilter.applyingMfluxAvailabilityFast(out, config: config)
+            )
         case .full:
-            return ImageGenMfluxPluginFilter.applyingMfluxAvailability(out, config: config)
+            return Self.sortedByModelLabel(
+                ImageGenMfluxPluginFilter.applyingMfluxAvailability(out, config: config)
+            )
+        }
+    }
+
+    private static func modelLabel(for plugin: [String: Any]) -> String {
+        let id = plugin["plugin_id"] as? String ?? ""
+        return plugin["model_label"] as? String ?? plugin["display_name"] as? String ?? id
+    }
+
+    private static func sortedByModelLabel(_ plugins: [[String: Any]]) -> [[String: Any]] {
+        plugins.sorted {
+            modelLabel(for: $0).localizedCaseInsensitiveCompare(modelLabel(for: $1)) == .orderedAscending
         }
     }
 

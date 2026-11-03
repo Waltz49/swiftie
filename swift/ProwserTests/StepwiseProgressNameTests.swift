@@ -4,6 +4,7 @@ import XCTest
 final class StepwiseProgressNameTests: XCTestCase {
     func testParsesStandardMfluxName() {
         let parsed = StepwiseProgressName.parse("seed_123_step2of8.png")
+        XCTAssertEqual(parsed?.seed, 123)
         XCTAssertEqual(parsed?.step, 2)
         XCTAssertEqual(parsed?.total, 8)
     }

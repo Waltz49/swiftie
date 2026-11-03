@@ -263,6 +263,17 @@ extension AppState {
             }
         }
     }
+    func presentLaunchRestoreMissing(_ target: AppConfig.LaunchRestoreMissingTarget) {
+        launchRestoreMissingMessage = ThumbnailEmptyStateRenderer.launchRestoreMissingMessage(for: target)
+        fileData.setDisplayedImages([])
+        fileData.setViewMode(.thumbnail)
+        noteInitialThumbnailDirectoryLoadCompleted()
+    }
+
+    func clearLaunchRestoreMissingMessage() {
+        launchRestoreMissingMessage = nil
+    }
+
     /// Python launch restore: thumbnail/slideshow reopen the folder, browse reopens the file.
     func restoreSession(_ snapshot: AppConfig.RestoreStateSnapshot) {
         let mode = ViewMode(rawValue: snapshot.lastViewMode) ?? .thumbnail

@@ -35,10 +35,17 @@ enum ThumbnailEmptyStateRenderer {
         filterPattern: String,
         directoryListingDenied: Bool,
         isLoadingDirectory: Bool = false,
-        directoryListingInProgress: Bool = false
+        directoryListingInProgress: Bool = false,
+        launchRestoreMissingMessage: String? = nil
     ) -> String? {
+        if let launchRestoreMissingMessage {
+            return launchRestoreMissingMessage
+        }
         guard let directory else { return nil }
         let displayDirectory = StatusBarFormatter.displayPath(directory)
+        if !FileManager.default.fileExists(atPath: directory) {
+            return "Last saved directory no longer exists\n\n\(displayDirectory)"
+        }
         if isLoadingDirectory {
             return "Loading\n\n\(displayDirectory)"
         }
@@ -59,6 +66,20 @@ enum ThumbnailEmptyStateRenderer {
             return "No Images matching filter pattern \"\(filterPattern)\" are available in\n\n\(displayDirectory)"
         }
         return "No Images are available in\n\n\(displayDirectory)"
+    }
+
+    static func launchRestoreMissingMessage(for target: AppConfig.LaunchRestoreMissingTarget) -> String {
+        let path: String
+        let headline: String
+        switch target {
+        case .image(let savedPath):
+            path = savedPath
+            headline = "Last saved image no longer exists"
+        case .directory(let savedPath):
+            path = savedPath
+            headline = "Last saved directory no longer exists"
+        }
+        return "\(headline)\n\n\(StatusBarFormatter.displayPath(path))"
     }
 
     static func draw(

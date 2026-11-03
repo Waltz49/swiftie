@@ -162,6 +162,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             }
         }
     }
+    var launchRestoreMissingMessage: String? {
+        didSet {
+            if oldValue != launchRestoreMissingMessage {
+                needsDisplay = true
+            }
+        }
+    }
     /// Python `specific_files_active` — recalculate grid size for the partial page (`generate_thumbnails`).
     var specificFilesActive = false
     /// Reference-graph presentation (Python `reference_graph_data`).
@@ -826,7 +833,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 filterPattern: filterPattern,
                 directoryListingDenied: directoryListingDenied,
                 isLoadingDirectory: isLoadingDirectory,
-                directoryListingInProgress: appState?.isLoadingDirectory == true && !isLoadingDirectory
+                directoryListingInProgress: appState?.isLoadingDirectory == true && !isLoadingDirectory,
+                launchRestoreMissingMessage: launchRestoreMissingMessage
             ) {
                 filterButtons = ThumbnailEmptyStateRenderer.draw(
                     in: area,

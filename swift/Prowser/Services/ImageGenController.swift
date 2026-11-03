@@ -3275,6 +3275,10 @@ final class ImageGenController {
     }
 
     private func wireBridgeCallbacks() {
+        modelTasks.onPreparedRunPayload = { [weak self] payload in
+            guard let self, let seed = self.intFromAny(payload["resolved_seed"]) else { return }
+            self.noteCopyCycleUsedSeed(seed)
+        }
         modelTasks.onJobProcessingStarted = { [weak self] kind in
             guard let self else { return }
             if kind == "generate" {
@@ -3296,6 +3300,9 @@ final class ImageGenController {
             } else if let total = self.intFromAny(message["step_total"])
                         ?? self.intFromAny(message["total_steps"]) {
                 self.liveStepTotal = total
+            }
+            if let seed = self.intFromAny(message["seed"]) {
+                self.noteCopyCycleUsedSeed(seed)
             }
             if let path = self.progressMessagePath(from: message),
                self.showProgressiveImages {
@@ -3859,6 +3866,21 @@ final class ImageGenController {
         copyCycleWorkerPrompt = ""
     }
 
+    /// Actual seed for this run (``ImageGenMfluxPrep`` / stepwise filenames) for progressive EXIF.
+    private func noteCopyCycleUsedSeed(_ seed: Int) {
+        copyCycleValues["seed"] = seed
+        copyCycleValues["resolved_seed"] = seed
+        copyCycleValues["random_seed"] = false
+    }
+
+    private func progressiveExifSupplementalWorkerResult() -> [String: Any] {
+        var out = modelTasks.lastGenerateResult
+        if let seed = intFromAny(copyCycleValues["resolved_seed"]) ?? intFromAny(copyCycleValues["seed"]) {
+            out["seed"] = seed
+        }
+        return out
+    }
+
     /// Python ``_cleanup_infill_batch_assets``.
     private func cleanupInfillBatchAssets() {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: activePluginID),
@@ -3911,11 +3933,6 @@ final class ImageGenController {
         guard showProgressiveImages,
               !path.isEmpty,
               !copyCycleExifPluginID.isEmpty else { return }
-        // SD15/SDXL workers stamp progressive EXIF in Python (piexif); Swift WebP mux can fail on partial files.
-        if let plugin = ImageGenPluginCatalog.plugin(pluginID: copyCycleExifPluginID),
-           plugin.pipelineID == "sd15_diffusers" || plugin.pipelineID == "sdxl_diffusers" {
-            return
-        }
         var ready = false
         for _ in 0..<40 {
             if progressivePreviewRasterIsComplete(path) {
@@ -3943,7 +3960,8 @@ final class ImageGenController {
                 totalSteps: total,
                 fallbackSourcePaths: fallback,
                 tempRoot: config.temporaryFilesDirectory.path,
-                lora: loraLabel
+                lora: loraLabel,
+                supplementalWorkerResult: progressiveExifSupplementalWorkerResult()
             )
         } catch {
             print("DEBUG writeProgressivePreviewExifIfNeeded: failed for \(path): \(error)")

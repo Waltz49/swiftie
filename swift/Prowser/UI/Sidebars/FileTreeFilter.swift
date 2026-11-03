@@ -11,6 +11,19 @@ enum FileTreeExcludedExtensions {
         let lower = name.lowercased()
         return extensions.contains { lower.hasSuffix($0) }
     }
+
+    /// Package-like dirs stay hidden unless on/necessary for navigation priority paths (Python filter order).
+    static func shouldOmitPackageDirectoryFromTree(at path: String, priorityPaths: Set<String> = []) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        guard shouldExcludeDirectory(named: name) else { return false }
+        let pathNorm = URL(fileURLWithPath: path).standardizedFileURL.path
+        if priorityPaths.contains(pathNorm) { return false }
+        for priority in priorityPaths {
+            let priorityNorm = URL(fileURLWithPath: priority).standardizedFileURL.path
+            if priorityNorm.hasPrefix(pathNorm + "/") { return false }
+        }
+        return true
+    }
 }
 
 /// Directory visibility for the file tree (port of `CustomFileSystemFilter`).
@@ -71,6 +84,11 @@ enum FileTreeFilter {
 
     static func standardizedPath(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    /// Package-like dirs (`.bundle`, `.app`, …) omitted unless needed for tree highlight / priority navigation.
+    static func shouldOmitPackageDirectoryFromTree(at path: String) -> Bool {
+        FileTreeExcludedExtensions.shouldOmitPackageDirectoryFromTree(at: path, priorityPaths: priorityPaths)
     }
 
     /// True when thumbnails can list files from more than one folder (`highlight_current_file` exception).
@@ -164,7 +182,7 @@ enum FileTreeFilter {
         }
         return entries
             .filter { !PathExclusions.isExcluded($0.path, excluded: excluded) }
-            .filter { !FileTreeExcludedExtensions.shouldExcludeDirectory(named: $0.lastPathComponent) }
+            .filter { !shouldOmitPackageDirectoryFromTree(at: $0.path) }
             .compactMap { entry -> String? in
                 let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
                 guard isDir else { return nil }

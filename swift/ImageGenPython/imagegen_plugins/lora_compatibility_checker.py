@@ -135,6 +135,11 @@ def _probe_strict_identical_comparison() -> bool:
     return bool(getattr(_probe_run_context, "strict_identical", False))
 
 
+def _probe_require_cnn_for_effect() -> bool:
+    """Cross-family probes must have CNN; same-host may fall back to pixel delta."""
+    return bool(getattr(_probe_run_context, "require_cnn_for_effect", False))
+
+
 @dataclass
 class LoraCheckStats:
     loras_total: int = 0
@@ -166,6 +171,11 @@ class LoraCheckStats:
     files_deduped: int = 0
     skipped_unchanged: int = 0
     skipped_unchanged_probes: int = 0
+    probe_effect_pass: int = 0
+    probe_effect_no_effect: int = 0
+    probe_effect_weak: int = 0
+    probe_effect_cnn_missing_pass: int = 0
+    probe_effect_cnn_required_fail: int = 0
     # All (lora, model) pairs visited in the run loop (GPU + history + reg skips).
     progress_pairs_total: int = 0
     current_lora_label: str = ""
@@ -240,6 +250,8 @@ class LoraCheckResult:
     probe_history: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     previous_support: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     registration_mode: str = REGISTRATION_IGNORE_PREVIOUS
+    probe_effect_threshold_lines: List[str] = field(default_factory=list)
+    probe_effect_outcome_lines: List[str] = field(default_factory=list)
 
     @property
     def deleted_ids(self) -> List[str]:
@@ -871,6 +883,13 @@ def _probe_choice_user_sort_key(choice: LoraProbeChoice) -> str:
     return (choice.label or choice.display_name or "").strip().lower()
 
 
+def _probe_model_user_sort_key(model_key: str) -> str:
+    """Case-insensitive key for user-visible base model list ordering (Test LoRAs, etc.)."""
+    from imagegen_plugins.hf_model_ids import lora_model_display_name
+
+    return lora_model_display_name(model_key).strip().lower()
+
+
 def discover_check_lora_choices(
     settings: Optional[Dict[str, Any]],
     *,
@@ -1495,6 +1514,17 @@ def _ensure_probe_baseline(
     return baseline_path, True
 
 
+def _probe_check_stats() -> Optional[LoraCheckStats]:
+    return getattr(_probe_run_context, "check_stats", None)
+
+
+def _bump_probe_effect_stat(name: str) -> None:
+    stats = _probe_check_stats()
+    if stats is None:
+        return
+    setattr(stats, name, int(getattr(stats, name, 0)) + 1)
+
+
 def _lora_probe_has_effect(
     *,
     baseline_path: str,
@@ -1508,30 +1538,72 @@ def _lora_probe_has_effect(
     generated_baseline: bool,
 ) -> bool:
     """True when with-LoRA render differs from baseline (LoRA had an effect)."""
+    from imagegen_plugins.hf_model_ids import SD15_LORA_MODEL_KEYS
     from imagegen_plugins.lora_probe_effect import (
-        _probe_cnn_identical_min_cosine,
+        PROBE_MIN_EFFECT_CNN_COSINE,
+        effective_identical_cnn_threshold,
+        format_probe_effect_metrics,
         measure_probe_image_delta,
         probe_images_effectively_identical,
+        probe_lora_effect_is_strong_enough,
     )
 
     if not os.path.isfile(out_path) or os.path.getsize(out_path) < 64:
+        print(
+            f"[Check LoRAs] Probe: invalid output for {label!r} on "
+            f"{lora_model_display_name(model_key)} (missing or tiny file)"
+        )
+        _bump_probe_effect_stat("probe_effect_no_effect")
         return False
     delta = measure_probe_image_delta(baseline_path, out_path)
-    cnn_threshold = _probe_cnn_identical_min_cosine()
-    if probe_images_effectively_identical(
-        delta, strict=_probe_strict_identical_comparison()
-    ):
+    strict_identical = _probe_strict_identical_comparison()
+    require_cnn = _probe_require_cnn_for_effect()
+    apply_min_cnn = model_key in SD15_LORA_MODEL_KEYS or require_cnn
+    identical_threshold = effective_identical_cnn_threshold(strict=strict_identical)
+    metrics = format_probe_effect_metrics(delta)
+    context = (
+        f"cross_family={require_cnn} apply_min_cnn={apply_min_cnn} "
+        f"identical_cnn>={identical_threshold} "
+        f"min_effect_cnn<{PROBE_MIN_EFFECT_CNN_COSINE if apply_min_cnn else 'n/a'}"
+    )
+
+    if probe_images_effectively_identical(delta, strict=strict_identical):
         print(
             f"[Check LoRAs] Probe: no effect for {label!r} on "
             f"{lora_model_display_name(model_key)} "
             f"(prompt={prompt!r} size={width}x{height} steps={steps} "
-            f"baseline_reused={not generated_baseline} "
-            f"mean={delta.mean_diff:.3f} max={delta.max_diff} "
-            f"phash={delta.phash_distance} "
-            f"cnn_cosine={delta.cnn_cosine} "
-            f"cnn_threshold={cnn_threshold})"
+            f"baseline_reused={not generated_baseline} {metrics} {context})"
         )
+        _bump_probe_effect_stat("probe_effect_no_effect")
         return False
+
+    if delta.cnn_cosine is None and require_cnn:
+        print(
+            f"[Check LoRAs] Probe: CNN required but unavailable for {label!r} on "
+            f"{lora_model_display_name(model_key)} ({metrics} {context})"
+        )
+        _bump_probe_effect_stat("probe_effect_cnn_required_fail")
+        return False
+
+    if not probe_lora_effect_is_strong_enough(
+        delta,
+        require_cnn_if_missing=require_cnn,
+        apply_min_cnn=apply_min_cnn,
+    ):
+        print(
+            f"[Check LoRAs] Probe: weak effect for {label!r} on "
+            f"{lora_model_display_name(model_key)} ({metrics} {context})"
+        )
+        _bump_probe_effect_stat("probe_effect_weak")
+        return False
+
+    if delta.cnn_cosine is None and apply_min_cnn:
+        _bump_probe_effect_stat("probe_effect_cnn_missing_pass")
+    print(
+        f"[Check LoRAs] Probe: effect OK for {label!r} on "
+        f"{lora_model_display_name(model_key)} ({metrics} {context})"
+    )
+    _bump_probe_effect_stat("probe_effect_pass")
     return True
 
 
@@ -2096,10 +2168,10 @@ def probe_lora_on_model(
     from imagegen_plugins.lora_model_registry import is_cross_family_lora_model
 
     previous_strict = getattr(_probe_run_context, "strict_identical", False)
-    _probe_run_context.strict_identical = entry is not None and (
-        is_cross_family_lora_model(entry, model_key)
-        or model_key in SD15_LORA_MODEL_KEYS
-    )
+    previous_require_cnn = getattr(_probe_run_context, "require_cnn_for_effect", False)
+    cross_host = entry is not None and is_cross_family_lora_model(entry, model_key)
+    _probe_run_context.strict_identical = cross_host
+    _probe_run_context.require_cnn_for_effect = cross_host
     try:
         return _probe_lora_on_model_impl(
             model_key=model_key,
@@ -2115,6 +2187,7 @@ def probe_lora_on_model(
         )
     finally:
         _probe_run_context.strict_identical = previous_strict
+        _probe_run_context.require_cnn_for_effect = previous_require_cnn
 
 
 def _probe_lora_on_model_impl(
@@ -2284,16 +2357,13 @@ def _prune_enabled_to_saved_probe_support(
     model_support: Dict[str, List[str]],
     cross_family_models: Dict[str, List[str]],
 ) -> None:
-    """Drop Create-menu enables that no longer have a same-host or cross-family pass."""
+    """Drop Create-menu enables that no longer have a same-host probe pass."""
     for mk in list(by_model_enabled.keys()):
-        kept: List[str] = []
-        for lid in by_model_enabled.get(mk, []):
-            if mk in model_support.get(lid, ()):
-                kept.append(lid)
-                continue
-            cf = cross_family_models.get(lid, ())
-            if mk in cf:
-                kept.append(lid)
+        kept = [
+            str(lid)
+            for lid in by_model_enabled.get(mk, [])
+            if mk in model_support.get(str(lid), ())
+        ]
         by_model_enabled[mk] = kept
 
 
@@ -2486,6 +2556,9 @@ def _record_probe_result(
     lora_id = state.lora_id
     lora_label = state.lora_label
     plan_item = state.plan_item
+    from imagegen_plugins.lora_model_registry import is_cross_family_lora_model
+
+    same_host_pass = not is_cross_family_lora_model(state.entry, model_key)
 
     if ok:
         stats.last_result = "pass"
@@ -2526,7 +2599,7 @@ def _record_probe_result(
                         model_label=model_label,
                     )
                 )
-            elif lora_id not in enabled:
+            elif same_host_pass and lora_id not in enabled:
                 enabled.append(lora_id)
                 stats.newly_enabled_count += 1
                 result.changes.append(
@@ -2810,6 +2883,18 @@ def run_lora_compatibility_check(
         result.stats = stats
         stats.probe_prompt = (opts.probe_prompt or "test").strip() or "test"
 
+    from imagegen_plugins.lora_probe_effect import (
+        build_probe_effect_outcome_lines,
+        build_probe_effect_threshold_lines,
+    )
+
+    result.probe_effect_threshold_lines = build_probe_effect_threshold_lines(
+        check_cross_families=opts.check_cross_families,
+    )
+    for line in result.probe_effect_threshold_lines:
+        print(f"[Check LoRAs] {line}" if line else "[Check LoRAs]")
+    _probe_run_context.check_stats = result.stats
+
     for plan_item in plan:
         for model_key in plan_item.models:
             if model_key not in by_model_enabled:
@@ -2841,6 +2926,10 @@ def run_lora_compatibility_check(
         result.model_support = model_support
         result.stats = stats
         result.elapsed_seconds = time.monotonic() - run_started
+        result.probe_effect_outcome_lines = build_probe_effect_outcome_lines(stats)
+        for line in result.probe_effect_outcome_lines:
+            print(f"[Check LoRAs] {line}" if line else "[Check LoRAs]")
+        _probe_run_context.check_stats = None
         return result
 
     not_installed_models = [
@@ -3135,4 +3224,8 @@ def run_lora_compatibility_check(
     }
     result.stats = stats
     result.elapsed_seconds = time.monotonic() - run_started
+    result.probe_effect_outcome_lines = build_probe_effect_outcome_lines(stats)
+    for line in result.probe_effect_outcome_lines:
+        print(f"[Check LoRAs] {line}" if line else "[Check LoRAs]")
+    _probe_run_context.check_stats = None
     return result

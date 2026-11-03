@@ -321,8 +321,14 @@ def write_check_loras_report(
         f"Failed probes: {result.stats.failed_probe_count}",
         f"Skipped registered: {result.stats.skipped_registered_probes}",
         "",
-        "=== model_support in result (before save) ===",
     ]
+    if result.probe_effect_threshold_lines:
+        lines.extend(result.probe_effect_threshold_lines)
+    if result.probe_effect_outcome_lines:
+        lines.extend(result.probe_effect_outcome_lines)
+    lines.extend([
+        "=== model_support in result (before save) ===",
+    ])
     for lid, models in sorted((result.model_support or {}).items()):
         lines.append(f"  {lid}: {list(models)}")
 

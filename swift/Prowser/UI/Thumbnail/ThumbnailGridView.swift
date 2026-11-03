@@ -155,6 +155,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             var thumbnailCellSize: Double
             var manualThumbnailSize: Bool
             var thumbnailLockPaintRevision: Int
+            var launchRestoreMissingMessage: String?
         }
 
         private struct SelectionFingerprint: Equatable {
@@ -327,7 +328,8 @@ struct ThumbnailGridView: NSViewRepresentable {
                     default: ThumbnailLayout.defaultCellSize
                 ),
                 manualThumbnailSize: appState.config.bool(forKey: "manual_thumbnail_size", default: false),
-                thumbnailLockPaintRevision: appState.thumbnailLockPaintRevision
+                thumbnailLockPaintRevision: appState.thumbnailLockPaintRevision,
+                launchRestoreMissingMessage: appState.launchRestoreMissingMessage
             )
             if !force, fingerprint == lastGridSyncFingerprint {
                 reconcileGridPathsIfNeeded()
@@ -351,6 +353,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
             gridView.currentDirectory = directory
             gridView.filterPattern = appState.filterSettings.filterPattern
+            gridView.launchRestoreMissingMessage = appState.launchRestoreMissingMessage
             gridView.isLoadingDirectory = fingerprint.showDirectoryLoadingCanvas
             gridView.specificFilesActive = appState.specificFilesActive
             gridView.imageExtensions = appState.config.imageExtensions

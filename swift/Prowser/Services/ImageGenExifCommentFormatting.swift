@@ -147,36 +147,106 @@ enum ImageGenExifCommentFormatting {
 
     // MARK: - MFLUX → EXIF body
 
-    /// Port of `format_exif_comment_from_mflux_metadata` (values / pipeline omitted in Swift browser).
-    static func formatExifCommentFromMfluxMetadata(_ meta: [String: Any], modelName: String = "") -> String {
+    /// Port of `format_exif_comment_from_mflux_metadata`.
+    static func formatExifCommentFromMfluxMetadata(
+        _ meta: [String: Any],
+        modelName: String = "",
+        values: [String: Any] = [:],
+        plugin: ImageGenPluginDescriptor? = nil,
+        elapsedSeconds: Double? = nil,
+        seed: Int? = nil,
+        loraOverride: String? = nil,
+        includeQuantization: Bool = true,
+        quantization: Int? = nil
+    ) -> String {
         var resolvedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         if resolvedModel.isEmpty {
             let rawModel = stringValue(meta["model_config"]) ?? stringValue(meta["model"]) ?? ""
             resolvedModel = menuLabelForHFModelId(rawModel)
         }
-        let promptText = stringValue(meta["prompt"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let steps = intValue(meta["steps"])
-        let quant = intValue(meta["quantize"])
-        let guidance = doubleValue(meta["guidance"])
-        let seed = intValue(meta["seed"])
-        var elapsed = parseElapsedSeconds(meta["generation_time_seconds"])
+
+        let valuesPrompt = (values["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let metaPrompt = stringValue(meta["prompt"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let promptText = valuesPrompt.isEmpty ? metaPrompt : valuesPrompt
+
+        var steps = intValue(values["steps"])
+        if steps == nil { steps = intValue(meta["steps"]) }
+
+        var quant: Int?
+        if let plugin {
+            quant = ImageGenExifPluginFields.quantizationForExif(plugin: plugin, values: values)
+        } else if includeQuantization {
+            quant = quantization ?? intValue(values["mflux_quantize"]) ?? intValue(meta["quantize"])
+        }
+
+        var guidance: Double?
+        if let plugin {
+            guidance = ImageGenExifPluginFields.guidanceForExif(plugin: plugin, values: values)
+        } else {
+            guidance = doubleValue(values["guidance_scale"]) ?? doubleValue(meta["guidance"])
+        }
+
+        var resolvedSeed = seed
+        if resolvedSeed == nil, values["random_seed"] as? Bool != true {
+            resolvedSeed = intValue(values["seed"])
+        }
+        if resolvedSeed == nil {
+            resolvedSeed = intValue(meta["seed"])
+        }
+
+        var elapsed = elapsedSeconds
+        if elapsed == nil {
+            elapsed = parseElapsedSeconds(meta["generation_time_seconds"])
+        }
         if elapsed == nil {
             elapsed = parseElapsedSeconds(meta["generation_time"])
         }
-        let lora = loraNameForExifFromPathsAndScales(
-            paths: meta["lora_paths"],
-            scales: meta["lora_scales"]
-        )
+
+        var lora = loraOverride?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lora?.isEmpty != false {
+            if let plugin {
+                lora = loraNameForExifFromValues(
+                    values: values,
+                    pipelineID: plugin.pipelineID,
+                    loraHostID: plugin.loraHostID
+                )
+            }
+        }
+        if lora?.isEmpty != false {
+            lora = loraNameForExifFromPathsAndScales(
+                paths: meta["lora_paths"],
+                scales: meta["lora_scales"]
+            )
+        }
+
         return formatImageExifPrompt(
             modelName: resolvedModel,
             promptText: promptText,
             elapsedSeconds: elapsed,
-            seed: seed,
+            seed: resolvedSeed,
             steps: steps,
             quantization: quant,
             lora: lora,
             guidance: guidance
         )
+    }
+
+    /// Seed line from a finished-style Image Model block (progressive rewrites).
+    static func seedFromFormattedGenerationComment(_ text: String) -> Int? {
+        let seedPattern = try? NSRegularExpression(
+            pattern: #"^\s*Seed\s*:\s*(\d+)\s*$"#,
+            options: [.caseInsensitive]
+        )
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let stripped = String(line).trimmingCharacters(in: .whitespaces)
+            guard !stripped.isEmpty else { continue }
+            if let match = seedPattern?.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
+               let valueRange = Range(match.range(at: 1), in: stripped),
+               let value = Int(stripped[valueRange]) {
+                return value
+            }
+        }
+        return nil
     }
 
     /// Port of `format_image_exif_prompt`.
@@ -481,7 +551,7 @@ enum ImageGenExifCommentFormatting {
         guard let raw else { return nil }
         if let i = raw as? Int { return i }
         if let n = raw as? NSNumber { return n.intValue }
-        if let s = raw as? String, let i = Int(s) { return i }
+        if let s = raw as? String, let i = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) { return i }
         if let d = raw as? Double { return Int(d) }
         return nil
     }

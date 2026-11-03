@@ -1143,6 +1143,7 @@ def _handle_check_loras_prescan(cmd: Dict[str, Any]) -> Dict[str, Any]:
     from config import get_config
     from imagegen_plugins.hf_model_ids import lora_model_display_name
     from imagegen_plugins.lora_compatibility_checker import (
+        _probe_model_user_sort_key,
         check_loras_options_from_settings,
         discover_check_lora_choices,
         installed_probeable_models,
@@ -1151,9 +1152,11 @@ def _handle_check_loras_prescan(cmd: Dict[str, Any]) -> Dict[str, Any]:
     settings = get_config().load_settings()
     choices = discover_check_lora_choices(settings, dedupe_downloads=False)
     saved = check_loras_options_from_settings(settings)
+    model_keys = installed_probeable_models()
+    model_keys.sort(key=_probe_model_user_sort_key)
     installed = [
         {"model_key": key, "display_name": lora_model_display_name(key)}
-        for key in installed_probeable_models()
+        for key in model_keys
     ]
     return {
         "type": "result",

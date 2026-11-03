@@ -5,7 +5,7 @@ enum LoRAMapRows {
     struct Row {
         var loraID: String
         var loraLabel: String
-        var models: [(label: String, crossFamily: Bool)]
+        var models: [(modelKey: String, label: String, crossFamily: Bool)]
     }
 
     static func rows(lc: [String: Any]) -> [Row] {
@@ -16,7 +16,7 @@ enum LoRAMapRows {
             guard LoRAPathResolver.localWeightsPath(loraID: entry.loraID, entry: entry) != nil else { continue }
             let label = entry.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             let display = label.isEmpty ? entry.loraID : label
-            var models: [(String, Bool)] = []
+            var models: [(modelKey: String, label: String, crossFamily: Bool)] = []
             for mk in LoRAHFModelIDs.probeModelOrder {
                 guard LoRACatalog.probePassed(
                     loraID: entry.loraID,
@@ -29,7 +29,7 @@ enum LoRAMapRows {
                 let isCross = LoRACatalog.crossFamily(entry: entry, loraID: entry.loraID, modelKey: mk, lc: lc)
                     || ((crossRaw[entry.loraID] as? [String])?.contains(mk) == true)
                 if isCross { modelLabel += " *" }
-                models.append((modelLabel, isCross))
+                models.append((modelKey: mk, label: modelLabel, crossFamily: isCross))
             }
             out.append(Row(loraID: entry.loraID, loraLabel: display, models: models))
         }

@@ -273,6 +273,7 @@ final class DirectoryLoadCoordinator {
         saveHistory: Bool,
         pinnedImagePath: String? = nil,
         showLoadingState: Bool = true,
+        scanFilterPattern: String? = nil,
         onComplete: (() -> Void)? = nil
     ) {
         guard let normalized = FileDataModel.normalizePath(path) else {
@@ -316,7 +317,7 @@ final class DirectoryLoadCoordinator {
         let snapshot = DirectoryLoadBackgroundWork.Snapshot(
             path: normalized,
             extensions: appState.config.imageExtensions,
-            filterPattern: appState.filterSettings.filterPattern,
+            filterPattern: scanFilterPattern ?? appState.filterSettings.filterPattern,
             sortModeRaw: appState.config.string(forKey: "sort_mode", default: "date"),
             sortReversed: appState.config.bool(forKey: "sort_reversed", default: false),
             useExifDate: appState.config.useExifDate

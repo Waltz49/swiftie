@@ -14,6 +14,8 @@ final class MfluxGenerationTasks {
     private(set) var lastGenerateResult: [String: Any] = [:]
 
     var onJobProcessingStarted: ((String) -> Void)?
+    /// Fired after ``ImageGenMfluxPrep.apply`` so EXIF snapshots include ``resolved_seed``.
+    var onPreparedRunPayload: (([String: Any]) -> Void)?
     var onProgress: (([String: Any]) -> Void)?
     var onGenerateFinished: ((Bool, String, String) -> Void)?
 
@@ -153,6 +155,7 @@ final class MfluxGenerationTasks {
         do {
             let userOutputPath = payload["output_path"] as? String ?? ""
             var runPayload = try await ImageGenMfluxPrep.apply(to: payload)
+            onPreparedRunPayload?(runPayload)
             let prepTempPaths = ImageGenMfluxPrep.takePrepTempPaths(from: &runPayload)
             defer {
                 let debug = config?.bool(forKey: "debug_mode", default: false) ?? false

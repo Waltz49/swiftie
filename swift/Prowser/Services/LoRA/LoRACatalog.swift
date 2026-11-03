@@ -19,7 +19,19 @@ enum LoRACatalog {
     }
 
     static func catalogEntriesSorted(lc: [String: Any]) -> [LoRAEntry] {
-        mergedCatalog(lc: lc).values.sorted { $0.displayName.lowercased() < $1.displayName.lowercased() }
+        mergedCatalog(lc: lc).values.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    private static func sortRunDialogChoices(_ choices: [(label: String, id: String)]) -> [(label: String, id: String)] {
+        guard choices.count > 1 else { return choices }
+        let noneRow = choices[0]
+        guard noneRow.id == "none" else { return choices }
+        let sorted = choices.dropFirst().sorted {
+            $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending
+        }
+        return [noneRow] + sorted
     }
 
     static func choiceLabel(entry: LoRAEntry, modelKey: String) -> String {
@@ -56,7 +68,7 @@ enum LoRACatalog {
         ) {
             return true
         }
-        return crossFamily(entry: resolved, loraID: resolved.loraID, modelKey: modelKey, lc: lc)
+        return false
     }
 
     static func entryVisibleInSettings(
@@ -113,7 +125,7 @@ enum LoRACatalog {
                 choices.append((choiceLabel(entry: entry, modelKey: modelKey), entry.loraID))
             }
         }
-        return choices
+        return sortRunDialogChoices(choices)
     }
 
     static func visibleForRun(

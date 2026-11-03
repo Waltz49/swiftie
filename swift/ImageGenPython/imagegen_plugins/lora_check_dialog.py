@@ -61,6 +61,7 @@ from imagegen_plugins.lora_compatibility_checker import (
     check_loras_options_from_settings,
     discover_check_lora_choices,
     installed_probeable_models,
+    _probe_model_user_sort_key,
     lora_check_work_total,
     persist_check_loras_options,
     plan_disk_lora_probes,
@@ -353,6 +354,7 @@ class CheckLorasOptionsDialog(QDialog):
         self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
 
         self._installed_models = installed_probeable_models()
+        self._installed_models.sort(key=_probe_model_user_sort_key)
         self._lora_choices = list(lora_choices)
         self._model_checkboxes: dict[str, QCheckBox] = {}
         self._lora_checkboxes: dict[str, QCheckBox] = {}
