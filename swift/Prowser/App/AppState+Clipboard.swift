@@ -6,7 +6,7 @@ extension AppState {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         if showFeedback {
-            copyFeedback.show()
+            copyFeedback.show(hostWindow: NSApp.keyWindow)
         }
     }
 }

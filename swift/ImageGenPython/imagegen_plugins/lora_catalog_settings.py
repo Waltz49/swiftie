@@ -269,6 +269,31 @@ def normalize_probe_history(raw: Any) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def merge_probe_history_slice(
+    prev: Dict[str, Any],
+    new: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Merge a partial Test LoRAs history update into stored history.
+
+    ``models_probed`` is unioned so scoped re-runs do not shrink the probe set
+    (``migrate_lora_catalog`` trims ``model_support`` to probed models).
+    ``model_support`` and fingerprint fields come from the new slice (full probe
+    state after the run step).
+    """
+    if not prev:
+        return dict(new)
+    if not new:
+        return dict(prev)
+    out = dict(new)
+    out["models_probed"] = sorted(
+        set(prev.get("models_probed") or []) | set(new.get("models_probed") or [])
+    )
+    if prev.get("complete") and not new.get("complete"):
+        out["complete"] = True
+    return out
+
+
 def probe_history_from_lc(lc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
 

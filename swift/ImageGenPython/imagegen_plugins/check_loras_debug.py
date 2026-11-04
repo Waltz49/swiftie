@@ -156,10 +156,34 @@ def format_check_loras_results_text(
     return text
 
 
+def persist_lora_check_catalog_slice(
+    *,
+    model_support: Optional[Dict[str, List[str]]] = None,
+    cross_family_models: Optional[Dict[str, List[str]]] = None,
+    by_model: Optional[Dict[str, Dict[str, list]]] = None,
+    probe_history: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> None:
+    """Merge one incremental Test LoRAs slice into ``lora_catalog.json``."""
+    if not (
+        model_support
+        or cross_family_models
+        or by_model
+        or probe_history
+    ):
+        return
+    from imagegen_plugins.image_gen_persistence import save_lora_catalog_state
+
+    save_lora_catalog_state(
+        model_support=model_support,
+        cross_family_models=cross_family_models,
+        by_model=by_model,
+        probe_history=probe_history,
+    )
+
+
 def apply_lora_check_result(result: LoraCheckResult) -> List[str]:
     """Persist catalog state and write report (Swift bridge + headless runners)."""
     from config import get_config
-    from imagegen_plugins.image_gen_persistence import save_lora_catalog_state
 
     settings_before = get_config().load_settings()
     if (
@@ -168,7 +192,7 @@ def apply_lora_check_result(result: LoraCheckResult) -> List[str]:
         or result.by_model
         or result.probe_history
     ):
-        save_lora_catalog_state(
+        persist_lora_check_catalog_slice(
             model_support=result.model_support or None,
             cross_family_models=result.cross_family_models or None,
             by_model=result.by_model or None,

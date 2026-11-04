@@ -674,6 +674,7 @@ def save_lora_catalog_state(
         CROSS_FAMILY_MODELS_KEY,
         DELETED_IDS_KEY,
         PROBE_HISTORY_KEY,
+        merge_probe_history_slice,
         normalize_probe_history,
         migrate_lora_catalog,
     )
@@ -829,7 +830,10 @@ def save_lora_catalog_state(
                     continue
                 normalized = normalize_probe_history({key_s: slice_})
                 if key_s in normalized:
-                    merged_ph[key_s] = normalized[key_s]
+                    merged_ph[key_s] = merge_probe_history_slice(
+                        merged_ph.get(key_s) or {},
+                        normalized[key_s],
+                    )
             lc[PROBE_HISTORY_KEY] = merged_ph
 
         imagegen["lora_catalog"] = lc

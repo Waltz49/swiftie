@@ -49,12 +49,6 @@ enum FilterPresetMenu {
     static func appendItems(to menu: NSMenu, appState: AppState, makeAction: (String, @escaping () -> Void) -> NSMenuItem) {
         let snapshot = model(appState: appState)
 
-        menu.addItem(makeAction("Edit...", {
-            appState.presentFilterEditSheet()
-        }))
-
-        menu.addItem(.separator())
-
         let noFilter = makeAction("No Filter (*)", {
             appState.applyFilenameFilterPattern("*")
         })
@@ -74,6 +68,12 @@ enum FilterPresetMenu {
             }
             menu.addItem(item)
         }
+
+        menu.addItem(.separator())
+
+        menu.addItem(makeAction("Edit...", {
+            appState.presentFilterEditSheet()
+        }))
     }
 
     static func normalizeForComparison(_ pattern: String) -> String {

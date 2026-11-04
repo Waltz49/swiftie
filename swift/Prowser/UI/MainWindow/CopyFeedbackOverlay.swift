@@ -1,11 +1,13 @@
+import AppKit
 import SwiftUI
 
 /// Green “✓ Copied!” badge at the window upper-right (Python `copy_feedback.show_copy_feedback`).
 struct CopyFeedbackOverlay: View {
     @Environment(AppState.self) private var appState
+    @State private var hostingWindow: NSWindow?
 
     var body: some View {
-        let visible = appState.copyFeedback.isVisible
+        let visible = appState.copyFeedback.shouldShow(on: hostingWindow)
         let palette = copyFeedbackPalette(theme: appState.theme)
         Group {
             if visible {
@@ -29,6 +31,41 @@ struct CopyFeedbackOverlay: View {
         .padding(.trailing, 12)
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 0.15), value: visible)
+        .background(CopyFeedbackHostingWindowAnchor(window: $hostingWindow))
+    }
+}
+
+/// Resolves the NSWindow that hosts this overlay (main browser vs auxiliary dialog).
+private struct CopyFeedbackHostingWindowAnchor: NSViewRepresentable {
+    @Binding var window: NSWindow?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.bind(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.bind(nsView)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(window: $window)
+    }
+
+    final class Coordinator {
+        var window: Binding<NSWindow?>
+
+        init(window: Binding<NSWindow?>) {
+            self.window = window
+        }
+
+        func bind(_ view: NSView) {
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                self.window.wrappedValue = view.window
+            }
+        }
     }
 }
 

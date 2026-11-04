@@ -831,7 +831,7 @@ final class FileOperationsService {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
-        appState.copyFeedback.show()
+        appState.copyFeedback.show(hostWindow: NSApp.keyWindow)
     }
 
     func duplicateFiles(_ paths: [String]) -> [String] {

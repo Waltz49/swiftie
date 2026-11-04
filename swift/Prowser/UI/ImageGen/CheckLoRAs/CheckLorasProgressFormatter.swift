@@ -40,7 +40,7 @@ enum CheckLorasProgressFormatter {
     ) {
         var timing = "Elapsed: \(formatDuration(elapsed))"
         if let eta, eta > 0 {
-            timing += " · Est. remaining: \(formatDuration(eta))"
+            timing += "  Est. Remaining: \(formatDuration(eta))"
         }
         lines.append(timing)
     }
@@ -81,54 +81,29 @@ enum CheckLorasProgressFormatter {
         into lines: inout [String]
     ) {
         let activity = (stats["probe_activity"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let loraLabel = stats["current_lora_label"] as? String ?? "—"
         let modelKey = message["model_key"] as? String ?? ""
-        let modelLabel = modelKey.isEmpty ? "—" : modelKey
-
-        if !activity.isEmpty {
-            lines.append(activity)
-        } else {
-            lines.append("Testing \(modelLabel) with \(loraLabel)")
-        }
+        let modelIndex = int(stats["model_index_for_lora"])
+        let modelsInPlan = max(int(stats["models_total"]), int(stats["models_for_lora"]), 1)
+        let displayName = modelKey.isEmpty ? "—" : LoRAHFModelIDs.displayName(for: modelKey)
+        lines.append("Model: \(modelIndex) of \(modelsInPlan) - \(displayName)")
 
         let loraPos = "\(int(stats["lora_index"]))/\(max(1, int(stats["loras_total"])))"
-        let modelPos = int(stats["models_for_lora"]) > 0
-            ? "\(int(stats["model_index_for_lora"]))/\(max(1, int(stats["models_for_lora"])))"
-            : "—"
-        let workTotal = max(1, (message["work_total"] as? NSNumber)?.intValue ?? int(stats["probes_total"]))
-        let current = int(stats["probe_current"])
-        let probesDone = int(stats["probes_done"])
-        let probePos = current > 0 ? current : probesDone
-        lines.append(
-            "Model \(modelPos) · LoRA \(loraPos) on this model · Probe \(probePos)/\(workTotal) (\(probesDone) finished)"
+        let generatingName = generatingItemLabel(
+            activity: activity,
+            loraLabel: stats["current_lora_label"] as? String
         )
+        lines.append("Generating: \(loraPos) \(generatingName)")
 
+        lines.append("Newly Enabled: \(int(stats["newly_enabled_count"]))")
         appendTimingLine(elapsed: elapsed, eta: eta, into: &lines)
+    }
 
-        switch stats["last_result"] as? String ?? "" {
-        case "pass":
-            lines.append("Last result: pass")
-        case "fail":
-            lines.append("Last result: fail")
-        case "skip":
-            lines.append("Last result: skipped (registered)")
-        default:
-            break
+    private static func generatingItemLabel(activity: String, loraLabel: String?) -> String {
+        if activity.lowercased().contains("base image") {
+            return "Base image"
         }
-
-        lines.append("Installed models in plan: \(int(stats["models_total"]))")
-        lines.append("Passed probes: \(int(stats["passed_probe_count"]))")
-        lines.append("Passed LoRAs: \(int(stats["supported_loras"]))")
-        lines.append("Newly enabled: \(int(stats["newly_enabled_count"]))")
-        lines.append("Failed probes: \(int(stats["failed_probe_count"]))")
-        let skippedReg = int(stats["skipped_registered_probes"])
-        if skippedReg > 0 {
-            lines.append("Skipped registered pairs: \(skippedReg)")
-        }
-        let skippedUnchanged = int(stats["skipped_unchanged_probes"])
-        if skippedUnchanged > 0 {
-            lines.append("Skipped unchanged renders: \(skippedUnchanged)")
-        }
+        let trimmed = (loraLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "—" : trimmed
     }
 
     /// ETA from completed GPU renders only (skipped / history pairs are not timed work).

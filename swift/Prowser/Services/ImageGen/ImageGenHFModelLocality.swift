@@ -41,6 +41,61 @@ enum ImageGenHFModelLocality {
         return result
     }
 
+    /// On-disk install root for display (snapshot dir, tier dir, or local path). Nil when not installed.
+    static func resolvedInstallPath(pipelineID: String, repoID: String) -> String? {
+        switch pipelineID {
+        case "flux_schnell_mflux_play":
+            return mfluxFluxResolvedPath(repoID: repoID)
+        case "mflux_fill_expand", "mflux_fill_infill":
+            return newestCompleteSnapshot(repoID: repoID, subdirs: fluxWeightSubdirs)
+        case "mflux_flux2_klein_edit", "mflux_flux2_klein_create", "mflux_flux2_klein_expand":
+            if ImageGenSceneWorksKlein.isSceneWorksRepo(repoID) {
+                return ImageGenSceneWorksKlein.resolveTierModelPath(repoID: repoID, tier: "q4")
+            }
+            return newestCompleteSnapshot(repoID: repoID, subdirs: flux2KleinWeightSubdirs)
+        case "sana_sprint_600m":
+            return newestSnapshotWithWeights(repoID: repoID)
+        case "mflux_z_image_turbo":
+            return newestCompleteSnapshot(repoID: repoID, subdirs: zImageWeightSubdirs)
+        case "sd15_diffusers":
+            guard let main = newestCompleteSnapshot(repoID: repoID, subdirs: sd15WeightSubdirs) else {
+                return nil
+            }
+            if hfRepoSnapshotIsComplete(repoID: repoID, subdirs: ["vae"]) { return main }
+            if hfRepoSnapshotHasWeights(repoID: sd15DefaultVAE) { return main }
+            return nil
+        case "sdxl_diffusers":
+            return newestCompleteSnapshot(repoID: repoID, subdirs: sdxlWeightSubdirs)
+        default:
+            return nil
+        }
+    }
+
+    private static func mfluxFluxResolvedPath(repoID: String) -> String? {
+        let expanded = (repoID as NSString).expandingTildeInPath
+        if FileManager.default.fileExists(atPath: expanded) { return expanded }
+        return newestCompleteSnapshot(repoID: repoID, subdirs: fluxWeightSubdirs)
+    }
+
+    private static func newestCompleteSnapshot(repoID: String, subdirs: [String]) -> String? {
+        for snapshot in snapshotPaths(repoID: repoID) {
+            if snapshotHasComponentWeights(snapshotPath: snapshot, subdirs: subdirs) {
+                return snapshot
+            }
+        }
+        return nil
+    }
+
+    private static func newestSnapshotWithWeights(repoID: String) -> String? {
+        let weightExtensions = [".safetensors", ".bin", ".pt"]
+        for snapshot in snapshotPaths(repoID: repoID) {
+            if directoryHasWeightFile(at: snapshot, extensions: weightExtensions) {
+                return snapshot
+            }
+        }
+        return nil
+    }
+
     private static func checkLocal(pipelineID: String, repoID: String) -> Bool {
         switch pipelineID {
         case "flux_schnell_mflux_play":

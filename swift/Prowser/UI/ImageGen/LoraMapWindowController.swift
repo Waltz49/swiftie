@@ -173,6 +173,29 @@ enum LoraMapFormatting {
         return lines.joined(separator: "\n")
     }
 
+    static func plainTextByModel(for rows: [LoraMapRow]) -> String {
+        let groups = modelGroups(from: rows)
+        var lines = [summary(for: rows)]
+        if rows.isEmpty {
+            lines.append("(No LoRA model-support map yet. Run Test LoRAs first.)")
+        }
+        for group in groups {
+            lines.append("")
+            lines.append(group.displayName)
+            for lora in group.loras {
+                let suffix = lora.crossFamily ? " *" : ""
+                lines.append("  - \(lora.loraLabel)\(suffix)")
+            }
+        }
+        lines.append("")
+        lines.append(
+            "* cross-family — Test LoRAs found this LoRA "
+                + "working on a base model outside its usual family."
+        )
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
     static func summary(for rows: [LoraMapRow]) -> String {
         let used = rows.filter { !$0.models.isEmpty }
         let unusedCount = rows.count - used.count
@@ -204,17 +227,22 @@ final class LoraMapWindowController: NSObject, NSWindowDelegate {
         }
 
         let host = NSHostingController(
-            rootView: LoraMapView(onClose: { [weak self] in
-                self?.window?.close()
-            })
+            rootView: ZStack {
+                LoraMapView(onClose: { [weak self] in
+                    self?.window?.close()
+                })
+                CopyFeedbackOverlay()
+            }
             .environment(appState)
         )
-        let window = NSWindow(contentViewController: host)
+        let window = AuxiliaryDialogWindow(contentViewController: host)
         window.title = "Map LoRAs"
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.minSize = NSSize(width: 520, height: 400)
         window.setContentSize(NSSize(width: 720, height: 640))
         window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.identifier = NSUserInterfaceItemIdentifier(BrowserWindowIdentity.dialogPrefix + "loraMap")
         window.delegate = self
         self.window = window
         DialogGeometryPersistence.apply(
@@ -246,6 +274,7 @@ private struct LoraMapView: View {
     private enum MapTab: String, CaseIterable, Identifiable {
         case byLora = "By LoRA"
         case byModel = "By model"
+        case fileLocations = "File locations"
         var id: String { rawValue }
     }
 
@@ -254,6 +283,8 @@ private struct LoraMapView: View {
     var onClose: () -> Void
 
     @State private var rows: [LoraMapRow] = []
+    @State private var imageGenLocations: [LoraMapFileLocations.Row] = []
+    @State private var loraLocations: [LoraMapFileLocations.Row] = []
     @State private var filter = ""
     @State private var mapTab: MapTab = .byLora
     @State private var isLoading = true
@@ -266,6 +297,14 @@ private struct LoraMapView: View {
 
     private var filteredModelGroups: [LoraMapFormatting.LoraMapModelGroup] {
         LoraMapFormatting.modelGroups(from: filteredRows)
+    }
+
+    private var filteredImageGenLocations: [LoraMapFileLocations.Row] {
+        LoraMapFileLocations.filter(imageGenLocations, needle: filter)
+    }
+
+    private var filteredLoraLocations: [LoraMapFileLocations.Row] {
+        LoraMapFileLocations.filter(loraLocations, needle: filter)
     }
 
     var body: some View {
@@ -298,6 +337,9 @@ private struct LoraMapView: View {
                 Spacer()
                 DialogButtonRow(
                     [
+                        DialogButton("Copy", isEnabled: !isLoading && loadError == nil) {
+                            copyCurrentTab()
+                        },
                         DialogButton("Save", isEnabled: !isLoading && loadError == nil) {
                             saveText()
                         },
@@ -314,6 +356,7 @@ private struct LoraMapView: View {
         .padding(16)
         .frame(minWidth: 520, minHeight: 400)
         .themeDialogStyle()
+        .onExitCommand { onClose() }
         .task { await load() }
         .alert("Map LoRAs", isPresented: Binding(
             get: { errorMessage != nil },
@@ -357,6 +400,11 @@ private struct LoraMapView: View {
                             LoraMapContent(rows: filteredRows, loadError: nil)
                         case .byModel:
                             LoraMapModelContent(rows: filteredRows, modelGroups: filteredModelGroups)
+                        case .fileLocations:
+                            LoraMapFileLocationsContent(
+                                imageGenRows: filteredImageGenLocations,
+                                loraRows: filteredLoraLocations
+                            )
                         }
                     }
                     .textSelection(.enabled)
@@ -371,14 +419,35 @@ private struct LoraMapView: View {
         isLoading = true
         do {
             rows = try await LoraMapService.fetchRows(config: appState.config)
+            let locations = LoraMapFileLocations.build(config: appState.config)
+            imageGenLocations = locations.imageGen
+            loraLocations = locations.loras
             loadError = nil
             errorMessage = nil
         } catch {
             rows = []
+            imageGenLocations = []
+            loraLocations = []
             loadError = error.localizedDescription
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private func copyCurrentTab() {
+        let text: String
+        switch mapTab {
+        case .byLora:
+            text = LoraMapFormatting.plainText(for: filteredRows)
+        case .byModel:
+            text = LoraMapFormatting.plainTextByModel(for: filteredRows)
+        case .fileLocations:
+            text = LoraMapFileLocations.plainText(
+                imageGenRows: filteredImageGenLocations,
+                loraRows: filteredLoraLocations
+            )
+        }
+        appState.copyTextToClipboard(text)
     }
 
     private func saveText() {
@@ -537,6 +606,60 @@ private struct LoraMapModelContent: View {
             .font(.system(size: 11))
             .foregroundStyle(colors.dialogMutedText)
             .padding(.top, 4)
+        }
+    }
+}
+
+private struct LoraMapFileLocationsContent: View {
+    @Environment(\.themeColors) private var colors
+    let imageGenRows: [LoraMapFileLocations.Row]
+    let loraRows: [LoraMapFileLocations.Row]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            fileLocationSection(
+                title: "Image Generation Models",
+                rows: imageGenRows,
+                emptyMessage: "No image generation models installed locally."
+            )
+            .padding(.bottom, 16)
+
+            fileLocationSection(
+                title: "LoRAs",
+                rows: loraRows,
+                emptyMessage: "No LoRA weight files found on disk."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func fileLocationSection(
+        title: String,
+        rows: [LoraMapFileLocations.Row],
+        emptyMessage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 13, weight: .bold))
+            Rectangle()
+                .fill(colors.defaultBorder)
+                .frame(height: 1)
+        }
+        .padding(.bottom, 8)
+
+        if rows.isEmpty {
+            Text(emptyMessage)
+                .font(.system(size: 12))
+                .foregroundStyle(colors.dialogMutedText)
+                .padding(.bottom, 4)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(rows) { row in
+                    Text("• \(row.label) : \(row.path)")
+                        .font(.system(size: 12))
+                }
+            }
+            .padding(.leading, 16)
         }
     }
 }

@@ -40,12 +40,6 @@ private struct FilterMenuCommandsContent: View {
             let _ = appState.filterSettings.filterPattern
             let _ = appState.config.getSavedFilters()
 
-            Button("Edit...") {
-                appState.presentFilterEditSheet()
-            }
-
-            Divider()
-
             FilterNoFilterMenuButton(appState: appState, selected: snapshot.noFilterSelected)
 
             if !snapshot.presets.isEmpty {
@@ -54,6 +48,12 @@ private struct FilterMenuCommandsContent: View {
 
             ForEach(Array(snapshot.presets.enumerated()), id: \.offset) { _, entry in
                 FilterPresetMenuButton(appState: appState, entry: entry)
+            }
+
+            Divider()
+
+            Button("Edit...") {
+                appState.presentFilterEditSheet()
             }
         }
         .disabled(!commandsEnabled)

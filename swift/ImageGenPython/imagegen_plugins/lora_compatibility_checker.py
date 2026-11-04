@@ -219,6 +219,8 @@ class _LoraProbeState:
     fingerprint: Optional[LoraFileFingerprint] = None
     history_key: str = ""
     models_completed: Set[str] = field(default_factory=set)
+    download_finalize_done: bool = False
+    finalize_applied: bool = False
 
 
 @dataclass
@@ -457,6 +459,35 @@ def _size_conflict_set(paths: Iterable[Path]) -> Set[int]:
     return {size for size, count in counts.items() if count > 1}
 
 
+# Process-lifetime RAM cache for full-file MD5 (LoRA ops worker). Key: resolved path str.
+# Value: (mtime_ns, size, digest). Size-only ids are not stored (cheap to recompute).
+_RAM_CONTENT_DIGEST: Dict[str, Tuple[int, int, str]] = {}
+_RAM_CONTENT_DIGEST_MAX = 512
+
+
+def _digest_ram_path_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+def _digest_ram_lookup(path: Path, *, mtime_ns: int, size: int) -> Optional[str]:
+    row = _RAM_CONTENT_DIGEST.get(_digest_ram_path_key(path))
+    if row is None:
+        return None
+    cached_mtime_ns, cached_size, digest = row
+    if cached_mtime_ns != mtime_ns or cached_size != size:
+        return None
+    return digest
+
+
+def _digest_ram_store(path: Path, *, mtime_ns: int, size: int, digest: str) -> None:
+    if len(_RAM_CONTENT_DIGEST) >= _RAM_CONTENT_DIGEST_MAX:
+        _RAM_CONTENT_DIGEST.clear()
+    _RAM_CONTENT_DIGEST[_digest_ram_path_key(path)] = (mtime_ns, size, digest)
+
+
 def _content_digest_for_path(
     path: Path,
     digest_cache: Dict[Path, str],
@@ -470,14 +501,19 @@ def _content_digest_for_path(
     Unique sizes use ``size:<bytes>`` — files of different length cannot share an MD5.
     """
     try:
-        if size is None:
-            size = int(path.stat().st_size)
-        if hash_sizes is not None and size not in hash_sizes:
-            return f"size:{size}"
+        st = path.stat()
+        file_size = int(size if size is not None else st.st_size)
+        if hash_sizes is not None and file_size not in hash_sizes:
+            return f"size:{file_size}"
+        mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)))
         digest = digest_cache.get(path)
+        if digest is not None:
+            return digest
+        digest = _digest_ram_lookup(path, mtime_ns=mtime_ns, size=file_size)
         if digest is None:
             digest = _md5_file(path)
-            digest_cache[path] = digest
+            _digest_ram_store(path, mtime_ns=mtime_ns, size=file_size, digest=digest)
+        digest_cache[path] = digest
         return digest
     except OSError:
         return None
@@ -2492,7 +2528,132 @@ def _sync_probe_history_slice(
         complete=complete,
     )
     if hist_rec:
-        result.probe_history.update(hist_rec)
+        from imagegen_plugins.lora_catalog_settings import merge_probe_history_slice
+
+        for key, slice_ in hist_rec.items():
+            prev = result.probe_history.get(key)
+            if prev:
+                slice_ = merge_probe_history_slice(prev, slice_)
+            result.probe_history[key] = slice_
+
+
+def _persist_lora_probe_progress(
+    state: _LoraProbeState,
+    *,
+    model_keys: List[str],
+    settings: Optional[Dict[str, Any]],
+    result: LoraCheckResult,
+    by_model_enabled: Dict[str, List[str]],
+    by_model_hidden: Dict[str, List[str]],
+    model_support: Dict[str, List[str]],
+) -> None:
+    from imagegen_plugins.check_loras_debug import persist_lora_check_catalog_slice
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_model_registry import same_host_supported_models
+
+    lora_id = state.lora_id
+    ms_slice: Optional[Dict[str, List[str]]] = None
+    cf_slice: Optional[Dict[str, List[str]]] = None
+    if lora_id and lora_id != _PENDING_DOWNLOAD_LORA_ID:
+        entry = get_lora_entry(lora_id, settings) or state.entry
+        if entry is not None:
+            same_host = list(same_host_supported_models(entry, state.supported))
+            cross = _merged_cross_family_after_probe(
+                entry=entry,
+                supported=state.supported,
+                plan_models=state.plan_item.models,
+                settings=settings,
+                lora_id=lora_id,
+            )
+            model_support[lora_id] = same_host
+            result.cross_family_models[lora_id] = cross
+            ms_slice = {lora_id: same_host}
+            cf_slice = {lora_id: cross}
+            _prune_enabled_to_saved_probe_support(
+                by_model_enabled,
+                model_support=model_support,
+                cross_family_models=result.cross_family_models,
+            )
+
+    hist_slice: Dict[str, Any] = {}
+    for key in (state.history_key, lora_id):
+        key_s = str(key or "").strip()
+        if key_s and key_s in result.probe_history:
+            hist_slice[key_s] = result.probe_history[key_s]
+
+    by_model: Dict[str, Dict[str, List[str]]] = {}
+    for mk in dict.fromkeys(model_keys):
+        by_model[mk] = {
+            "enabled_ids": list(by_model_enabled.get(mk, [])),
+            "deleted_ids": list(by_model_hidden.get(mk, [])),
+        }
+
+    persist_lora_check_catalog_slice(
+        model_support=ms_slice,
+        cross_family_models=cf_slice,
+        by_model=by_model or None,
+        probe_history=hist_slice or None,
+    )
+
+
+def _after_probe_model_completed(
+    state: _LoraProbeState,
+    model_key: str,
+    *,
+    settings: Optional[Dict[str, Any]],
+    result: LoraCheckResult,
+    stats: LoraCheckStats,
+    by_model_enabled: Dict[str, List[str]],
+    by_model_hidden: Dict[str, List[str]],
+    model_support: Dict[str, List[str]],
+    previous_support: Dict[str, Any],
+    registration_mode: str,
+    cancelled: bool,
+) -> None:
+    _sync_probe_history_slice(state, result, cancelled=cancelled)
+    _persist_lora_probe_progress(
+        state,
+        model_keys=[model_key],
+        settings=settings,
+        result=result,
+        by_model_enabled=by_model_enabled,
+        by_model_hidden=by_model_hidden,
+        model_support=model_support,
+    )
+    if (
+        state.plan_item.from_downloads
+        and not state.download_finalize_done
+        and _lora_probe_complete(
+            state,
+            cancelled=cancelled,
+            previous_support=previous_support,
+            registration_mode=registration_mode,
+        )
+    ):
+        _finalize_lora_probe_state(
+            state,
+            settings=settings,
+            result=result,
+            stats=stats,
+            model_support=model_support,
+            by_model_enabled=by_model_enabled,
+            by_model_hidden=by_model_hidden,
+            previous_support=previous_support,
+            registration_mode=registration_mode,
+            cancelled=cancelled,
+        )
+        persist_keys = list(
+            dict.fromkeys([model_key, *state.supported, *state.plan_item.models])
+        )
+        _persist_lora_probe_progress(
+            state,
+            model_keys=persist_keys,
+            settings=settings,
+            result=result,
+            by_model_enabled=by_model_enabled,
+            by_model_hidden=by_model_hidden,
+            model_support=model_support,
+        )
 
 
 def _lora_probe_complete(
@@ -2660,7 +2821,17 @@ def _finalize_lora_probe_state(
         same_host_supported_models,
     )
 
+    if state.finalize_applied:
+        return
+
     plan_item = state.plan_item
+    # On cancel, keep prior support for models we never finished testing.
+    if cancelled:
+        for model_key in plan_item.models:
+            if model_key in state.models_completed:
+                continue
+            if model_key in state.prev_models and model_key not in state.supported:
+                state.supported.append(model_key)
     supported = state.supported
     lora_label = state.lora_label
     registered_lora_id = state.lora_id
@@ -2668,7 +2839,9 @@ def _finalize_lora_probe_state(
     if plan_item.from_downloads:
         if not state.probed:
             return
-        if supported:
+        if state.download_finalize_done:
+            registered_lora_id = state.lora_id
+        elif supported:
             from imagegen_plugins.image_gen_persistence import register_user_lora
             from imagegen_plugins.lora_user_entries import build_user_lora_entry
 
@@ -2686,6 +2859,8 @@ def _finalize_lora_probe_state(
                     supported_models=supported,
                 )
                 registered_lora_id = new_entry.lora_id
+                state.lora_id = registered_lora_id
+                state.download_finalize_done = True
                 stats.downloads_registered += 1
                 result.changes.append(
                     LoraCheckChange(
@@ -2718,6 +2893,7 @@ def _finalize_lora_probe_state(
                     )
                 )
                 registered_lora_id = ""
+                state.download_finalize_done = True
         elif not cancelled:
             stats.downloads_failed += 1
             result.changes.append(
@@ -2728,6 +2904,7 @@ def _finalize_lora_probe_state(
                 )
             )
             registered_lora_id = ""
+            state.download_finalize_done = True
 
     if registered_lora_id and registered_lora_id != _PENDING_DOWNLOAD_LORA_ID:
         entry_for_cross = get_lora_entry(registered_lora_id, settings) or state.entry
@@ -2735,14 +2912,10 @@ def _finalize_lora_probe_state(
             model_support[registered_lora_id] = []
             result.cross_family_models[registered_lora_id] = []
         else:
-            completed = set(state.models_completed)
-            supported_for_save = [m for m in supported if m in completed]
-            same_host = list(
-                same_host_supported_models(entry_for_cross, supported_for_save)
-            )
+            same_host = list(same_host_supported_models(entry_for_cross, supported))
             cross = _merged_cross_family_after_probe(
                 entry=entry_for_cross,
-                supported=supported_for_save,
+                supported=supported,
                 plan_models=plan_item.models,
                 settings=settings,
                 lora_id=registered_lora_id,
@@ -2764,22 +2937,26 @@ def _finalize_lora_probe_state(
             previous_support=result.previous_support,
             registration_mode=result.registration_mode,
         )
+        entry_for_hist = get_lora_entry(registered_lora_id, settings) or state.entry
         hist_rec = _probe_history_record(
             history_key=hist_key,
             fingerprint=state.fingerprint,
-            supported=list(
-                same_host_supported_models(
-                    get_lora_entry(registered_lora_id, settings) or state.entry,
-                    [m for m in supported if m in state.models_completed],
-                )
-            ),
+            supported=list(same_host_supported_models(entry_for_hist, supported)),
             models_probed=sorted(state.models_completed),
             complete=complete,
         )
         if hist_rec:
-            result.probe_history.update(hist_rec)
+            from imagegen_plugins.lora_catalog_settings import merge_probe_history_slice
+
+            for key, slice_ in hist_rec.items():
+                prev = result.probe_history.get(key)
+                if prev:
+                    slice_ = merge_probe_history_slice(prev, slice_)
+                result.probe_history[key] = slice_
             if hist_key != state.history_key and state.history_key.startswith("md5:"):
                 result.probe_history.pop(state.history_key, None)
+
+    state.finalize_applied = True
 
 
 def _apply_reused_probe_result(
@@ -2814,6 +2991,10 @@ def _reuse_model_from_history(
     stats: LoraCheckStats,
     by_model_enabled: Dict[str, List[str]],
     by_model_hidden: Dict[str, List[str]],
+    settings: Optional[Dict[str, Any]],
+    model_support: Dict[str, List[str]],
+    previous_support: Dict[str, Any],
+    registration_mode: str,
     cancelled: bool,
 ) -> None:
     _apply_reused_probe_result(
@@ -2827,7 +3008,19 @@ def _reuse_model_from_history(
     if state.plan_item.cached_support or model_key in state.plan_item.probed_models_from_history:
         state.probed = True
     _mark_model_completed(state, model_key)
-    _sync_probe_history_slice(state, result, cancelled=cancelled)
+    _after_probe_model_completed(
+        state,
+        model_key,
+        settings=settings,
+        result=result,
+        stats=stats,
+        by_model_enabled=by_model_enabled,
+        by_model_hidden=by_model_hidden,
+        model_support=model_support,
+        previous_support=previous_support,
+        registration_mode=registration_mode,
+        cancelled=cancelled,
+    )
 
 
 def run_lora_compatibility_check(
@@ -3053,6 +3246,19 @@ def run_lora_compatibility_check(
                 ):
                     state.supported.append(model_key)
                 _mark_model_completed(state, model_key)
+                _after_probe_model_completed(
+                    state,
+                    model_key,
+                    settings=settings,
+                    result=result,
+                    stats=stats,
+                    by_model_enabled=by_model_enabled,
+                    by_model_hidden=by_model_hidden,
+                    model_support=model_support,
+                    previous_support=previous_support,
+                    registration_mode=opts.registration_mode,
+                    cancelled=result.cancelled,
+                )
                 progress_callback(
                     probe_idx,
                     work_total,
@@ -3094,6 +3300,10 @@ def run_lora_compatibility_check(
                     stats=stats,
                     by_model_enabled=by_model_enabled,
                     by_model_hidden=by_model_hidden,
+                    settings=settings,
+                    model_support=model_support,
+                    previous_support=previous_support,
+                    registration_mode=opts.registration_mode,
                     cancelled=result.cancelled,
                 )
                 probe_idx += 1
@@ -3170,7 +3380,19 @@ def run_lora_compatibility_check(
             state.probed = True
             stats.gpu_probes_done += 1
             _mark_model_completed(state, model_key)
-            _sync_probe_history_slice(state, result, cancelled=result.cancelled)
+            _after_probe_model_completed(
+                state,
+                model_key,
+                settings=settings,
+                result=result,
+                stats=stats,
+                by_model_enabled=by_model_enabled,
+                by_model_hidden=by_model_hidden,
+                model_support=model_support,
+                previous_support=previous_support,
+                registration_mode=opts.registration_mode,
+                cancelled=result.cancelled,
+            )
 
             probe_idx += 1
             stats.probes_done = probe_idx
