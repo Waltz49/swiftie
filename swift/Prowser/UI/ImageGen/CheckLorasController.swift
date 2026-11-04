@@ -159,6 +159,7 @@ enum CheckLorasController {
                 )
                 progress.setMaximum(max(1, total))
                 progress.update(value: done, label: label)
+                NotificationCenter.default.post(name: .prowserLoraMapShouldReload, object: nil)
             }
 
             var progressRefreshTimer: Timer?

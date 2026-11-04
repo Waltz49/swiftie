@@ -301,8 +301,7 @@ final class LoRASettingsViewModel {
                     mode: .deleteWeights
                 )
             }
-            enabledIDs.remove(loraID)
-            persistCurrentModelDraft()
+            await syncDraftAfterLoRARemoval(loraID: loraID)
             await reloadEntries()
             NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
         } catch {
@@ -334,6 +333,21 @@ final class LoRASettingsViewModel {
     func selectModelKey(_ key: String) async {
         if models.contains(where: { $0.modelKey == key }) {
             await modelChanged(to: key)
+        }
+    }
+
+    /// Keep in-memory drafts aligned with disk after delete so reload and Settings commit do not undo removal.
+    private func syncDraftAfterLoRARemoval(loraID: String) async {
+        enabledIDs.remove(loraID)
+        for key in draftByModel.keys {
+            var slice = draftByModel[key] ?? LoRAModelDraftSlice(enabledIDs: [], deletedIDs: [])
+            slice.enabledIDs.removeAll { $0 == loraID }
+            draftByModel[key] = slice
+        }
+        guard let bridge, !selectedModelKey.isEmpty else { return }
+        if let diskSlice = try? await bridge.diskModelSlice(modelKey: selectedModelKey) {
+            draftByModel[selectedModelKey] = diskSlice
+            enabledIDs = Set(diskSlice.enabledIDs)
         }
     }
 }

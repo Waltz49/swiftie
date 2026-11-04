@@ -66,6 +66,61 @@ enum LoRACatalogSettings {
         )
     }
 
+    /// Drop saved user LoRA metadata and compatibility state; keep weight files on disk (Python ``unregister_user_lora``).
+    static func purgeUserLoraSettings(loraID: String, in lc: inout [String: Any]) {
+        let lid = loraID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !lid.isEmpty, LoRAEntry.isUserLoraID(lid) else { return }
+
+        if var raw = lc[userEntriesKey] as? [String: Any] {
+            raw.removeValue(forKey: lid)
+            lc[userEntriesKey] = raw
+        }
+        if var ms = lc["model_support"] as? [String: Any] {
+            ms.removeValue(forKey: lid)
+            lc["model_support"] = ms
+        }
+        if var cfm = lc[crossFamilyModelsKey] as? [String: Any] {
+            cfm.removeValue(forKey: lid)
+            lc[crossFamilyModelsKey] = cfm
+        }
+        if var ph = lc[probeHistoryKey] as? [String: Any] {
+            ph.removeValue(forKey: lid)
+            lc[probeHistoryKey] = ph
+        }
+        if var overrides = lc[entryOverridesKey] as? [String: Any] {
+            overrides.removeValue(forKey: lid)
+            lc[entryOverridesKey] = overrides
+        }
+        if var byModel = lc[byModelKey] as? [String: Any] {
+            for (modelKey, value) in byModel {
+                guard var slice = value as? [String: Any] else { continue }
+                var enabled = (slice["enabled_ids"] as? [String]) ?? []
+                enabled.removeAll { $0 == lid }
+                slice["enabled_ids"] = enabled
+                byModel[modelKey] = slice
+            }
+            lc[byModelKey] = byModel
+        }
+    }
+
+    static func hideCatalogLoraFromModel(loraID: String, modelKey: String, in lc: inout [String: Any]) {
+        let lid = loraID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mk = modelKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !lid.isEmpty, !mk.isEmpty else { return }
+
+        var slice = modelState(lc: lc, modelKey: mk)
+        if !slice.deletedIDs.contains(lid) {
+            slice.deletedIDs.append(lid)
+        }
+        slice.enabledIDs.removeAll { $0 == lid }
+        var byModel = lc[byModelKey] as? [String: Any] ?? [:]
+        byModel[mk] = [
+            "enabled_ids": slice.enabledIDs,
+            deletedIDsKey: slice.deletedIDs,
+        ]
+        lc[byModelKey] = byModel
+    }
+
     static func enabledIDs(lc: [String: Any], modelKey: String) -> [String] {
         let catalog = userEntries(from: lc)
         let ms = modelSupportDict(lc)

@@ -565,27 +565,35 @@ final class LoRAService {
         )
     }
 
+    func diskModelSlice(modelKey: String) async throws -> LoRAModelDraftSlice {
+        let lc = try await loadCatalog()
+        let slice = LoRACatalogSettings.modelState(lc: lc, modelKey: modelKey)
+        return LoRAModelDraftSlice(enabledIDs: slice.enabledIDs, deletedIDs: slice.deletedIDs)
+    }
+
     func delete(loraID: String, modelKey: String, mode: LoRADeleteMode) async throws {
         let store = try store()
         var lc = try await loadCatalog()
-        if mode == .deleteWeights {
-            if let entry = LoRACatalog.getEntry(loraID: loraID, lc: lc),
-               let path = entry.localPath {
+        switch mode {
+        case .unregister:
+            if LoRAEntry.isUserLoraID(loraID) {
+                LoRACatalogSettings.purgeUserLoraSettings(loraID: loraID, in: &lc)
+            } else {
+                LoRACatalogSettings.hideCatalogLoraFromModel(loraID: loraID, modelKey: modelKey, in: &lc)
+            }
+        case .deleteWeights:
+            if LoRAEntry.isUserLoraID(loraID),
+               let entry = LoRACatalog.getEntry(loraID: loraID, lc: lc),
+               let path = entry.localPath
+            {
                 try? FileManager.default.removeItem(atPath: (path as NSString).expandingTildeInPath)
             }
-            var users = lc[LoRACatalogSettings.userEntriesKey] as? [String: Any] ?? [:]
-            users.removeValue(forKey: loraID)
-            lc[LoRACatalogSettings.userEntriesKey] = users
+            if LoRAEntry.isUserLoraID(loraID) {
+                LoRACatalogSettings.purgeUserLoraSettings(loraID: loraID, in: &lc)
+            } else {
+                LoRACatalogSettings.hideCatalogLoraFromModel(loraID: loraID, modelKey: modelKey, in: &lc)
+            }
         }
-        var slice = LoRACatalogSettings.modelState(lc: lc, modelKey: modelKey)
-        if !slice.deletedIDs.contains(loraID) { slice.deletedIDs.append(loraID) }
-        slice.enabledIDs.removeAll { $0 == loraID }
-        var byModel = lc[LoRACatalogSettings.byModelKey] as? [String: Any] ?? [:]
-        byModel[modelKey] = [
-            "enabled_ids": slice.enabledIDs,
-            LoRACatalogSettings.deletedIDsKey: slice.deletedIDs,
-        ]
-        lc[LoRACatalogSettings.byModelKey] = byModel
         store.save(lc)
     }
 
@@ -673,7 +681,8 @@ final class LoRAService {
     }
 
     func checkLorasCancel() async throws {
-        _ = try await opsRequest(["command": "check_loras_cancel"])
+        try await ensureOpsWorker()
+        try await opsWorker.writeCommand(["command": "check_loras_cancel"])
     }
 
     func checkLorasProbeHistoryCount() async throws -> Int {

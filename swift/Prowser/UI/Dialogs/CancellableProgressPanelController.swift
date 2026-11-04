@@ -194,9 +194,14 @@ final class CancellableProgressPanelController {
         self.accessoryButton = accessoryButton
         cancelTarget.onCancel = { [weak self] in
             guard let self else { return }
+            if self.cancelFlag.isCancelled {
+                self.close()
+                return
+            }
             self.cancelFlag.cancel()
-            self.setLabelOnMain("Cancelling…")
+            self.cancelButton.title = "Close now"
             self.onCancel?()
+            self.refreshCancellingLabel()
         }
         accessoryTarget.onTapped = { [weak self] in
             self?.onAccessory?()
@@ -496,10 +501,28 @@ final class CancellableProgressPanelController {
 
     private func setLabelOnMain(_ text: String) {
         guard !isClosed else { return }
-        label.stringValue = text
+        let body = text
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { RenamePrefixPlanner.elideMiddle(String($0), maxLen: Self.lineMaxChars) }
             .joined(separator: "\n")
+        label.stringValue = cancellingPrefixedLabel(body)
+    }
+
+    private func cancellingPrefixedLabel(_ body: String) -> String {
+        guard cancelFlag.isCancelled else { return body }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "Cancelling…" {
+            return "Cancelling…"
+        }
+        if trimmed.hasPrefix("Cancelling…") {
+            return body
+        }
+        return "Cancelling…\n\(body)"
+    }
+
+    private func refreshCancellingLabel() {
+        guard !isClosed else { return }
+        setLabelOnMain(label.stringValue)
     }
 
     private func updateOnMain(value: Int? = nil, label text: String? = nil) {

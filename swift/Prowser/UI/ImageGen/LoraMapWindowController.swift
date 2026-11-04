@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    /// Map LoRAs should re-read ``lora_catalog.json`` (raise window, catalog edits, Test LoRAs progress).
+    static let prowserLoraMapShouldReload = Notification.Name("prowser.loraMapShouldReload")
+}
+
 /// Image → Map LoRAs. Loads the same rows as Python ``_lora_map_rows``.
 @MainActor
 enum LoraMapService {
@@ -223,6 +228,7 @@ final class LoraMapWindowController: NSObject, NSWindowDelegate {
         if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .prowserLoraMapShouldReload, object: nil)
             return
         }
 
@@ -272,10 +278,24 @@ final class LoraMapWindowController: NSObject, NSWindowDelegate {
 @MainActor
 private struct LoraMapView: View {
     private enum MapTab: String, CaseIterable, Identifiable {
-        case byLora = "By LoRA"
-        case byModel = "By model"
-        case fileLocations = "File locations"
+        case byLora
+        case byModel
+        case fileLocations
+
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .byLora: "By LoRA"
+            case .byModel: "By model"
+            case .fileLocations: "File locations"
+            }
+        }
+
+        init?(storageKey: String) {
+            guard let match = Self.allCases.first(where: { $0.rawValue == storageKey }) else { return nil }
+            self = match
+        }
     }
 
     @Environment(AppState.self) private var appState
@@ -357,7 +377,22 @@ private struct LoraMapView: View {
         .frame(minWidth: 520, minHeight: 400)
         .themeDialogStyle()
         .onExitCommand { onClose() }
+        .onAppear {
+            if let key = appState.config.loraMapDialogTabFromSettings(),
+               let restored = MapTab(storageKey: key) {
+                mapTab = restored
+            }
+        }
+        .onChange(of: mapTab) { _, tab in
+            appState.config.persistLoraMapDialogTab(tab.rawValue)
+        }
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserLoraMapShouldReload)) { _ in
+            Task { await load() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserLoraCatalogChanged)) { _ in
+            Task { await load() }
+        }
         .alert("Map LoRAs", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -387,7 +422,7 @@ private struct LoraMapView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Picker("View", selection: $mapTab) {
                     ForEach(MapTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+                        Text(tab.title).tag(tab)
                     }
                 }
                 .pickerStyle(.segmented)

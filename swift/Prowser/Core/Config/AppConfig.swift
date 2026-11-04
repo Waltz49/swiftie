@@ -199,6 +199,34 @@ final class AppConfig {
         saveSettings()
     }
 
+    /// Map LoRAs segmented control (`imagegen.lora_map_dialog_tab`).
+    func loraMapDialogTabFromSettings() -> String? {
+        let imagegen = readSettings()["imagegen"] as? [String: Any] ?? [:]
+        let raw = imagegen[DialogGeometryKey.loraMapTab] as? String ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func persistLoraMapDialogTab(_ tabKey: String) {
+        func merge(into storage: inout [String: Any]) {
+            var imagegen = storage["imagegen"] as? [String: Any] ?? [:]
+            imagegen[DialogGeometryKey.loraMapTab] = tabKey
+            storage["imagegen"] = imagegen
+        }
+        merge(into: &settings)
+        if var draft = settingsDraft {
+            merge(into: &draft)
+            draft.removeValue(forKey: "debug_mode")
+            settingsDraft = draft
+        }
+        if var snap = settingsSnapshot {
+            merge(into: &snap)
+            snap.removeValue(forKey: "debug_mode")
+            settingsSnapshot = snap
+        }
+        saveSettings()
+    }
+
     /// Update last file/folder/view without changing the launch-restore toggle.
     func updateRestoreSnapshot(
         filePath: String?,

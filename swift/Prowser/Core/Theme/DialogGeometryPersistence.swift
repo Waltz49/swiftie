@@ -23,6 +23,7 @@ enum DialogGeometryKey {
     static let checkLorasOptions = "check_loras_options_dialog_geometry"
     static let checkLorasResults = "check_loras_results_dialog_geometry"
     static let loraMap = "lora_map_dialog_geometry"
+    static let loraMapTab = "lora_map_dialog_tab"
     static let manageModelsList = "debug_download_models_list_dialog_geometry"
     static let manageModelsDetail = "debug_download_models_detail_dialog_geometry"
 
