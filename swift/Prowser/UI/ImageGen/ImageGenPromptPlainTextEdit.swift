@@ -319,6 +319,7 @@ final class ImageGenPromptPlainTextHostView: NSView {
         textView.backgroundColor = .textBackgroundColor
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         ImageGenPromptPlainTextFieldSettings.applyUnicodePlainTextInputDefaults(to: textView)
+        ImageGenPromptPlainTextFieldSettings.applyAutomaticTextReplacementEnabled(to: textView)
         textView.isContinuousSpellCheckingEnabled = true
         textView.isGrammarCheckingEnabled = true
         textView.isAutomaticSpellingCorrectionEnabled = true

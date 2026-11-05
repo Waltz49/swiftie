@@ -242,6 +242,7 @@ struct EditExifUserCommentSheet: View {
             .scrollContentBackground(.hidden)
             .background(colors.dialogInputBackground)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background(EditExifUserCommentAutomaticTextReplacementConfigurator())
             .focused($editorFocused)
             .disabled(captionInProgress && !streamingStarted)
         }
@@ -566,5 +567,46 @@ struct EditExifUserCommentSheet: View {
             action: action
         )
         .accessibilityIdentifier(id)
+    }
+}
+
+/// Applies ``NSTextView.isAutomaticTextReplacementEnabled`` to the hosted ``TextEditor`` (⌘E dialog main comment field).
+private struct EditExifUserCommentAutomaticTextReplacementConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.isHidden = true
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let textView = associatedTextView(for: nsView) else { return }
+            ImageGenPromptPlainTextFieldSettings.applyAutomaticTextReplacementEnabled(to: textView)
+        }
+    }
+
+    private func associatedTextView(for configurator: NSView) -> NSTextView? {
+        guard let host = configurator.superview else { return nil }
+        guard let index = host.subviews.firstIndex(of: configurator), index > 0 else {
+            return firstTextView(in: host)
+        }
+        for subview in host.subviews[..<index].reversed() {
+            if let textView = firstTextView(in: subview) {
+                return textView
+            }
+        }
+        return firstTextView(in: host)
+    }
+
+    private func firstTextView(in view: NSView) -> NSTextView? {
+        if let textView = view as? NSTextView {
+            return textView
+        }
+        for subview in view.subviews {
+            if let textView = firstTextView(in: subview) {
+                return textView
+            }
+        }
+        return nil
     }
 }

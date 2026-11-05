@@ -9,4 +9,9 @@ enum ImageGenPromptPlainTextFieldSettings {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
     }
+
+    /// macOS Text Replacements (System Settings → Keyboard → Text Replacements).
+    static func applyAutomaticTextReplacementEnabled(to textView: NSTextView) {
+        textView.isAutomaticTextReplacementEnabled = true
+    }
 }
