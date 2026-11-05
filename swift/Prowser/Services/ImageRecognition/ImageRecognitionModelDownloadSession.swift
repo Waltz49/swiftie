@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// HTTPS session for search-model downloads. Pins the bundled cert for `waltzremote.com` (self-signed on the default host).
+/// HTTPS session for search-model downloads. Optionally pins the bundled cert for `waltzremote.com` when it matches the server leaf; otherwise uses system trust (e.g. Let's Encrypt).
 enum ImageRecognitionModelDownloadSession {
     private static let pinnedHost = "waltzremote.com"
     private static let delegate = SessionDelegate()
@@ -103,7 +103,21 @@ enum ImageRecognitionModelDownloadSession {
             if let error {
                 let ns = error as NSError
                 if ns.domain == NSURLErrorDomain, ns.code == URLError.cancelled.rawValue {
-                    complete(taskIdentifier: task.taskIdentifier, result: .failure(ModelDownloadError.userDeclined))
+                    if ActiveModelDownload.shared.wasUserCancelled() {
+                        complete(taskIdentifier: task.taskIdentifier, result: .failure(ModelDownloadError.userDeclined))
+                    } else {
+                        complete(
+                            taskIdentifier: task.taskIdentifier,
+                            result: .failure(
+                                ModelDownloadError.downloadFailed(
+                                    """
+                                    Could not complete the download (secure connection was rejected or interrupted). \
+                                    If you did not press Cancel, check Settings → Models for Search or place the model zip in your profile’s _mirror folder.
+                                    """
+                                )
+                            )
+                        )
+                    }
                 } else {
                     complete(taskIdentifier: task.taskIdentifier, result: .failure(error))
                 }
@@ -159,11 +173,12 @@ enum ImageRecognitionModelDownloadSession {
 
             let serverData = SecCertificateCopyData(serverCert) as Data
             guard serverData == pinnedData else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
+                // Host moved from bundled self-signed cert to a public CA (e.g. Let's Encrypt).
+                completionHandler(.performDefaultHandling, nil)
                 return
             }
 
-            SecTrustSetPolicies(serverTrust, [SecPolicyCreateBasicX509()] as CFArray)
+            SecTrustSetPolicies(serverTrust, [SecPolicyCreateSSL(true, host as CFString)] as CFArray)
             SecTrustSetAnchorCertificates(serverTrust, [pinnedCert] as CFArray)
             SecTrustSetAnchorCertificatesOnly(serverTrust, true)
 

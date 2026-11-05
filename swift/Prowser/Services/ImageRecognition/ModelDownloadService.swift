@@ -276,6 +276,12 @@ final class ActiveModelDownload: @unchecked Sendable {
         if cancelled { throw ModelDownloadError.userDeclined }
     }
 
+    func wasUserCancelled() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return userCancelled
+    }
+
     func registerDownloadTask(_ task: URLSessionDownloadTask) {
         lock.lock()
         downloadTask = task
