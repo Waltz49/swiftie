@@ -68,9 +68,13 @@ enum WebPImageWriter {
 
     private static func extractExifChunk(from path: String) -> Data? {
         guard let fileData = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        return fileData.withUnsafeBytes { rawBuffer -> Data? in
+        return extractExifChunk(from: fileData)
+    }
+
+    static func extractExifChunk(from webpData: Data) -> Data? {
+        webpData.withUnsafeBytes { rawBuffer -> Data? in
             guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return nil }
-            var input = WebPData(bytes: base, size: fileData.count)
+            var input = WebPData(bytes: base, size: webpData.count)
             guard let mux = WebPMuxCreate(&input, 1) else { return nil }
             defer { WebPMuxDelete(mux) }
 
@@ -82,8 +86,6 @@ enum WebPImageWriter {
             return Data(bytes: chunkBytes, count: chunk.size)
         }
     }
-
-    /// Replace or add the WebP `EXIF` chunk without re-encoding image data (port of piexif.insert for WebP).
     static func dataWithReplacedExifChunk(webpData: Data, exifTiff: Data) throws -> Data {
         try muxExifChunk(into: webpData, exif: exifTiff)
     }

@@ -396,6 +396,7 @@ final class ImageGenController {
         let normalizedCopies = JobStepQueue.normalizeCopies(copies ?? values["copies"] ?? 1)
         var submitValues = values
         ImageGenPromptSentenceCase.flushPromptValues(&submitValues)
+        ImageGenPromptTextEncoding.repairPromptDictionaryFields(&submitValues)
         submitValues["copies"] = normalizedCopies
         if function == "edit" {
             ImageGenEditCustomSizeSubmit.normalizeOptionalCustomSizeFields(&submitValues)
@@ -3698,9 +3699,7 @@ final class ImageGenController {
         applyQueuedJobErrorBanner(at: writeIndex)
         publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
         bumpQueueRevision()
-        await MainActor.run {
-            onQueueStatusDetailsReady?()
-        }
+        await MainActor.run { onQueueStatusDetailsReady?() }
     }
 
     /// Port of ``_sync_active_job_queue_row`` (active job still has a queue row until the worker pops it).

@@ -61,6 +61,21 @@ final class ImageGenPromptTextEncodingTests: XCTestCase {
         XCTAssertEqual(AIPromptExitService.restoreLoremPlaceholdersForDialog(#"say "hi""#), #"say "hi""#)
     }
 
+    func testRepairUTF8BytesMisinterpretedAsLatin1() {
+        let once = String(data: Data([0x50, 0x61, 0x6e, 0x65, 0x6c, 0xc3, 0xb0, 0xc2, 0x9f, 0xc2, 0x9a, 0xc2, 0xab]), encoding: .utf8)!
+        XCTAssertEqual(ImageGenPromptTextEncoding.repairUTF8BytesMisinterpretedAsLatin1(once), "Panel🚫")
+        XCTAssertEqual(ImageGenPromptTextEncoding.repairUTF8BytesMisinterpretedAsLatin1("Panel🚫"), "Panel🚫")
+    }
+
+    func testPrimeEditorPromptRepairsStoredMojibake() {
+        let once = String(data: Data([0x50, 0x61, 0x6e, 0x65, 0x6c, 0xc3, 0xb0, 0xc2, 0x9f, 0xc2, 0x9a, 0xc2, 0xab]), encoding: .utf8)!
+        let primed = ImageGenDialogPromptPersistence.primeEditorPrompt(
+            jobValues: ["prompt": once],
+            fullPrompt: ""
+        )
+        XCTAssertEqual(primed, "Panel🚫")
+    }
+
     func testSentenceCasePreservesCJKContent() {
         let input = "  日本語の説明  "
         let out = ImageGenPromptSentenceCase.normalized(input)

@@ -17,13 +17,13 @@ struct LoRAReferencePromptEditor: NSViewRepresentable {
         scrollView.drawsBackground = true
 
         let textView = LoRAReferencePromptTextView()
-        textView.isRichText = false
-        textView.importsGraphics = false
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.drawsBackground = true
         textView.backgroundColor = .textBackgroundColor
+        ImageGenPromptPlainTextFieldSettings.applyUnicodePlainTextInputDefaults(to: textView)
         textView.textContainerInset = NSSize(width: 4, height: 5)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -44,6 +44,7 @@ struct LoRAReferencePromptEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
         if context.coordinator.isUpdatingFromView { return }
+        if textView.hasMarkedText() { return }
         if textView.string != text {
             textView.string = text
         }
@@ -78,6 +79,7 @@ struct LoRAReferencePromptEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            if textView.hasMarkedText() { return }
             isUpdatingFromView = true
             text = textView.string
             isUpdatingFromView = false

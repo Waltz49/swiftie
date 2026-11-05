@@ -77,7 +77,9 @@ enum AIPromptExitService {
         }
         guard process.terminationStatus == 0 else { return text }
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return text }
-        return output.trimmingCharacters(in: CharacterSet.newlines)
+        guard var output = String(data: data, encoding: .utf8) else { return text }
+        output = output.trimmingCharacters(in: CharacterSet.newlines)
+        output = ImageGenPromptTextEncoding.repairUTF8BytesMisinterpretedAsLatin1(output)
+        return output
     }
 }

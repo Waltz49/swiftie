@@ -176,6 +176,8 @@ struct ImageGenQueuedJob: Identifiable {
         }
         values = loadedValues
 
+        ImageGenPromptTextEncoding.repairPromptDictionaryFields(&values)
+
         if let display = document["display"] as? [String: Any] {
             thumbnailPaths = display["thumbnail_paths"] as? [String] ?? document["thumbnail_paths"] as? [String] ?? []
         } else {
@@ -214,6 +216,7 @@ struct ImageGenQueuedJob: Identifiable {
             steps: steps,
             statusView: nil
         )
+        fullPrompt = ImageGenPromptTextEncoding.repairUTF8BytesMisinterpretedAsLatin1(fullPrompt)
         if !fullPrompt.isEmpty, (values["prompt"] as? String ?? "").isEmpty {
             values["prompt"] = fullPrompt
         }

@@ -7,6 +7,8 @@ enum ImageGenDialogPromptPersistence {
         let fromValues = jobValues["prompt"] as? String ?? ""
         let trimmed = fromValues.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = trimmed.isEmpty ? fullPrompt : fromValues
-        return AIPromptExitService.restoreLoremPlaceholdersForDialog(base)
+        var result = AIPromptExitService.restoreLoremPlaceholdersForDialog(base)
+        result = ImageGenPromptTextEncoding.repairUTF8BytesMisinterpretedAsLatin1(result)
+        return result
     }
 }

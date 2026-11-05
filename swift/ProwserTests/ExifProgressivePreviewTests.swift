@@ -2,8 +2,8 @@ import XCTest
 import ImageIO
 @testable import Prowser
 
-@MainActor
 final class ExifProgressivePreviewTests: XCTestCase {
+    @MainActor
     func testProgressiveExifOnPngBytesAtWebpPathMatchesFinalStyle() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-\(UUID().uuidString)").path
@@ -42,6 +42,7 @@ final class ExifProgressivePreviewTests: XCTestCase {
         XCTAssertTrue(comment.contains("Seed: 542559250"))
     }
 
+    @MainActor
     func testProgressiveExifFromMfluxJsonMatchesFinalStyleForKleinKV() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-klein-\(UUID().uuidString)").path
@@ -102,6 +103,7 @@ final class ExifProgressivePreviewTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testProgressiveExifRewritesElapsedWhenLoraLinePresent() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-elapsed-\(UUID().uuidString)").path
@@ -150,6 +152,7 @@ final class ExifProgressivePreviewTests: XCTestCase {
         XCTAssertTrue(comment.contains("LoRA: F2K9B_BallgagV2_2020E10 [1]"))
     }
 
+    @MainActor
     func testProgressiveExifPreservesSeedAfterFormattedRewrite() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("progressive-exif-seed-\(UUID().uuidString)").path

@@ -77,4 +77,20 @@ final class ImageGenPromptSentenceCaseTests: XCTestCase {
         XCTAssertEqual(values["trigger_word"] as? String, "Mytoken")
         XCTAssertEqual(values["comment"] as? String, "Note.")
     }
+
+    func testNormalizedPreservesCJKAndEmoji() {
+        let input = "  猫 🐱  in the garden  "
+        let out = ImageGenPromptSentenceCase.normalized(input)
+        XCTAssertTrue(out.contains("猫"))
+        XCTAssertTrue(out.contains("🐱"))
+        XCTAssertTrue(ImageGenPromptTextEncoding.preservesUTF8RoundTrip(out))
+    }
+
+    func testNormalizedPerLinePreservesUnicodeLines() {
+        let input = "第一行\n第二行 🌍"
+        let out = ImageGenPromptSentenceCase.normalized(input, perLine: true)
+        XCTAssertTrue(out.contains("第一行"))
+        XCTAssertTrue(out.contains("第二行"))
+        XCTAssertTrue(out.contains("🌍"))
+    }
 }

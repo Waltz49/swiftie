@@ -313,19 +313,15 @@ final class ImageGenPromptPlainTextHostView: NSView {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
 
-        textView.isRichText = false
-        textView.importsGraphics = false
         textView.isEditable = true
         textView.isSelectable = true
         textView.drawsBackground = true
         textView.backgroundColor = .textBackgroundColor
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
-        textView.isAutomaticTextReplacementEnabled = false
+        ImageGenPromptPlainTextFieldSettings.applyUnicodePlainTextInputDefaults(to: textView)
         textView.isContinuousSpellCheckingEnabled = true
         textView.isGrammarCheckingEnabled = true
         textView.isAutomaticSpellingCorrectionEnabled = true
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
         textView.allowsUndo = true
         textView.textContainerInset = NSSize(width: 4, height: 5)
         textView.isVerticallyResizable = true

@@ -38,4 +38,29 @@ enum ImageGenPromptTextEncoding {
         guard let data = utf8Data(from: text) else { return text.isEmpty }
         return stringFromUTF8(data) == text
     }
+
+    /// Reverses UTF-8 bytes mis-read as ISO Latin-1 and stored as UTF-8 again (common exit-script / pipe mojibake).
+    static func repairUTF8BytesMisinterpretedAsLatin1(_ text: String, maxPasses: Int = 3) -> String {
+        var current = text
+        for _ in 0..<max(1, maxPasses) {
+            guard let latin1 = current.data(using: .isoLatin1),
+                  let repaired = stringFromUTF8(latin1),
+                  repaired != current else { break }
+            current = repaired
+        }
+        return current
+    }
+
+    static func repairPromptDictionaryFields(
+        _ values: inout [String: Any],
+        keys: [String] = ["prompt", "negative_prompt"]
+    ) {
+        for key in keys {
+            guard let text = values[key] as? String else { continue }
+            let repaired = repairUTF8BytesMisinterpretedAsLatin1(text)
+            if repaired != text {
+                values[key] = repaired
+            }
+        }
+    }
 }

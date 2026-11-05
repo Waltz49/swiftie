@@ -141,6 +141,7 @@ enum ExifService {
         if let lensModel, !lensModel.isEmpty { record.lens = lensModel }
 
         record.description = userDescription(exif: exif, tiff: tiff)
+            ?? ExifEmbeddedTIFFReader.userComment(fromFile: path)
 
         if let exposure = exif[kCGImagePropertyExifExposureTime] as? Double {
             record.exposure = formatExposureTime(exposure)
@@ -197,7 +198,16 @@ enum ExifService {
 
     static func userComment(path: String) -> String? {
         let record = loadRecord(for: path)
-        return record.description
+        if let description = record.description, !description.isEmpty {
+            return description
+        }
+        if detectedRasterExtension(path: path) == "webp",
+           let fileData = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let tiff = WebPImageWriter.extractExifChunk(from: fileData),
+           let comment = ExifEmbeddedTIFFReader.userComment(fromEmbeddedTIFF: tiff) {
+            return comment
+        }
+        return ExifEmbeddedTIFFReader.userComment(fromFile: path)
     }
 
     /// Lightweight read of description / user-comment fields only (list view comments column).
@@ -345,40 +355,16 @@ enum ExifService {
         guard canWriteExif(path: path) else {
             throw ExifError.unsupportedFormat
         }
-        let url = URL(fileURLWithPath: path)
         let attrs = try FileManager.default.attributesOfItem(atPath: path)
         let mtime = attrs[.modificationDate] as? Date
         let atime = attrs[.creationDate] as? Date
 
-        let onDisk = detectedRasterExtension(path: path)
-        let useWebPMux = onDisk == "webp"
-            || (onDisk == nil && url.pathExtension.lowercased() == "webp")
-        if useWebPMux {
-            try writeUserCommentWebP(url: url, text: text, mtime: mtime, atime: atime)
+        if text.isEmpty {
+            try deleteUserCommentImageIO(path: path)
             return
         }
 
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let uti = CGImageSourceGetType(source),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-            throw ExifError.readFailed
-        }
-
-        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
-        applyUserComment(text, to: &properties)
-
-        let tempURL = url.deletingLastPathComponent()
-            .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
-            .appendingPathExtension(url.pathExtension)
-        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
-            throw ExifError.writeFailed
-        }
-        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else {
-            try? FileManager.default.removeItem(at: tempURL)
-            throw ExifError.writeFailed
-        }
-        try replaceWrittenFile(at: url, with: tempURL, mtime: mtime, atime: atime)
+        try ExifUserCommentRestore.restore(path: path, text: text, mtime: mtime, atime: atime)
     }
 
     private static func writeUserCommentWebP(
@@ -402,13 +388,13 @@ enum ExifService {
         try replaceWrittenFile(at: url, with: tempURL, mtime: mtime, atime: atime)
     }
 
-    /// ImageIO writes `kCGImagePropertyExifUserComment` as a `String`; `Data` is dropped on finalize.
+    /// ImageIO accepts binary UserComment (EXIF charset prefix + payload); plain ``String`` loses non-ASCII on write.
     private static func applyUserComment(_ text: String, to properties: inout [CFString: Any]) {
         var exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         if text.isEmpty {
             exif.removeValue(forKey: kCGImagePropertyExifUserComment)
         } else {
-            exif[kCGImagePropertyExifUserComment] = text
+            exif[kCGImagePropertyExifUserComment] = encodeUserCommentData(text)
         }
         if exif.isEmpty {
             properties.removeValue(forKey: kCGImagePropertyExifDictionary)

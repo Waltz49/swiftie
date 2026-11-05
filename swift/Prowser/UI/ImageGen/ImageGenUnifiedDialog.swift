@@ -1224,6 +1224,7 @@ struct ImageGenUnifiedDialog: View {
 
     private func prepareRunValues(forceFluxAIJob: Bool) -> [String: Any]? {
         var submitValues = prepareSubmitValues(values)
+        ImageGenPromptTextEncoding.repairPromptDictionaryFields(&submitValues)
         syncNormalizedPromptFieldsFromSubmit(into: &values, submitValues: submitValues)
         fluxContext.lmStudioMounted = appState.workers.foregroundModelTasks.isAvailable
         fluxContext.promptText = submitValues["prompt"] as? String ?? ""

@@ -411,7 +411,8 @@ enum FluxPromptJob {
     static func applyPromptExitsAfterFluxJobResolution(values: inout [String: Any], config: AppConfig) -> Bool {
         if JobStepQueue.hasFluxPromptAIJob(values) { return false }
         let prompt = values["prompt"] as? String ?? ""
-        let updated = AIPromptExitService.applyImageAIExit(prompt, config: config)
+        let merged = ImageGenMfluxPayloadBuilder.applyImagePromptRules(values: values, config: config)
+        let updated = merged["prompt"] as? String ?? ""
         guard updated != prompt else { return false }
         let recased = ImageGenPromptSentenceCase.afterPromptExit(updated)
         values["prompt"] = recased

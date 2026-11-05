@@ -120,6 +120,10 @@ enum ExitScriptUtils {
             let existing = env["PATH"] ?? ""
             env["PATH"] = pathPrefixes.joined(separator: ":") + (existing.isEmpty ? "" : ":" + existing)
         }
+        env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
+        env["LC_ALL"] = env["LC_ALL"] ?? "en_US.UTF-8"
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8:utf-8"
         return env
     }
 
