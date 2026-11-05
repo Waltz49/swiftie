@@ -260,6 +260,7 @@ struct ImageGenPanelShell: View {
                             compactSliderTracks: compactSliderTracks,
                             onValuesChanged: onValuesChanged
                         )
+                        .padding(.vertical, compactSliderTracks ? 4 : 0)
                     }
                     ImageGenFieldRenderer(
                         layout: filteredLayout,

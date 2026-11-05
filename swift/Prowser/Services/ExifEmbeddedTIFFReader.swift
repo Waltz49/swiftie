@@ -2,6 +2,9 @@ import Foundation
 
 /// Read EXIF UserComment from embedded TIFF (PNG ``eXIf``, JPEG APP1, WebP EXIF chunk) when ImageIO returns nothing.
 enum ExifEmbeddedTIFFReader {
+    private static let maxIFDEntries = 256
+    private static let maxTagByteCount = 16 * 1024 * 1024
+
     static func userComment(fromFile path: String) -> String? {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
         return userComment(fromImageData: data)
@@ -64,17 +67,24 @@ enum ExifEmbeddedTIFFReader {
 
     private static func userCommentParse(fromTIFF tiff: Data) -> String? {
         guard tiff.count >= 8 else { return nil }
+        guard isValidTIFFHeader(tiff) else { return nil }
         if let quick = quickUserCommentFromMinimalPiexifTIFF(tiff) {
             return quick
         }
         return genericUserComment(fromTIFF: tiff)
     }
 
+    private static func isValidTIFFHeader(_ tiff: Data) -> Bool {
+        let sig = tiff.prefix(2)
+        return sig == Data([0x49, 0x49]) || sig == Data([0x4D, 0x4D])
+    }
+
     private static func genericUserComment(fromTIFF tiff: Data) -> String? {
         let littleEndian = tiff.prefix(2) == Data([0x49, 0x49])
         guard let ifd0Offset = readUInt32(tiff, 4, littleEndian: littleEndian) else { return nil }
-        guard Int(ifd0Offset) >= 0, Int(ifd0Offset) + 2 <= tiff.count else { return nil }
-        guard let exifIFDOffset = pointerTag(in: tiff, ifdOffset: Int(ifd0Offset), tag: 0x8769, littleEndian: littleEndian)
+        let ifd0 = Int(ifd0Offset)
+        guard ifd0 >= 0, ifd0 + 2 <= tiff.count else { return nil }
+        guard let exifIFDOffset = pointerTag(in: tiff, ifdOffset: ifd0, tag: 0x8769, littleEndian: littleEndian)
         else { return nil }
         guard exifIFDOffset >= 0, exifIFDOffset + 2 <= tiff.count else { return nil }
         guard let payload = undefinedTag(in: tiff, ifdOffset: exifIFDOffset, tag: 0x9286, littleEndian: littleEndian)
@@ -90,7 +100,7 @@ enum ExifEmbeddedTIFFReader {
         guard readUInt16BE(tiff, 28) == 0x9286 else { return nil }
         guard readUInt16BE(tiff, 30) == 7 else { return nil }
         let count = readInt32BE(tiff, 32)
-        guard count > 0, count <= tiff.count else { return nil }
+        guard count > 0, count <= tiff.count, count <= maxTagByteCount else { return nil }
         let valueOffset = readInt32BE(tiff, 36)
         guard valueOffset >= 0, valueOffset + count <= tiff.count else { return nil }
         return decodeUserCommentPayload(tiff[valueOffset ..< (valueOffset + count)])
@@ -103,17 +113,12 @@ enum ExifEmbeddedTIFFReader {
     }
 
     private static func readUInt16BE(_ data: Data, _ offset: Int) -> Int {
-        guard offset >= 0, offset + 2 <= data.count else { return 0 }
-        let value = (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
+        guard let value = readUInt16(data, offset, littleEndian: false) else { return 0 }
         return Int(value)
     }
 
     private static func readInt32BE(_ data: Data, _ offset: Int) -> Int {
-        guard offset >= 0, offset + 4 <= data.count else { return 0 }
-        let value = (UInt32(data[offset]) << 24)
-            | (UInt32(data[offset + 1]) << 16)
-            | (UInt32(data[offset + 2]) << 8)
-            | UInt32(data[offset + 3])
+        guard let value = readUInt32(data, offset, littleEndian: false) else { return 0 }
         return Int(value)
     }
 
@@ -121,7 +126,9 @@ enum ExifEmbeddedTIFFReader {
         guard let raw = ifdEntryValue(in: tiff, ifdOffset: ifdOffset, tag: tag, littleEndian: littleEndian) else {
             return nil
         }
-        return Int(raw)
+        let offset = Int(raw)
+        guard offset >= 0, offset < tiff.count else { return nil }
+        return offset
     }
 
     private static func undefinedTag(
@@ -137,8 +144,9 @@ enum ExifEmbeddedTIFFReader {
             return entry.inlineData
         }
         let start = Int(entry.valueOffset)
+        guard start >= 0, entry.count >= 0, entry.count <= maxTagByteCount else { return nil }
         let end = start + entry.count
-        guard start >= 0, end <= tiff.count else { return nil }
+        guard end <= tiff.count else { return nil }
         return tiff[start..<end]
     }
 
@@ -153,11 +161,19 @@ enum ExifEmbeddedTIFFReader {
             return nil
         }
         if entry.count <= 4 {
-            var bytes = entry.inlineData
-            while bytes.count < 4 { bytes.append(0) }
-            return readUInt32(bytes, 0, littleEndian: littleEndian)
+            return readUInt32FromInline(entry.inlineData, littleEndian: littleEndian)
         }
         return entry.valueOffset
+    }
+
+    private static func readUInt32FromInline(_ inline: Data, littleEndian: Bool) -> UInt32? {
+        var bytes = Data()
+        bytes.reserveCapacity(4)
+        bytes.append(inline.prefix(4))
+        while bytes.count < 4 {
+            bytes.append(0)
+        }
+        return readUInt32(bytes, 0, littleEndian: littleEndian)
     }
 
     private static func ifdEntry(
@@ -167,19 +183,21 @@ enum ExifEmbeddedTIFFReader {
         littleEndian: Bool
     ) -> IFDEntry? {
         guard ifdOffset >= 0, ifdOffset + 2 <= tiff.count else { return nil }
-        let entryCountRaw = readUInt16(tiff, ifdOffset, littleEndian: littleEndian) ?? 0
-        guard entryCountRaw <= 256 else { return nil }
+        guard let entryCountRaw = readUInt16(tiff, ifdOffset, littleEndian: littleEndian) else { return nil }
+        guard entryCountRaw <= maxIFDEntries else { return nil }
         let entryCount = Int(entryCountRaw)
         var index = ifdOffset + 2
         for _ in 0..<entryCount {
-            guard index + 12 <= tiff.count else { return nil }
+            guard index >= 0, index + 12 <= tiff.count else { return nil }
             guard let entryTag = readUInt16(tiff, index, littleEndian: littleEndian) else {
                 return nil
             }
-            let count = Int(readUInt32(tiff, index + 4, littleEndian: littleEndian) ?? 0)
-            let valueOffset = readUInt32(tiff, index + 8, littleEndian: littleEndian) ?? 0
+            guard let countRaw = readUInt32(tiff, index + 4, littleEndian: littleEndian) else { return nil }
+            let count = Int(countRaw)
+            guard count >= 0, count <= maxTagByteCount else { return nil }
+            guard let valueOffset = readUInt32(tiff, index + 8, littleEndian: littleEndian) else { return nil }
             if entryTag == tag {
-                let inline = tiff[(index + 8)..<(index + 12)]
+                let inline = Data(tiff[(index + 8)..<(index + 12)])
                 return IFDEntry(count: count, valueOffset: valueOffset, inlineData: inline)
             }
             index += 12
@@ -189,29 +207,32 @@ enum ExifEmbeddedTIFFReader {
 
     private static func readUInt16(_ data: Data, _ offset: Int, littleEndian: Bool) -> UInt16? {
         guard offset >= 0, offset + 2 <= data.count else { return nil }
-        let b0 = UInt16(data[offset])
-        let b1 = UInt16(data[offset + 1])
-        return littleEndian ? (b1 << 8 | b0) : (b0 << 8 | b1)
+        guard let b0 = byteAt(data, offset), let b1 = byteAt(data, offset + 1) else { return nil }
+        return littleEndian ? (UInt16(b1) << 8 | UInt16(b0)) : (UInt16(b0) << 8 | UInt16(b1))
     }
 
     private static func readUInt32(_ data: Data, _ offset: Int, littleEndian: Bool) -> UInt32? {
         guard offset >= 0, offset + 4 <= data.count else { return nil }
-        let b0 = UInt32(data[offset])
-        let b1 = UInt32(data[offset + 1])
-        let b2 = UInt32(data[offset + 2])
-        let b3 = UInt32(data[offset + 3])
+        guard let b0 = byteAt(data, offset),
+              let b1 = byteAt(data, offset + 1),
+              let b2 = byteAt(data, offset + 2),
+              let b3 = byteAt(data, offset + 3) else { return nil }
         if littleEndian {
-            return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+            return UInt32(b0) | (UInt32(b1) << 8) | (UInt32(b2) << 16) | (UInt32(b3) << 24)
         }
-        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+        return (UInt32(b0) << 24) | (UInt32(b1) << 16) | (UInt32(b2) << 8) | UInt32(b3)
+    }
+
+    private static func byteAt(_ data: Data, _ offset: Int) -> UInt8? {
+        guard offset >= 0, offset < data.count else { return nil }
+        return data.withUnsafeBytes { raw in
+            guard offset < raw.count else { return nil }
+            return raw[offset]
+        }
     }
 
     private static func readUInt32BE(_ data: Data, _ offset: Int) -> Int {
-        guard offset >= 0, offset + 4 <= data.count else { return 0 }
-        let value = (UInt32(data[offset]) << 24)
-            | (UInt32(data[offset + 1]) << 16)
-            | (UInt32(data[offset + 2]) << 8)
-            | UInt32(data[offset + 3])
+        guard let value = readUInt32(data, offset, littleEndian: false) else { return 0 }
         return Int(value)
     }
 }

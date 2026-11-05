@@ -471,7 +471,61 @@ enum ExifService {
     }
 
     private static func deleteUserCommentImageIO(path: String) throws {
-        try writeUserCommentImageIO(path: path, text: "")
+        guard canWriteExif(path: path) else {
+            throw ExifError.unsupportedFormat
+        }
+        let url = URL(fileURLWithPath: path)
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        let mtime = attrs[.modificationDate] as? Date
+        let atime = attrs[.creationDate] as? Date
+
+        let ext = url.pathExtension.lowercased()
+        if ext == "webp" {
+            try deleteUserCommentInWebP(url: url, mtime: mtime, atime: atime)
+            return
+        }
+
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let uti = CGImageSourceGetType(source),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ExifError.readFailed
+        }
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        applyUserComment("", to: &properties)
+
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
+            .appendingPathExtension(url.pathExtension)
+        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
+            throw ExifError.writeFailed
+        }
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw ExifError.writeFailed }
+        try replaceWrittenFile(at: url, with: tempURL, mtime: mtime, atime: atime)
+    }
+
+    private static func deleteUserCommentInWebP(url: URL, mtime: Date?, atime: Date?) throws {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            throw ExifError.readFailed
+        }
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        applyUserComment("", to: &properties)
+
+        let exifRemaining = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        let hasExifTags = exifRemaining.map { !$0.isEmpty } ?? false
+        let hasGPS = properties[kCGImagePropertyGPSDictionary] != nil
+
+        let fileData = try Data(contentsOf: url)
+        if !hasExifTags && !hasGPS {
+            let output = try WebPImageWriter.dataWithoutExifChunk(webpData: fileData)
+            let tempURL = url.deletingLastPathComponent()
+                .appendingPathComponent(".prowser-exif-\(UUID().uuidString)")
+                .appendingPathExtension(url.pathExtension)
+            try output.write(to: tempURL, options: .atomic)
+            try replaceWrittenFile(at: url, with: tempURL, mtime: mtime, atime: atime)
+            return
+        }
+        try writeUserCommentWebP(url: url, text: "", mtime: mtime, atime: atime)
     }
 
     static func resetFileDateToExif(path: String) throws {

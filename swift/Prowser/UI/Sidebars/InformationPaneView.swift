@@ -36,6 +36,9 @@ struct InformationPaneView: View {
                     },
                     onReferenceLevel: { optionHeld in
                         handleLink(.refLevel(optionHeld: optionHeld))
+                    },
+                    onEditUserComment: {
+                        handleLink(.edit)
                     }
                 )
                 .environment(\.informationPaneScrollCoordinator, scrollCoordinator)

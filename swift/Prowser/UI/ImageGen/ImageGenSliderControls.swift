@@ -325,6 +325,10 @@ struct ImageGenFloatSliderRow: View {
             )
             .frame(width: valueControlWidth)
             if includesReset {
+                let trashIcons = ImageGenChrome.fieldResetTrashIcons(
+                    fieldKey: key,
+                    compactTrack: compactTrack
+                )
                 ImageGenFieldResetButton(
                     isActive: !ImageGenFieldResetLogic.matchesDefault(
                         current: values[key],
@@ -332,6 +336,10 @@ struct ImageGenFloatSliderRow: View {
                         kind: "float_slider",
                         step: step
                     ),
+                    normalName: trashIcons.normalName,
+                    hoverName: trashIcons.hoverName,
+                    fileExtension: trashIcons.normalExtension,
+                    hoverFileExtension: trashIcons.hoverExtension,
                     tooltip: "Reset to default",
                     action: resetToDefault
                 )

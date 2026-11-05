@@ -274,29 +274,38 @@ enum SettingsCollapsibleTitlePrefix {
 struct SettingsOutlinedGroupBox<Title: View, Content: View>: View {
     private let borderWidth: CGFloat = 2
     private let cornerRadius: CGFloat = 4
+    /// When false, the bordered box sizes to its content (image-gen custom size section).
+    var contentFillsAvailableWidth: Bool = true
 
     @ViewBuilder let title: () -> Title
     @ViewBuilder let content: () -> Content
 
     var body: some View {
+        let borderedContent = VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .padding(.horizontal, 6)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(SettingsDialogChrome.border, lineWidth: borderWidth)
+        }
+        .overlay(alignment: .topLeading) {
+            title()
+                .fixedSize(horizontal: true, vertical: false)
+                .offset(x: 8, y: -11)
+        }
+        .padding(.top, 11)
+
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                content()
-            }
-            .padding(.horizontal, 6)
-            .padding(.top, 10)
-            .padding(.bottom, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(SettingsDialogChrome.border, lineWidth: borderWidth)
-            }
-            .overlay(alignment: .topLeading) {
-                title()
+            if contentFillsAvailableWidth {
+                borderedContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                borderedContent
                     .fixedSize(horizontal: true, vertical: false)
-                    .offset(x: 8, y: -11)
             }
-            .padding(.top, 11)
         }
     }
 }

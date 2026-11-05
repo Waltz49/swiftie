@@ -29,7 +29,9 @@ struct ImageGenCustomSizeSection: View {
         ImageGenCollapsibleSection(
             title: headerTitle,
             isExpanded: $isExpanded,
-            tooltip: "Override output dimensions when enabled."
+            tooltip: "Override output dimensions when enabled.",
+            contentLeadingPadding: compactSliderTracks ? 0 : ImageGenInlineFieldLayout.controlIndent,
+            useSettingsOutlinedStyle: compactSliderTracks
         ) {
             if isExpanded {
                 HStack(alignment: .top, spacing: 6) {
@@ -221,13 +223,10 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private var headerTitle: String {
-        if usesOptionalCustomSize {
-            let base = isExpanded ? "Custom Size" : "Use Custom Size"
-            guard !isExpanded, let size = sourcePixelSize() else { return base }
+        let base = isExpanded ? "Custom Size" : "Use Custom Size"
+        if usesOptionalCustomSize, !isExpanded, let size = sourcePixelSize() {
             return "\(base) ( Current: \(size.width) x \(size.height) )"
         }
-        let base = isExpanded ? "Custom Size" : "Use Custom Size"
-        guard !isExpanded else { return base }
         let width = values["width"] as? Int ?? Int(widthSpec["reset_default"] as? Int ?? 1024)
         let height = values["height"] as? Int ?? Int(heightSpec["reset_default"] as? Int ?? 1024)
         return "\(base) ( Current: \(width) x \(height) )"

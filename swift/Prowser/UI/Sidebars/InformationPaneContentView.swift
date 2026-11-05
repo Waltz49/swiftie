@@ -7,6 +7,7 @@ struct InformationPaneContentView: View {
     let onToggleSection: (String, Bool) -> Void
     let onCopySeed: (String) -> Void
     let onReferenceLevel: (Bool) -> Void
+    let onEditUserComment: () -> Void
 
     private let bodyFontSize: CGFloat = 10
     private let filenameHeaderFontSize: CGFloat = 11
@@ -71,9 +72,17 @@ struct InformationPaneContentView: View {
     private func descriptionBlock(_ section: InformationDescriptionSection) -> some View {
         switch section.body {
         case .addUserComment:
-            Text("Add user comment")
-                .font(monospaceFont(bodyFontSize))
-                .foregroundStyle(colors.sidebarText)
+            Button(action: onEditUserComment) {
+                Text("Add user comment")
+                    .font(monospaceFont(bodyFontSize))
+                    .foregroundStyle(colors.currentImageBorder)
+                    .underline()
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .padding(.top, bodyFontSize + 4)
+            .help("Edit EXIF user comment (⇧⌘E)")
         case .blocks(let blocks):
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in

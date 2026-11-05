@@ -139,9 +139,9 @@ enum ImageGenChrome {
         var hoverExtension: String
     }
 
-    /// Unified dialog Steps / Copies use ``red_trash_icon.png`` (opaque white backing), not the cutout webp.
+    /// Unified dialog Steps / Copies / Guidance use ``red_trash_icon.png`` (opaque white backing), not the cutout webp.
     static func fieldResetTrashIcons(fieldKey: String, compactTrack: Bool) -> FieldResetTrashIcons {
-        if compactTrack, fieldKey == "copies" || fieldKey == "steps" {
+        if compactTrack, fieldKey == "copies" || fieldKey == "steps" || fieldKey == "guidance_scale" {
             return FieldResetTrashIcons(
                 normalName: "red_trash_icon",
                 hoverName: "trash_icon_hover",

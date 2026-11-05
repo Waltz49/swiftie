@@ -90,6 +90,37 @@ enum WebPImageWriter {
         try muxExifChunk(into: webpData, exif: exifTiff)
     }
 
+    /// Remove the WebP ``EXIF`` chunk (e.g. after clearing the only metadata tag).
+    static func dataWithoutExifChunk(webpData: Data) throws -> Data {
+        var assembled = Data()
+        let muxError: WebPMuxError = webpData.withUnsafeBytes { webpBuffer in
+            guard let webpBase = webpBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return WEBP_MUX_INVALID_ARGUMENT
+            }
+            var webpInput = WebPData(bytes: webpBase, size: webpData.count)
+            guard let mux = WebPMuxCreate(&webpInput, 1) else {
+                return WEBP_MUX_BAD_DATA
+            }
+            defer { WebPMuxDelete(mux) }
+
+            guard "EXIF".withCString({ WebPMuxDeleteChunk(mux, $0) }) == WEBP_MUX_OK else {
+                return WEBP_MUX_NOT_FOUND
+            }
+
+            var output = WebPData()
+            guard WebPMuxAssemble(mux, &output) == WEBP_MUX_OK, let outBytes = output.bytes else {
+                return WEBP_MUX_BAD_DATA
+            }
+            assembled = Data(bytes: outBytes, count: output.size)
+            WebPDataClear(&output)
+            return WEBP_MUX_OK
+        }
+        guard muxError == WEBP_MUX_OK || muxError == WEBP_MUX_NOT_FOUND else {
+            throw WriteError.muxFailed
+        }
+        return muxError == WEBP_MUX_NOT_FOUND ? webpData : assembled
+    }
+
     private static func muxExifChunk(into webpData: Data, exif: Data) throws -> Data {
         var assembled = Data()
         let muxError: WebPMuxError = webpData.withUnsafeBytes { webpBuffer in
