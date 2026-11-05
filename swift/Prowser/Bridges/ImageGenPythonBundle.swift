@@ -35,12 +35,38 @@ enum ImageGenPythonBundle {
             .appendingPathComponent(bundleResourceName, isDirectory: true)
     }
 
+    /// Colon-separated ``PYTHONPATH`` for worker subprocesses.
+    ///
+    /// Always includes ``bundleRoot`` (``imagegen_plugins``, ``config``, …).
+    /// LoRA probe CNN compare imports ``search.cnn_image_similarity_sorter`` (same stack as ⌘K).
+    /// When ``bundleRoot/search`` is vendored (sync script), that alone is enough; otherwise
+    /// append the monorepo root (``swift/ImageGenPython`` → parent ``swift`` → repo root).
+    nonisolated static func pythonPath(forBundleRoot bundleRoot: URL) -> String {
+        var entries = [bundleRoot.path]
+        let vendoredSearch = bundleRoot.appendingPathComponent("search", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: vendoredSearch.path),
+           let repoRoot = monorepoRootForBundledDevLayout(imageGenRoot: bundleRoot) {
+            entries.append(repoRoot.path)
+        }
+        return entries.joined(separator: ":")
+    }
+
+    /// ``…/swift/ImageGenPython`` in the monorepo; nil for shipped ``Resources/.../ImageGenPython`` only trees.
+    nonisolated private static func monorepoRootForBundledDevLayout(imageGenRoot: URL) -> URL? {
+        let swiftPackage = imageGenRoot.deletingLastPathComponent()
+        guard swiftPackage.lastPathComponent == "swift" else { return nil }
+        let repoRoot = swiftPackage.deletingLastPathComponent()
+        let searchDir = repoRoot.appendingPathComponent("search", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: searchDir.path) else { return nil }
+        return repoRoot
+    }
+
     nonisolated static func applyPythonEnvironment(
         _ env: inout [String: String],
         bundleRoot: URL,
         profilePath: String?
     ) {
-        env["PYTHONPATH"] = bundleRoot.path
+        env["PYTHONPATH"] = pythonPath(forBundleRoot: bundleRoot)
         env["PYTHONUNBUFFERED"] = "1"
         if let profilePath, !profilePath.isEmpty {
             env["PROWSER_PROFILE"] = profilePath

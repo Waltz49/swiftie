@@ -14,6 +14,24 @@ _retained_lock = threading.Lock()
 _cnn_sorter = None
 _cnn_sorter_lock = threading.Lock()
 
+_headless_resnet = None
+_headless_resnet_lock = threading.Lock()
+
+
+@dataclass
+class _ProbeCnnEnvironment:
+    """Per Check LoRAs run (see ``reset_probe_cnn_environment``)."""
+
+    compare_mode: str = ""  # full | headless | unavailable
+    sorter_error: str = ""
+    headless_error: str = ""
+    headless_fallback_logged: bool = False
+    user_warning: str = ""
+
+
+_probe_cnn_env = _ProbeCnnEnvironment()
+_probe_cnn_env_lock = threading.Lock()
+
 # ResNet cosine similarity above this => baseline and with-LoRA renders match (no effect).
 # Identical copies ~1.0; strong LoRA effects are often <0.9 (e.g. pillory ~0.6).
 _DEFAULT_CNN_IDENTICAL_MIN_COSINE = 0.98
@@ -120,6 +138,207 @@ def format_probe_effect_metrics(delta: ProbeImageDelta) -> str:
     )
 
 
+def reset_probe_cnn_environment() -> None:
+    """Clear probe CNN environment tracking at the start of a Check LoRAs run."""
+    global _probe_cnn_env
+    with _probe_cnn_env_lock:
+        _probe_cnn_env = _ProbeCnnEnvironment()
+
+
+def _probe_cnn_env_snapshot() -> _ProbeCnnEnvironment:
+    with _probe_cnn_env_lock:
+        return _ProbeCnnEnvironment(
+            compare_mode=_probe_cnn_env.compare_mode,
+            sorter_error=_probe_cnn_env.sorter_error,
+            headless_error=_probe_cnn_env.headless_error,
+            headless_fallback_logged=_probe_cnn_env.headless_fallback_logged,
+            user_warning=_probe_cnn_env.user_warning,
+        )
+
+
+def _set_probe_cnn_compare_mode(mode: str) -> None:
+    with _probe_cnn_env_lock:
+        if mode == "unavailable":
+            _probe_cnn_env.compare_mode = "unavailable"
+        elif _probe_cnn_env.compare_mode != "unavailable":
+            if mode == "full" and not _probe_cnn_env.compare_mode:
+                _probe_cnn_env.compare_mode = "full"
+            elif mode == "headless":
+                _probe_cnn_env.compare_mode = "headless"
+
+
+def note_probe_cnn_sorter_unavailable(exc: BaseException) -> None:
+    msg = f"{type(exc).__name__}: {exc}"
+    with _probe_cnn_env_lock:
+        if not _probe_cnn_env.sorter_error:
+            _probe_cnn_env.sorter_error = msg
+
+
+def note_probe_cnn_headless_active() -> None:
+    _set_probe_cnn_compare_mode("headless")
+    with _probe_cnn_env_lock:
+        if _probe_cnn_env.headless_fallback_logged:
+            return
+        _probe_cnn_env.headless_fallback_logged = True
+    snap = _probe_cnn_env_snapshot()
+    reason = snap.sorter_error or "unknown"
+    line = (
+        "[Check LoRAs] Probe CNN: using headless ResNet in the imagegen venv "
+        f"(full similarity stack unavailable: {reason})."
+    )
+    print(line)
+
+
+def note_probe_cnn_fully_unavailable(exc: BaseException) -> None:
+    msg = f"{type(exc).__name__}: {exc}"
+    with _probe_cnn_env_lock:
+        _probe_cnn_env.headless_error = msg
+        _probe_cnn_env.compare_mode = "unavailable"
+    print(f"[Check LoRAs] Probe CNN unavailable: {msg}")
+
+
+def note_probe_cnn_full_stack() -> None:
+    _set_probe_cnn_compare_mode("full")
+
+
+def build_probe_cnn_environment_user_warning() -> str:
+    """User-facing explanation when CNN compare cannot run (cross-family false negatives)."""
+    snap = _probe_cnn_env_snapshot()
+    if snap.compare_mode != "unavailable":
+        return ""
+    parts = [
+        "Cross-family LoRA probes need ResNet CNN comparison between baseline and "
+        "with-LoRA images. That compare could not run in the image generation "
+        "Python environment, so those probes were marked failed even when renders "
+        "look different.",
+        "",
+    ]
+    if snap.headless_error:
+        parts.append(f"Headless ResNet error: {snap.headless_error}")
+    if snap.sorter_error:
+        parts.append(f"Full similarity stack error: {snap.sorter_error}")
+    parts.extend(
+        [
+            "",
+            "Check that torch and torchvision work in your imagegen venv "
+            "(Settings → Image Generation). See the Test LoRAs debug report "
+            "(check_loras_last_run.txt in your profile logs) for details.",
+        ]
+    )
+    return "\n".join(parts).strip()
+
+
+def build_probe_cnn_environment_report_lines() -> List[str]:
+    snap = _probe_cnn_env_snapshot()
+    if not snap.compare_mode:
+        return []
+    lines = ["=== Probe CNN environment ==="]
+    if snap.compare_mode == "full":
+        lines.append("Mode: full (search.cnn_image_similarity_sorter)")
+    elif snap.compare_mode == "headless":
+        lines.append("Mode: headless ResNet (imagegen venv)")
+        if snap.sorter_error:
+            lines.append(f"Full stack unavailable: {snap.sorter_error}")
+    else:
+        lines.append("Mode: unavailable — CNN compare did not run")
+        if snap.sorter_error:
+            lines.append(f"Full stack error: {snap.sorter_error}")
+        if snap.headless_error:
+            lines.append(f"Headless ResNet error: {snap.headless_error}")
+    warning = build_probe_cnn_environment_user_warning()
+    if warning:
+        lines.append("")
+        lines.extend(warning.splitlines())
+    lines.append("")
+    return lines
+
+
+def build_probe_cnn_environment_summary_line() -> str:
+    snap = _probe_cnn_env_snapshot()
+    if snap.compare_mode == "full":
+        return "Probe CNN: full similarity stack"
+    if snap.compare_mode == "headless":
+        return (
+            "Probe CNN: headless ResNet (full stack unavailable"
+            + (f": {snap.sorter_error}" if snap.sorter_error else "")
+            + ")"
+        )
+    if snap.compare_mode == "unavailable":
+        detail = snap.headless_error or snap.sorter_error or "unknown error"
+        return f"Probe CNN: unavailable ({detail})"
+    return ""
+
+
+def record_probe_cnn_incompatible_probe_failure(*, lora_label: str, model_label: str) -> None:
+    """
+    Call when a cross-family (or CNN-required) probe fails because cnn_cosine is missing.
+    Sets a one-shot user warning for the UI and log/report.
+    """
+    warning = build_probe_cnn_environment_user_warning()
+    if not warning:
+        with _probe_cnn_env_lock:
+            if not _probe_cnn_env.user_warning:
+                _probe_cnn_env.user_warning = (
+                    "Cross-family LoRA probes require ResNet CNN comparison, but CNN "
+                    "similarity was unavailable for this run. See the debug report "
+                    "(check_loras_last_run.txt) for details."
+                )
+    else:
+        with _probe_cnn_env_lock:
+            if not _probe_cnn_env.user_warning:
+                _probe_cnn_env.user_warning = warning
+    sync_probe_cnn_environment_to_run_stats()
+    print(
+        f"[Check LoRAs] Probe CNN required but missing for {lora_label!r} on "
+        f"{model_label} — {build_probe_cnn_environment_summary_line()}"
+    )
+
+
+def sync_probe_cnn_environment_to_run_stats() -> None:
+    """Mirror environment state onto ``LoraCheckStats`` for progress + final result."""
+    try:
+        from imagegen_plugins.lora_compatibility_checker import _probe_run_context
+    except ImportError:
+        return
+    stats = getattr(_probe_run_context, "check_stats", None)
+    if stats is None:
+        return
+    snap = _probe_cnn_env_snapshot()
+    stats.probe_cnn_compare_mode = snap.compare_mode
+    stats.probe_cnn_environment_summary = build_probe_cnn_environment_summary_line()
+    log_lines = build_probe_cnn_environment_report_lines()
+    stats.probe_cnn_environment_log = "\n".join(log_lines).strip()
+    if snap.user_warning:
+        stats.probe_cnn_user_warning = snap.user_warning
+
+
+def finalize_probe_cnn_environment_on_result(result: Any) -> None:
+    """Attach report lines and sync stats at end of a Check LoRAs run."""
+    sync_probe_cnn_environment_to_run_stats()
+    lines = build_probe_cnn_environment_report_lines()
+    if lines:
+        result.probe_cnn_environment_lines = lines
+    snap = _probe_cnn_env_snapshot()
+    stats = getattr(result, "stats", None)
+    if stats is None:
+        return
+    if snap.user_warning:
+        stats.probe_cnn_user_warning = snap.user_warning
+    elif int(getattr(stats, "probe_effect_cnn_required_fail", 0) or 0) > 0:
+        stats.probe_cnn_user_warning = (
+            "Cross-family LoRA probes require ResNet CNN comparison, but CNN "
+            "similarity was unavailable for this run. See the debug report "
+            "(check_loras_last_run.txt) for details."
+        )
+
+
+def _configured_resnet_model_name() -> str:
+    from config import get_config
+
+    settings = get_config().load_settings()
+    return str(settings.get("resnet_model") or "resnet18")
+
+
 def _probe_cnn_sorter():
     """Lazy ResNet feature extractor (same stack as ⌘K similarity search)."""
     global _cnn_sorter
@@ -128,8 +347,7 @@ def _probe_cnn_sorter():
             return _cnn_sorter
         from config import get_config
 
-        settings = get_config().load_settings()
-        resnet_model = str(settings.get("resnet_model") or "resnet18")
+        resnet_model = _configured_resnet_model_name()
         cache_dir = str(get_config().image_recognition_cache_dir)
         from search.cnn_image_similarity_sorter import CNNImageSimilaritySorter
 
@@ -139,6 +357,110 @@ def _probe_cnn_sorter():
             resnet_model=resnet_model,
         )
         return _cnn_sorter
+
+
+def _headless_probe_resnet():
+    """
+    Headless ResNet features for Check LoRAs (imagegen venv: no PySide6 / search package).
+
+    Uses the same torchvision ResNet + preprocessing as ``CNNImageSimilaritySorter``.
+    """
+    global _headless_resnet
+    with _headless_resnet_lock:
+        if _headless_resnet is not None:
+            return _headless_resnet
+        import torch
+        import torch.nn.functional as F
+        from PIL import Image
+        from torchvision import models, transforms
+        from torchvision.models import ResNet101_Weights, ResNet18_Weights, ResNet50_Weights
+
+        from pil_image_io import register_heif_opener
+
+        register_heif_opener()
+
+        model_name = _configured_resnet_model_name().lower()
+        if model_name == "resnet50":
+            model = models.resnet50(weights=ResNet50_Weights.DEFAULT)
+        elif model_name == "resnet101":
+            model = models.resnet101(weights=ResNet101_Weights.DEFAULT)
+        else:
+            model = models.resnet18(weights=ResNet18_Weights.DEFAULT)
+
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+        elif torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
+
+        model = model.to(device)
+        model.eval()
+        feature_extractor = torch.nn.Sequential(*(list(model.children())[:-1]))
+        feature_extractor.eval()
+        for param in feature_extractor.parameters():
+            param.requires_grad = False
+
+        transform = transforms.Compose(
+            [
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.Lambda(lambda img: img.convert("RGB")),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ]
+        )
+
+        bundle = {
+            "device": device,
+            "feature_extractor": feature_extractor,
+            "transform": transform,
+            "F": F,
+            "torch": torch,
+            "Image": Image,
+        }
+        _headless_resnet = bundle
+        return bundle
+
+
+def _headless_probe_feature(path: str):
+    bundle = _headless_probe_resnet()
+    torch = bundle["torch"]
+    Image = bundle["Image"]
+    try:
+        with Image.open(path) as img:
+            tensor = bundle["transform"](img)
+    except OSError:
+        return None
+    tensor = tensor.unsqueeze(0).to(bundle["device"])
+    with torch.no_grad():
+        feat = bundle["feature_extractor"](tensor)
+        feat = feat.view(feat.size(0), -1).squeeze(0)
+    return feat
+
+
+def _measure_probe_cnn_cosine_via_sorter(path_a: str, path_b: str) -> Optional[float]:
+    sorter = _probe_cnn_sorter()
+    feat_a = sorter._get_feature(path_a)
+    feat_b = sorter._get_feature(path_b)
+    if feat_a is None or feat_b is None:
+        return None
+    return float(sorter._compute_similarity(feat_a, feat_b))
+
+
+def _measure_probe_cnn_cosine_headless(path_a: str, path_b: str) -> Optional[float]:
+    feat_a = _headless_probe_feature(path_a)
+    feat_b = _headless_probe_feature(path_b)
+    if feat_a is None or feat_b is None:
+        return None
+    bundle = _headless_probe_resnet()
+    F = bundle["F"]
+    if feat_a.device != feat_b.device:
+        feat_b = feat_b.to(feat_a.device)
+    return float(F.cosine_similarity(feat_a, feat_b, dim=0).item())
 
 
 def measure_probe_cnn_cosine(path_a: str, path_b: str) -> Optional[float]:
@@ -152,14 +474,24 @@ def measure_probe_cnn_cosine(path_a: str, path_b: str) -> Optional[float]:
     if not os.path.isfile(path_a) or not os.path.isfile(path_b):
         return None
     try:
-        sorter = _probe_cnn_sorter()
-        feat_a = sorter._get_feature(path_a)
-        feat_b = sorter._get_feature(path_b)
-        if feat_a is None or feat_b is None:
-            return None
-        return float(sorter._compute_similarity(feat_a, feat_b))
+        value = _measure_probe_cnn_cosine_via_sorter(path_a, path_b)
+        note_probe_cnn_full_stack()
+        sync_probe_cnn_environment_to_run_stats()
+        return value
     except Exception as exc:
-        print(f"[Check LoRAs] CNN probe compare failed: {exc}")
+        note_probe_cnn_sorter_unavailable(exc)
+        print(
+            f"[Check LoRAs] CNN probe compare (similarity sorter) unavailable: {exc}; "
+            "using headless ResNet"
+        )
+    try:
+        value = _measure_probe_cnn_cosine_headless(path_a, path_b)
+        note_probe_cnn_headless_active()
+        sync_probe_cnn_environment_to_run_stats()
+        return value
+    except Exception as exc:
+        note_probe_cnn_fully_unavailable(exc)
+        sync_probe_cnn_environment_to_run_stats()
         return None
 
 

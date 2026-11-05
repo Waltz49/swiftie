@@ -61,6 +61,10 @@ echo "Syncing imagegen bundle: $REPO_ROOT -> $DEST"
 
 copy_dir imagegen_plugins
 
+# LoRA probe effect compare (ResNet CNN) and other headless imports from monorepo root.
+copy_dir search
+copy_dir files
+
 # Swift app does not bundle chat UI; set SYNC_IMAGEGEN_MINIMAL=1 to omit chat_plugins/theme.
 if [[ "${SYNC_IMAGEGEN_MINIMAL:-0}" != "1" ]]; then
   copy_dir chat_plugins

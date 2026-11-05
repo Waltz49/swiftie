@@ -1,13 +1,23 @@
 import SwiftUI
 
 struct CheckLorasResultsSheetView: View {
+    @Environment(AppState.self) private var appState
     @Environment(\.closeDialog) private var closeDialog
     let bodyText: String
     var cancelledBanner: String?
 
+    private var fullCopyText: String {
+        var parts: [String] = []
+        if let cancelledBanner, !cancelledBanner.isEmpty {
+            parts.append(cancelledBanner)
+        }
+        parts.append(bodyText)
+        return parts.joined(separator: "\n")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Changes from this Test LoRAs run:")
+            Text("Test LoRAs results:")
                 .foregroundStyle(.secondary)
             if let cancelledBanner, !cancelledBanner.isEmpty {
                 Text(cancelledBanner)
@@ -21,9 +31,17 @@ struct CheckLorasResultsSheetView: View {
                     .textSelection(.enabled)
             }
             .frame(minHeight: 360)
-            DialogButtonRow([
-                DialogButton("OK", isDefault: true, isCancel: true) { closeDialog() },
-            ])
+            DialogButtonRow(
+                [
+                    DialogButton("OK", isDefault: true, isCancel: true) { closeDialog() },
+                ],
+                leadingButtons: [
+                    DialogButton("Copy", id: "copy") {
+                        appState.copyTextToClipboard(fullCopyText)
+                    },
+                ],
+                focusDefaultOnAppear: true
+            )
         }
         .padding(20)
         .themeDialogStyle()

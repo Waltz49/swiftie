@@ -966,6 +966,36 @@ final class AppState {
         }
     }
 
+    func enableCompatibleLorasForAllModels() {
+        Task { @MainActor in
+            guard workers.lora.isAvailable else {
+                status.show("LoRA catalog is not available")
+                return
+            }
+            do {
+                let result = try await workers.lora.enableCompatibleLorasForAllModels()
+                NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
+                let lines = result.perModel.map { "  \($0.displayName): \($0.enabledCount) enabled" }
+                let body = ([
+                    "Create-menu LoRAs are enabled for every probe-pass entry on each base model "
+                        + "(Settings → LoRA).",
+                    "",
+                    "Newly checked: \(result.newlyEnabledCount)",
+                    "",
+                ] + lines).joined(separator: "\n")
+                StyledMessageDialog.showInformation(
+                    title: "Enable Compatible LoRAs",
+                    message: body
+                )
+            } catch {
+                StyledMessageDialog.showWarning(
+                    title: "Enable Compatible LoRAs",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
     func loadRandomImagesFromRecents(count: Int = 200) {
         let recent = config.recentDirectories(limit: 20)
         let searchDirs = uniqueTopLevelDirectories(from: recent, limit: 5)
@@ -1876,7 +1906,7 @@ final class AppState {
             }
         ) {
             if let prescan = checkLorasFlow.optionsPrescan {
-                CheckLorasOptionsDialogHost(prescan: prescan, appConfig: config)
+                CheckLorasOptionsDialogHost(prescan: prescan)
             }
         }
         syncDialog(

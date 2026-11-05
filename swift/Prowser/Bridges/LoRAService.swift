@@ -50,6 +50,11 @@ struct LoRASettingsModel: Identifiable, Equatable {
     var id: String { modelKey }
 }
 
+struct EnableCompatibleLorasResult {
+    var newlyEnabledCount: Int
+    var perModel: [(displayName: String, enabledCount: Int)]
+}
+
 struct LoRACatalogEntry: Identifiable, Equatable {
     var loraID: String
     var displayName: String
@@ -156,6 +161,8 @@ struct CheckLorasProbeChoice: Equatable, Identifiable {
     var label: String
     var displayName: String
     var fromDownloads: Bool
+    /// Absolute weights path when provided by prescan (for selection key aliasing).
+    var weightsPath: String
     var id: String { key }
 
     static func fromDictionary(_ dict: [String: Any]) -> CheckLorasProbeChoice? {
@@ -164,7 +171,8 @@ struct CheckLorasProbeChoice: Equatable, Identifiable {
             key: key,
             label: dict["label"] as? String ?? key,
             displayName: dict["display_name"] as? String ?? dict["label"] as? String ?? key,
-            fromDownloads: dict["from_downloads"] as? Bool ?? false
+            fromDownloads: dict["from_downloads"] as? Bool ?? false,
+            weightsPath: dict["weights_path"] as? String ?? ""
         )
     }
 }
@@ -195,11 +203,16 @@ struct CheckLorasOptions: Equatable {
     var checkCrossFamilies: Bool
 
     static func fromDictionary(_ dict: [String: Any]) -> CheckLorasOptions {
-        CheckLorasOptions(
+        var loraScope = dict["lora_scope"] as? String ?? loraScopeAll
+        let selectedLoraKeys = dict["selected_lora_keys"] as? [String] ?? []
+        if loraScope == loraScopeSelected && selectedLoraKeys.isEmpty {
+            loraScope = loraScopeAll
+        }
+        return CheckLorasOptions(
             modelScope: dict["model_scope"] as? String ?? modelScopeAll,
             selectedModelKeys: dict["selected_model_keys"] as? [String] ?? [],
-            loraScope: dict["lora_scope"] as? String ?? loraScopeAll,
-            selectedLoraKeys: dict["selected_lora_keys"] as? [String] ?? [],
+            loraScope: loraScope,
+            selectedLoraKeys: selectedLoraKeys,
             registrationMode: dict["registration_mode"] as? String ?? registrationIgnorePrevious,
             probePrompt: normalizedProbePrompt(dict["probe_prompt"] as? String ?? ""),
             skipUnchanged: dict["skip_unchanged"] as? Bool ?? true,
@@ -239,6 +252,8 @@ struct CheckLorasRunResult: Equatable {
     var probesDone: Int
     var resultsText: String
     var reportPaths: [String]
+    /// Set when cross-family probes fail because CNN compare could not run in the imagegen venv.
+    var probeCnnUserWarning: String
 }
 
 /// Native LoRA catalog + settings; Python subprocess only for import / Check LoRAs probes.
@@ -380,6 +395,32 @@ final class LoRAService {
         if !modelKey.isEmpty, let config {
             config.setImagegenLoraModelKey(modelKey)
         }
+    }
+
+    /// Enable every probe-pass LoRA on each Settings → LoRA base model (Create-menu checkboxes).
+    func enableCompatibleLorasForAllModels() async throws -> EnableCompatibleLorasResult {
+        let store = try store()
+        let lc = store.load()
+        var byModel: [String: LoRAModelDraftSlice] = [:]
+        var newlyEnabled = 0
+        var perModel: [(displayName: String, enabledCount: Int)] = []
+        for model in LoRAModelRegistry.modelsForSettings() {
+            let modelKey = model.modelKey
+            let slice = LoRACatalogSettings.modelState(lc: lc, modelKey: modelKey)
+            let deleted = Set(slice.deletedIDs)
+            let compatible = LoRACatalog.compatibleLoraIDsForSettingsModel(lc: lc, modelKey: modelKey)
+                .filter { !deleted.contains($0) }
+            let previous = Set(slice.enabledIDs)
+            newlyEnabled += Set(compatible).subtracting(previous).count
+            byModel[modelKey] = LoRAModelDraftSlice(
+                enabledIDs: compatible,
+                deletedIDs: slice.deletedIDs
+            )
+            let label = model.displayName.split(separator: "/").last.map(String.init) ?? model.displayName
+            perModel.append((displayName: label, enabledCount: compatible.count))
+        }
+        LoRACatalogPersistence.saveCatalogState(byModel: byModel, store: store)
+        return EnableCompatibleLorasResult(newlyEnabledCount: newlyEnabled, perModel: perModel)
     }
 
     func choicesForPlugin(pluginID: String, values: [String: Any]) async throws -> LoRAPluginChoices {
@@ -716,13 +757,6 @@ final class LoRAService {
         }
     }
 
-    func checkLorasSaveOptions(options: CheckLorasOptions) async throws {
-        _ = try await opsRequest([
-            "command": "check_loras_save_options",
-            "options": options.bridgeDictionary(),
-        ])
-    }
-
     func checkLorasPrepare(options: CheckLorasOptions) async throws -> CheckLorasPrepareResult {
         let result = try await opsRequest(
             ["command": "check_loras_prepare", "options": options.bridgeDictionary()],
@@ -750,7 +784,8 @@ final class LoRAService {
             cancelled: result["cancelled"] as? Bool ?? false,
             probesDone: (result["probes_done"] as? NSNumber)?.intValue ?? 0,
             resultsText: result["results_text"] as? String ?? "",
-            reportPaths: result["report_paths"] as? [String] ?? []
+            reportPaths: result["report_paths"] as? [String] ?? [],
+            probeCnnUserWarning: (result["probe_cnn_user_warning"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         )
     }
 

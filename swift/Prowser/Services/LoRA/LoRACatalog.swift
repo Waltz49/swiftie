@@ -180,4 +180,12 @@ enum LoRACatalog {
         if ms[entry.loraID] != nil { return "fail" }
         return "unknown"
     }
+
+    /// LoRA IDs that show as “Works with …” on Settings → LoRA for ``modelKey`` (probe pass).
+    static func compatibleLoraIDsForSettingsModel(lc: [String: Any], modelKey: String) -> [String] {
+        settingsEntries(lc: lc, modelKey: modelKey, draftByModel: nil)
+            .filter { probeStateForModel(entry: $0, modelKey: modelKey, lc: lc) == "pass" }
+            .map(\.loraID)
+            .sorted()
+    }
 }

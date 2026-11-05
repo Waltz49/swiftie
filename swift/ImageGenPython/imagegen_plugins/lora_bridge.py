@@ -1137,17 +1137,30 @@ def _check_loras_choice_to_dict(choice) -> Dict[str, Any]:
 
 
 def _check_loras_nothing_to_probe_message(prepared, options) -> str:
+    from imagegen_plugins.lora_compatibility_checker import LORA_SCOPE_SELECTED
+
     plan_stats = prepared.stats
+    scope_note = ""
+    if options.lora_scope == LORA_SCOPE_SELECTED and options.selected_lora_keys:
+        scope_note = (
+            f"LoRAs selected in options: {len(options.selected_lora_keys)}\n"
+        )
     return (
         "Nothing to probe with the current options.\n\n"
+        f"{scope_note}"
         f"Catalog candidates considered: {len(prepared.candidates)}\n"
+        f"LoRAs in probe plan: {plan_stats.loras_total}\n"
+        f"Probe pairs in plan: {plan_stats.progress_pairs_total}\n"
         f"Skipped (not on disk): {plan_stats.skipped_not_on_disk}\n"
         f"Weight files discovered: {plan_stats.files_discovered}\n"
         f"Downloads scanned: {plan_stats.downloads_scanned}\n"
         f"Unchanged (history): {plan_stats.skipped_unchanged}\n"
-        f"Models in plan: {plan_stats.models_total}\n"
+        f"Installed models in scope: {plan_stats.models_total}\n"
         f"Probes planned: {plan_stats.probes_total} GPU · "
         f"{plan_stats.skipped_unchanged_probes} history\n\n"
+        "If you selected specific LoRAs, try toggling them again (keys can change "
+        "after a LoRA is registered). Turn off “Skip unchanged weights” to force "
+        "new GPU probes, or adjust models / registration options.\n\n"
         "Adjust options, download LoRA weights (or place .safetensors in "
         "cache or ~/Downloads), or install a base model, then try again."
     )
@@ -1189,13 +1202,32 @@ def _execute_check_loras_prepare(cmd: Dict[str, Any], job_id: str) -> Dict[str, 
 
     from config import get_config
     from imagegen_plugins.lora_compatibility_checker import (
+        LORA_SCOPE_SELECTED,
+        MODEL_SCOPE_SELECTED,
         PreparedLoraProbePlan,
         normalize_check_loras_probe_prompt,
-        persist_check_loras_options,
         plan_disk_lora_probes,
     )
 
     options = _check_loras_options_from_dict(cmd.get("options") or {})
+    if options.model_scope == MODEL_SCOPE_SELECTED and not options.selected_model_keys:
+        return {
+            "type": "result",
+            "job_id": job_id,
+            "command": "check_loras_prepare",
+            "success": False,
+            "cancelled": False,
+            "message": "Select at least one base model, or choose All models.",
+        }
+    if options.lora_scope == LORA_SCOPE_SELECTED and not options.selected_lora_keys:
+        return {
+            "type": "result",
+            "job_id": job_id,
+            "command": "check_loras_prepare",
+            "success": False,
+            "cancelled": False,
+            "message": "Select at least one LoRA, or choose All discovered LoRAs.",
+        }
     if _check_loras_cancel_flag[0]:
         return {
             "type": "result",
@@ -1205,7 +1237,6 @@ def _execute_check_loras_prepare(cmd: Dict[str, Any], job_id: str) -> Dict[str, 
             "cancelled": True,
         }
     try:
-        persist_check_loras_options(options)
         cfg = get_config().load_settings()
         candidates, plan, plan_stats = plan_disk_lora_probes(
             cfg, dedupe=True, options=options
@@ -1366,7 +1397,9 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
             )
         else:
             report_paths = apply_lora_check_result(result)
-            results_text = format_check_loras_results_text(result, report_paths)
+            results_text = format_check_loras_results_text(
+                result, report_paths, options=options
+            )
 
         changes = [
             {
@@ -1394,6 +1427,7 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
                 "elapsed_seconds": result.elapsed_seconds,
                 "results_text": results_text,
                 "report_paths": report_paths,
+                "probe_cnn_user_warning": (result.stats.probe_cnn_user_warning or "").strip(),
             }
         )
     except Exception as exc:

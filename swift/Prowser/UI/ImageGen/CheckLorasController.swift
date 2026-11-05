@@ -13,6 +13,21 @@ enum CheckLorasController {
         Task { await begin(from: appState) }
     }
 
+    static func showPreviousReport(from appState: AppState) {
+        guard let saved = CheckLorasPreviousReport.load(profilePaths: appState.config.profilePaths) else {
+            StyledMessageDialog.showInformation(
+                title: "Test LoRAs",
+                message: "No saved Test LoRAs results yet. Run Test LoRAs first."
+            )
+            return
+        }
+        appState.checkLorasFlow.results = CheckLorasFlowState.ResultsPresentation(
+            body: saved.body,
+            cancelledBanner: saved.cancelledBanner
+        )
+        appState.syncAuxiliaryDialogs()
+    }
+
     private static func begin(from appState: AppState) async {
         let bridge = appState.workers.lora
         guard bridge.pythonOpsAvailable else {
@@ -127,12 +142,26 @@ enum CheckLorasController {
             )
             progress.show()
 
+            var didShowProbeCnnEnvironmentWarning = false
+            func maybeShowProbeCnnEnvironmentWarning(from stats: [String: Any]) {
+                guard !didShowProbeCnnEnvironmentWarning else { return }
+                let warning = (stats["probe_cnn_user_warning"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !warning.isEmpty else { return }
+                didShowProbeCnnEnvironmentWarning = true
+                StyledMessageDialog.showWarning(
+                    title: "Test LoRAs — probe compare",
+                    message: warning
+                )
+            }
+
             let runStart = Date()
             let gpuPhaseClock = GpuPhaseClock()
             let progressSnapshot = CheckLorasProgressSnapshot()
 
             func applyProgressUI(message: [String: Any]) {
                 let stats = message["stats"] as? [String: Any] ?? [:]
+                maybeShowProbeCnnEnvironmentWarning(from: stats)
                 let phase = message["phase"] as? String ?? ""
                 if phase == "probe" {
                     let effectivePrompt = (stats["probe_prompt"] as? String)?
@@ -190,6 +219,13 @@ enum CheckLorasController {
             progressRefreshTimer?.invalidate()
             progress.close()
 
+            if !didShowProbeCnnEnvironmentWarning, !runResult.probeCnnUserWarning.isEmpty {
+                StyledMessageDialog.showWarning(
+                    title: "Test LoRAs — probe compare",
+                    message: runResult.probeCnnUserWarning
+                )
+            }
+
             NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
 
             let body = CheckLorasResultsDialog.resolvedBody(
@@ -208,6 +244,11 @@ enum CheckLorasController {
                 banner = "Test LoRAs was cancelled. Partial results from completed probes were saved."
             }
 
+            CheckLorasPreviousReport.persist(
+                profilePaths: appState.config.profilePaths,
+                body: body,
+                cancelledBanner: banner
+            )
             appState.checkLorasFlow.results = CheckLorasFlowState.ResultsPresentation(
                 body: body,
                 cancelledBanner: banner

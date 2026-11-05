@@ -9,11 +9,19 @@ struct CheckLorasOptionsView: View {
     var loraBridge: LoRABridge
     var onCancel: () -> Void
     var onRun: (CheckLorasOptions) -> Void
+    var onShowPreviousReport: () -> Void
 
     @State private var validationMessage: String?
     @State private var showClearHistoryConfirm = false
     @State private var clearHistoryCount = 0
     @State private var clearHistoryAlert: String?
+    private var canRun: Bool {
+        guard !modelKeys.isEmpty, !choices.isEmpty else { return false }
+        let models = allModels ? modelKeys : Array(selectedModelKeys)
+        guard !models.isEmpty else { return false }
+        return !resolvedLoraKeysForScope().isEmpty
+    }
+
     private var sortedInstalledModels: [CheckLorasInstalledModel] {
         installedModels.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
@@ -50,9 +58,6 @@ struct CheckLorasOptionsView: View {
     @State private var probePrompt: String
     @State private var skipUnchanged: Bool
     @State private var checkCrossFamilies: Bool
-    /// Avoid persisting factory @State before saved options are applied (dismiss / window close).
-    @State private var isStateSyncedFromPersistence: Bool
-
     init(
         choices: [CheckLorasProbeChoice],
         installedModels: [CheckLorasInstalledModel],
@@ -60,7 +65,8 @@ struct CheckLorasOptionsView: View {
         appConfig: AppConfig,
         loraBridge: LoRABridge,
         onCancel: @escaping () -> Void,
-        onRun: @escaping (CheckLorasOptions) -> Void
+        onRun: @escaping (CheckLorasOptions) -> Void,
+        onShowPreviousReport: @escaping () -> Void = {}
     ) {
         self.choices = choices
         self.installedModels = installedModels
@@ -69,6 +75,7 @@ struct CheckLorasOptionsView: View {
         self.loraBridge = loraBridge
         self.onCancel = onCancel
         self.onRun = onRun
+        self.onShowPreviousReport = onShowPreviousReport
 
         let modelKeys = installedModels
             .sorted {
@@ -88,7 +95,6 @@ struct CheckLorasOptionsView: View {
         _showClearHistoryConfirm = State(initialValue: false)
         _clearHistoryCount = State(initialValue: 0)
         _clearHistoryAlert = State(initialValue: nil)
-        _isStateSyncedFromPersistence = State(initialValue: true)
     }
 
     var body: some View {
@@ -120,10 +126,13 @@ struct CheckLorasOptionsView: View {
 
             DialogButtonRow(
                 [
-                    DialogButton("Run", isDefault: true) { commitAndRun() },
-                    DialogButton("Cancel", isCancel: true) { dismissSaving() },
+                    DialogButton("Run", isDefault: true, isEnabled: canRun) { commitAndRun() },
+                    DialogButton("Cancel", isCancel: true) { onCancel() },
                 ],
                 leadingButtons: [
+                    DialogButton("Previous report", id: "previousReport") {
+                        onShowPreviousReport()
+                    },
                     DialogButton("Clear probe history", id: "clearHistory") {
                         Task { await beginClearProbeHistory() }
                     },
@@ -133,11 +142,10 @@ struct CheckLorasOptionsView: View {
         }
         .padding(16)
         .onAppear { loadFromOptions() }
-        .background {
-            SceneWindowLifecycleBridge(
-                windowIdentifier: BrowserWindowIdentity.dialogPrefix + "checkLorasOptions",
-                onWillClose: { persistToDisk() }
-            )
+        .onChange(of: allLoras) { _, isAll in
+            if isAll {
+                selectedLoraKeys = allLoraChoiceKeys
+            }
         }
         .confirmationDialog(
             "Clear probe history?",
@@ -255,7 +263,7 @@ struct CheckLorasOptionsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(sortedChoices) { choice in
                             Toggle(isOn: Binding(
-                                get: { selectedLoraKeys.contains(choice.key) },
+                                get: { allLoras || selectedLoraKeys.contains(choice.key) },
                                 set: { on in
                                     if on { selectedLoraKeys.insert(choice.key) }
                                     else { selectedLoraKeys.remove(choice.key) }
@@ -331,19 +339,28 @@ struct CheckLorasOptionsView: View {
         modelKeys: [String]
     ) -> LocalState {
         let allModels = options.modelScope == CheckLorasOptions.modelScopeAll
-        var allLoras = options.loraScope == CheckLorasOptions.loraScopeAll
-            || options.selectedLoraKeys.isEmpty
+        let useSelectedLoraScope = options.loraScope == CheckLorasOptions.loraScopeSelected
+            && !options.selectedLoraKeys.isEmpty
+        let allLoras = !useSelectedLoraScope
         let selectedModelKeys = Set(
-            options.selectedModelKeys.isEmpty ? modelKeys : options.selectedModelKeys
+            options.selectedModelKeys.isEmpty && !allModels
+                ? []
+                : (options.selectedModelKeys.isEmpty ? modelKeys : options.selectedModelKeys)
         )
-        let selectedLoraKeys: Set<String>
-        if options.loraScope == CheckLorasOptions.loraScopeSelected, !options.selectedLoraKeys.isEmpty {
-            selectedLoraKeys = Set(options.selectedLoraKeys)
-        } else {
-            selectedLoraKeys = Set(choices.map(\.key))
-        }
+        let selectedLoraKeys: Set<String> = useSelectedLoraScope
+            ? Set(options.selectedLoraKeys)
+            : Set(choices.map(\.key))
         if choices.isEmpty {
-            allLoras = true
+            return LocalState(
+                selectedModelKeys: selectedModelKeys,
+                selectedLoraKeys: [],
+                allModels: allModels,
+                allLoras: true,
+                registrationMode: options.registrationMode,
+                probePrompt: CheckLorasOptions.normalizedProbePrompt(options.probePrompt),
+                skipUnchanged: options.skipUnchanged,
+                checkCrossFamilies: options.checkCrossFamilies
+            )
         }
         return LocalState(
             selectedModelKeys: selectedModelKeys,
@@ -367,12 +384,36 @@ struct CheckLorasOptionsView: View {
         probePrompt = local.probePrompt
         skipUnchanged = local.skipUnchanged
         checkCrossFamilies = local.checkCrossFamilies
-        isStateSyncedFromPersistence = true
+    }
+
+    private func resolvedLoraKeysForScope() -> [String] {
+        if allLoras {
+            return choices.map(\.key)
+        }
+        var keys = selectedLoraKeys
+        for choice in choices {
+            let path = choice.weightsPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else { continue }
+            let standardized = (path as NSString).standardizingPath
+            if keys.contains(choice.key) {
+                continue
+            }
+            let pathKeys: Set<String> = [
+                path,
+                standardized,
+                "path:\(path)",
+                "path:\(standardized)",
+            ]
+            if !keys.isDisjoint(with: pathKeys) {
+                keys.insert(choice.key)
+            }
+        }
+        return keys.sorted()
     }
 
     private func snapshotOptions() -> CheckLorasOptions {
         let models = allModels ? modelKeys : selectedModelKeys.sorted()
-        let loraKeys = allLoras ? choices.map(\.key) : selectedLoraKeys.sorted()
+        let loraKeys = resolvedLoraKeysForScope()
         return CheckLorasOptions(
             modelScope: allModels ? CheckLorasOptions.modelScopeAll : CheckLorasOptions.modelScopeSelected,
             selectedModelKeys: models,
@@ -385,27 +426,23 @@ struct CheckLorasOptionsView: View {
         )
     }
 
-    private func persistToDisk() {
-        guard isStateSyncedFromPersistence else { return }
-        let snapshot = snapshotOptions()
-        options = snapshot
-        appConfig.persistCheckLorasOptions(snapshot)
-    }
-
-    private func dismissSaving() {
-        persistToDisk()
-        onCancel()
-    }
-
     private func commitAndRun() {
         validationMessage = nil
+        if choices.isEmpty {
+            validationMessage = "No LoRA weights were found on disk."
+            return
+        }
+        if modelKeys.isEmpty {
+            validationMessage = "No installed base models are available to probe against."
+            return
+        }
         let models = allModels ? modelKeys : selectedModelKeys.sorted()
-        if !allModels, models.isEmpty {
+        if models.isEmpty {
             validationMessage = "Select at least one model, or choose All models."
             return
         }
-        let loraKeys = allLoras ? choices.map(\.key) : selectedLoraKeys.sorted()
-        if !allLoras, loraKeys.isEmpty {
+        let loraKeys = resolvedLoraKeysForScope()
+        if loraKeys.isEmpty {
             validationMessage = "Select at least one LoRA, or choose All discovered LoRAs."
             return
         }

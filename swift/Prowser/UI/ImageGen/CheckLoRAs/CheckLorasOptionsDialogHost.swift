@@ -7,9 +7,9 @@ struct CheckLorasOptionsDialogHost: View {
     let prescan: CheckLorasPrescanResult
     @State private var options: CheckLorasOptions
 
-    init(prescan: CheckLorasPrescanResult, appConfig: AppConfig) {
+    init(prescan: CheckLorasPrescanResult) {
         self.prescan = prescan
-        _options = State(initialValue: appConfig.checkLorasOptionsFromSettings())
+        _options = State(initialValue: prescan.savedOptions)
     }
 
     var body: some View {
@@ -26,6 +26,9 @@ struct CheckLorasOptionsDialogHost: View {
                     options: committed
                 )
                 closeDialog()
+            },
+            onShowPreviousReport: {
+                CheckLorasController.showPreviousReport(from: appState)
             }
         )
         .themeDialogStyle()

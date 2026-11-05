@@ -702,8 +702,10 @@ def _show_cancelled_dialog(parent, *, partial: bool) -> None:
     )
 
 
-def _show_results_dialog(parent, result: LoraCheckResult) -> None:
-    text = format_check_loras_results_text(result)
+def _show_results_dialog(
+    parent, result: LoraCheckResult, options: CheckLorasOptions
+) -> None:
+    text = format_check_loras_results_text(result, options=options)
     dlg = QDialog(parent)
     dlg.setWindowTitle("Check LoRAs — Results")
     dlg.setWindowModality(Qt.WindowModality.WindowModal)
@@ -1193,7 +1195,7 @@ def _start_probe_run(
                 return
 
         _apply_check_result(parent, result)
-        _show_results_dialog(parent, result)
+        _show_results_dialog(parent, result, options)
 
     def on_worker_watchdog() -> None:
         if finished_handled[0]:

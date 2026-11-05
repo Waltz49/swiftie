@@ -470,6 +470,10 @@ struct ProwserCommands: Commands {
                         Task { @MainActor in appState.printCacheStatus() }
                     }
 
+                    Button("Enable Compatible LoRAs") {
+                        Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
+                    }
+
                     Button("Toggle Debug Mode") {
                         Task { @MainActor in appState.toggleDebugMode() }
                     }

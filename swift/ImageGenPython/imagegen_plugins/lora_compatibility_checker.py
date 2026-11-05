@@ -176,6 +176,10 @@ class LoraCheckStats:
     probe_effect_weak: int = 0
     probe_effect_cnn_missing_pass: int = 0
     probe_effect_cnn_required_fail: int = 0
+    probe_cnn_compare_mode: str = ""
+    probe_cnn_environment_summary: str = ""
+    probe_cnn_environment_log: str = ""
+    probe_cnn_user_warning: str = ""
     # All (lora, model) pairs visited in the run loop (GPU + history + reg skips).
     progress_pairs_total: int = 0
     current_lora_label: str = ""
@@ -254,6 +258,7 @@ class LoraCheckResult:
     registration_mode: str = REGISTRATION_IGNORE_PREVIOUS
     probe_effect_threshold_lines: List[str] = field(default_factory=list)
     probe_effect_outcome_lines: List[str] = field(default_factory=list)
+    probe_cnn_environment_lines: List[str] = field(default_factory=list)
 
     @property
     def deleted_ids(self) -> List[str]:
@@ -297,8 +302,6 @@ def check_loras_options_from_settings(
     selected = [
         str(m) for m in (raw.get("selected_model_keys") or []) if str(m) in installed_set
     ]
-    if scope == MODEL_SCOPE_SELECTED and not selected:
-        scope = MODEL_SCOPE_ALL
 
     mode = str(raw.get("registration_mode") or REGISTRATION_IGNORE_PREVIOUS)
     if mode not in (
@@ -371,11 +374,13 @@ def _count_probes_in_plan(
     plan: List[LoraProbePlanItem],
     previous_support: Dict[str, Tuple[str, ...]],
     registration_mode: str,
+    *,
+    skip_unchanged: bool,
 ) -> int:
     total = 0
     for item in plan:
         for model_key in item.models:
-            if model_key in item.probed_models_from_history:
+            if skip_unchanged and model_key in item.probed_models_from_history:
                 continue
             if _probe_should_run(
                 item.entry.lora_id,
@@ -872,12 +877,63 @@ def _probe_plan_item_selection_keys(item: LoraProbePlanItem) -> Set[str]:
     return keys
 
 
+def _expand_lora_selection_keys(
+    allowed: Set[str],
+    settings: Optional[Dict[str, Any]],
+) -> Set[str]:
+    """Match UI keys to plan items (catalog id, path:, absolute path, history keys)."""
+    from imagegen_plugins.lora_catalog import get_lora_entry
+
+    expanded = set(allowed)
+    for key in list(allowed):
+        text = str(key or "").strip()
+        if not text:
+            continue
+        if text.startswith("path:"):
+            raw = text[5:].strip()
+            if raw:
+                try:
+                    expanded.add(str(Path(raw).expanduser().resolve()))
+                except OSError:
+                    expanded.add(raw)
+                expanded.add(text)
+            continue
+        candidate = Path(text).expanduser()
+        if candidate.is_file():
+            try:
+                resolved = str(candidate.resolve())
+            except OSError:
+                resolved = str(candidate)
+            expanded.add(resolved)
+            expanded.add(f"path:{resolved}")
+            continue
+        entry = get_lora_entry(text, settings)
+        if entry is None:
+            continue
+        wp = local_lora_weights_path(text, settings, entry=entry)
+        if wp is None:
+            continue
+        try:
+            resolved = str(wp.resolve())
+        except OSError:
+            resolved = str(wp)
+        expanded.add(resolved)
+        expanded.add(f"path:{resolved}")
+        expanded.add(text)
+    return expanded
+
+
 def _selected_lora_key_set(options: CheckLorasOptions) -> Optional[Set[str]]:
     """Return allowed LoRA option keys, or None when every discovered LoRA is in scope."""
     if options.lora_scope != LORA_SCOPE_SELECTED or not options.selected_lora_keys:
         return None
     allowed = {str(k) for k in options.selected_lora_keys if str(k)}
-    return allowed or None
+    if not allowed:
+        return None
+    from config import get_config
+
+    settings = get_config().load_settings()
+    return _expand_lora_selection_keys(allowed, settings)
 
 
 def _catalog_entry_selection_keys(
@@ -1239,6 +1295,7 @@ def plan_disk_lora_probes(
         plan,
         previous_support,
         opts.registration_mode,
+        skip_unchanged=opts.skip_unchanged,
     )
     stats.progress_pairs_total = sum(len(item.models) for item in plan)
     if opts.skip_unchanged:
@@ -1614,6 +1671,14 @@ def _lora_probe_has_effect(
         return False
 
     if delta.cnn_cosine is None and require_cnn:
+        from imagegen_plugins.lora_probe_effect import (
+            record_probe_cnn_incompatible_probe_failure,
+        )
+
+        record_probe_cnn_incompatible_probe_failure(
+            lora_label=label,
+            model_label=lora_model_display_name(model_key),
+        )
         print(
             f"[Check LoRAs] Probe: CNN required but unavailable for {label!r} on "
             f"{lora_model_display_name(model_key)} ({metrics} {context})"
@@ -3079,7 +3144,11 @@ def run_lora_compatibility_check(
     from imagegen_plugins.lora_probe_effect import (
         build_probe_effect_outcome_lines,
         build_probe_effect_threshold_lines,
+        finalize_probe_cnn_environment_on_result,
+        reset_probe_cnn_environment,
     )
+
+    reset_probe_cnn_environment()
 
     result.probe_effect_threshold_lines = build_probe_effect_threshold_lines(
         check_cross_families=opts.check_cross_families,
@@ -3122,6 +3191,7 @@ def run_lora_compatibility_check(
         result.probe_effect_outcome_lines = build_probe_effect_outcome_lines(stats)
         for line in result.probe_effect_outcome_lines:
             print(f"[Check LoRAs] {line}" if line else "[Check LoRAs]")
+        finalize_probe_cnn_environment_on_result(result)
         _probe_run_context.check_stats = None
         return result
 
@@ -3449,5 +3519,9 @@ def run_lora_compatibility_check(
     result.probe_effect_outcome_lines = build_probe_effect_outcome_lines(stats)
     for line in result.probe_effect_outcome_lines:
         print(f"[Check LoRAs] {line}" if line else "[Check LoRAs]")
+    finalize_probe_cnn_environment_on_result(result)
+    if result.probe_cnn_environment_lines:
+        for line in result.probe_cnn_environment_lines:
+            print(f"[Check LoRAs] {line}" if line else "[Check LoRAs]")
     _probe_run_context.check_stats = None
     return result
