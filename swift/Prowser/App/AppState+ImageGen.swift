@@ -335,6 +335,7 @@ extension AppState {
         }
         if jobsQueueSizeMode == mode, !forceRefit { return }
         if jobsQueueSizeMode != mode {
+            jobsPaneUserSplitterSized = false
             // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
             // card); size from the fallback estimate until the new panel reports.
             measuredJobsCardStackHeight = 0
@@ -427,6 +428,7 @@ extension AppState {
 
     /// Port of ``JobQueuePanelWidget.should_auto_resize_sidebar_pane``.
     func shouldAutoResizeJobsSidebarPane() -> Bool {
+        if jobsPaneUserSplitterSized { return false }
         switch jobsQueueSizeMode {
         case .one, .strip:
             return true
@@ -483,6 +485,7 @@ extension AppState {
 
     /// Whether ``ensureJobsPaneFitsContent`` should run (includes multijob grow-only refit).
     func shouldInvokeJobsPaneEnsureFitsRefit(forceRefit: Bool) -> Bool {
+        if jobsPaneUserSplitterSized, !forceRefit { return false }
         if rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) { return true }
         if forceRefit { return true }
         if shouldAutoResizeJobsSidebarPane() { return true }

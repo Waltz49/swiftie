@@ -229,6 +229,31 @@ extension AppState {
         return header + max(content, SidebarPaneLayout.minJobsQueueContentHeight)
     }
 
+    /// Port of ``_jobs_compact_pane_height`` body (header + strip-mode client height).
+    func jobsCompactPaneHeight() -> CGFloat {
+        SidebarPaneLayout.headerHeight + jobsStripCompactContentHeight()
+    }
+
+    /// True when titlebar drag can snap jobs pane to strip floor (``_jobs_strip_compact_available``).
+    func jobsStripCompactAvailable() -> Bool {
+        guard jobsDisplayMode == .pane else { return false }
+        guard !rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) else { return false }
+        return jobsCompactPaneHeight() > SidebarPaneLayout.headerHeight + 1
+    }
+
+    private func jobsStripCompactContentHeight() -> CGFloat {
+        let toolbarShown = jobsToolbarVisible && jobsDisplayMode == .pane
+        let toolbar = toolbarShown ? JobQueuePaneMetrics.toolbarBlockHeight : 0
+        let padding = JobQueuePaneMetrics.panelPadding * 2
+        let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
+        if showsStrip {
+            let stripEstimate = JobQueuePaneMetrics.estimatedActiveStripHeight(for: imageGen.activeStripView)
+            let strip = max(measuredActiveJobStripHeight, stripEstimate, 28)
+            return toolbar + padding + strip
+        }
+        return toolbar + padding + JobQueuePaneMetrics.emptyStateClientHeight(toolbarVisible: toolbarShown)
+    }
+
     /// Port of ``JobQueuePanelWidget._deferred_generation_geometry_sync`` + ⌘\\ re-apply current mode.
     func scheduleJobsPaneLayoutSettleRefresh() {
         guard jobsDisplayMode == .pane else { return }

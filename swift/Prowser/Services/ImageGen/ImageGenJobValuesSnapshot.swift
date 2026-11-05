@@ -93,6 +93,7 @@ enum ImageGenJobValuesSnapshot {
             settings: config.rawSettings()
         )
         out["max_generation_dimension"] = effectiveMax
+        out["hf_model_id"] = plugin.hfModelID
         out[snapshottedKey] = true
         return out
     }

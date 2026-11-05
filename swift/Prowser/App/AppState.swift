@@ -83,6 +83,8 @@ final class AppState {
     var jobsPaneLayoutSettleToken = 0
     /// Remaining layout passes that should snap the showing jobs surface to the measured height.
     var jobsSurfaceExactSnapPasses = 0
+    /// When true, skip content-driven jobs pane refits until queue size mode changes (user titlebar drag).
+    var jobsPaneUserSplitterSized = false
     var progressiveRefreshTask: Task<Void, Never>?
     var pendingProgressivePath: String?
     var pendingProgressiveForceEnterBrowse = false

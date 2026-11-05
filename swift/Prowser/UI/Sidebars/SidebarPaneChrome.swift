@@ -58,6 +58,20 @@ struct SidebarPaneTitlebar: View {
         .padding(.vertical, 4)
         .frame(height: 30)
         .frame(maxWidth: .infinity)
+        .background {
+            if titlebarResizeEnabled, let paneIndex, let splitModel {
+                SidebarPaneVerticalResizeMouseView(
+                    paneIndex: paneIndex,
+                    splitModel: splitModel,
+                    appState: appState,
+                    onDragStarted: { suppressTitleClick = true },
+                    onDoubleClick: {
+                        suppressTitleClick = true
+                        onTitleDoubleClick?()
+                    }
+                )
+            }
+        }
         .background(colors.sidebarHeaderBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -102,30 +116,28 @@ struct SidebarPaneTitlebar: View {
                 }
             }
             .allowsHitTesting(false)
-
-            if titlebarResizeEnabled, let paneIndex, let splitModel {
-                SidebarPaneVerticalResizeMouseView(
-                    paneIndex: paneIndex,
-                    splitModel: splitModel,
-                    appState: appState,
-                    onDragStarted: { suppressTitleClick = true },
-                    onDoubleClick: {
-                        suppressTitleClick = true
-                        onTitleDoubleClick?()
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onTapGesture(count: 1) {
-            guard !titlebarResizeEnabled else { return }
-            onTitleClick?()
+        .if(!titlebarResizeEnabled) { view in
+            view
+                .onTapGesture(count: 1) {
+                    onTitleClick?()
+                }
+                .onTapGesture(count: 2) {
+                    suppressTitleClick = true
+                    onTitleDoubleClick?()
+                }
         }
-        .onTapGesture(count: 2) {
-            guard !titlebarResizeEnabled else { return }
-            suppressTitleClick = true
-            onTitleDoubleClick?()
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func `if`(_ condition: Bool, transform: (Self) -> some View) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
         }
     }
 }

@@ -64,6 +64,8 @@ struct LoRACatalogEntry: Identifiable, Equatable {
     var filename: String
     var localPath: String
     var sourcePath: String
+    var safetensorsOrigin: String
+    var webPageURL: String
     var installed: Bool
     var lifecycle: String
     var statusLabel: String
@@ -90,6 +92,13 @@ struct LoRACatalogEntry: Identifiable, Equatable {
             let shown = trigger.count > maxLen ? String(trigger.prefix(maxLen - 3)) + "..." : trigger
             label = "\(label) - Trigger: \(shown)"
         }
+        let origin = (entry.safetensorsOrigin ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let webPage = (entry.webPageURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacySource = (entry.sourcePath ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasRecovery = !origin.isEmpty
+            || !webPage.isEmpty
+            || !legacySource.isEmpty
+            || !entry.repoID.isEmpty
         return LoRACatalogEntry(
             loraID: entry.loraID,
             displayName: entry.displayName,
@@ -104,10 +113,12 @@ struct LoRACatalogEntry: Identifiable, Equatable {
             filename: entry.filename,
             localPath: entry.localPath ?? "",
             sourcePath: entry.sourcePath ?? "",
+            safetensorsOrigin: origin,
+            webPageURL: webPage,
             installed: weights != nil,
             lifecycle: lifecycle,
             statusLabel: statusLabel(for: lifecycle),
-            hasRecoverySource: !(entry.sourcePath ?? "").isEmpty || !entry.repoID.isEmpty,
+            hasRecoverySource: hasRecovery,
             registered: true,
             probeStateForModel: LoRACatalog.probeStateForModel(entry: entry, modelKey: modelKey, lc: lc)
         )
@@ -477,14 +488,55 @@ final class LoRAService {
     }
 
     func validateSource(path: String, modelKey: String) async throws -> [String: Any] {
-        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ["valid": false, "error": "Choose a .safetensors file."]
+        }
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded).standardizedFileURL
         guard FileManager.default.isReadableFile(atPath: url.path) else {
-            return ["valid": false, "message": "File is not readable."]
+            return ["valid": false, "error": "File is not readable."]
         }
         guard url.pathExtension.lowercased() == "safetensors" else {
-            return ["valid": false, "message": "Expected a .safetensors file."]
+            return ["valid": false, "error": "Expected a .safetensors file."]
         }
-        return ["valid": true, "path": url.path]
+
+        let lc = try await loadCatalog()
+        let hostID = LoRAModelRegistry.hostID(forModelKey: modelKey) ?? ""
+        let users = LoRAUserEntries.entries(from: lc)
+
+        var out: [String: Any] = [
+            "valid": true,
+            "display_path": url.path,
+            "path": url.path,
+        ]
+
+        if let existing = LoRAUserEntries.findUserLoraForSource(path: url, hostID: hostID, entries: users) {
+            out["reusing"] = true
+            out["reuse_lora_id"] = existing.loraID
+            out["display_name"] = existing.displayName
+            out["trigger_word"] = existing.triggerWord ?? ""
+            out["best_guess"] = existing.bestGuess
+            out["comment"] = existing.comment ?? ""
+            out["reference_prompt"] = existing.referencePrompt ?? ""
+            out["safetensors_origin"] = existing.safetensorsOrigin ?? ""
+            out["web_page_url"] = existing.webPageURL ?? ""
+            return out
+        }
+
+        out["reusing"] = false
+        out["display_name"] = LoRAUserEntries.displayName(from: url)
+        if let trigger = LoRASafetensorsMetadata.triggerWord(fromFile: url.path) {
+            out["trigger_word"] = trigger
+        }
+        let provenance = LoRAFileProvenance.provenanceSuggestions(for: url.path)
+        if let origin = provenance.safetensorsOrigin {
+            out["safetensors_origin"] = origin
+        }
+        if let page = provenance.webPageURL {
+            out["web_page_url"] = page
+        }
+        return out
     }
 
     func saveMetadata(
@@ -496,7 +548,9 @@ final class LoRAService {
         referencePrompt: String,
         repoID: String,
         filename: String,
-        sourcePath: String
+        sourcePath: String,
+        safetensorsOrigin: String,
+        webPageURL: String
     ) async throws {
         var tw = triggerWord
         var c = comment
@@ -506,6 +560,14 @@ final class LoRAService {
             comment: &c,
             referencePrompt: &r
         )
+        let originNorm = LoRAURLValidation.normalizedHTTPURL(safetensorsOrigin)
+        let webNorm = LoRAURLValidation.normalizedHTTPURL(webPageURL)
+        if !safetensorsOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, originNorm == nil {
+            throw BridgeError.workerMessage("Safetensors origin must be a valid http or https URL.")
+        }
+        if !webPageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, webNorm == nil {
+            throw BridgeError.workerMessage("Web page must be a valid http or https URL.")
+        }
         let store = try store()
         var lc = try await loadCatalog()
         guard let raw = (lc[LoRACatalogSettings.userEntriesKey] as? [String: Any])?[loraID] as? [String: Any],
@@ -518,8 +580,20 @@ final class LoRAService {
         entry.repoID = repoID
         entry.filename = filename
         entry.sourcePath = sourcePath.isEmpty ? nil : sourcePath
+        entry.safetensorsOrigin = originNorm
+        entry.webPageURL = webNorm
         var users = lc[LoRACatalogSettings.userEntriesKey] as? [String: Any] ?? [:]
-        users[loraID] = entry.toDictionary()
+        var merged = LoRAEntry.mergedUserEntryDictionary(entry: entry, preserving: raw)
+        // Optional fields omitted from `toDictionary()` when nil; persist clears like Python updates.
+        merged["trigger_word"] = tw
+        merged["comment"] = c
+        merged["reference_prompt"] = r
+        merged["safetensors_origin"] = originNorm ?? ""
+        merged["web_page_url"] = webNorm ?? ""
+        if sourcePath.isEmpty {
+            merged["source_path"] = ""
+        }
+        users[loraID] = merged
         lc[LoRACatalogSettings.userEntriesKey] = users
         store.save(lc)
     }
@@ -726,6 +800,8 @@ final class LoRAService {
                 filename: fileName,
                 localPath: path,
                 sourcePath: path,
+                safetensorsOrigin: "",
+                webPageURL: "",
                 installed: true,
                 lifecycle: "discovered",
                 statusLabel: "Needs setup",

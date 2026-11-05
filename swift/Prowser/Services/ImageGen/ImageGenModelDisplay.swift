@@ -2,21 +2,21 @@ import Foundation
 
 /// Model id + label for job cards and EXIF (port of ``_generation_model_id_for_status`` / ``model_display_name``).
 enum ImageGenModelDisplay {
-    /// Hugging Face repo id used for status / EXIF for this plugin and values.
+    /// Hugging Face repo id for job cards, EXIF, and timing keys.
+    /// Prefer the registry plugin's ``hf_model_id`` when set (matches Python ``build_worker_payload`` and
+    /// avoids stale ``hf_model_id`` in queue values after Replace). Fall back to ``effective`` when the
+    /// plugin id is empty. Python ``_generation_model_id_for_status`` reads values first; Swift prefers
+    /// the plugin when registered so cards match what the worker runs.
     static func generationModelID(plugin: ImageGenPluginDescriptor, effective: [String: Any]) -> String {
+        let pluginHF = plugin.hfModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pluginHF.isEmpty {
+            return pluginHF
+        }
         let raw = (effective["hf_model_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.contains("/"), hfModelIDValidForPipeline(plugin: plugin, hfModelID: raw) {
+        if raw.contains("/") {
             return raw
         }
-        return plugin.hfModelID
-    }
-
-    static func hfModelIDValidForPipeline(plugin: ImageGenPluginDescriptor, hfModelID: String) -> Bool {
-        let hf = hfModelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard hf.contains("/") else { return false }
-        return ImageGenPluginCatalog.allPlugins().contains {
-            $0.pipelineID == plugin.pipelineID && $0.hfModelID == hf
-        }
+        return pluginHF
     }
 
     static func modelDisplayName(pipelineID: String, hfModelID: String) -> String {
@@ -96,7 +96,7 @@ enum ImageGenModelDisplay {
     static func sanitizeJobValues(pluginID: String, values: [String: Any]) -> [String: Any] {
         guard let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return values }
         var out = values
-        out["hf_model_id"] = generationModelID(plugin: plugin, effective: out)
+        out["hf_model_id"] = plugin.hfModelID
         return out
     }
 }

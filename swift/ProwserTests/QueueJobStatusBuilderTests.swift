@@ -4,6 +4,43 @@ import AppKit
 
 @MainActor
 final class QueueJobStatusBuilderTests: XCTestCase {
+    func testFluxDevPluginJobCardShowsDevModel() {
+        let result = QueueJobStatusBuilder.build(
+            pluginID: "flux_sldr_nsfw_v2_lora",
+            function: "create",
+            values: [
+                "prompt": "test",
+                "width": 1024,
+                "height": 1024,
+                "steps": 20,
+                "hf_model_id": LoRAHFModelIDs.flux1Dev,
+            ],
+            copiesTotal: 1
+        )
+        let fp = result.statusView.fingerprint()
+        XCTAssertTrue(fp.contains("lv:Model:"))
+        XCTAssertTrue(fp.contains("FLUX.1 dev") || fp.contains("FLUX.1 Dev"), fp)
+        XCTAssertFalse(fp.contains("Schnell"), fp)
+    }
+
+    func testStaleHFModelIDInValuesShowsPluginModelOnJobCard() {
+        let result = QueueJobStatusBuilder.build(
+            pluginID: "flux_sldr_nsfw_v2_lora",
+            function: "create",
+            values: [
+                "prompt": "test",
+                "width": 1024,
+                "height": 1024,
+                "steps": 20,
+                "hf_model_id": "black-forest-labs/FLUX.1-schnell",
+            ],
+            copiesTotal: 1
+        )
+        let fp = result.statusView.fingerprint()
+        XCTAssertTrue(fp.contains("FLUX.1 dev") || fp.contains("FLUX.1 Dev"), fp)
+        XCTAssertFalse(fp.contains("Schnell"), fp)
+    }
+
     func testContinuousSeriesCopiesLineShowsContinuous() {
         let result = QueueJobStatusBuilder.build(
             pluginID: "realistic_vision_v4_sd15",

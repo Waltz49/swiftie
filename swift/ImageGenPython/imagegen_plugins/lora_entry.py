@@ -58,3 +58,7 @@ class FluxLoraEntry:
     reference_prompt: Optional[str] = None
     # Original path selected on first import (for cross-model deduplication).
     source_path: Optional[str] = None
+    # Direct download URL for weights (reinstall).
+    safetensors_origin: Optional[str] = None
+    # Model or version page URL (description).
+    web_page_url: Optional[str] = None

@@ -58,7 +58,8 @@ enum LoRACatalog {
         let resolved = entry ?? LoRAEntry(
             hostID: "", loraID: loraID, displayName: loraID, repoID: "", filename: "",
             scale: 1, bestGuess: 1, localPath: nil, baseHFModelID: "", minSteps: 2,
-            mfluxCompatible: nil, triggerWord: nil, comment: nil, referencePrompt: nil, sourcePath: nil
+            mfluxCompatible: nil, triggerWord: nil, comment: nil, referencePrompt: nil, sourcePath: nil,
+            safetensorsOrigin: nil, webPageURL: nil
         )
         if resolved.mfluxCompatible == false { return false }
         if LoRAModelRegistry.probeSupportedOnModel(

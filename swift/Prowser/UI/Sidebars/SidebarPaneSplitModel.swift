@@ -202,17 +202,99 @@ final class SidebarPaneSplitModel {
         let vis = visibility(appState: appState)
         let start = dragStartSizes ?? sizes
         let pressY = dragPressWindowY ?? currentWindowY
-        let deltaY = currentWindowY - pressY
-        guard let updated = SidebarPaneLayout.applyPaneTitlebarDragDelta(
-            paneIdx: paneIndex,
-            dy: deltaY,
-            visibility: vis,
-            startSizes: start,
-            minHeightForPane: { idx, headerOnly in
-                minHeight(for: idx, headerOnly: headerOnly, appState: appState)
+        var totalDy = currentWindowY - pressY
+        if totalDy == 0 { return }
+
+        if side == .right, paneIndex == 2 {
+            if jobsPaneDragBefore(totalDy: totalDy, startSizes: start, appState: appState) {
+                dragStartSizes = sizes
+                dragPressWindowY = currentWindowY
+                totalDy = 0
             }
-        ) else { return }
-        sizes = updated
+        }
+
+        if totalDy != 0 {
+            guard let updated = SidebarPaneLayout.applyPaneTitlebarDragDelta(
+                paneIdx: paneIndex,
+                dy: totalDy,
+                visibility: vis,
+                startSizes: start,
+                minHeightForPane: { idx, headerOnly in
+                    minHeight(for: idx, headerOnly: headerOnly, appState: appState)
+                }
+            ) else {
+                return
+            }
+            sizes = updated
+        }
+
+        if side == .right, paneIndex == 2 {
+            jobsPaneDragAfter(totalDy: totalDy, appState: appState)
+        }
+    }
+
+    /// Port of ``right_sidebar_combined._jobs_pane_drag_before``.
+    private func jobsPaneDragBefore(
+        totalDy: CGFloat,
+        startSizes: [CGFloat],
+        appState: AppState
+    ) -> Bool {
+        guard !jobsIsSoleVisiblePane(appState: appState) else { return false }
+        let compact = appState.jobsCompactPaneHeight()
+        let stripMode = appState.jobsQueueSizeMode == .strip
+
+        if totalDy < 0, stripMode {
+            appState.applyJobsQueueSizeMode(.all, forceRefit: false)
+            return true
+        }
+
+        if totalDy > 0,
+           !stripMode,
+           appState.jobsStripCompactAvailable(),
+           startSizes.count > 2 {
+            let projectedJobs = startSizes[2] - totalDy
+            if projectedJobs <= compact + 1 {
+                appState.applyJobsQueueSizeMode(.strip, forceRefit: false)
+                enforceJobsCompactSplitterSize(appState: appState)
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Port of ``right_sidebar_combined._jobs_pane_drag_after`` / ``_sync_jobs_compact_from_splitter_size``.
+    private func jobsPaneDragAfter(totalDy: CGFloat, appState: AppState) {
+        guard totalDy > 0 else { return }
+        syncJobsCompactFromSplitterSize(appState: appState)
+    }
+
+    private func syncJobsCompactFromSplitterSize(appState: AppState) {
+        guard !jobsIsSoleVisiblePane(appState: appState) else { return }
+        guard appState.jobsStripCompactAvailable() else { return }
+        let compact = appState.jobsCompactPaneHeight()
+        let jobsHeight = sizes[2]
+        if jobsHeight <= compact + 1 {
+            if appState.jobsQueueSizeMode != .strip {
+                appState.applyJobsQueueSizeMode(.strip, forceRefit: false)
+            }
+            enforceJobsCompactSplitterSize(appState: appState)
+        } else if appState.jobsQueueSizeMode == .strip, jobsHeight > compact + 1 {
+            appState.applyJobsQueueSizeMode(.all, forceRefit: false)
+        }
+    }
+
+    /// Port of ``right_sidebar_combined._enforce_jobs_compact_splitter_size``.
+    private func enforceJobsCompactSplitterSize(appState: AppState) {
+        guard appState.jobsQueueSizeMode == .strip else { return }
+        guard visibility(appState: appState)[2], !jobsIsSoleVisiblePane(appState: appState) else { return }
+        let compact = appState.jobsCompactPaneHeight()
+        guard abs(sizes[2] - compact) > 1 else { return }
+        resizePaneToHeight(
+            paneIndex: 2,
+            targetHeight: compact,
+            appState: appState,
+            applyJobsAutoHeightCap: false
+        )
     }
 
     func endPaneResizeDrag(appState: AppState, paneIndex: Int) {
@@ -227,6 +309,9 @@ final class SidebarPaneSplitModel {
         }
         mergePersistedSizes(appState: appState)
         fitTargets.removeAll()
+        if side == .right, paneIndex == 2, !jobsIsSoleVisiblePane(appState: appState) {
+            appState.jobsPaneUserSplitterSized = true
+        }
         if side == .right, paneIndex == 2,
            appState.jobsQueueSizeMode == .all,
            appState.visibleJobsQueueRowCount() > 1,
@@ -279,6 +364,7 @@ final class SidebarPaneSplitModel {
 
     func cycleJobsPaneSize(appState: AppState) {
         guard side == .right, appState.jobsDisplayMode == .pane else { return }
+        appState.jobsPaneUserSplitterSized = false
         if !paneExpanded(configKey: "jobs_visible", default: true) {
             setPaneExpanded(true, configKey: "jobs_visible")
         }
@@ -463,27 +549,11 @@ final class SidebarPaneSplitModel {
 
     private func jobsPaneMinHeight(appState: AppState) -> CGFloat {
         let header = headerHeight(for: 2)
-        let mode = appState.jobsQueueSizeMode
-        if mode == .strip {
-            return jobsPaneHeight(appState: appState, headerOnly: false)
-        }
-        if mode == .one {
-            return jobsPaneHeight(appState: appState, headerOnly: false)
-        }
-        if mode == .all {
-            return header + SidebarPaneLayout.minJobsQueueContentHeight
-        }
-        if appState.shouldShrinkWrapJobsClient() {
-            return jobsPaneHeight(appState: appState, headerOnly: false)
-        }
+        // Splitter/titlebar drag floor only (see ``applyPaneTitlebarDragDelta``). Auto-fit uses
+        // ``jobsPaneTargetPaneHeight`` via ``ensureJobsPaneFitsContent`` — not this minimum.
+        // Using fitted content height here (2c8b436+) made adjustedDY zero whenever the pane
+        // matched auto-fit, so Job Control titlebar drag appeared broken in ONE/STRIP.
         return header + SidebarPaneLayout.minJobsQueueContentHeight
-    }
-
-    private func jobsPaneHeight(appState: AppState, headerOnly: Bool) -> CGFloat {
-        let header = headerHeight(for: 2)
-        if headerOnly { return header }
-        appState.refreshJobsPaneLiveMeasurements()
-        return appState.jobsPaneTargetPaneHeight()
     }
 
     private func expandPaneToFit(paneIndex: Int, needed: CGFloat, appState: AppState) {

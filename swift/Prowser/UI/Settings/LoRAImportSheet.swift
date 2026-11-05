@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -5,6 +6,7 @@ struct LoRAImportSheet: View {
     private static let weightRange = 0.1...2.0
     private static let weightStep = 0.05
     private static let weightControlWidth: CGFloat = 68
+    private static let referencePromptEditorMinHeight: CGFloat = 88
 
     enum Mode {
         case add
@@ -24,6 +26,8 @@ struct LoRAImportSheet: View {
     @State private var bestGuess = 1.0
     @State private var comment = ""
     @State private var referencePrompt = ""
+    @State private var safetensorsOrigin = ""
+    @State private var webPageURL = ""
     @State private var reuseLoraID: String?
     @State private var isImporting = false
     @State private var errorMessage: String?
@@ -50,9 +54,20 @@ struct LoRAImportSheet: View {
                 }
                 TextField("Comment", text: $comment)
                     .imageGenPromptSentenceCaseOnBlur($comment)
-                TextField("Reference prompt (compatibility test)", text: $referencePrompt)
-                    .imageGenPromptSentenceCaseOnBlur($referencePrompt)
+                LabeledContent("Safetensors origin") {
+                    HStack(spacing: 6) {
+                        TextField("Download URL", text: $safetensorsOrigin)
+                        LoRAImportCopyButton(text: safetensorsOrigin) { appState.copyTextToClipboard($0) }
+                    }
+                }
+                LabeledContent("Web page") {
+                    HStack(spacing: 6) {
+                        TextField("Model description URL", text: $webPageURL)
+                        LoRAImportOpenWebButton(urlString: webPageURL) { NSWorkspace.shared.open($0) }
+                    }
+                }
             }
+            referencePromptSection
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
@@ -60,7 +75,8 @@ struct LoRAImportSheet: View {
                 .disabled(isImporting)
         }
         .padding(20)
-        .frame(minWidth: 520, minHeight: 360)
+        .frame(minWidth: 520, minHeight: 480)
+        // Normalizes bound field text only; catalog/settings are written in importAdd on Save.
         .imageGenPromptSentenceCaseClickAwayCommit()
         .onAppear {
             if !initialSourcePath.isEmpty {
@@ -91,6 +107,22 @@ struct LoRAImportSheet: View {
         switch mode {
         case .add: return "Add LoRA file"
         case .edit: return "Edit LoRA"
+        }
+    }
+
+    private var referencePromptSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Reference prompt")
+                    .font(.headline)
+                Spacer()
+                LoRAImportCopyButton(text: referencePrompt) { appState.copyTextToClipboard($0) }
+            }
+            Text("Used for compatibility test images for this LoRA.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LoRAReferencePromptEditor(text: $referencePrompt)
+                .frame(height: Self.referencePromptEditorMinHeight)
         }
     }
 
@@ -133,9 +165,22 @@ struct LoRAImportSheet: View {
                 let fromEntry = entry.referencePrompt
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 referencePrompt = fromEntry.isEmpty
-                    ? LoraAddReferencePromptSettings.load(config: appState.config)
+                    ? LoraAddReferencePromptSettings.defaultPrompt
                     : fromEntry
                 sourcePath = entry.localPath.isEmpty ? entry.sourcePath : entry.localPath
+                safetensorsOrigin = entry.safetensorsOrigin
+                webPageURL = entry.webPageURL
+                if safetensorsOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   webPageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                    let legacy = LoRALegacyURLPrefill.suggestions(fromLegacySourcePath: entry.sourcePath)
+                    if let origin = legacy.safetensorsOrigin {
+                        safetensorsOrigin = origin
+                    }
+                    if let page = legacy.webPageURL {
+                        webPageURL = page
+                    }
+                }
                 reuseLoraID = loraID
             }
         } catch {
@@ -157,8 +202,34 @@ struct LoRAImportSheet: View {
         if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             displayName = suggested
         }
+    }
+
+    private func applyPrimingFromValidation(_ result: [String: Any]) {
         if triggerWord.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            triggerWord = suggested
+            if let trigger = result["trigger_word"] as? String,
+               !trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                triggerWord = trigger
+            } else {
+                let path = (result["display_path"] as? String ?? sourcePath)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !path.isEmpty {
+                    let fallback = Self.defaultLabelFromPath(path)
+                    if !fallback.isEmpty { triggerWord = fallback }
+                }
+            }
+        }
+        if safetensorsOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let origin = result["safetensors_origin"] as? String,
+           !origin.isEmpty
+        {
+            safetensorsOrigin = origin
+        }
+        if webPageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let page = result["web_page_url"] as? String,
+           !page.isEmpty
+        {
+            webPageURL = page
         }
     }
 
@@ -176,9 +247,9 @@ struct LoRAImportSheet: View {
         comment = result["comment"] as? String ?? ""
         let ref = (result["reference_prompt"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !ref.isEmpty {
-            referencePrompt = ref
-        }
+        referencePrompt = ref.isEmpty ? LoraAddReferencePromptSettings.defaultPrompt : ref
+        safetensorsOrigin = result["safetensors_origin"] as? String ?? safetensorsOrigin
+        webPageURL = result["web_page_url"] as? String ?? webPageURL
     }
 
     private func validatePath() async {
@@ -207,6 +278,7 @@ struct LoRAImportSheet: View {
                 } else {
                     reuseLoraID = nil
                     applyFilenameDefaultsIfNeeded(for: resolvedPath)
+                    applyPrimingFromValidation(result)
                 }
             } else {
                 reuseLoraID = nil
@@ -241,7 +313,16 @@ struct LoRAImportSheet: View {
             errorMessage = "LoRA services are not available."
             return
         }
+        if !LoRAURLValidation.isValidOrEmpty(safetensorsOrigin) {
+            errorMessage = "Safetensors origin must be a valid http or https URL."
+            return
+        }
+        if !LoRAURLValidation.isValidOrEmpty(webPageURL) {
+            errorMessage = "Web page must be a valid http or https URL."
+            return
+        }
 
+        // Persist only when the user confirms Save / Test & Save; Cancel and Esc dismiss without this path.
         LoraAddReferencePromptSettings.save(referencePrompt, config: appState.config)
 
         if case .edit(let loraID) = mode {
@@ -255,7 +336,9 @@ struct LoRAImportSheet: View {
                     referencePrompt: referencePrompt,
                     repoID: "",
                     filename: "",
-                    sourcePath: path
+                    sourcePath: path,
+                    safetensorsOrigin: safetensorsOrigin,
+                    webPageURL: webPageURL
                 )
                 NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
                 dismiss()
@@ -274,6 +357,8 @@ struct LoRAImportSheet: View {
             "best_guess": bestGuess,
             "comment": comment,
             "reference_prompt": referencePrompt,
+            "safetensors_origin": safetensorsOrigin,
+            "web_page_url": webPageURL,
         ]
         if let reuseLoraID { payload["reuse_lora_id"] = reuseLoraID }
         if skipCompatibilityProbe {

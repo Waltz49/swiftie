@@ -914,6 +914,8 @@ def update_lora_entry_metadata(
     repo_id: Optional[str] = None,
     filename: Optional[str] = None,
     source_path: Optional[str] = None,
+    safetensors_origin: Optional[str] = None,
+    web_page_url: Optional[str] = None,
 ) -> None:
     """Persist user-editable LoRA metadata (name, trigger, scale, best guess, comment, reference prompt).
 
@@ -944,6 +946,12 @@ def update_lora_entry_metadata(
     src = (source_path or "").strip() if source_path is not None else None
     if src == "":
         src = None
+    origin = (safetensors_origin or "").strip() if safetensors_origin is not None else None
+    if origin == "":
+        origin = None
+    web_page = (web_page_url or "").strip() if web_page_url is not None else None
+    if web_page == "":
+        web_page = None
     scale_val: Optional[float] = None
     if scale is not None:
         try:
@@ -980,6 +988,10 @@ def update_lora_entry_metadata(
                 entry_dict["filename"] = fname
             if source_path is not None:
                 entry_dict["source_path"] = src or ""
+            if safetensors_origin is not None:
+                entry_dict["safetensors_origin"] = origin or ""
+            if web_page_url is not None:
+                entry_dict["web_page_url"] = web_page or ""
             raw[lid] = entry_dict
             lc[USER_ENTRIES_KEY] = raw
         else:

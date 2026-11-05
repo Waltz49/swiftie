@@ -38,6 +38,8 @@ def _entry_to_dict(entry: FluxLoraEntry) -> Dict[str, Any]:
         "comment": entry.comment,
         "reference_prompt": entry.reference_prompt,
         "source_path": entry.source_path or "",
+        "safetensors_origin": entry.safetensors_origin or "",
+        "web_page_url": entry.web_page_url or "",
     }
 
 
@@ -83,6 +85,14 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
     source_path = str(source_raw).strip() if source_raw else None
     if source_path == "":
         source_path = None
+    origin_raw = raw.get("safetensors_origin")
+    safetensors_origin = str(origin_raw).strip() if origin_raw else None
+    if safetensors_origin == "":
+        safetensors_origin = None
+    web_raw = raw.get("web_page_url")
+    web_page_url = str(web_raw).strip() if web_raw else None
+    if web_page_url == "":
+        web_page_url = None
     return FluxLoraEntry(
         host_id=host_id,
         lora_id=lora_id,
@@ -99,6 +109,8 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
         comment=comment,
         reference_prompt=reference_prompt,
         source_path=source_path,
+        safetensors_origin=safetensors_origin,
+        web_page_url=web_page_url,
     )
 
 
@@ -331,6 +343,8 @@ def build_user_lora_entry(
     reference_prompt: Optional[str] = None,
     repo_id: str = "",
     filename: str = "",
+    safetensors_origin: Optional[str] = None,
+    web_page_url: Optional[str] = None,
     settings: Optional[Dict[str, Any]] = None,
 ) -> FluxLoraEntry:
     host_id = host_id_for_lora_model(model_key)
@@ -358,6 +372,8 @@ def build_user_lora_entry(
         comment=(comment or "").strip() or None,
         reference_prompt=(reference_prompt or "").strip() or None,
         source_path=str(resolved_source),
+        safetensors_origin=(safetensors_origin or "").strip() or None,
+        web_page_url=(web_page_url or "").strip() or None,
     )
 
 
@@ -367,7 +383,7 @@ def reinstall_user_lora(entry: FluxLoraEntry) -> Path:
 
     if (entry.repo_id or "").strip() and (entry.filename or "").strip():
         return Path(resolve_lora_path(entry.lora_id))
-    source_text = (entry.source_path or "").strip()
+    source_text = (entry.safetensors_origin or entry.source_path or "").strip()
     if not source_text:
         raise ValueError("No recovery source is configured for this LoRA.")
     if source_text.lower().startswith(("http://", "https://")):

@@ -60,6 +60,7 @@ let packageTargets: [Target] = [
         linkerSettings: [
             .linkedFramework("Photos"),
             .linkedFramework("Accelerate"),
+            .linkedFramework("CoreServices"),
             .unsafeFlags([
                 "-Xlinker", "-sectcreate",
                 "-Xlinker", "__TEXT",

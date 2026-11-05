@@ -80,6 +80,8 @@ def _entry_to_dict(
         "filename": entry.filename or "",
         "local_path": entry.local_path or "",
         "source_path": entry.source_path or "",
+        "safetensors_origin": getattr(entry, "safetensors_origin", None) or "",
+        "web_page_url": getattr(entry, "web_page_url", None) or "",
         "installed": bool(is_lora_installed(entry.lora_id)),
         "lifecycle": lifecycle,
         "status_label": lora_status_label(entry.lora_id, model_key, settings),
@@ -668,6 +670,8 @@ def _handle_validate_source(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 "scale": float(existing.scale),
                 "best_guess": float(existing.best_guess),
                 "comment": existing.comment or "",
+                "safetensors_origin": existing.safetensors_origin or "",
+                "web_page_url": existing.web_page_url or "",
                 "reusing": True,
             }
         return {
@@ -705,6 +709,8 @@ def _handle_save_metadata(cmd: Dict[str, Any]) -> Dict[str, Any]:
         repo_id=str(cmd.get("repo_id") or "").strip(),
         filename=str(cmd.get("filename") or "").strip(),
         source_path=str(cmd.get("source_path") or "").strip() or None,
+        safetensors_origin=str(cmd.get("safetensors_origin") or "").strip() or None,
+        web_page_url=str(cmd.get("web_page_url") or "").strip() or None,
     )
     return {
         "type": "result",
@@ -781,6 +787,8 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
         repo_id = str(cmd.get("repo_id") or "").strip()
         filename = str(cmd.get("filename") or "").strip()
         recovery_source_path = str(cmd.get("recovery_source_path") or "").strip()
+        safetensors_origin = str(cmd.get("safetensors_origin") or "").strip()
+        web_page_url = str(cmd.get("web_page_url") or "").strip()
         skip_probe = bool(cmd.get("skip_compatibility_probe"))
 
         if cancelled():
@@ -824,6 +832,8 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                 repo_id=repo_id,
                 filename=filename,
                 source_path=recovery_source_path or None,
+                safetensors_origin=safetensors_origin or None,
+                web_page_url=web_page_url or None,
             )
             entry = get_lora_entry(entry.lora_id)
             if entry is None:
@@ -841,6 +851,8 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                     repo_id=repo_id,
                     filename=filename,
                     source_path=recovery_source_path or None,
+                    safetensors_origin=safetensors_origin or None,
+                    web_page_url=web_page_url or None,
                 )
                 entry = get_lora_entry(existing.lora_id)
                 if entry is None:
@@ -857,6 +869,8 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                     reference_prompt=reference_prompt,
                     repo_id=repo_id,
                     filename=filename,
+                    safetensors_origin=safetensors_origin or None,
+                    web_page_url=web_page_url or None,
                 )
                 if recovery_source_path:
                     from dataclasses import replace

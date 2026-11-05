@@ -188,6 +188,10 @@ def is_lora_installed(
 
 def has_recovery_source(entry: FluxLoraEntry) -> bool:
     """True when weights can be reinstalled (HF, remote URL, local source file, or bundled path)."""
+    if (entry.safetensors_origin or "").strip():
+        return True
+    if (entry.web_page_url or "").strip():
+        return True
     if (entry.repo_id or "").strip() and (entry.filename or "").strip():
         return True
     for raw in (entry.source_path, entry.local_path):

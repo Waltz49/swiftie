@@ -16,6 +16,8 @@ struct LoRAEntry: Equatable, Sendable {
     var comment: String?
     var referencePrompt: String?
     var sourcePath: String?
+    var safetensorsOrigin: String?
+    var webPageURL: String?
 
     static let minStepsDefault = 2
     static let userIDPrefix = "user_"
@@ -42,6 +44,17 @@ struct LoRAEntry: Equatable, Sendable {
         if let comment { out["comment"] = comment }
         if let referencePrompt { out["reference_prompt"] = referencePrompt }
         if let sourcePath { out["source_path"] = sourcePath }
+        if let safetensorsOrigin { out["safetensors_origin"] = safetensorsOrigin }
+        if let webPageURL { out["web_page_url"] = webPageURL }
+        return out
+    }
+
+    /// Merge typed fields into an existing persisted dict so unknown keys are preserved.
+    static func mergedUserEntryDictionary(entry: LoRAEntry, preserving raw: [String: Any]) -> [String: Any] {
+        var out = raw
+        for (key, value) in entry.toDictionary() {
+            out[key] = value
+        }
         return out
     }
 
@@ -70,6 +83,8 @@ struct LoRAEntry: Equatable, Sendable {
         let ref = (raw["reference_prompt"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let mflux = raw["mflux_compatible"] as? Bool
         let source = (raw["source_path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let origin = (raw["safetensors_origin"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let webPage = (raw["web_page_url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return LoRAEntry(
             hostID: hostID,
@@ -86,7 +101,9 @@ struct LoRAEntry: Equatable, Sendable {
             triggerWord: trigger?.isEmpty == true ? nil : trigger,
             comment: comment?.isEmpty == true ? nil : comment,
             referencePrompt: ref?.isEmpty == true ? nil : ref,
-            sourcePath: source?.isEmpty == true ? nil : source
+            sourcePath: source?.isEmpty == true ? nil : source,
+            safetensorsOrigin: origin?.isEmpty == true ? nil : origin,
+            webPageURL: webPage?.isEmpty == true ? nil : webPage
         )
     }
 }

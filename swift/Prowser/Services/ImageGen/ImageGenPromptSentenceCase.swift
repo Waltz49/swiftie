@@ -92,11 +92,26 @@ enum ImageGenPromptSentenceCase {
             commitAllPendingFieldEdits()
             return
         }
+        if editableTextView(at: hit) != nil {
+            return
+        }
         if let active = activeEditableTextView(in: window),
            isHitInsideEditableTextEntry(hit, textView: active) {
             return
         }
         commitAllPendingFieldEdits()
+    }
+
+    /// Any editable ``NSTextView`` under the click (SwiftUI ``TextEditor`` or AppKit prompt fields).
+    private static func editableTextView(at hit: NSView) -> NSTextView? {
+        var view: NSView? = hit
+        while let current = view {
+            if let textView = current as? NSTextView, textView.isEditable {
+                return textView
+            }
+            view = current.superview
+        }
+        return nil
     }
 
     private static func activeEditableTextView(in window: NSWindow) -> NSTextView? {

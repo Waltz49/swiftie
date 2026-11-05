@@ -95,6 +95,81 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     }
 
     @MainActor
+    func testFluxDevPluginPayloadUsesDevHFModelID() async throws {
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        config.setValue(false, forKey: "debug_mode")
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_sldr_nsfw_v2_lora") else {
+            XCTFail("missing plugin")
+            return
+        }
+        XCTAssertEqual(plugin.hfModelID, LoRAHFModelIDs.flux1Dev)
+        let snap = try await ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
+            plugin: plugin,
+            values: [
+                "prompt": "test",
+                "width": 1024,
+                "height": 1024,
+                "steps": 20,
+                "mflux_quantize": 4,
+            ],
+            config: config
+        )
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: snap,
+            outputPath: "/tmp/out.png",
+            config: config,
+            applyImageExit: false
+        )
+        XCTAssertEqual(payload["hf_model_id"] as? String, LoRAHFModelIDs.flux1Dev)
+    }
+
+    @MainActor
+    func testStaleJobValuesHFModelIDDoesNotOverridePluginOnPayload() throws {
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_sldr_nsfw_v2_lora") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: [
+                "prompt": "test",
+                "width": 1024,
+                "height": 1024,
+                "steps": 20,
+                "hf_model_id": "black-forest-labs/FLUX.1-schnell",
+                "_job_values_snapshotted": true,
+            ],
+            outputPath: "/tmp/out.png",
+            config: config,
+            applyImageExit: false
+        )
+        XCTAssertEqual(payload["hf_model_id"] as? String, LoRAHFModelIDs.flux1Dev)
+    }
+
+    @MainActor
+    func testSnapshotSubmitStampsPluginHFModelIDOverStaleValues() async throws {
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_sldr_nsfw_v2_lora") else {
+            XCTFail("missing plugin")
+            return
+        }
+        let snap = try await ImageGenJobValuesSnapshot.snapshotJobValuesAtSubmit(
+            plugin: plugin,
+            values: [
+                "prompt": "test",
+                "width": 1024,
+                "height": 1024,
+                "steps": 20,
+                "hf_model_id": "black-forest-labs/FLUX.1-schnell",
+            ],
+            config: config
+        )
+        XCTAssertEqual(snap["hf_model_id"] as? String, LoRAHFModelIDs.flux1Dev)
+    }
+
+    @MainActor
     func testInfillPayloadSetsCanonicalFromPixelmatorDocPath() throws {
         let fm = FileManager.default
         let dataDir = fm.temporaryDirectory.appendingPathComponent("infill-payload-\(UUID().uuidString)")

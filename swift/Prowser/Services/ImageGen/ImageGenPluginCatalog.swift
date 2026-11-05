@@ -50,8 +50,8 @@ enum ImageGenPluginCatalog {
             pluginID: "flux_sldr_nsfw_v2_lora",
             pipelineID: "flux_schnell_mflux_play",
             function: "create",
-            displayName: "FLUX SLDR NSFW v2 LoRA",
-            hfModelID: "black-forest-labs/FLUX.1-schnell",
+            displayName: LoRAHFModelIDs.flux1Dev,
+            hfModelID: LoRAHFModelIDs.flux1Dev,
             loraHostID: "flux1_t2i"
         ),
         .init(

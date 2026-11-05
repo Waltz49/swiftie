@@ -14,11 +14,21 @@ private final class JobsPaneNonFocusScrollView: NSScrollView {
     override var acceptsFirstResponder: Bool { false }
 }
 
+private struct JobCardContextMenuState {
+    var showMoveToTop = false
+    var moveToTopEnabled = false
+    var singleRunEnabled = false
+    var continuousEnabled = false
+}
+
 @MainActor
 final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onReorder: ((String, String?) -> Void)?
     var onEdit: ((String) -> Void)?
     var onCancel: ((String, Bool) -> Void)?
+    var onMoveToTop: ((String) -> Void)?
+    var onSetSingleRun: ((String) -> Void)?
+    var onSetContinuous: ((String) -> Void)?
     var onOpenReferences: (([String]) -> Void)?
     /// Card heights changed after a width reflow; the measured pane geometry must be re-reported.
     var onCardGeometryChanged: (() -> Void)?
@@ -359,6 +369,34 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         card.onCancel = { [weak self] skipConfirmation in
             self?.onCancel?(row.jobID, skipConfirmation)
         }
+        card.onMoveToTop = { [weak self, weak card] in
+            guard let self, let card, !card.boundJobID.isEmpty else { return }
+            self.onMoveToTop?(card.boundJobID)
+        }
+        card.onSetSingleRun = { [weak self, weak card] in
+            guard let self, let card, !card.boundJobID.isEmpty else { return }
+            self.onSetSingleRun?(card.boundJobID)
+        }
+        card.onSetContinuous = { [weak self, weak card] in
+            guard let self, let card, !card.boundJobID.isEmpty else { return }
+            self.onSetContinuous?(card.boundJobID)
+        }
+        card.contextMenuStateProvider = { [weak self, weak card] in
+            guard let self, let card else { return JobCardContextMenuState() }
+            let jobID = card.boundJobID
+            guard let row = self.rows.first(where: { $0.jobID == jobID }) else {
+                return JobCardContextMenuState()
+            }
+            let barState = self.actionBarStateProvider?(jobID) ?? .empty
+            let queueIndex = self.rows.firstIndex(where: { $0.jobID == jobID }) ?? 0
+            return JobCardContextMenuState(
+                showMoveToTop: !row.held,
+                moveToTopEnabled: queueIndex > 0,
+                singleRunEnabled: barState.canSubtractSeries,
+                continuousEnabled: !row.pluginUnavailable
+                    && !JobStepQueue.isSeriesContinuousCopies(row.copiesTotal)
+            )
+        }
         card.onOpenReferences = { [weak self] paths in self?.onOpenReferences?(paths) }
         card.onJobNumberClick = { [weak self] in self?.onJobNumberClick?(row.jobID) }
     }
@@ -377,6 +415,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             guard let self else { return }
             let source = self.cardViews.first(where: { $0.boundJobID == jobID }) ?? card
             self.beginDrag(jobID: jobID, event: event, from: source)
+        }
+        card.suppressRowDrag = { [weak self] in
+            self?.paneContextMenuAppState?.rightSidebarSplit.userPaneResizeInProgress ?? false
         }
         card.onHoverChanged = { [weak self, weak card] isHovered in
             guard let self, let card else { return }
@@ -750,6 +791,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
 
     private func beginDrag(jobID: String, event: NSEvent, from card: JobCardNSView) {
+        if paneContextMenuAppState?.rightSidebarSplit.userPaneResizeInProgress == true {
+            return
+        }
         dragJobID = jobID
         reorderApplied = false
         pendingDropInsertIndex = nil
@@ -1079,6 +1123,7 @@ private final class JobCardClickOverlay: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if card?.suppressRowDrag?() == true { return }
         card?.handleSelectionMouseDragged(event)
     }
 }
@@ -1088,8 +1133,14 @@ final class JobCardNSView: NSView {
     override var isFlipped: Bool { true }
 
     var onBeginDrag: ((String, NSEvent) -> Void)?
+    /// When true, ignore row reorder drag (pane titlebar resize in progress).
+    var suppressRowDrag: (() -> Bool)?
     var onEdit: (() -> Void)?
     var onCancel: ((Bool) -> Void)?
+    var onMoveToTop: (() -> Void)?
+    var onSetSingleRun: (() -> Void)?
+    var onSetContinuous: (() -> Void)?
+    fileprivate var contextMenuStateProvider: (() -> JobCardContextMenuState)?
     var onHoverChanged: ((Bool) -> Void)?
     var onOpenReferences: (([String]) -> Void)?
     var onJobNumberClick: (() -> Void)?
@@ -1761,10 +1812,29 @@ final class JobCardNSView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        let menuState = contextMenuStateProvider?() ?? JobCardContextMenuState()
         let menu = NSMenu()
-        menu.addItem(withTitle: "Edit", action: #selector(editAction), keyEquivalent: "")
-        menu.addItem(withTitle: "Cancel", action: #selector(cancelAction), keyEquivalent: "")
+        menu.addItem(contextMenuItem(title: "Edit", action: #selector(editAction)))
+        menu.addItem(contextMenuItem(title: "Cancel", action: #selector(cancelAction)))
+        menu.addItem(.separator())
+        if menuState.showMoveToTop {
+            let item = contextMenuItem(title: "Move to top", action: #selector(moveToTopAction))
+            item.isEnabled = menuState.moveToTopEnabled
+            menu.addItem(item)
+        }
+        let singleRun = contextMenuItem(title: "Set to single run", action: #selector(setSingleRunAction))
+        singleRun.isEnabled = menuState.singleRunEnabled
+        menu.addItem(singleRun)
+        let continuous = contextMenuItem(title: "Set to continuous", action: #selector(setContinuousAction))
+        continuous.isEnabled = menuState.continuousEnabled
+        menu.addItem(continuous)
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    private func contextMenuItem(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
     }
 
     @objc private func editAction() { onEdit?() }
@@ -1773,6 +1843,9 @@ final class JobCardNSView: NSView {
             .intersection(.deviceIndependentFlagsMask)
         onCancel?(flags.contains(.option))
     }
+    @objc private func moveToTopAction() { onMoveToTop?() }
+    @objc private func setSingleRunAction() { onSetSingleRun?() }
+    @objc private func setContinuousAction() { onSetContinuous?() }
 
     func snapshotImage() -> NSImage {
         let rep = bitmapImageRepForCachingDisplay(in: bounds)!
@@ -1955,6 +2028,17 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         }
         panel.onCancel = { jobID, skipConfirmation in
             appState.confirmCancelJob(id: jobID, skipConfirmation: skipConfirmation)
+        }
+        panel.onMoveToTop = { jobID in
+            let rows = appState.imageGen.queueSnapshot()
+            guard let first = rows.first?.jobID, first != jobID else { return }
+            appState.imageGen.moveJob(before: first, jobID: jobID)
+        }
+        panel.onSetSingleRun = { jobID in
+            appState.imageGen.subtractSeriesRemaining(forJobID: jobID, removeAll: true)
+        }
+        panel.onSetContinuous = { jobID in
+            appState.imageGen.setSeriesContinuous(forJobID: jobID)
         }
         panel.onOpenReferences = { paths in
             appState.openReferenceThumbnailPaths(paths)
