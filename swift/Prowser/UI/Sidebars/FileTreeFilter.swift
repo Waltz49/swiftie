@@ -37,6 +37,12 @@ enum FileTreeFilter {
     private static var expandedDirectoryPaths: Set<String> = []
     private static var fileTreePaneVisible = true
     private static var expandableChildCache: [String: Bool] = [:]
+    /// While ⌘↩ expand is running, `priority_paths` may list parents not yet deep-checked.
+    private static var expandPriorityBypassActive = false
+
+    static func setExpandPriorityBypassActive(_ active: Bool) {
+        expandPriorityBypassActive = active
+    }
 
     static func setUpdateHandler(_ handler: @escaping (Set<String>) -> Void) {
         onUpdateHandler = handler
@@ -67,6 +73,7 @@ enum FileTreeFilter {
         clearShallowCache()
         invalidateExpandableChildCache()
         cacheKey = ""
+        expandPriorityBypassActive = false
         priorityPaths.removeAll()
         pendingDiscoveryPaths.removeAll()
         debounceTask?.cancel()
@@ -190,6 +197,7 @@ enum FileTreeFilter {
             }
     }
 
+    /// Immediate-directory image probe; matches `DirectoryScanner` (always skips UF_HIDDEN files).
     private static func quickCheckMatchingImages(
         at path: String,
         mode: String,
@@ -200,17 +208,21 @@ enum FileTreeFilter {
         let normalizedExtensions = Set(imageExtensions.map { DirectoryScanner.normalizeExtensionToken($0) })
         guard !normalizedExtensions.isEmpty else { return false }
         let url = URL(fileURLWithPath: path)
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: url.path) else {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+            options: [.skipsHiddenFiles]
+        ) else {
             return false
         }
-        for name in names {
-            let entryPath = url.appendingPathComponent(name).path
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: entryPath, isDirectory: &isDir), !isDir.boolValue else {
+        for entry in entries {
+            guard (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
                 continue
             }
-            let ext = DirectoryScanner.normalizeExtensionToken((name as NSString).pathExtension)
+            if FileTreeImageFileFilter.isHiddenImageFile(entry) { continue }
+            let ext = DirectoryScanner.normalizeExtensionToken(entry.pathExtension)
             guard normalizedExtensions.contains(ext) else { continue }
+            let name = entry.lastPathComponent
             if mode == "images" { return true }
             if mode == "use_filter", DirectoryScanner.matchesGlob(name, pattern: pattern) {
                 return true
@@ -282,7 +294,12 @@ enum FileTreeFilter {
         }
 
         let extensions = appState.config.imageExtensions
-        if quickCheckMatchingImages(at: path, mode: mode, pattern: pattern, imageExtensions: extensions) {
+        if quickCheckMatchingImages(
+            at: path,
+            mode: mode,
+            pattern: pattern,
+            imageExtensions: extensions
+        ) {
             noteDirectoryDiscoveryResult(at: path, hasImages: true)
             return true
         }
@@ -329,10 +346,12 @@ enum FileTreeFilter {
         }
 
         let pattern = mode == "use_filter" ? appState.filterSettings.filterPattern : "*"
-        let key = "\(mode)|\(pattern)"
+        let includeHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
+        let key = "\(mode)|\(pattern)|hidden:\(includeHidden)"
         if key != cacheKey {
             cache.removeAll()
             cacheKey = key
+            FileTreeImageDiscovery.shared.invalidate()
         }
         if let cached = cache[normalized] {
             return cached
@@ -348,17 +367,16 @@ enum FileTreeFilter {
         return result
     }
 
+    /// Current thumbnail directory and its ancestors (not stale `priority_paths` from earlier tree clicks).
     private static func isOnNavigationPath(_ path: String, appState: AppState) -> Bool {
         let pathNorm = standardizedPath(path)
-        if priorityPaths.contains(pathNorm) {
+        if expandPriorityBypassActive, priorityPaths.contains(pathNorm) {
             return true
         }
-        for directory in navigationDirectories(appState: appState) {
-            if directory == pathNorm || directory.hasPrefix(pathNorm + "/") {
-                return true
-            }
-        }
-        return false
+        guard let highlight = highlightDirectory(appState: appState) else { return false }
+        let highlightNorm = standardizedPath(highlight)
+        if pathNorm == highlightNorm { return true }
+        return highlightNorm.hasPrefix(pathNorm + "/")
     }
 
     private static func navigationDirectories(appState: AppState) -> [String] {

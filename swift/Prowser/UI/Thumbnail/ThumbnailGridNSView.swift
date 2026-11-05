@@ -652,33 +652,56 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         invalidateThumbnails(for: [path])
     }
 
-    /// Keys in view-layer caches that refer to the same file as ``path`` (Python ``_canvas_paths_matching``).
-    private func pathsMatchingDisplayedFile(_ path: String) -> [String] {
-        var keys = Set<String>()
-        for listPath in imagePaths where FileDataModel.pathsReferToSameFile(listPath, path) {
-            keys.insert(listPath)
-        }
-        for key in thumbnails.keys where FileDataModel.pathsReferToSameFile(key, path) {
-            keys.insert(key)
-        }
-        for key in loadingPaths where FileDataModel.pathsReferToSameFile(key, path) {
-            keys.insert(key)
-        }
-        for key in imageDimensionCache.keys where FileDataModel.pathsReferToSameFile(key, path) {
-            keys.insert(key)
-        }
-        if keys.isEmpty {
-            keys.insert(path)
-        }
-        return Array(keys)
-    }
-
     func invalidateThumbnails(for paths: [String]) {
         guard !paths.isEmpty else { return }
+        // Exact match covers cache clears, where both sides are already standardized.
+        // Any path that does not match is resolved once against a standardized index,
+        // instead of comparing every path with every key.
+        let requested = Set(paths)
         var keysToClear = Set<String>()
-        for path in paths {
-            for key in pathsMatchingDisplayedFile(path) {
+        func takeExact(_ key: String) {
+            if requested.contains(key) {
                 keysToClear.insert(key)
+            }
+        }
+        for path in imagePaths {
+            takeExact(path)
+        }
+        for key in thumbnails.keys {
+            takeExact(key)
+        }
+        for key in loadingPaths {
+            takeExact(key)
+        }
+        for key in imageDimensionCache.keys {
+            takeExact(key)
+        }
+        let unmatched = paths.filter { !keysToClear.contains($0) }
+        if !unmatched.isEmpty {
+            var keysByStandard: [String: [String]] = [:]
+            var indexed = Set<String>()
+            func indexKey(_ key: String) {
+                guard indexed.insert(key).inserted else { return }
+                let standard = URL(fileURLWithPath: key).standardizedFileURL.path
+                keysByStandard[standard, default: []].append(key)
+            }
+            for path in imagePaths {
+                indexKey(path)
+            }
+            for key in thumbnails.keys {
+                indexKey(key)
+            }
+            for key in loadingPaths {
+                indexKey(key)
+            }
+            for key in imageDimensionCache.keys {
+                indexKey(key)
+            }
+            for path in unmatched {
+                let standard = URL(fileURLWithPath: path).standardizedFileURL.path
+                if let keys = keysByStandard[standard] {
+                    keysToClear.formUnion(keys)
+                }
             }
         }
         guard !keysToClear.isEmpty else { return }
@@ -687,15 +710,24 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             loadingPaths.remove(key)
             imageDimensionCache.removeValue(forKey: key)
         }
-        var repainted = false
-        for key in keysToClear {
-            if let index = FileDataModel.indexOfPath(key, in: imagePaths) {
-                setNeedsDisplay(thumbnailRect(for: index))
-                repainted = true
-            }
-        }
-        if !repainted {
+        if keysToClear.count > 48 {
             needsDisplay = true
+        } else {
+            var repainted = false
+            var indexByPath: [String: Int] = [:]
+            indexByPath.reserveCapacity(imagePaths.count)
+            for (index, path) in imagePaths.enumerated() {
+                indexByPath[path] = index
+            }
+            for key in keysToClear {
+                if let index = indexByPath[key] {
+                    setNeedsDisplay(thumbnailRect(for: index))
+                    repainted = true
+                }
+            }
+            if !repainted {
+                needsDisplay = true
+            }
         }
         scheduleLoadVisibleThumbnails(debounced: false)
     }

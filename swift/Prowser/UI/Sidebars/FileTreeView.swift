@@ -195,6 +195,7 @@ struct FileTreeView: NSViewRepresentable {
             allModeExpandVisited.removeAll()
             filteredPathsToExpand.removeAll()
             treeExpandInProgress = true
+            FileTreeFilter.setExpandPriorityBypassActive(true)
             markUserNavigatingTree(extended: true)
             appState.noteUserRequestedTreeDirectory(startNode.path)
 
@@ -357,6 +358,11 @@ struct FileTreeView: NSViewRepresentable {
             guard generation == expandGeneration else { return }
             publishExpandedPathsForDiscovery()
             treeExpandInProgress = false
+            FileTreeFilter.setExpandPriorityBypassActive(false)
+            if let directory = directoryToHighlightForTreeSync() {
+                FileTreeFilter.setPriorityNavigationDirectory(standardizedPath(directory))
+            }
+            reloadFilterResults(preserveExpansion: true)
         }
 
         /// Disclosure when any non-excluded child directory exists. Filtered visibility is applied when children load.
@@ -595,7 +601,7 @@ struct FileTreeView: NSViewRepresentable {
 
         func selectDirectoryInTree(path: String, outlineView: NSOutlineView, scroll: Bool) {
             let normalized = standardizedPath(path)
-            FileTreeFilter.addPriorityPath(normalized)
+            FileTreeFilter.setPriorityNavigationDirectory(normalized)
             guard let match = findNodeByPath(normalized) else { return }
             expandPath(to: match, outlineView: outlineView, preserveSelection: false)
             let row = outlineView.row(forItem: match)

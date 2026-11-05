@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 /// Thumbnail memory + disk cache. Port of `cache/image_cache.py` (incremental).
 actor ThumbnailCache {
@@ -39,6 +40,10 @@ actor ThumbnailCache {
     private var acceptedBackgroundLoadSession: UInt64 = 0
     /// Built once per cache lifecycle; avoids per-image `contentsOfDirectory` in `scaledDownFromLarger`.
     private var lazyDiskThumbnailIndex: DiskThumbnailIndex?
+    /// Bumped for every disk-cache clear. In-flight JPEG writes captured an older value and must not recreate files.
+    private var diskPersistGeneration: UInt64 = 0
+    /// Bumped per path by `invalidate(for:)`. Same purpose as `diskPersistGeneration` for one file.
+    private var diskPersistEpochByPath: [String: UInt64] = [:]
     private let decodePool = ThumbnailDecodePool(maxConcurrent: 4)
 
     init(paths: ProfilePaths, ignoreExifRotation: Bool) {
@@ -68,6 +73,7 @@ actor ThumbnailCache {
             }
         }
         diskSizesByPath.removeValue(forKey: normalized)
+        diskPersistEpochByPath[normalized, default: 0] += 1
     }
 
     /// Python `clear_cache_for_directory(..., skip_disk_deletion=False)` — drop memory and `{key}_*.jpg` files.
@@ -91,6 +97,8 @@ actor ThumbnailCache {
     /// Python `clear_cache("thumbnails")` — drop in-memory thumbnails and cancel queued decodes after disk cache changes.
     func resetAfterDiskCacheMutation() async {
         decodeQueueGeneration += 1
+        diskPersistGeneration += 1
+        diskPersistEpochByPath.removeAll()
         for entry in inflightGenerations.values {
             entry.task.cancel()
         }
@@ -103,11 +111,14 @@ actor ThumbnailCache {
         await decodePool.cancelWaiters(withPriorityAtMost: ThumbnailLoadPriority.visible.rawValue)
     }
 
-    private func diskIndexOrBuild() -> DiskThumbnailIndex {
+    private func diskIndexOrBuild() async -> DiskThumbnailIndex {
         if let lazyDiskThumbnailIndex {
             return lazyDiskThumbnailIndex
         }
-        let built = diskThumbnailIndex()
+        let built = await diskThumbnailIndex()
+        if let existing = lazyDiskThumbnailIndex {
+            return existing
+        }
         lazyDiskThumbnailIndex = built
         return built
     }
@@ -131,9 +142,9 @@ actor ThumbnailCache {
 
     /// Cache lookup only (no generation). Returns `CGImage` so `@MainActor` callers
     /// can build `NSImage` without crossing a non-Sendable boundary.
-    func cachedThumbnail(for imagePath: String, size: Int) -> CGImage? {
+    func cachedThumbnail(for imagePath: String, size: Int) async -> CGImage? {
         let memoryKey = memoryKey(for: imagePath, size: size)
-        return cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size)?.image
+        return await cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size)?.image
     }
 
     func storeThumbnail(_ image: NSImage, for imagePath: String, size: Int) throws {
@@ -195,7 +206,7 @@ actor ThumbnailCache {
             registerDiskSize(imagePath: imagePath, size: size)
             return true
         }
-        if diskIndex == nil, let sizes = diskThumbnailIndex().sizesByKey[key], sizes.contains(where: { $0 >= size }) {
+        if diskIndex == nil, let sizes = lazyDiskThumbnailIndex?.sizesByKey[key], sizes.contains(where: { $0 >= size }) {
             for cachedSize in sizes where cachedSize >= size {
                 registerDiskSize(imagePath: imagePath, size: cachedSize)
             }
@@ -208,6 +219,12 @@ actor ThumbnailCache {
     func warmIdleBackgroundThumbnail(for imagePath: String, size: Int) async -> Bool {
         if isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
             return false
+        }
+        if lazyDiskThumbnailIndex == nil {
+            _ = await diskIndexOrBuild()
+            if isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
+                return false
+            }
         }
         _ = await generateThumbnailResult(
             for: imagePath,
@@ -235,7 +252,7 @@ actor ThumbnailCache {
         backgroundLoadSession: UInt64? = nil
     ) async -> GeneratedThumbnail? {
         let memoryKey = memoryKey(for: imagePath, size: size)
-        if let cached = cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size) {
+        if let cached = await cachedThumbnailResult(memoryKey: memoryKey, imagePath: imagePath, size: size) {
             return cached
         }
         if let scaled = await scaledDownFromLarger(imagePath: imagePath, size: size) {
@@ -307,7 +324,7 @@ actor ThumbnailCache {
             cgImage: generated.image,
             size: NSSize(width: generated.image.width, height: generated.image.height)
         )
-        try? await storeThumbnailOffDiskIO(image, for: imagePath, size: size, memoryKey: memoryKey)
+        storeThumbnailOffDiskIO(image, for: imagePath, size: size, memoryKey: memoryKey)
         return generated
     }
 
@@ -364,41 +381,52 @@ actor ThumbnailCache {
         for imagePath: String,
         size: Int,
         memoryKey: String
-    ) async throws {
+    ) {
         storeInMemory(key: memoryKey, image: image, imagePath: imagePath, pixelSize: size)
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return
         }
         let url = diskURL(for: imagePath, size: size)
-        try await decodePool.writeJPEG(jpeg, to: url)
-        registerDiskSize(imagePath: imagePath, size: size)
+        let path = imagePath
+        let normalized = ThumbnailCacheKey.normalizeImagePath(path)
+        let pixelSize = size
+        let generation = diskPersistGeneration
+        let epoch = diskPersistEpochByPath[normalized] ?? 0
+        Task {
+            guard let jpeg = await ThumbnailBlockingIO.jpegData(from: cgImage) else { return }
+            guard self.diskPersistStillValid(generation: generation, normalizedPath: normalized, epoch: epoch) else {
+                return
+            }
+            do {
+                try await ThumbnailBlockingIO.write(jpeg, to: url)
+            } catch {
+                return
+            }
+            guard self.diskPersistStillValid(generation: generation, normalizedPath: normalized, epoch: epoch) else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            self.registerDiskSize(imagePath: path, size: pixelSize)
+        }
     }
 
-    private func cachedThumbnailResult(memoryKey: String, imagePath: String, size: Int) -> GeneratedThumbnail? {
+    private func diskPersistStillValid(generation: UInt64, normalizedPath: String, epoch: UInt64) -> Bool {
+        diskPersistGeneration == generation && (diskPersistEpochByPath[normalizedPath] ?? 0) == epoch
+    }
+
+    private func cachedThumbnailResult(memoryKey: String, imagePath: String, size: Int) async -> GeneratedThumbnail? {
         if let image = touchMemory(key: memoryKey),
            let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
         }
         let url = diskURL(for: imagePath, size: size)
-        guard let cgImage = loadDiskThumbnailCGImage(at: url) else {
+        guard let cgImage = await ThumbnailBlockingIO.readThumbnailJPEG(at: url) else {
             return nil
         }
         registerDiskSize(imagePath: imagePath, size: size)
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         storeInMemory(key: memoryKey, image: image, imagePath: imagePath, pixelSize: size)
         return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
-    }
-
-    /// JPEG on disk from a prior session (Python `get_thumbnail_sync` disk path).
-    private func loadDiskThumbnailCGImage(at url: URL) -> CGImage? {
-        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else {
-            return nil
-        }
-        return image
     }
 
     private func scaledDownFromLarger(imagePath: String, size: Int) async -> GeneratedThumbnail? {
@@ -419,7 +447,7 @@ actor ThumbnailCache {
                 let memoryKey = memoryKey(for: imagePath, size: size)
                 storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
                 if !isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
-                    try? await storeThumbnailOffDiskIO(scaled, for: imagePath, size: size, memoryKey: memoryKey)
+                    storeThumbnailOffDiskIO(scaled, for: imagePath, size: size, memoryKey: memoryKey)
                 }
                 return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
             }
@@ -438,7 +466,7 @@ actor ThumbnailCache {
             }
         }
         if bestDiskURL == nil {
-            let index = diskIndexOrBuild()
+            let index = await diskIndexOrBuild()
             if let sizes = index.sizesByKey[base] {
                 for cachedSize in sizes where cachedSize >= size && cachedSize < bestDiskSize {
                     bestDiskSize = cachedSize
@@ -452,7 +480,7 @@ actor ThumbnailCache {
             }
         }
         guard let url = bestDiskURL,
-              let diskImage = loadDiskThumbnailCGImage(at: url) else {
+              let diskImage = await ThumbnailBlockingIO.readThumbnailJPEG(at: url) else {
             return nil
         }
         let nsImage = NSImage(cgImage: diskImage, size: NSSize(width: diskImage.width, height: diskImage.height))
@@ -463,7 +491,7 @@ actor ThumbnailCache {
         let memoryKey = memoryKey(for: imagePath, size: size)
         storeInMemory(key: memoryKey, image: scaled, imagePath: imagePath, pixelSize: size)
         if bestDiskSize != size || !isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
-            try? await storeThumbnailOffDiskIO(scaled, for: imagePath, size: size, memoryKey: memoryKey)
+            storeThumbnailOffDiskIO(scaled, for: imagePath, size: size, memoryKey: memoryKey)
         }
         return GeneratedThumbnail(image: cgImage, originalWidth: 0, originalHeight: 0)
     }
@@ -545,16 +573,8 @@ actor ThumbnailCache {
         let sizesByKey: [String: [Int]]
     }
 
-    func diskThumbnailIndex() -> DiskThumbnailIndex {
-        var sizesByKey: [String: [Int]] = [:]
-        if let filenames = try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path) {
-            for filename in filenames where filename.hasSuffix(".jpg") {
-                guard let underscore = filename.lastIndex(of: "_"),
-                      let size = Int(filename[filename.index(after: underscore)...].dropLast(4)) else { continue }
-                sizesByKey[String(filename[..<underscore]), default: []].append(size)
-            }
-        }
-        return DiskThumbnailIndex(sizesByKey: sizesByKey)
+    func diskThumbnailIndex() async -> DiskThumbnailIndex {
+        await ThumbnailBlockingIO.diskThumbnailIndex(directoryPath: thumbnailDirectory.path)
     }
 
     /// Python `is_thumbnail_cached_on_disk` over a batch: an exact-size or any larger cached variant counts as cached.
@@ -629,12 +649,18 @@ private actor ThumbnailDecodePool {
             return nil
         }
         defer { release(priority: priority) }
-        if Task.isCancelled { return nil }
-        return ThumbnailDecodePool.decodeThumbnail(
-            imagePath: imagePath,
-            size: size,
-            ignoreExifRotation: ignoreExifRotation
-        )
+        if Task.isCancelled {
+            return nil
+        }
+        // ImageIO reads block. Running them on the actor serialized every thumbnail behind one file
+        // and stuck that read on the cooperative thread pool, so the grid stayed blank.
+        return await ThumbnailBlockingIO.perform {
+            ThumbnailDecodePool.decodeThumbnail(
+                imagePath: imagePath,
+                size: size,
+                ignoreExifRotation: ignoreExifRotation
+            )
+        }
     }
 
     func cancelWaiters(withPriorityAtMost maxPriority: Int) {
@@ -688,7 +714,14 @@ private actor ThumbnailDecodePool {
                 )
                 sortWaiters()
             }
-            try Task.checkCancellation()
+            // `release` already reserved this slot before resuming the waiter.
+            do {
+                try Task.checkCancellation()
+            } catch {
+                release(priority: priority)
+                throw error
+            }
+            return
         }
         active += 1
         if priority == .background {
@@ -715,19 +748,26 @@ private actor ThumbnailDecodePool {
         if priority == .background {
             activeBackgroundDecodes = max(0, activeBackgroundDecodes - 1)
         }
+        grantWaitingSlots()
+    }
+
+    /// Fill every free decode slot. Each resumed waiter already owns its slot.
+    private func grantWaitingSlots() {
         guard active < maxConcurrent, !waiters.isEmpty else { return }
         sortWaiters()
-        for index in waiters.indices {
+        var index = 0
+        while index < waiters.count, active < maxConcurrent {
             let candidate = waiters[index]
-            if canTakeDecodeSlot(priority: candidate.priority) {
-                let next = waiters.remove(at: index)
-                active += 1
-                if next.priority == .background {
-                    activeBackgroundDecodes += 1
-                }
-                next.continuation.resume()
-                return
+            guard canTakeDecodeSlot(priority: candidate.priority) else {
+                index += 1
+                continue
             }
+            let next = waiters.remove(at: index)
+            active += 1
+            if next.priority == .background {
+                activeBackgroundDecodes += 1
+            }
+            next.continuation.resume()
         }
     }
 
@@ -743,17 +783,12 @@ private actor ThumbnailDecodePool {
         }
     }
 
-    func writeJPEG(_ data: Data, to url: URL) async throws {
-        try await acquire(imagePath: "", priority: .default, queueOrder: ThumbnailQueueOrdering.background)
-        defer { release(priority: .default) }
-        try data.write(to: url, options: .atomic)
-    }
-
     private static func decodeThumbnail(
         imagePath: String,
         size: Int,
         ignoreExifRotation: Bool
     ) -> ThumbnailCache.GeneratedThumbnail? {
+        guard FileManager.default.fileExists(atPath: imagePath) else { return nil }
         let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
         guard let source = CGImageSourceCreateWithURL(
             URL(fileURLWithPath: imagePath) as CFURL,
@@ -801,5 +836,88 @@ private actor ThumbnailDecodePool {
             return (rawHeight, rawWidth)
         }
         return (rawWidth, rawHeight)
+    }
+}
+
+/// Blocking file and ImageIO work. Actors must not call this synchronously: one stuck read
+/// otherwise holds the actor, and the cooperative thread pool, so later thumbnails never start.
+private enum ThumbnailBlockingIO {
+    private static let queue = DispatchQueue(
+        label: "com.prowser.thumbnail-io",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+
+    static func perform<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: body())
+            }
+        }
+    }
+
+    static func readThumbnailJPEG(at url: URL) async -> CGImage? {
+        await perform {
+            readThumbnailJPEGSync(at: url)
+        }
+    }
+
+    static func jpegData(from image: CGImage) async -> Data? {
+        await perform {
+            let data = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(
+                data,
+                UTType.jpeg.identifier as CFString,
+                1,
+                nil
+            ) else {
+                return nil
+            }
+            let properties = [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary
+            CGImageDestinationAddImage(destination, image, properties)
+            guard CGImageDestinationFinalize(destination) else { return nil }
+            return data as Data
+        }
+    }
+
+    static func write(_ data: Data, to url: URL) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            queue.async {
+                do {
+                    try data.write(to: url, options: .atomic)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    static func diskThumbnailIndex(directoryPath: String) async -> ThumbnailCache.DiskThumbnailIndex {
+        await perform {
+            var sizesByKey: [String: [Int]] = [:]
+            if let filenames = try? FileManager.default.contentsOfDirectory(atPath: directoryPath) {
+                for filename in filenames where filename.hasSuffix(".jpg") {
+                    guard let underscore = filename.lastIndex(of: "_"),
+                          let size = Int(filename[filename.index(after: underscore)...].dropLast(4)) else { continue }
+                    sizesByKey[String(filename[..<underscore]), default: []].append(size)
+                }
+            }
+            return ThumbnailCache.DiskThumbnailIndex(sizesByKey: sizesByKey)
+        }
+    }
+
+    private static func readThumbnailJPEGSync(at url: URL) -> CGImage? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            return nil
+        }
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return image
     }
 }

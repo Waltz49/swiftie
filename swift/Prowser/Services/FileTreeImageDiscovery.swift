@@ -173,7 +173,7 @@ final class FileTreeImageDiscovery {
             var regularFiles: [URL] = []
             for entry in entries {
                 let values = try? entry.resourceValues(forKeys: [
-                    .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
+                    .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey,
                 ])
                 if values?.isSymbolicLink == true {
                     let linkPath = entry.standardizedFileURL.path
@@ -190,6 +190,7 @@ final class FileTreeImageDiscovery {
             }
 
             for entry in regularFiles {
+                if FileTreeImageFileFilter.isHiddenImageFile(entry) { continue }
                 let ext = normalizeExtension(entry.pathExtension)
                 guard normalizedExtensions.contains(ext) else { continue }
                 if context.mode == "use_filter", matchPattern != "*" {

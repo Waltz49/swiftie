@@ -45,13 +45,14 @@ enum FileTreeExpandRunner {
             var subdirs: [URL] = []
             for entry in entries {
                 let values = try? entry.resourceValues(forKeys: [
-                    .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
+                    .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey,
                 ])
                 if values?.isSymbolicLink == true {
                     let linkPath = entry.standardizedFileURL.path
                     if !context.followSymlinks, !context.enabledRootPaths.contains(linkPath) { continue }
                 }
                 if values?.isRegularFile == true {
+                    if FileTreeImageFileFilter.isHiddenImageFile(entry) { continue }
                     let ext = DirectoryScanner.normalizeExtensionToken(entry.pathExtension)
                     guard normalizedExtensions.contains(ext) else { continue }
                     if context.mode == "use_filter", matchPattern != "*" {

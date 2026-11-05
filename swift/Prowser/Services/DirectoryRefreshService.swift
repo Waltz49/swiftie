@@ -435,9 +435,8 @@ enum DirectoryRefreshService {
         guard !paths.isEmpty else { return }
         for path in paths {
             appState.metadataCache.invalidate(path: path)
-            appState.previewPaneCache.invalidate(path: path)
-            appState.metadataCache.recordDiskSnapshot(path: path)
         }
+        appState.previewPaneCache.invalidateIfPresent(in: Set(paths))
         appState.backgroundImageRecognition.noteThumbnailDiskCacheInvalidated()
         appState.thumbnailInvalidationGeneration += 1
         appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(paths))
@@ -445,14 +444,30 @@ enum DirectoryRefreshService {
         let cache = appState.thumbnailCache
         let pathsCopy = paths
         Task {
-            for path in pathsCopy {
-                await cache.invalidate(for: path)
-            }
+            // `removeDiskThumbnails` drops memory entries. A per-path await here would
+            // re-enter the main actor once per file and stall the grid while thumbs load.
             _ = await cache.removeDiskThumbnails(for: pathsCopy)
+            let snapshots = await Task.detached(priority: .utility) {
+                pathsCopy.compactMap { path -> (String, TimeInterval, Int64)? in
+                    guard let snap = MetadataCacheService.readDiskSnapshot(path: path) else { return nil }
+                    return (path, snap.mtime, snap.size)
+                }
+            }.value
             await MainActor.run {
                 refreshPreviewAndBrowseIfCurrentImageChanged(appState: appState, paths: pathsCopy)
-                for path in pathsCopy {
-                    appState.metadataCache.recordDiskSnapshot(path: path)
+            }
+            var start = 0
+            while start < snapshots.count {
+                let end = min(start + 250, snapshots.count)
+                let slice = snapshots[start..<end]
+                await MainActor.run {
+                    for item in slice {
+                        appState.metadataCache.applyDiskSnapshot(path: item.0, mtime: item.1, size: item.2)
+                    }
+                }
+                start = end
+                if start < snapshots.count {
+                    await Task.yield()
                 }
             }
         }
@@ -460,7 +475,8 @@ enum DirectoryRefreshService {
 
     private static func refreshPreviewAndBrowseIfCurrentImageChanged(appState: AppState, paths: [String]) {
         guard let current = appState.fileData.currentImagePath else { return }
-        guard paths.contains(where: { FileDataModel.pathsReferToSameFile($0, current) }) else { return }
+        guard paths.contains(current)
+            || paths.contains(where: { FileDataModel.pathsReferToSameFile($0, current) }) else { return }
         appState.previewPaneContentRevision += 1
         appState.reloadBrowseImageIfCurrent(path: current)
     }

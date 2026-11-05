@@ -57,7 +57,22 @@ final class PreviewPaneSessionCache {
     /// Drop session pixmap when the file at *path* was replaced on disk (same path, new bytes).
     func invalidate(path: String) {
         guard let imagePath else { return }
-        if FileDataModel.pathsReferToSameFile(path, imagePath) {
+        if path == imagePath || FileDataModel.pathsReferToSameFile(path, imagePath) {
+            clear()
+        }
+    }
+
+    /// Drop the preview when it is one of `paths`. Exact membership avoids standardizing
+    /// every path; a spelling mismatch still compares the one preview path.
+    func invalidateIfPresent(in paths: Set<String>) {
+        guard let imagePath else { return }
+        if paths.contains(imagePath) {
+            clear()
+            return
+        }
+        let standard = URL(fileURLWithPath: imagePath).standardizedFileURL.path
+        if paths.contains(standard)
+            || paths.contains(where: { URL(fileURLWithPath: $0).standardizedFileURL.path == standard }) {
             clear()
         }
     }

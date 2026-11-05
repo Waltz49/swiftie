@@ -148,10 +148,10 @@ final class MetadataCacheService {
     func recordDiskSnapshot(path: String) {
         guard let mtime = readMtime(for: path),
               let size = readSize(for: path) else { return }
-        recordDiskSnapshot(path: path, mtime: mtime, size: size)
+        applyDiskSnapshot(path: path, mtime: mtime, size: size)
     }
 
-    private func recordDiskSnapshot(path: String, mtime: TimeInterval, size: Int64) {
+    func applyDiskSnapshot(path: String, mtime: TimeInterval, size: Int64) {
         diskSnapshots[path] = (mtime, size)
         if let existing = cache[path] {
             cache[path] = Entry(
@@ -214,6 +214,15 @@ final class MetadataCacheService {
         for (path, entry) in decoded {
             diskSnapshots[path] = (entry.mtime, entry.size)
         }
+    }
+
+    nonisolated static func readDiskSnapshot(path: String) -> (mtime: TimeInterval, size: Int64)? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let date = attrs[.modificationDate] as? Date else {
+            return nil
+        }
+        guard let size = (attrs[.size] as? NSNumber)?.int64Value else { return nil }
+        return (date.timeIntervalSince1970, size)
     }
 
     private func readMtime(for path: String) -> TimeInterval? {
