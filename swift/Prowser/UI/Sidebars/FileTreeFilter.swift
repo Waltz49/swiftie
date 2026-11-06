@@ -69,16 +69,26 @@ enum FileTreeFilter {
         cache.removeAll()
     }
 
-    static func invalidateCache() {
+    /// Filter visibility and expandable-child caches; keeps deep discovery and navigation priority.
+    static func invalidateShallowFilterCache() {
         clearShallowCache()
         invalidateExpandableChildCache()
-        cacheKey = ""
-        expandPriorityBypassActive = false
-        priorityPaths.removeAll()
         pendingDiscoveryPaths.removeAll()
         debounceTask?.cancel()
         debounceTask = nil
+    }
+
+    /// Deep discovery results and navigation priority (expensive; avoid on listing-only glob changes).
+    static func invalidateDiscoveryAndPriority() {
+        cacheKey = ""
+        expandPriorityBypassActive = false
+        priorityPaths.removeAll()
         FileTreeImageDiscovery.shared.invalidate()
+    }
+
+    static func invalidateCache() {
+        invalidateShallowFilterCache()
+        invalidateDiscoveryAndPriority()
     }
 
     static func invalidateExpandableChildCache(path: String? = nil) {
@@ -216,10 +226,11 @@ enum FileTreeFilter {
             return false
         }
         for entry in entries {
-            guard (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+            let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .isHiddenKey])
+            guard values?.isRegularFile == true else {
                 continue
             }
-            if FileTreeImageFileFilter.isHiddenImageFile(entry) { continue }
+            if FileTreeImageFileFilter.isHiddenImageFile(isHidden: values?.isHidden) { continue }
             let ext = DirectoryScanner.normalizeExtensionToken(entry.pathExtension)
             guard normalizedExtensions.contains(ext) else { continue }
             let name = entry.lastPathComponent

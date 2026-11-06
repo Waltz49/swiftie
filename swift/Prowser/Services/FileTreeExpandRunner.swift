@@ -52,7 +52,7 @@ enum FileTreeExpandRunner {
                     if !context.followSymlinks, !context.enabledRootPaths.contains(linkPath) { continue }
                 }
                 if values?.isRegularFile == true {
-                    if FileTreeImageFileFilter.isHiddenImageFile(entry) { continue }
+                    if FileTreeImageFileFilter.isHiddenImageFile(isHidden: values?.isHidden) { continue }
                     let ext = DirectoryScanner.normalizeExtensionToken(entry.pathExtension)
                     guard normalizedExtensions.contains(ext) else { continue }
                     if context.mode == "use_filter", matchPattern != "*" {

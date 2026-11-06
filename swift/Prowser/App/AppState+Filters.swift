@@ -11,20 +11,23 @@ extension AppState {
         let previousPattern = filterSettings.filterPattern
         filterSettings.setFilterPattern(pattern, persist: true)
         guard filterSettings.filterPattern != previousPattern else { return }
-        applyImmediateFilenameFilterToDisplayedImages()
-        refreshFileTreeFilter()
-        refreshDirectory()
+        let listingSubsetApplied = applyImmediateFilenameFilterToDisplayedImages()
+        refreshFileTreeFilterShallow()
+        if filterSettings.filterPattern == "*" || !listingSubsetApplied {
+            refreshDirectory()
+        }
         config.applySettingsChange(emit: eventBus)
     }
 
     /// Subset the current listing by the active glob (Python `filter_images_by_pattern`) before the async rescan finishes.
-    private func applyImmediateFilenameFilterToDisplayedImages() {
+    @discardableResult
+    private func applyImmediateFilenameFilterToDisplayedImages() -> Bool {
         let pattern = filterSettings.filterPattern
         let current = fileData.displayedImages
-        guard !current.isEmpty else { return }
+        guard !current.isEmpty else { return false }
 
         if referenceGraphActive, !specificFilesActive {
-            return
+            return false
         }
 
         let filtered = current.filter { path in
@@ -32,7 +35,7 @@ extension AppState {
             return DirectoryScanner.matchesGlob(basename, pattern: pattern)
         }
 
-        guard filtered != current else { return }
+        guard filtered != current else { return false }
 
         let priorActive = fileData.currentImagePath
         let ordered = DisplayOrderService.applyDisplayOrder(filtered, appState: self)
@@ -55,10 +58,19 @@ extension AppState {
         }
 
         DirectoryRefreshService.reconcileThumbnailGridListing(appState: self)
+        return true
     }
 
     func refreshFileTreeFilter() {
         FileTreeFilter.invalidateCache()
+        fileTreeReloadFilterOnly = true
+        fileTreeReloadPreservesExpansion = true
+        fileTreeReloadToken += 1
+    }
+
+    /// Listing glob changed; tree `shouldShowDirectory` refreshes its own cache key without wiping deep discovery.
+    func refreshFileTreeFilterShallow() {
+        FileTreeFilter.invalidateShallowFilterCache()
         fileTreeReloadFilterOnly = true
         fileTreeReloadPreservesExpansion = true
         fileTreeReloadToken += 1

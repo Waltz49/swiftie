@@ -447,6 +447,7 @@ enum DirectoryRefreshService {
         appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(paths))
 
         let shouldRefreshSnapshots = refreshDiskSnapshots ?? (!diskAlreadyRemoved || paths.count <= 48)
+        // Default: skip re-statting every source file after a large tree cache clear (`diskAlreadyRemoved` + many paths).
 
         let cache = appState.thumbnailCache
         let pathsCopy = paths

@@ -6,4 +6,8 @@ enum FileTreeImageFileFilter {
     nonisolated static func isHiddenImageFile(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isHiddenKey]).isHidden) == true
     }
+
+    nonisolated static func isHiddenImageFile(isHidden: Bool?) -> Bool {
+        isHidden == true
+    }
 }

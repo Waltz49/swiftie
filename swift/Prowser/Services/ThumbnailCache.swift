@@ -40,6 +40,10 @@ actor ThumbnailCache {
     private var acceptedBackgroundLoadSession: UInt64 = 0
     /// Built once per cache lifecycle; avoids per-image `contentsOfDirectory` in `scaledDownFromLarger`.
     private var lazyDiskThumbnailIndex: DiskThumbnailIndex?
+    private var diskIndexBuildTask: Task<DiskThumbnailIndex, Never>?
+    /// Bumped when the on-disk thumbnail set is reset; in-flight index builds must not repopulate `lazyDiskThumbnailIndex`.
+    private var diskIndexGeneration: UInt64 = 0
+    private var diskIndexBuildTaskGeneration: UInt64 = 0
     /// Bumped for every disk-cache clear. In-flight JPEG writes captured an older value and must not recreate files.
     private var diskPersistGeneration: UInt64 = 0
     /// Bumped per path by `invalidate(for:)`. Same purpose as `diskPersistGeneration` for one file.
@@ -60,8 +64,15 @@ actor ThumbnailCache {
             memoryKeysByPath.removeAll()
             diskSizesByPath.removeAll()
             mtimeStatCache.removeAll()
-            lazyDiskThumbnailIndex = nil
+            invalidateDiskIndexState()
         }
+    }
+
+    private func invalidateDiskIndexState() {
+        diskIndexGeneration += 1
+        lazyDiskThumbnailIndex = nil
+        diskIndexBuildTask?.cancel()
+        diskIndexBuildTask = nil
     }
 
     func invalidate(for imagePath: String) {
@@ -120,7 +131,7 @@ actor ThumbnailCache {
         memoryKeysByPath.removeAll()
         diskSizesByPath.removeAll()
         mtimeStatCache.removeAll()
-        lazyDiskThumbnailIndex = nil
+        invalidateDiskIndexState()
         await decodePool.cancelWaiters(withPriorityAtMost: ThumbnailLoadPriority.visible.rawValue)
     }
 
@@ -128,12 +139,34 @@ actor ThumbnailCache {
         if let lazyDiskThumbnailIndex {
             return lazyDiskThumbnailIndex
         }
-        let built = await diskThumbnailIndex()
-        if let existing = lazyDiskThumbnailIndex {
-            return existing
+        if let diskIndexBuildTask {
+            let buildGeneration = diskIndexBuildTaskGeneration
+            let built = await diskIndexBuildTask.value
+            if let lazyDiskThumbnailIndex {
+                return lazyDiskThumbnailIndex
+            }
+            guard buildGeneration == diskIndexGeneration else {
+                return await diskIndexOrBuild()
+            }
+            lazyDiskThumbnailIndex = built
+            return built
         }
-        lazyDiskThumbnailIndex = built
-        return built
+        let buildGeneration = diskIndexGeneration
+        let directoryPath = thumbnailDirectory.path
+        let task = Task {
+            await ThumbnailBlockingIO.diskThumbnailIndex(directoryPath: directoryPath)
+        }
+        diskIndexBuildTaskGeneration = buildGeneration
+        diskIndexBuildTask = task
+        let built = await task.value
+        diskIndexBuildTask = nil
+        if buildGeneration != diskIndexGeneration {
+            return await diskIndexOrBuild()
+        }
+        if lazyDiskThumbnailIndex == nil {
+            lazyDiskThumbnailIndex = built
+        }
+        return lazyDiskThumbnailIndex ?? built
     }
 
     func cacheKey(for imagePath: String) -> String {
@@ -232,12 +265,6 @@ actor ThumbnailCache {
     func warmIdleBackgroundThumbnail(for imagePath: String, size: Int) async -> Bool {
         if isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
             return false
-        }
-        if lazyDiskThumbnailIndex == nil {
-            _ = await diskIndexOrBuild()
-            if isThumbnailSatisfiedOnDisk(for: imagePath, size: size) {
-                return false
-            }
         }
         _ = await generateThumbnailResult(
             for: imagePath,
@@ -529,6 +556,15 @@ actor ThumbnailCache {
     private func registerDiskSize(imagePath: String, size: Int) {
         let normalized = ThumbnailCacheKey.normalizeImagePath(imagePath)
         diskSizesByPath[normalized, default: []].insert(size)
+        let cacheKeyBase = cacheKey(for: imagePath)
+        if var map = lazyDiskThumbnailIndex?.sizesByKey {
+            var sizes = map[cacheKeyBase] ?? []
+            if !sizes.contains(size) {
+                sizes.append(size)
+                map[cacheKeyBase] = sizes
+                lazyDiskThumbnailIndex = DiskThumbnailIndex(sizesByKey: map)
+            }
+        }
     }
 
     private func parseSize(fromMemoryKey key: String) -> Int? {
@@ -665,15 +701,14 @@ private actor ThumbnailDecodePool {
         if Task.isCancelled {
             return nil
         }
-        // ImageIO reads block. Running them on the actor serialized every thumbnail behind one file
-        // and stuck that read on the cooperative thread pool, so the grid stayed blank.
-        return await ThumbnailBlockingIO.performRead {
+        // Full original decodes stay off the thumbnail read queue so cached JPEG loads are not starved.
+        return await Task.detached(priority: .userInitiated) {
             ThumbnailDecodePool.decodeThumbnail(
                 imagePath: imagePath,
                 size: size,
                 ignoreExifRotation: ignoreExifRotation
             )
-        }
+        }.value
     }
 
     func cancelWaiters(withPriorityAtMost maxPriority: Int) {
@@ -919,10 +954,13 @@ private enum ThumbnailBlockingIO {
         attributes: .concurrent
     )
     private static let writeSlots = DispatchSemaphore(value: 2)
+    private static let readSlots = DispatchSemaphore(value: 12)
 
     static func performRead<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
         await withCheckedContinuation { continuation in
             readQueue.async {
+                readSlots.wait()
+                defer { readSlots.signal() }
                 continuation.resume(returning: body())
             }
         }

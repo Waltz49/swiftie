@@ -180,6 +180,7 @@ final class FileTreeImageDiscovery {
                     if !context.followSymlinks, !context.enabledRootPaths.contains(linkPath) { continue }
                 }
                 if values?.isRegularFile == true {
+                    if FileTreeImageFileFilter.isHiddenImageFile(isHidden: values?.isHidden) { continue }
                     regularFiles.append(entry)
                 } else if values?.isDirectory == true {
                     guard !FileTreeExcludedExtensions.shouldExcludeDirectory(named: entry.lastPathComponent) else {
@@ -190,7 +191,6 @@ final class FileTreeImageDiscovery {
             }
 
             for entry in regularFiles {
-                if FileTreeImageFileFilter.isHiddenImageFile(entry) { continue }
                 let ext = normalizeExtension(entry.pathExtension)
                 guard normalizedExtensions.contains(ext) else { continue }
                 if context.mode == "use_filter", matchPattern != "*" {

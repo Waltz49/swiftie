@@ -772,11 +772,28 @@ struct FileTreeView: NSViewRepresentable {
             }
 
             let pathsToRefresh = Set(expandedDirectoryPaths.flatMap { ancestorPaths(of: $0) })
+            var nodesToReload: [FileTreeNode] = []
             for path in pathsToRefresh.sorted(by: { $0.count < $1.count }) {
                 guard let node = findNodeByPath(path) else { continue }
                 node.reloadChildren(appState: appState, rootPaths: rootPaths)
                 guard outlineView.row(forItem: node) >= 0 else { continue }
-                reloadItemPreservingSelection(outlineView, node, reloadChildren: true)
+                nodesToReload.append(node)
+            }
+            if !nodesToReload.isEmpty {
+                let selectedItem = outlineView.selectedRow >= 0
+                    ? outlineView.item(atRow: outlineView.selectedRow)
+                    : nil
+                outlineView.beginUpdates()
+                for node in nodesToReload {
+                    outlineView.reloadItem(node, reloadChildren: true)
+                }
+                outlineView.endUpdates()
+                if let selectedItem {
+                    let row = outlineView.row(forItem: selectedItem)
+                    if row >= 0 {
+                        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                    }
+                }
             }
             restoreTrackedExpansion(outlineView: outlineView)
             syncSelectionIfNeeded()
