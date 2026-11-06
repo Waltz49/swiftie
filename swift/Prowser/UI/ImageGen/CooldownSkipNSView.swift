@@ -141,6 +141,11 @@ final class CooldownSkipNSView: NSView {
         showSkip && arrowRect.contains(point)
     }
 
+    /// Used by active-strip double-click (mini mode): allow toggle on cooldown text, not on skip arrow.
+    func isSkipArrowHit(at pointInView: NSPoint) -> Bool {
+        arrowHit(pointInView)
+    }
+
     override func resetCursorRects() {
         super.resetCursorRects()
         if showSkip {

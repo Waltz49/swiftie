@@ -495,6 +495,27 @@ final class ActiveJobStripNSView: NSView {
     @objc private func subtractSeriesAction() {
         onSubtractSeries?(NSEvent.modifierFlags.contains(.option))
     }
+
+    /// Double-click to leave Mini ⌥[ (strip + mini): progress rows, bars, backgrounds — not icon buttons or cooldown skip arrow.
+    func allowsStripMiniDoubleClickToggle(at pointInSelf: NSPoint) -> Bool {
+        guard let hit = hitTest(pointInSelf) else { return false }
+        var node: NSView? = hit
+        while let current = node {
+            if current === self { break }
+            if current is NSButton { return false }
+            if let cooldown = current as? CooldownSkipNSView {
+                let pt = cooldown.convert(pointInSelf, from: self)
+                return !cooldown.isSkipArrowHit(at: pt)
+            }
+            node = current.superview
+        }
+        node = hit
+        while let current = node {
+            if current === iconColumn { return false }
+            node = current.superview
+        }
+        return true
+    }
 }
 
 struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
@@ -529,11 +550,13 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: ActiveJobStripNSView, coordinator: Coordinator) {
+        coordinator.removeStripMiniDoubleClickMonitor()
         if let id = coordinator.sinkID {
             coordinator.controller?.setStripLiveSink(id, nil)
         }
         coordinator.sinkID = nil
         coordinator.controller = nil
+        coordinator.appState = nil
     }
 
     @MainActor
@@ -567,6 +590,8 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
 
     @MainActor
     private func installCallbacks(on nsView: ActiveJobStripNSView, context: Context) {
+        context.coordinator.appState = appState
+        context.coordinator.syncStripMiniDoubleClickMonitor(hostingView: nsView)
         nsView.onContentHeightChanged = { [weak nsView] in
             guard let nsView else { return }
             reportMeasuredHeight(nsView: nsView, appState: appState)
@@ -591,9 +616,55 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator {
         var sinkID: ObjectIdentifier?
         weak var controller: ImageGenController?
+        weak var appState: AppState?
+        private weak var stripDoubleClickHost: ActiveJobStripNSView?
+        private var stripDoubleClickMonitor: Any?
+
+        func syncStripMiniDoubleClickMonitor(hostingView: ActiveJobStripNSView) {
+            stripDoubleClickHost = hostingView
+            guard let appState else {
+                removeStripMiniDoubleClickMonitor()
+                return
+            }
+            // Strip mode: double-click toggles mini chrome on/off (preference), not only when mini is already on.
+            let shouldMonitor = BundleCapabilities.imageGenUIEnabled
+                && appState.jobsQueueSizeMode == .strip
+            if !shouldMonitor {
+                removeStripMiniDoubleClickMonitor()
+                return
+            }
+            guard stripDoubleClickMonitor == nil else { return }
+            stripDoubleClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                guard let self else { return event }
+                return self.handleStripMiniDoubleClick(event)
+            }
+        }
+
+        func removeStripMiniDoubleClickMonitor() {
+            if let token = stripDoubleClickMonitor {
+                NSEvent.removeMonitor(token)
+                stripDoubleClickMonitor = nil
+            }
+            stripDoubleClickHost = nil
+        }
+
+        @MainActor
+        private func handleStripMiniDoubleClick(_ event: NSEvent) -> NSEvent? {
+            guard event.clickCount == 2 else { return event }
+            guard let appState else { return event }
+            guard appState.jobsQueueSizeMode == .strip else { return event }
+            guard let host = stripDoubleClickHost, let window = host.window else { return event }
+            guard window == event.window else { return event }
+            let point = host.convert(event.locationInWindow, from: nil)
+            guard host.bounds.contains(point) else { return event }
+            guard host.allowsStripMiniDoubleClickToggle(at: point) else { return event }
+            appState.setJobsPaneMiniOptionBracketMode(!appState.jobsPaneMiniOptionBracketMode)
+            return nil
+        }
     }
 
     private func resolvedLayoutWidth(
