@@ -5,6 +5,8 @@ struct ImageGenExpandPreviewPane: View {
     @Binding var values: [String: Any]
     let sourcePath: String?
     let pipelineID: String
+    /// True when editing a queued job — keep stored placement; otherwise prefer a fresh aspect fit on load.
+    var honorPersistedPlacement: Bool = false
     var onSourcePathChanged: ((String) -> Void)?
     var onValuesChanged: (() -> Void)?
 
@@ -50,6 +52,7 @@ struct ImageGenExpandPreviewPane: View {
                         sourcePath: path,
                         canvasWidth: canvasWidth,
                         canvasHeight: canvasHeight,
+                        honorPersistedPlacement: honorPersistedPlacement,
                         placement: placementFromValues,
                         onPlacementChanged: { px, py, pw, ph in
                             values["placement_x"] = px

@@ -27,6 +27,8 @@ struct ImageGenPanelShell: View {
     @Environment(AppState.self) private var appState
     @State private var localSourcePath: String?
     @State private var localSourcePaths: [String] = []
+    /// Expand: when true, canvas restores job snapshot placement; when false, first fit wins over stale `placement_*` from settings.
+    var editingQueueJob: Bool = false
 
     private var selectedPlugin: [String: Any]? {
         plugins.first { ($0["plugin_id"] as? String) == selectedPluginID }
@@ -85,6 +87,7 @@ struct ImageGenPanelShell: View {
                         values: $values,
                         sourcePath: effectiveSourcePath,
                         pipelineID: pipelineID,
+                        honorPersistedPlacement: editingQueueJob,
                         onSourcePathChanged: { adoptSingleSourcePath($0) },
                         onValuesChanged: onValuesChanged
                     )

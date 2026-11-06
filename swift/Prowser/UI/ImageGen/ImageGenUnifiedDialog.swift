@@ -108,7 +108,8 @@ struct ImageGenUnifiedDialog: View {
                         activeBrowsePath: activeImagePath,
                         onQueueJobWithAI: {
                             Task { await submit(replace: false, forceFluxAIJob: true) }
-                        }
+                        },
+                        editingQueueJob: replaceJobID != nil
                     )
                     if showReplaceUpdate, let row = editingQueueJobRow, let jobNumber = row.jobNumber {
                         ImageGenJobNumberBadgeView(
@@ -207,12 +208,12 @@ struct ImageGenUnifiedDialog: View {
             raiseWindow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserCycleImageGenFunction)) { note in
-            let delta = note.userInfo?["delta"] as? Int ?? 0
+            let delta = (note.userInfo?[AnyHashable("delta")] as? NSNumber)?.intValue ?? 0
             guard delta == -1 || delta == 1 else { return }
             cycleFunction(delta: delta)
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserStepImageGenSource)) { note in
-            let delta = note.userInfo?["delta"] as? Int ?? 0
+            let delta = (note.userInfo?[AnyHashable("delta")] as? NSNumber)?.intValue ?? 0
             guard delta == -1 || delta == 1 else { return }
             _ = handleSourceNavKeyboard(delta: delta)
         }

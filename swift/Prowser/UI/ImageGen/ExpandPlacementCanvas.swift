@@ -419,6 +419,9 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
     let sourcePath: String
     let canvasWidth: Int
     let canvasHeight: Int
+    /// When false (normal open), prefer the view’s aspect fit over stale `placement_*` from SwiftUI/session.
+    /// When true (queue job editor), keep job snapshot placement.
+    var honorPersistedPlacement: Bool = false
     var placement: (x: Int, y: Int, w: Int, h: Int)?
     var onPlacementChanged: ((Int, Int, Int, Int) -> Void)?
 
@@ -434,6 +437,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
             context.coordinator.onPlacementChanged?(p.0, p.1, p.2, p.3)
         }
         context.coordinator.onPlacementChanged = onPlacementChanged
+        context.coordinator.honorPersistedPlacement = honorPersistedPlacement
         context.coordinator.apply(
             to: view,
             sourcePath: sourcePath,
@@ -446,6 +450,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: ExpandPlacementCanvasView, context: Context) {
         context.coordinator.onPlacementChanged = onPlacementChanged
+        context.coordinator.honorPersistedPlacement = honorPersistedPlacement
         context.coordinator.apply(
             to: view,
             sourcePath: sourcePath,
@@ -458,9 +463,8 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         var onPlacementChanged: ((Int, Int, Int, Int) -> Void)?
+        var honorPersistedPlacement = false
         private var lastSourcePath = ""
-        private var lastCanvasW = 0
-        private var lastCanvasH = 0
         private var appliedPlacementKey = ""
 
         func apply(
@@ -470,12 +474,16 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
             canvasH: Int,
             placement: (x: Int, y: Int, w: Int, h: Int)?
         ) {
-            let sizeChanged = canvasW != lastCanvasW || canvasH != lastCanvasH
             let sourceChanged = sourcePath != lastSourcePath
+            /// Prefer the view's fit over the SwiftUI binding when the source path becomes available
+            /// or changes, unless we are restoring a queue job snapshot (``honorPersistedPlacement``).
+            let navigatedToFreshSource = sourceChanged && (
+                honorPersistedPlacement
+                    ? !lastSourcePath.isEmpty
+                    : (!lastSourcePath.isEmpty || !sourcePath.isEmpty)
+            )
             view.configure(sourcePath: sourcePath, canvasW: canvasW, canvasH: canvasH)
             lastSourcePath = sourcePath
-            lastCanvasW = canvasW
-            lastCanvasH = canvasH
 
             if let placement {
                 let key = "\(placement.x),\(placement.y),\(placement.w),\(placement.h)"
@@ -484,25 +492,31 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
                     placementHeight: placement.h,
                     image: view.sourceImageForAspect()
                 )
-                if sourceChanged, !storedMatchesImage {
+                if navigatedToFreshSource || (sourceChanged && !storedMatchesImage) {
                     let fit = view.canvasPlacement()
                     appliedPlacementKey = "\(fit.0),\(fit.1),\(fit.2),\(fit.3)"
                     onPlacementChanged?(fit.0, fit.1, fit.2, fit.3)
                 } else if key != appliedPlacementKey || sourceChanged {
-                    view.setCanvasPlacement(
-                        px: placement.x,
-                        py: placement.y,
-                        pw: placement.w,
-                        ph: placement.h,
-                        emit: false
-                    )
-                    appliedPlacementKey = key
+                    // SwiftUI can deliver a second `updateNSView` with a stale `placement` binding
+                    // (previous session rect) after we already fitted the new source; applying it distorts.
+                    if !sourceChanged, !honorPersistedPlacement, !storedMatchesImage {
+                        let fit = view.canvasPlacement()
+                        let fitKey = "\(fit.0),\(fit.1),\(fit.2),\(fit.3)"
+                        appliedPlacementKey = fitKey
+                        onPlacementChanged?(fit.0, fit.1, fit.2, fit.3)
+                    } else {
+                        view.setCanvasPlacement(
+                            px: placement.x,
+                            py: placement.y,
+                            pw: placement.w,
+                            ph: placement.h,
+                            emit: false
+                        )
+                        appliedPlacementKey = key
+                    }
                 }
             } else if sourceChanged {
                 appliedPlacementKey = ""
-            }
-            if sizeChanged, !sourceChanged {
-                _ = view.canvasPlacement()
             }
         }
 
@@ -514,7 +528,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
             guard let image, image.height > 0, placementHeight > 0 else { return true }
             let imageAspect = Double(image.width) / Double(image.height)
             let placementAspect = Double(placementWidth) / Double(placementHeight)
-            return abs(imageAspect - placementAspect) / imageAspect < 0.04
+            return abs(imageAspect - placementAspect) / imageAspect < 0.01
         }
     }
 }
