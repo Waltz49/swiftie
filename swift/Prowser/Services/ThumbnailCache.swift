@@ -76,20 +76,33 @@ actor ThumbnailCache {
         diskPersistEpochByPath[normalized, default: 0] += 1
     }
 
-    /// Python `clear_cache_for_directory(..., skip_disk_deletion=False)` — drop memory and `{key}_*.jpg` files.
-    @discardableResult
-    func removeDiskThumbnails(for imagePaths: [String]) -> Int {
-        let filenames = (try? FileManager.default.contentsOfDirectory(atPath: thumbnailDirectory.path)) ?? []
-        var removed = 0
+    func invalidateMemory(for imagePaths: [String]) {
         for path in imagePaths {
             invalidate(for: path)
-            let prefix = "\(cacheKey(for: path))_"
-            for filename in filenames where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
-                let url = thumbnailDirectory.appendingPathComponent(filename)
-                if (try? FileManager.default.removeItem(at: url)) != nil {
-                    removed += 1
-                }
+        }
+    }
+
+    /// Python `clear_cache_for_directory(..., skip_disk_deletion=False)` — drop memory and `{key}_*.jpg` files.
+    @discardableResult
+    func removeDiskThumbnails(for imagePaths: [String]) async -> Int {
+        guard !imagePaths.isEmpty else { return 0 }
+        let indexSnapshot = lazyDiskThumbnailIndex?.sizesByKey
+        let keys = imagePaths.map { cacheKey(for: $0) }
+        let directoryPath = thumbnailDirectory.path
+        let removed = await ThumbnailBlockingIO.removeThumbnailFiles(
+            directoryPath: directoryPath,
+            cacheKeys: keys,
+            indexSizesByKey: indexSnapshot
+        )
+        for path in imagePaths {
+            invalidate(for: path)
+        }
+        if lazyDiskThumbnailIndex != nil {
+            var map = lazyDiskThumbnailIndex!.sizesByKey
+            for key in keys {
+                map.removeValue(forKey: key)
             }
+            lazyDiskThumbnailIndex = DiskThumbnailIndex(sizesByKey: map)
         }
         return removed
     }
@@ -654,7 +667,7 @@ private actor ThumbnailDecodePool {
         }
         // ImageIO reads block. Running them on the actor serialized every thumbnail behind one file
         // and stuck that read on the cooperative thread pool, so the grid stayed blank.
-        return await ThumbnailBlockingIO.perform {
+        return await ThumbnailBlockingIO.performRead {
             ThumbnailDecodePool.decodeThumbnail(
                 imagePath: imagePath,
                 size: size,
@@ -839,31 +852,114 @@ private actor ThumbnailDecodePool {
     }
 }
 
+/// Index-based disk thumbnail deletion (unit-testable; one dir listing when index is missing).
+enum ThumbnailDiskRemoval {
+    static func removeFiles(
+        directoryPath: String,
+        cacheKeys: [String],
+        indexSizesByKey: [String: [Int]]?
+    ) -> Int {
+        guard !cacheKeys.isEmpty else { return 0 }
+        var index = indexSizesByKey ?? [:]
+        var directoryListing: [String]?
+        var removed = 0
+
+        func listing() -> [String] {
+            if let directoryListing {
+                return directoryListing
+            }
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: directoryPath)) ?? []
+            directoryListing = names
+            if indexSizesByKey == nil {
+                for filename in names where filename.hasSuffix(".jpg") {
+                    guard let underscore = filename.lastIndex(of: "_"),
+                          let size = Int(filename[filename.index(after: underscore)...].dropLast(4)) else { continue }
+                    index[String(filename[..<underscore]), default: []].append(size)
+                }
+            }
+            return names
+        }
+
+        for key in cacheKeys {
+            if let sizes = index[key], !sizes.isEmpty {
+                for size in sizes {
+                    let filename = ThumbnailCacheKey.diskFilename(cacheKey: key, size: size)
+                    let filePath = (directoryPath as NSString).appendingPathComponent(filename)
+                    if (try? FileManager.default.removeItem(atPath: filePath)) != nil {
+                        removed += 1
+                    }
+                }
+                index.removeValue(forKey: key)
+                continue
+            }
+            let prefix = "\(key)_"
+            for filename in listing() where filename.hasPrefix(prefix) && filename.hasSuffix(".jpg") {
+                let filePath = (directoryPath as NSString).appendingPathComponent(filename)
+                if (try? FileManager.default.removeItem(atPath: filePath)) != nil {
+                    removed += 1
+                }
+            }
+            index.removeValue(forKey: key)
+        }
+        return removed
+    }
+}
+
 /// Blocking file and ImageIO work. Actors must not call this synchronously: one stuck read
 /// otherwise holds the actor, and the cooperative thread pool, so later thumbnails never start.
 private enum ThumbnailBlockingIO {
-    private static let queue = DispatchQueue(
-        label: "com.prowser.thumbnail-io",
+    private static let readQueue = DispatchQueue(
+        label: "com.prowser.thumbnail-io.read",
         qos: .userInitiated,
         attributes: .concurrent
     )
+    private static let writeQueue = DispatchQueue(
+        label: "com.prowser.thumbnail-io.write",
+        qos: .utility,
+        attributes: .concurrent
+    )
+    private static let writeSlots = DispatchSemaphore(value: 2)
 
-    static func perform<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+    static func performRead<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
         await withCheckedContinuation { continuation in
-            queue.async {
+            readQueue.async {
                 continuation.resume(returning: body())
             }
         }
     }
 
+    private static func performWrite<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            writeQueue.async {
+                writeSlots.wait()
+                defer { writeSlots.signal() }
+                continuation.resume(returning: body())
+            }
+        }
+    }
+
+    static func removeThumbnailFiles(
+        directoryPath: String,
+        cacheKeys: [String],
+        indexSizesByKey: [String: [Int]]?
+    ) async -> Int {
+        await performRead {
+            ThumbnailDiskRemoval.removeFiles(
+                directoryPath: directoryPath,
+                cacheKeys: cacheKeys,
+                indexSizesByKey: indexSizesByKey
+            )
+        }
+    }
+
     static func readThumbnailJPEG(at url: URL) async -> CGImage? {
-        await perform {
+        await performRead {
             readThumbnailJPEGSync(at: url)
         }
     }
 
     static func jpegData(from image: CGImage) async -> Data? {
-        await perform {
+        await performWrite {
             let data = NSMutableData()
             guard let destination = CGImageDestinationCreateWithData(
                 data,
@@ -882,7 +978,9 @@ private enum ThumbnailBlockingIO {
 
     static func write(_ data: Data, to url: URL) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async {
+            writeQueue.async {
+                writeSlots.wait()
+                defer { writeSlots.signal() }
                 do {
                     try data.write(to: url, options: .atomic)
                     continuation.resume()
@@ -894,7 +992,7 @@ private enum ThumbnailBlockingIO {
     }
 
     static func diskThumbnailIndex(directoryPath: String) async -> ThumbnailCache.DiskThumbnailIndex {
-        await perform {
+        await performRead {
             var sizesByKey: [String: [Int]] = [:]
             if let filenames = try? FileManager.default.contentsOfDirectory(atPath: directoryPath) {
                 for filename in filenames where filename.hasSuffix(".jpg") {

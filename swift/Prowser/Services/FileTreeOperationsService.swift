@@ -114,14 +114,15 @@ final class FileTreeOperationsService {
             extensions: appState.config.imageExtensions,
             filterPattern: "*"
         )
-        for path in images {
-            appState.metadataCache.invalidate(path: path)
-        }
         Task { @MainActor in
             await appState.thumbnailCache.resetAfterDiskCacheMutation()
             let removed = await appState.thumbnailCache.removeDiskThumbnails(for: images)
             if !images.isEmpty {
-                DirectoryRefreshService.invalidateThumbnails(appState: appState, paths: images)
+                DirectoryRefreshService.invalidateThumbnails(
+                    appState: appState,
+                    paths: images,
+                    diskAlreadyRemoved: true
+                )
             } else {
                 appState.backgroundImageRecognition.noteThumbnailDiskCacheInvalidated()
             }

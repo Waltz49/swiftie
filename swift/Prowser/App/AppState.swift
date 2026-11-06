@@ -763,7 +763,11 @@ final class AppState {
                     thumbnailGridHost?.clearThumbnails()
                     thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
                 } else {
-                    DirectoryRefreshService.invalidateThumbnails(appState: self, paths: paths)
+                    DirectoryRefreshService.invalidateThumbnails(
+                        appState: self,
+                        paths: paths,
+                        diskAlreadyRemoved: true
+                    )
                 }
             }
         }

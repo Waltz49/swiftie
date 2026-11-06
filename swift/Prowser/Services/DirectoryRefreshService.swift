@@ -428,7 +428,12 @@ enum DirectoryRefreshService {
         grid.reconcileDisplayedPathsIfNeeded(displayed)
     }
 
-    static func invalidateThumbnails(appState: AppState, paths: [String]) {
+    static func invalidateThumbnails(
+        appState: AppState,
+        paths: [String],
+        diskAlreadyRemoved: Bool = false,
+        refreshDiskSnapshots: Bool? = nil
+    ) {
         let paths = paths.filter {
             !appState.imageGen.shouldSuppressGenerationOutputDiskUpdates(for: $0)
         }
@@ -441,12 +446,23 @@ enum DirectoryRefreshService {
         appState.thumbnailInvalidationGeneration += 1
         appState.eventBus.emit(.thumbnailsInvalidated, payload: .strings(paths))
 
+        let shouldRefreshSnapshots = refreshDiskSnapshots ?? (!diskAlreadyRemoved || paths.count <= 48)
+
         let cache = appState.thumbnailCache
         let pathsCopy = paths
+        let skipDiskRemoval = diskAlreadyRemoved
         Task {
-            // `removeDiskThumbnails` drops memory entries. A per-path await here would
-            // re-enter the main actor once per file and stall the grid while thumbs load.
-            _ = await cache.removeDiskThumbnails(for: pathsCopy)
+            if !skipDiskRemoval {
+                _ = await cache.removeDiskThumbnails(for: pathsCopy)
+            } else {
+                await cache.invalidateMemory(for: pathsCopy)
+            }
+            guard shouldRefreshSnapshots else {
+                await MainActor.run {
+                    refreshPreviewAndBrowseIfCurrentImageChanged(appState: appState, paths: pathsCopy)
+                }
+                return
+            }
             let snapshots = await Task.detached(priority: .utility) {
                 pathsCopy.compactMap { path -> (String, TimeInterval, Int64)? in
                     guard let snap = MetadataCacheService.readDiskSnapshot(path: path) else { return nil }
