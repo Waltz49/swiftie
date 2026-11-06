@@ -22,6 +22,23 @@ enum ImageDisplayLoader {
         )
     }
 
+    /// EXIF-oriented pixels. Do not round-trip through ``NSImage.cgImage(forProposedRect:)``;
+    /// that returns the unrotated bitmap and stretches expand placement.
+    static func orientedCGImage(for path: String, maxPixelSize: Int = 8192) -> CGImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        if let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            return image
+        }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
     static func draw(
         _ image: NSImage,
         in rect: NSRect,

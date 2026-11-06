@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor
 struct ImageGenModelSelector: View {
+    @Environment(\.imageGenControlsInSplitPane) private var inSplitPane
     let plugins: [[String: Any]]
     @Binding var selectedPluginID: String
 
@@ -20,8 +21,8 @@ struct ImageGenModelSelector: View {
         .labelsHidden()
         .accessibilityLabel("Model")
         .frame(
-            minWidth: ImageGenInlineFieldLayout.fieldControlMinWidth,
-            maxWidth: ImageGenInlineFieldLayout.fieldControlMaxWidth,
+            minWidth: inSplitPane ? 0 : ImageGenInlineFieldLayout.fieldControlMinWidth,
+            maxWidth: inSplitPane ? .infinity : ImageGenInlineFieldLayout.fieldControlMaxWidth,
             alignment: .leading
         )
     }

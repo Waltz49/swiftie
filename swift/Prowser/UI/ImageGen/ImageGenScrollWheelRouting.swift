@@ -24,29 +24,31 @@ struct ImageGenPanelClientScrollView<Content: View>: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = ImageGenPanelClientNSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        scrollView.contentView.clipsToBounds = true
+        scrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let document = ImageGenPanelClientScrollDocumentView()
+        document.clipsToBounds = true
         let hosting = NSHostingView(rootView: content())
-        hosting.translatesAutoresizingMaskIntoConstraints = false
+        hosting.translatesAutoresizingMaskIntoConstraints = true
+        hosting.autoresizingMask = []
+        hosting.clipsToBounds = true
+        hosting.sizingOptions = .standardBounds
         document.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: document.topAnchor),
-        ])
-        document.hostingView = hosting
 
         scrollView.documentView = document
         context.coordinator.scrollView = scrollView
         context.coordinator.document = document
         context.coordinator.hosting = hosting
         context.coordinator.installWidthObservation(on: scrollView)
+        context.coordinator.scheduleLayout()
         return scrollView
     }
 
@@ -94,19 +96,16 @@ struct ImageGenPanelClientScrollView<Content: View>: NSViewRepresentable {
 
         private func layoutDocument() {
             guard let scrollView, let document, let hosting else { return }
-            let width = max(1, scrollView.bounds.width)
-            if hosting.frame.width != width {
-                hosting.frame.size.width = width
+            let clip = scrollView.contentView
+            let width = max(1, clip.bounds.width)
+            if abs(clip.bounds.origin.x) > 0.5 {
+                clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y))
+                scrollView.reflectScrolledClipView(clip)
             }
             hosting.layoutSubtreeIfNeeded()
             let height = max(hosting.fittingSize.height, 1)
-            let size = NSSize(width: width, height: height)
-            if document.frame.size != size {
-                document.frame.size = size
-            }
-            if hosting.frame.size.height != height {
-                hosting.frame.size.height = height
-            }
+            hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            document.frame = NSRect(origin: .zero, size: NSSize(width: width, height: height))
         }
 
         deinit {
@@ -120,9 +119,16 @@ struct ImageGenPanelClientScrollView<Content: View>: NSViewRepresentable {
     }
 }
 
+/// Fills the controls pane. Intrinsic width must not follow the custom-size block
+/// (that pulled the scroll view left under the splitter on expand and infill).
+@MainActor
+final class ImageGenPanelClientNSScrollView: NSScrollView {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+}
+
 @MainActor
 final class ImageGenPanelClientScrollDocumentView: NSView {
-    weak var hostingView: NSView?
-
     override var isFlipped: Bool { true }
 }

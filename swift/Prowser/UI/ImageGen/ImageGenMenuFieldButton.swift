@@ -26,6 +26,7 @@ struct ImageGenMenuFieldButton: NSViewRepresentable {
         popup.addItem(withTitle: title)
         popup.setContentHuggingPriority(.defaultLow, for: .horizontal)
         popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        popup.lineBreakMode = .byTruncatingTail
         bind(popup, context: context)
         return popup
     }

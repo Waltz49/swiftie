@@ -59,7 +59,7 @@ struct ImageGenExpandPreviewPane: View {
                             onValuesChanged?()
                         }
                     )
-                    .frame(minHeight: 280)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 if !maskNote.isEmpty {
                     Text(maskNote)
@@ -121,7 +121,9 @@ struct ImageGenExpandPreviewPane: View {
     }
 
     private func sourceAspect(path: String) -> Double {
-        guard let cg = ImageGenOutpaintMask.loadCGImage(path: path), cg.height > 0 else { return 1 }
-        return Double(cg.width) / Double(cg.height)
+        if let cg = ImageDisplayLoader.orientedCGImage(for: path), cg.height > 0 {
+            return Double(cg.width) / Double(cg.height)
+        }
+        return 1
     }
 }

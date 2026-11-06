@@ -47,6 +47,15 @@ struct ImageGenUnifiedDialog: View {
     @State private var fluxContext = ImageGenFluxPromptSubmitContext()
     @State private var fluxRefineCoordinator = FluxPromptRefineCoordinator()
 
+    private var usesPreviewSplitter: Bool {
+        selectedFunction == "edit" || selectedFunction == "expand" || selectedFunction == "infill"
+    }
+
+    private var unifiedShellMinWidth: CGFloat {
+        guard usesPreviewSplitter else { return 800 }
+        return max(800, ImageGenPreviewSplitterLayout.minimumTotalWidth + 16)
+    }
+
     var body: some View {
         let _ = appState.imageGenUIRevision
         return VStack(alignment: .leading, spacing: 8) {
@@ -136,7 +145,7 @@ struct ImageGenUnifiedDialog: View {
         .padding(.trailing, 4)
         .padding(.top, 2)
         .padding(.bottom, 4)
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(minWidth: unifiedShellMinWidth, minHeight: 600)
         .background(
             ImageGenDialogKeyHandler(
                 windowIdentifier: Self.windowIdentifier,
@@ -179,7 +188,7 @@ struct ImageGenUnifiedDialog: View {
             DialogGeometryKey.imageGenDialog,
             defaultWidth: 880,
             defaultHeight: 560,
-            minWidth: 800,
+            minWidth: unifiedShellMinWidth,
             minHeight: 600,
             nestedInImageGen: true,
             windowIdentifier: ImageGenUnifiedDialog.windowIdentifier,

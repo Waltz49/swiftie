@@ -54,7 +54,7 @@ struct ImageGenInfillPreviewPane: View {
                             onHasPaintChanged?(localHasPaint)
                         }
                     )
-                    .frame(minHeight: 360)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
                 Text("Infill requires an active source image.")

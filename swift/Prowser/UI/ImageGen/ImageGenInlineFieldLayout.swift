@@ -45,6 +45,27 @@ enum ImageGenInlineFieldLayout {
         return maxText + labelPad
     }
 
+    /// One compact inline slider row (label + track + spin + reset) in the unified split pane.
+    static func compactInlineSliderRowMinWidth(maxSpinValue: Int = 999_999_999) -> CGFloat {
+        let spin = AppNumericSpinBox.integerWidth(minValue: 0, maxValue: maxSpinValue)
+        return parameterLabelWidth
+            + rowSpacing
+            + ImageGenSliderLayout.unifiedTrackWidth
+            + ImageGenSliderLayout.rowSpacing
+            + spin
+            + ImageGenSliderLayout.rowSpacing
+            + ImageGenChrome.fieldButtonSize
+    }
+
+    /// Unified dialog split pane minimum follows the compact slider rows.
+    /// Intro, model, and LoRA text wrap inside that width.
+    static func unifiedSplitControlsPaneMinWidth() -> CGFloat {
+        let sliderRow = compactInlineSliderRowMinWidth()
+        let seedSpin = AppNumericSpinBox.integerWidth(minValue: 0, maxValue: Int(UInt32.max))
+        let seedRow = parameterLabelWidth + rowSpacing + seedSpin + rowSpacing + 88
+        return max(sliderRow, seedRow)
+    }
+
     /// Shared label column for compact parameter rows (Seed, Steps, Copies, …).
     static var parameterLabelWidth: CGFloat {
         labelColumnWidth(extraLabels: ["Quantization", "Continuous", "Randomize", "Seed", "Steps", "Copies"])

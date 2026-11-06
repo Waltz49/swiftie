@@ -29,6 +29,16 @@ final class ExpandPlacementCanvasView: NSView {
 
     override var isFlipped: Bool { true }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        autoresizingMask = [.width, .height]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func resetCursorRects() {
         discardCursorRects()
         addCursorRect(bounds, cursor: .arrow)
@@ -80,12 +90,16 @@ final class ExpandPlacementCanvasView: NSView {
         (placementX, placementY, placementW, placementH)
     }
 
+    func sourceImageForAspect() -> CGImage? {
+        sourceImage
+    }
+
     private func reloadSourceImage() {
         if sourcePath.isEmpty {
             sourceImage = nil
             return
         }
-        sourceImage = ImageGenOutpaintMask.loadCGImage(path: sourcePath)
+        sourceImage = ImageDisplayLoader.orientedCGImage(for: sourcePath)
     }
 
     private func sourceAspect() -> Double {
@@ -350,18 +364,11 @@ final class ExpandPlacementCanvasView: NSView {
         if !pr.isEmpty {
             ctx.saveGState()
             ctx.clip(to: canvasRect)
-            let nsImage = NSImage(
-                cgImage: sourceImage,
-                size: NSSize(width: sourceImage.width, height: sourceImage.height)
-            )
-            nsImage.draw(
-                in: pr,
-                from: .zero,
-                operation: .sourceOver,
-                fraction: 1,
-                respectFlipped: true,
-                hints: nil
-            )
+            ctx.interpolationQuality = .high
+            // Flipped view: draw the bitmap upright inside the placement rect.
+            ctx.translateBy(x: pr.minX, y: pr.maxY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(sourceImage, in: CGRect(x: 0, y: 0, width: pr.width, height: pr.height))
             ctx.restoreGState()
 
             ctx.setStrokeColor(NSColor(calibratedRed: 100 / 255, green: 180 / 255, blue: 1, alpha: 1).cgColor)
@@ -393,7 +400,12 @@ final class ExpandPlacementCanvasView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 520, height: 360)
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    override func layout() {
+        super.layout()
+        needsDisplay = true
     }
 
     override func resize(withOldSuperviewSize oldSize: NSSize) {
@@ -467,7 +479,16 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
 
             if let placement {
                 let key = "\(placement.x),\(placement.y),\(placement.w),\(placement.h)"
-                if key != appliedPlacementKey || sourceChanged {
+                let storedMatchesImage = Self.aspectMatchesImage(
+                    placementWidth: placement.w,
+                    placementHeight: placement.h,
+                    image: view.sourceImageForAspect()
+                )
+                if sourceChanged, !storedMatchesImage {
+                    let fit = view.canvasPlacement()
+                    appliedPlacementKey = "\(fit.0),\(fit.1),\(fit.2),\(fit.3)"
+                    onPlacementChanged?(fit.0, fit.1, fit.2, fit.3)
+                } else if key != appliedPlacementKey || sourceChanged {
                     view.setCanvasPlacement(
                         px: placement.x,
                         py: placement.y,
@@ -483,6 +504,17 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
             if sizeChanged, !sourceChanged {
                 _ = view.canvasPlacement()
             }
+        }
+
+        private static func aspectMatchesImage(
+            placementWidth: Int,
+            placementHeight: Int,
+            image: CGImage?
+        ) -> Bool {
+            guard let image, image.height > 0, placementHeight > 0 else { return true }
+            let imageAspect = Double(image.width) / Double(image.height)
+            let placementAspect = Double(placementWidth) / Double(placementHeight)
+            return abs(imageAspect - placementAspect) / imageAspect < 0.04
         }
     }
 }

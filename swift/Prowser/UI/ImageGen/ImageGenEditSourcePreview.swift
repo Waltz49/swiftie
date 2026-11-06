@@ -37,7 +37,6 @@ struct ImageGenEditSourcePreview: View {
                 appState.openImageInBrowse(path: path)
             }
         )
-        .frame(minWidth: 160, minHeight: 120)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -139,6 +138,7 @@ final class ImageGenEditSourcePreviewNSView: NSView, NSDraggingSource {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        autoresizingMask = [.width, .height]
         registerForDraggedTypes([.fileURL, Self.internalDragType])
         wantsLayer = true
         dropLine.wantsLayer = true

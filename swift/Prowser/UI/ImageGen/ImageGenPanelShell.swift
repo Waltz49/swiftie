@@ -144,11 +144,7 @@ struct ImageGenPanelShell: View {
     }
 
     private var splitControlsColumn: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            panelIntro
-            controlsContent(includeFunctionHeader: false)
-        }
-        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        splitControlsColumnBody
     }
 
     private var editPreviewPane: some View {
@@ -170,11 +166,14 @@ struct ImageGenPanelShell: View {
     }
 
     private var editControlsColumn: some View {
+        splitControlsColumnBody
+    }
+
+    private var splitControlsColumnBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             panelIntro
             controlsContent(includeFunctionHeader: false)
         }
-        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -183,6 +182,7 @@ struct ImageGenPanelShell: View {
             Text(intro)
                 .font(ImageGenInlineFieldLayout.introFont)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             ImageGenUnifiedIntroRule()
         }
@@ -272,8 +272,9 @@ struct ImageGenPanelShell: View {
                 }
                 .padding(.top, 2)
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var editSourcePathsBinding: Binding<[String]> {

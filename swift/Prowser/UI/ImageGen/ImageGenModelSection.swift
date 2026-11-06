@@ -28,6 +28,7 @@ struct ImageGenModelSection: View {
                     Text(modelNotesLine)
                         .font(ImageGenInlineFieldLayout.infoLineFont)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

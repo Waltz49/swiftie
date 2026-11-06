@@ -45,6 +45,7 @@ final class InfillPaintCanvasView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        autoresizingMask = [.width, .height]
         wantsLayer = false
         clearButton.bezelStyle = .roundRect
         clearButton.isBordered = true
@@ -670,7 +671,7 @@ final class InfillPaintCanvasView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 520, height: 360)
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 }
 

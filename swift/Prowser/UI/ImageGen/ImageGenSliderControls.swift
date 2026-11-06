@@ -24,8 +24,8 @@ struct ImageGenSliderTrackRow<Slider: View, Trailing: View>: View {
                     .frame(width: ImageGenSliderLayout.unifiedTrackWidth)
                 trailing()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: ImageGenSliderLayout.rowHeight)
-            .fixedSize(horizontal: true, vertical: false)
         } else {
             HStack(spacing: ImageGenSliderLayout.rowSpacing) {
                 slider()

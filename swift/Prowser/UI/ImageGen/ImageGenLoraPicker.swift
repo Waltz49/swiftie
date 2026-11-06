@@ -13,6 +13,7 @@ struct ImageGenLoraPicker: View {
     private static let popupWidth: CGFloat = 504
 
     @Environment(AppState.self) private var appState
+    @Environment(\.imageGenControlsInSplitPane) private var inSplitPane
     let pluginID: String
     @Binding var values: [String: Any]
     @Binding var selectionDetailLine: String
@@ -43,6 +44,7 @@ struct ImageGenLoraPicker: View {
                 Text(selectionDetailLine)
                     .font(ImageGenInlineFieldLayout.infoLineFont)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(selectionDetailLine)
             }
@@ -239,8 +241,8 @@ struct ImageGenLoraPicker: View {
                 .labelsHidden()
                 .accessibilityLabel("LoRA")
                 .frame(
-                    minWidth: ImageGenInlineFieldLayout.fieldControlMinWidth,
-                    maxWidth: ImageGenInlineFieldLayout.fieldControlMaxWidth,
+                    minWidth: inSplitPane ? 0 : ImageGenInlineFieldLayout.fieldControlMinWidth,
+                    maxWidth: inSplitPane ? .infinity : ImageGenInlineFieldLayout.fieldControlMaxWidth,
                     alignment: .leading
                 )
                 .onChange(of: singleBinding.wrappedValue) { _, _ in
@@ -263,6 +265,7 @@ struct ImageGenLoraPicker: View {
             )
             .font(.caption)
             .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             if appState.workers.lora.isAvailable {
                 Button("Open LoRA settings…") {
