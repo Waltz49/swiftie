@@ -41,11 +41,6 @@ final class ChatController {
         case manageOnly
     }
 
-    enum UserPromptLibraryPresentationHost: Equatable {
-        case mainWindow
-        case imageGenUnified
-    }
-
     struct UserPromptSaveDraft: Equatable {
         var defaultName: String
         var text: String
@@ -53,7 +48,6 @@ final class ChatController {
     }
 
     var userPromptLibraryApplyMode: UserPromptLibraryApplyMode = .chatCompose
-    var userPromptLibraryPresentationHost: UserPromptLibraryPresentationHost = .mainWindow
     var userPromptLibrarySuggestionText = ""
     var userPromptLibrarySuggestionImages: [String] = []
     private var imageGenAppendExistingPrompt = ""
@@ -353,13 +347,9 @@ final class ChatController {
         ChatSystemPromptStore.save(systemPromptConfig, dataDirectory: appState.config.dataDirectory)
     }
 
-    func openFavoriteUserPrompts(
-        mode: UserPromptLibraryApplyMode? = nil,
-        presentationHost: UserPromptLibraryPresentationHost = .mainWindow
-    ) {
+    func openFavoriteUserPrompts(mode: UserPromptLibraryApplyMode? = nil) {
         let resolvedMode = mode ?? (BundleCapabilities.chatUIEnabled ? .chatCompose : .manageOnly)
         userPromptLibraryApplyMode = resolvedMode
-        userPromptLibraryPresentationHost = presentationHost
         switch resolvedMode {
         case .chatCompose:
             userPromptLibrarySuggestionText = composePromptText
@@ -380,7 +370,7 @@ final class ChatController {
     ) {
         imageGenAppendExistingPrompt = existingPrompt
         userPromptLibraryImageGenOnApplied = onApplied
-        openFavoriteUserPrompts(mode: .imageGenAppend, presentationHost: .imageGenUnified)
+        openFavoriteUserPrompts(mode: .imageGenAppend)
     }
 
     func userPromptLibraryDidDismiss(cancelled: Bool) {
@@ -389,7 +379,6 @@ final class ChatController {
         userPromptLibraryImageGenOnApplied = nil
         userPromptLibraryApplyMode = .chatCompose
         imageGenAppendExistingPrompt = ""
-        userPromptLibraryPresentationHost = .mainWindow
     }
 
     func finishUserPromptLibraryOK(config: ChatUserPromptStore.Config, selectedEntry: ChatFavoritePrompt?) {
