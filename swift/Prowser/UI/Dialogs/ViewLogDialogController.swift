@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 /// Tools → Debug → View log — live session log viewer (port of `print_log_dialog.py`).
 @MainActor
 final class ViewLogDialogController: NSObject, NSWindowDelegate {
-    private static let geometryKey = "view_print_log_dialog_geometry"
     private static let wrapKey = "view_print_log_wrap"
     private static let pollInterval: TimeInterval = 0.3
     private static let logBackground = NSColor.black
@@ -165,7 +164,7 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         DialogGeometryPersistence.apply(
             to: panel,
             config: config,
-            key: Self.geometryKey,
+            key: DialogGeometryKey.viewPrintLog,
             defaultSize: NSSize(width: 820, height: 520),
             minSize: NSSize(width: 520, height: 360)
         )
@@ -342,7 +341,7 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         if let panel {
             DialogGeometryPersistence.saveFrame(
                 config: appState!.config,
-                key: Self.geometryKey,
+                key: DialogGeometryKey.viewPrintLog,
                 frame: panel.frame
             )
         }

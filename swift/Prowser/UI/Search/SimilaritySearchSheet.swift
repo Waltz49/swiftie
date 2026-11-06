@@ -70,7 +70,14 @@ struct SimilaritySearchSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 440)
+        .frame(minWidth: 440, minHeight: 248)
+        .persistedDialogGeometry(
+            DialogGeometryKey.similaritySearch,
+            defaultWidth: 480,
+            defaultHeight: 288,
+            minWidth: 440,
+            minHeight: 248
+        )
         .onAppear { loadDefaults() }
         .onChange(of: customDirectory) { _, _ in validateDirectory() }
         .onChange(of: useCustomDirectory) { _, enabled in

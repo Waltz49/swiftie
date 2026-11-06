@@ -18,10 +18,22 @@ final class ChatController {
     var showToolbar: Bool
     var showUnavailableOnly = false
     var scrollToBottomToken = 0
-    var showSystemPromptLibrary = false
-    var showUserPromptLibrary = false
+    var showSystemPromptLibrary = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showSystemPromptLibrary) }
+    }
+    var showUserPromptLibrary = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showUserPromptLibrary) }
+    }
     var showTips = false
-    var showPrefixPostfixLibrary = false
+    var showPrefixPostfixLibrary = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showPrefixPostfixLibrary) }
+    }
+    var showExitScripts = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showExitScripts) }
+    }
+    var showRejectedPhrases = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showRejectedPhrases) }
+    }
 
     enum UserPromptLibraryApplyMode: Equatable {
         case chatCompose
@@ -50,7 +62,9 @@ final class ChatController {
     var composePromptText = ""
     var composeAttachmentPaths: [String] = []
 
-    var showUserPromptSave = false
+    var showUserPromptSave = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showUserPromptSave) }
+    }
     var userPromptSaveDraft: UserPromptSaveDraft?
 
     var editingMessageID: String?
@@ -303,6 +317,19 @@ final class ChatController {
 
     func editSystemPrompt() {
         showSystemPromptLibrary = true
+    }
+
+    func openExitScripts() {
+        showExitScripts = true
+    }
+
+    func openRejectedPhrases() {
+        showRejectedPhrases = true
+    }
+
+    private func publishDialogVisibilityChange(from oldValue: Bool, to newValue: Bool) {
+        guard oldValue != newValue else { return }
+        appState.syncAuxiliaryDialogs()
     }
 
     func applySystemPromptSelection(_ config: ChatSystemPromptStore.Config) {

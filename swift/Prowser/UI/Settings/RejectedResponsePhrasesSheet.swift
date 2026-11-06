@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct RejectedResponsePhrasesSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
     @Environment(AppState.self) private var appState
 
     @State private var entries: [PhraseEntry] = []
@@ -47,13 +48,14 @@ struct RejectedResponsePhrasesSheet: View {
             .frame(minHeight: 200)
 
             DialogButtonRow([
-                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
                 DialogButton("OK", isDefault: true) {
                     let phrases = entries.map(\.text)
                     ChatRejectedResponsePhrasesStore.save(
                         phrases: phrases,
                         dataDirectory: appState.config.dataDirectory
                     )
+                    closeDialog()
                     dismiss()
                 },
             ], leadingButtons: [
@@ -61,7 +63,15 @@ struct RejectedResponsePhrasesSheet: View {
             ], focusDefaultOnAppear: true)
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 480, minHeight: 360)
+        .persistedDialogGeometry(
+            DialogGeometryKey.rejectedPhrases,
+            defaultWidth: 520,
+            defaultHeight: 420,
+            minWidth: 480,
+            minHeight: 360
+        )
         .onAppear {
             loadEntries()
         }

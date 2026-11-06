@@ -5,6 +5,7 @@ import SwiftUI
 struct ChatUserPromptLibrarySheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
 
     @State private var draft = ChatUserPromptStore.Config(selectedFavoriteID: "", favoritePrompts: [])
     @State private var selectedID = ""
@@ -37,7 +38,8 @@ struct ChatUserPromptLibrarySheet: View {
 
                 TextEditor(text: $previewText)
                     .font(.body)
-                    .frame(minHeight: 120, maxHeight: 140)
+                    .frame(minHeight: 140)
+                    .layoutPriority(1)
                     .padding(4)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.35)))
                     .disabled(previewReadOnly)
@@ -82,7 +84,8 @@ struct ChatUserPromptLibrarySheet: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 180)
+                .frame(minHeight: 120)
+                .layoutPriority(1)
 
                 Button("Add Favorite Prompt…") {
                     commitPreview(to: selectedID, text: previewText)
@@ -94,7 +97,7 @@ struct ChatUserPromptLibrarySheet: View {
             DialogButtonRow(
                 [
                     DialogButton("Cancel", isCancel: true) {
-                        appState.chat.userPromptLibraryDidDismiss(cancelled: true)
+                        closeDialog()
                         dismiss()
                     },
                     DialogButton("OK", isDefault: true) {
@@ -105,7 +108,15 @@ struct ChatUserPromptLibrarySheet: View {
             )
             .padding()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 480, minHeight: 360)
+        .persistedDialogGeometry(
+            DialogGeometryKey.favoritePrompts,
+            defaultWidth: 560,
+            defaultHeight: 480,
+            minWidth: 480,
+            minHeight: 360
+        )
         .onAppear(perform: loadInitialState)
         .sheet(isPresented: $showAddPrompt) {
             ChatUserPromptEditSheet(
@@ -288,7 +299,8 @@ struct ChatUserPromptSaveSheet: View {
             title: "Save user prompt",
             initialName: draft.defaultName,
             initialText: draft.text,
-            initialImagePaths: draft.imagePaths
+            initialImagePaths: draft.imagePaths,
+            closesHostWindow: true
         ) { name, text, paths in
             appState.chat.commitSaveUserPrompt(name: name, text: text, imagePaths: paths)
         }
@@ -296,57 +308,3 @@ struct ChatUserPromptSaveSheet: View {
     }
 }
 
-/// Shared sheet bindings for main window and image-gen unified window.
-@MainActor
-struct ChatUserPromptSheetsHost: ViewModifier {
-    @Environment(AppState.self) private var appState
-    let presentationHost: ChatController.UserPromptLibraryPresentationHost
-
-    func body(content: Content) -> some View {
-        content
-            .sheet(isPresented: libraryPresented) {
-                ChatUserPromptLibrarySheet()
-                    .environment(appState)
-            }
-            .sheet(isPresented: savePresented) {
-                if let draft = appState.chat.userPromptSaveDraft {
-                    ChatUserPromptSaveSheet(draft: draft)
-                        .environment(appState)
-                }
-            }
-    }
-
-    private var libraryPresented: Binding<Bool> {
-        Binding(
-            get: {
-                appState.chat.showUserPromptLibrary
-                    && appState.chat.userPromptLibraryPresentationHost == presentationHost
-            },
-            set: { newValue in
-                if !newValue {
-                    appState.chat.userPromptLibraryDidDismiss(cancelled: true)
-                }
-            }
-        )
-    }
-
-    private var savePresented: Binding<Bool> {
-        Binding(
-            get: {
-                appState.chat.showUserPromptSave && presentationHost == .mainWindow
-            },
-            set: { newValue in
-                if !newValue {
-                    appState.chat.showUserPromptSave = false
-                    appState.chat.userPromptSaveDraft = nil
-                }
-            }
-        )
-    }
-}
-
-extension View {
-    func chatUserPromptSheets(host: ChatController.UserPromptLibraryPresentationHost) -> some View {
-        modifier(ChatUserPromptSheetsHost(presentationHost: host))
-    }
-}

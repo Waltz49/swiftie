@@ -945,6 +945,30 @@ final class AppState {
         }
     }
 
+    /// Tools ▸ Debug ▸ Reset window geometries — clears saved frames for auxiliary dialogs and panels.
+    func resetPersistedWindowGeometriesToDefaults() {
+        let confirm = NSAlert()
+        confirm.messageText = "Reset window geometries?"
+        confirm.informativeText =
+            "This removes saved sizes and positions for dialogs and panels. Next time each window opens, it will use the default placement."
+        confirm.alertStyle = .warning
+        confirm.addButton(withTitle: "Reset")
+        confirm.addButton(withTitle: "Cancel")
+        if confirm.runModal() != .alertFirstButtonReturn {
+            return
+        }
+        let keys = DialogGeometryKey.allPersistedWindowFrameKeyStrings
+        let ok = config.removePersistedWindowFrameKeys(keys)
+        let result = NSAlert()
+        result.alertStyle = ok ? .informational : .critical
+        result.messageText = ok ? "Window geometries reset" : "Could not save settings"
+        result.informativeText = ok
+            ? "Saved window frames were removed from your profile. Restart open dialogs or reopen them to see defaults."
+            : "The geometry keys were cleared in memory but writing settings.json failed. Check disk permissions or free space."
+        result.addButton(withTitle: "OK")
+        result.runModal()
+    }
+
     func toggleBrowseZoomSharpen() {
         guard fileData.currentViewMode == .browse else { return }
         let enabled = !config.bool(forKey: "browse_zoom_sharpen", default: false)
@@ -1706,6 +1730,12 @@ final class AppState {
         static let imageRecognitionCaveats = "imageRecognitionCaveats"
         static let checkLorasOptions = "checkLorasOptions"
         static let checkLorasResults = "checkLorasResults"
+        static let favoritePrompts = "favoritePrompts"
+        static let favoritePromptSave = "favoritePromptSave"
+        static let chatSystemPrompt = "chatSystemPrompt"
+        static let prefixPostfix = "prefixPostfix"
+        static let exitScripts = "exitScripts"
+        static let rejectedPhrases = "rejectedPhrases"
     }
 
     func syncAuxiliaryDialogs() {
@@ -1929,6 +1959,86 @@ final class AppState {
                     cancelledBanner: results.cancelledBanner
                 )
             }
+        }
+        syncDialog(
+            id: DialogID.favoritePrompts,
+            show: chat.showUserPromptLibrary,
+            title: "Favorite user prompts",
+            defaultSize: NSSize(width: 560, height: 480),
+            minSize: NSSize(width: 480, height: 360),
+            focusTextOnShow: true,
+            onClose: { [weak self] in
+                self?.chat.userPromptLibraryDidDismiss(cancelled: true)
+            }
+        ) {
+            ChatUserPromptLibrarySheet()
+        }
+        syncDialog(
+            id: DialogID.favoritePromptSave,
+            show: chat.showUserPromptSave && chat.userPromptSaveDraft != nil,
+            title: "Save user prompt",
+            defaultSize: NSSize(width: 560, height: 440),
+            minSize: NSSize(width: 480, height: 360),
+            focusTextOnShow: true,
+            onClose: { [weak self] in
+                self?.chat.showUserPromptSave = false
+                self?.chat.userPromptSaveDraft = nil
+            }
+        ) {
+            if let draft = chat.userPromptSaveDraft {
+                ChatUserPromptSaveSheet(draft: draft)
+            }
+        }
+        syncDialog(
+            id: DialogID.chatSystemPrompt,
+            show: chat.showSystemPromptLibrary,
+            title: "System Prompt for Chat",
+            defaultSize: NSSize(width: 560, height: 520),
+            minSize: NSSize(width: 480, height: 420),
+            focusTextOnShow: true,
+            onClose: { [weak self] in
+                self?.chat.showSystemPromptLibrary = false
+            }
+        ) {
+            ChatSystemPromptLibrarySheet()
+        }
+        syncDialog(
+            id: DialogID.prefixPostfix,
+            show: chat.showPrefixPostfixLibrary,
+            title: "Prefix and Postfix text",
+            defaultSize: NSSize(width: 760, height: 480),
+            minSize: NSSize(width: 720, height: 400),
+            onClose: { [weak self] in
+                self?.chat.showPrefixPostfixLibrary = false
+            }
+        ) {
+            PrefixPostfixSheet()
+        }
+        syncDialog(
+            id: DialogID.exitScripts,
+            show: chat.showExitScripts,
+            title: "Exit Scripts",
+            defaultSize: NSSize(width: 560, height: 280),
+            minSize: NSSize(width: 520, height: 240),
+            focusTextOnShow: true,
+            onClose: { [weak self] in
+                self?.chat.showExitScripts = false
+            }
+        ) {
+            ExitScriptsSheet()
+        }
+        syncDialog(
+            id: DialogID.rejectedPhrases,
+            show: chat.showRejectedPhrases,
+            title: "Rejected response phrases",
+            defaultSize: NSSize(width: 520, height: 420),
+            minSize: NSSize(width: 480, height: 360),
+            focusTextOnShow: true,
+            onClose: { [weak self] in
+                self?.chat.showRejectedPhrases = false
+            }
+        ) {
+            RejectedResponsePhrasesSheet()
         }
     }
 

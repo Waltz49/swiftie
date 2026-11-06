@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct ExitScriptsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
     @Environment(AppState.self) private var appState
 
     @State private var textAIExit = ""
@@ -20,7 +21,7 @@ struct ExitScriptsSheet: View {
             exitScriptRow(title: "Image AI exit", subtitle: "Image generation prompts", text: $imageAIExit)
 
             DialogButtonRow([
-                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
                 DialogButton("OK", isDefault: true) {
                     SettingsPathValidation.commitPendingPathFieldEdits()
                     appState.config.setValue(
@@ -32,12 +33,21 @@ struct ExitScriptsSheet: View {
                         forKey: ExitScriptUtils.settingImageAIExit
                     )
                     appState.config.applySettingsChange(emit: appState.eventBus)
+                    closeDialog()
                     dismiss()
                 },
             ], focusDefaultOnAppear: true)
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 520, minHeight: 240)
+        .persistedDialogGeometry(
+            DialogGeometryKey.exitScripts,
+            defaultWidth: 560,
+            defaultHeight: 280,
+            minWidth: 520,
+            minHeight: 240
+        )
         .onAppear {
             textAIExit = SettingsPathValidation.normalizedExitScriptCommandDisplay(
                 appState.config.string(forKey: ExitScriptUtils.settingTextAIExit)

@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct PrefixPostfixSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
     @Environment(AppState.self) private var appState
     @State private var entries: [PrefixPostfixEntry] = []
     @State private var editingEntry: PrefixPostfixEntry?
@@ -78,9 +79,10 @@ struct PrefixPostfixSheet: View {
             }
 
             DialogButtonRow([
-                DialogButton("Cancel", isCancel: true) { dismiss() },
+                DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
                 DialogButton("OK", isDefault: true) {
                     PrefixPostfixStore.save(entries, dataDirectory: appState.config.dataDirectory)
+                    closeDialog()
                     dismiss()
                 },
             ], leadingButtons: [
@@ -88,7 +90,15 @@ struct PrefixPostfixSheet: View {
             ], focusDefaultOnAppear: true)
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 720, minHeight: 400)
+        .persistedDialogGeometry(
+            DialogGeometryKey.prefixPostfix,
+            defaultWidth: 760,
+            defaultHeight: 480,
+            minWidth: 720,
+            minHeight: 400
+        )
         .onAppear {
             entries = PrefixPostfixStore.load(dataDirectory: appState.config.dataDirectory)
         }
@@ -186,7 +196,8 @@ private struct PrefixPostfixTextEditSheet: View {
             Text(title).font(.headline)
             TextEditor(text: $text)
                 .font(.body)
-                .frame(minHeight: 120)
+                .frame(minHeight: 160)
+                .layoutPriority(1)
                 .border(Color.secondary.opacity(0.3))
             DialogButtonRow([
                 DialogButton("Cancel", isCancel: true) { dismiss() },
@@ -197,6 +208,15 @@ private struct PrefixPostfixTextEditSheet: View {
             ], focusDefaultOnAppear: true)
         }
         .padding(20)
-        .frame(width: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minWidth: 420, minHeight: 280)
+        .persistedDialogGeometry(
+            DialogGeometryKey.prefixPostfixText,
+            defaultWidth: 480,
+            defaultHeight: 360,
+            minWidth: 420,
+            minHeight: 280,
+            onlyWhenSheet: true
+        )
     }
 }

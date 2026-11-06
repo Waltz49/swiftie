@@ -29,6 +29,59 @@ enum DialogGeometryKey {
 
     static let imageGenDialog = "dialog_geometry"
     static let jobQueue = "job_queue_geometry"
+    static let favoritePrompts = "favorite_prompts_dialog_geometry"
+    static let favoritePromptEdit = "favorite_prompt_edit_dialog_geometry"
+    static let chatSystemPrompt = "chat_system_prompt_dialog_geometry"
+    static let chatSystemPromptEdit = "chat_system_prompt_edit_dialog_geometry"
+    static let prefixPostfix = "prefix_postfix_dialog_geometry"
+    static let prefixPostfixText = "prefix_postfix_text_dialog_geometry"
+    static let exitScripts = "exit_scripts_dialog_geometry"
+    static let rejectedPhrases = "rejected_response_phrases_dialog_geometry"
+    static let loraImport = "lora_import_dialog_geometry"
+    static let loraFind = "lora_find_dialog_geometry"
+    /// View log (``ViewLogDialogController``).
+    static let viewPrintLog = "view_print_log_dialog_geometry"
+    static let imageGenCreateSheet = "imagegen_create_sheet_geometry"
+
+    /// Every settings key that stores a persisted auxiliary window frame (`[x,y,w,h]` or `[w,h]`), including values nested under `imagegen`.
+    static let allPersistedWindowFrameKeyStrings: [String] = [
+        editExifUserComment,
+        filter,
+        similaritySearch,
+        personSearch,
+        clipSearch,
+        convertFormat,
+        resizeImages,
+        renamePrefix,
+        findReferences,
+        referenceGraph,
+        exifBatchConfirmation,
+        keyboardHelp,
+        hiddenGemsHelp,
+        about,
+        settings,
+        settingsSizeFallback,
+        generationTiming,
+        checkLorasOptions,
+        checkLorasResults,
+        loraMap,
+        manageModelsList,
+        manageModelsDetail,
+        imageGenDialog,
+        jobQueue,
+        favoritePrompts,
+        favoritePromptEdit,
+        chatSystemPrompt,
+        chatSystemPromptEdit,
+        prefixPostfix,
+        prefixPostfixText,
+        exitScripts,
+        rejectedPhrases,
+        loraImport,
+        loraFind,
+        viewPrintLog,
+        imageGenCreateSheet,
+    ]
 }
 
 /// Save and restore NSWindow frames in profile settings (Swift counterpart to Python `save_dialog_geometry_hex`).
@@ -261,6 +314,8 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
     var windowTitle: String?
     var alwaysOnTop: Bool?
     var hidesStandardWindowButtons = false
+    /// Nested editors must not resize the dialog that presented them.
+    var onlyWhenSheet = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appState: appState)
@@ -284,6 +339,18 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
         coordinator.detach(from: nsView.window)
     }
 
+    /// Sheets and auxiliary dialogs can remember their own frame. Never resize the browser,
+    /// preferences, image-generation, or job-queue windows that host those sheets.
+    private static func canPersistGeometry(of window: NSWindow, onlyWhenSheet: Bool) -> Bool {
+        if BrowserWindowIdentity.isTaggedMainBrowserWindow(window) { return false }
+        if BrowserWindowIdentity.isPreferencesWindow(window) { return false }
+        let identifier = window.identifier?.rawValue ?? ""
+        if identifier == "imagegen-unified" || identifier == "jobs-panel" { return false }
+        if window.title == "Image Generation" || window.title == "Job Control" { return false }
+        if onlyWhenSheet, window is AuxiliaryDialogWindow { return false }
+        return true
+    }
+
     @MainActor
     final class Coordinator {
         private weak var appState: AppState?
@@ -302,7 +369,14 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
 
         func attach(to view: NSView, settings: DialogWindowGeometryConfigurator) {
             guard let window = view.window, let appState else { return }
+            guard DialogWindowGeometryConfigurator.canPersistGeometry(
+                of: window,
+                onlyWhenSheet: settings.onlyWhenSheet
+            ) else { return }
             let id = ObjectIdentifier(window)
+            if let existing = configuredWindows[id], existing.configKey != settings.configKey {
+                return
+            }
 
             if let title = settings.windowTitle {
                 window.title = title
@@ -432,7 +506,8 @@ extension View {
         windowIdentifier: String? = nil,
         windowTitle: String? = nil,
         alwaysOnTop: Bool? = nil,
-        hidesStandardWindowButtons: Bool = false
+        hidesStandardWindowButtons: Bool = false,
+        onlyWhenSheet: Bool = false
     ) -> some View {
         background(
             DialogWindowGeometryConfigurator(
@@ -446,7 +521,8 @@ extension View {
                 windowIdentifier: windowIdentifier,
                 windowTitle: windowTitle,
                 alwaysOnTop: alwaysOnTop,
-                hidesStandardWindowButtons: hidesStandardWindowButtons
+                hidesStandardWindowButtons: hidesStandardWindowButtons,
+                onlyWhenSheet: onlyWhenSheet
             )
         )
     }

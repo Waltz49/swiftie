@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatSystemPromptLibrarySheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
 
     @State private var draft = ChatSystemPromptStore.Config(
         systemPrompt: ChatSystemPromptStore.defaultPromptText,
@@ -27,7 +28,8 @@ struct ChatSystemPromptLibrarySheet: View {
                     .font(.subheadline)
                 TextEditor(text: $previewText)
                     .font(.body)
-                    .frame(minHeight: 100, maxHeight: 140)
+                    .frame(minHeight: 140)
+                    .layoutPriority(1)
                     .padding(4)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.35)))
                     .onChange(of: selectedID) { oldID, newID in
@@ -66,7 +68,8 @@ struct ChatSystemPromptLibrarySheet: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 180)
+                .frame(minHeight: 120)
+                .layoutPriority(1)
 
                 Button("Add System Prompt…") {
                     commitPreview(to: selectedID, text: previewText)
@@ -77,14 +80,22 @@ struct ChatSystemPromptLibrarySheet: View {
 
             DialogButtonRow(
                 [
-                    DialogButton("Cancel", isCancel: true) { dismiss() },
+                    DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
                     DialogButton("OK", isDefault: true) { accept() },
                 ],
                 focusDefaultOnAppear: true
             )
             .padding()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 480, minHeight: 420)
+        .persistedDialogGeometry(
+            DialogGeometryKey.chatSystemPrompt,
+            defaultWidth: 560,
+            defaultHeight: 520,
+            minWidth: 480,
+            minHeight: 420
+        )
         .onAppear {
             draft = appState.chat.systemPromptConfig
             selectedID = draft.activeNamedPromptID.isEmpty
@@ -167,6 +178,7 @@ struct ChatSystemPromptLibrarySheet: View {
         }
         let finalDraft = draft
         appState.chat.applySystemPromptSelection(finalDraft)
+        closeDialog()
         dismiss()
     }
 }
@@ -187,6 +199,7 @@ private struct ChatSystemPromptAddSheet: View {
             Text("System prompt:").padding(.horizontal)
             TextEditor(text: $text)
                 .frame(minHeight: 160)
+                .layoutPriority(1)
                 .padding(.horizontal)
             DialogButtonRow([
                 DialogButton("Cancel", isCancel: true) { dismiss() },
@@ -197,7 +210,16 @@ private struct ChatSystemPromptAddSheet: View {
             ])
             .padding()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 440, minHeight: 320)
+        .persistedDialogGeometry(
+            DialogGeometryKey.chatSystemPromptEdit,
+            defaultWidth: 520,
+            defaultHeight: 420,
+            minWidth: 440,
+            minHeight: 320,
+            onlyWhenSheet: true
+        )
         .onAppear { text = defaultText }
     }
 }

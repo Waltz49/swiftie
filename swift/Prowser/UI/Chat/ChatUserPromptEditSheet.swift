@@ -58,11 +58,13 @@ struct ChatEditableThumbRow: View {
 struct ChatUserPromptEditSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeDialog) private var closeDialog
 
     let title: String
     let initialName: String
     let initialText: String
     let initialImagePaths: [String]
+    var closesHostWindow = false
     let onSave: (String, String, [String]) -> Void
 
     @State private var name = ""
@@ -84,7 +86,8 @@ struct ChatUserPromptEditSheet: View {
             Text("User prompt:")
                 .padding(.horizontal)
             TextEditor(text: $text)
-                .frame(minHeight: 120)
+                .frame(minHeight: 160)
+                .layoutPriority(1)
                 .padding(.horizontal)
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     appendDroppedImages(providers)
@@ -95,7 +98,7 @@ struct ChatUserPromptEditSheet: View {
 
             DialogButtonRow(
                 [
-                    DialogButton("Cancel", isCancel: true) { dismiss() },
+                    DialogButton("Cancel", isCancel: true) { closeEditor() },
                     DialogButton("Save", isDefault: true) {
                         let saveName = name.trimmingCharacters(in: .whitespacesAndNewlines)
                         let formatted = ChatPromptFormatting.formatForSave(text)
@@ -104,7 +107,7 @@ struct ChatUserPromptEditSheet: View {
                             formatted,
                             imagePaths
                         )
-                        dismiss()
+                        closeEditor()
                     },
                 ],
                 leading: {
@@ -113,7 +116,16 @@ struct ChatUserPromptEditSheet: View {
             )
             .padding()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 480, minHeight: 360)
+        .persistedDialogGeometry(
+            DialogGeometryKey.favoritePromptEdit,
+            defaultWidth: 560,
+            defaultHeight: 440,
+            minWidth: 480,
+            minHeight: 360,
+            onlyWhenSheet: !closesHostWindow
+        )
         .onAppear {
             name = initialName
             text = initialText
@@ -124,9 +136,16 @@ struct ChatUserPromptEditSheet: View {
             let saveName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let formatted = ChatPromptFormatting.formatForSave(text)
             onSave(saveName.isEmpty ? "Untitled" : saveName, formatted, imagePaths)
-            dismiss()
+            closeEditor()
             return .handled
         }
+    }
+
+    private func closeEditor() {
+        if closesHostWindow {
+            closeDialog()
+        }
+        dismiss()
     }
 
     private func appendDroppedImages(_ providers: [NSItemProvider]) -> Bool {

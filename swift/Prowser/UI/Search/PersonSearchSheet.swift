@@ -86,7 +86,14 @@ struct PersonSearchSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: dialogMinWidth)
+        .frame(minWidth: dialogMinWidth, minHeight: 320)
+        .persistedDialogGeometry(
+            DialogGeometryKey.personSearch,
+            defaultWidth: 500,
+            defaultHeight: 360,
+            minWidth: 460,
+            minHeight: 320
+        )
         .onAppear { reload() }
         .onChange(of: selectedSubjectID) { _, _ in refreshChrome() }
         .onChange(of: recursive) { _, _ in refreshDirLabel() }

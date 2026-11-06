@@ -80,7 +80,14 @@ struct ClipSearchSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 460)
+        .frame(minWidth: 460, minHeight: 308)
+        .persistedDialogGeometry(
+            DialogGeometryKey.clipSearch,
+            defaultWidth: 500,
+            defaultHeight: 348,
+            minWidth: 460,
+            minHeight: 308
+        )
         .onAppear { loadDefaults() }
         .onChange(of: useCustomDirectory) { _, enabled in
             if enabled {

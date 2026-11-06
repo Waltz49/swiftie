@@ -354,15 +354,49 @@ final class AppConfig {
         saveSettings()
     }
 
-    func saveSettings() {
+    @discardableResult
+    func saveSettings() -> Bool {
         mergeMissingDefaults()
         var toWrite = settings
         toWrite.removeValue(forKey: "debug_mode")
         guard JSONSerialization.isValidJSONObject(toWrite),
               let data = try? JSONSerialization.data(withJSONObject: toWrite, options: [.prettyPrinted, .sortedKeys]) else {
-            return
+            return false
         }
-        try? data.write(to: paths.settingsFile, options: .atomic)
+        do {
+            try data.write(to: paths.settingsFile, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Removes persisted auxiliary window frames (Tools ▸ Debug ▸ Reset window geometries).
+    @discardableResult
+    func removePersistedWindowFrameKeys(_ keys: [String]) -> Bool {
+        let keySet = Set(keys)
+        func strip(from storage: inout [String: Any]) {
+            for key in keySet {
+                storage.removeValue(forKey: key)
+            }
+            if var imagegen = storage["imagegen"] as? [String: Any] {
+                for key in keySet {
+                    imagegen.removeValue(forKey: key)
+                }
+                storage["imagegen"] = imagegen
+            }
+        }
+        if var draft = settingsDraft {
+            strip(from: &draft)
+            draft.removeValue(forKey: "debug_mode")
+            settingsDraft = draft
+            settingsEditRevision += 1
+            return true
+        }
+        strip(from: &settings)
+        settings.removeValue(forKey: "debug_mode")
+        settingsEditRevision += 1
+        return saveSettings()
     }
 
     func updateSetting(_ key: String, value: Any?) {

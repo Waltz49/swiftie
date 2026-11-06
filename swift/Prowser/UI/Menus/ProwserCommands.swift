@@ -470,6 +470,10 @@ struct ProwserCommands: Commands {
                         Task { @MainActor in appState.printCacheStatus() }
                     }
 
+                    Button("Reset window geometries…") {
+                        Task { @MainActor in appState.resetPersistedWindowGeometriesToDefaults() }
+                    }
+
                     Button("Enable Compatible LoRAs") {
                         Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
                     }

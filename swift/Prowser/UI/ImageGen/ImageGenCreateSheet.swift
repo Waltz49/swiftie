@@ -40,7 +40,7 @@ struct ImageGenCreateSheet: View {
         .padding(24)
         .frame(minWidth: 480, minHeight: 320)
         .persistedDialogGeometry(
-            "imagegen_create_sheet_geometry",
+            DialogGeometryKey.imageGenCreateSheet,
             defaultWidth: 480,
             defaultHeight: 360,
             minWidth: 420,

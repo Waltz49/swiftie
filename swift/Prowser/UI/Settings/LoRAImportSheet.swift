@@ -75,7 +75,16 @@ struct LoRAImportSheet: View {
                 .disabled(isImporting)
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .frame(minWidth: 520, minHeight: 480)
+        .persistedDialogGeometry(
+            DialogGeometryKey.loraImport,
+            defaultWidth: 640,
+            defaultHeight: 640,
+            minWidth: 520,
+            minHeight: 480,
+            onlyWhenSheet: true
+        )
         // Normalizes bound field text only; catalog/settings are written in importAdd on Save.
         .imageGenPromptSentenceCaseClickAwayCommit()
         .onAppear {
@@ -122,7 +131,8 @@ struct LoRAImportSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             LoRAReferencePromptEditor(text: $referencePrompt)
-                .frame(height: Self.referencePromptEditorMinHeight)
+                .frame(minHeight: Self.referencePromptEditorMinHeight)
+                .layoutPriority(1)
         }
     }
 
@@ -476,7 +486,16 @@ struct LoRAFindSheet: View {
             DialogButtonRow([DialogButton("Close", isCancel: true) { dismiss() }])
         }
         .padding()
-        .frame(width: 480, height: 440)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minWidth: 480, minHeight: 440)
+        .persistedDialogGeometry(
+            DialogGeometryKey.loraFind,
+            defaultWidth: 560,
+            defaultHeight: 520,
+            minWidth: 480,
+            minHeight: 440,
+            onlyWhenSheet: true
+        )
         .task { await load() }
     }
 

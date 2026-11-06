@@ -55,24 +55,10 @@ struct ChatPaneView: View {
             ChatKeyboardMonitor.shared.install(appState: appState)
         }
         .sheet(isPresented: Binding(
-            get: { appState.chat.showSystemPromptLibrary },
-            set: { appState.chat.showSystemPromptLibrary = $0 }
-        )) {
-            ChatSystemPromptLibrarySheet()
-                .environment(appState)
-        }
-        .sheet(isPresented: Binding(
             get: { appState.chat.showTips },
             set: { appState.chat.showTips = $0 }
         )) {
             ChatTipsSheet()
-        }
-        .sheet(isPresented: Binding(
-            get: { appState.chat.showPrefixPostfixLibrary },
-            set: { appState.chat.showPrefixPostfixLibrary = $0 }
-        )) {
-            PrefixPostfixSheet()
-                .environment(appState)
         }
     }
 }

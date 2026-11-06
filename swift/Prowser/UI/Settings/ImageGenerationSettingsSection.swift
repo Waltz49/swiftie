@@ -5,9 +5,6 @@ import SwiftUI
 struct ImageGenerationSettingsSection: View {
     @Environment(AppState.self) private var appState
     @Binding var pythonEnvironmentExpanded: Bool
-    @State private var showExitScripts = false
-    @State private var showPrefixPostfix = false
-    @State private var showRejectedPhrases = false
     @State private var imageOutputEnabled = false
     @State private var imageOutputPath = ""
     @State private var imagegenVenvPath = ""
@@ -58,14 +55,14 @@ struct ImageGenerationSettingsSection: View {
                 subtitle: "Apply prefix/postfix rules to chat and image prompts.",
                 key: "imagegen_add_chat_prefix_postfix",
                 defaultValue: true,
-                onGear: { showPrefixPostfix = true }
+                onGear: { appState.chat.openPrefixPostfixLibrary() }
             )
 
             gearToggleRow(
                 title: "Use prompt filter exits",
                 subtitle: "Use exit scripts to modify prompt data before model calls.",
                 key: "use_prompt_filter_exits",
-                onGear: { showExitScripts = true }
+                onGear: { appState.chat.openExitScripts() }
             )
 
             gearToggleRow(
@@ -73,7 +70,7 @@ struct ImageGenerationSettingsSection: View {
                 subtitle: "Restart chat when the model response contains configured refusal phrases.",
                 key: ChatRejectedResponsePhrasesStore.settingsEnableKey,
                 defaultValue: true,
-                onGear: { showRejectedPhrases = true }
+                onGear: { appState.chat.openRejectedPhrases() }
             )
 
             cooldownSlider(title: "Inter-job cooldown time", key: "imagegen_job_cooldown_seconds", defaultValue: ImageGenDimLimits.jobCooldownSecondsDefault)
@@ -131,9 +128,6 @@ struct ImageGenerationSettingsSection: View {
                 }
             }
         }
-        .sheet(isPresented: $showExitScripts) { ExitScriptsSheet() }
-        .sheet(isPresented: $showPrefixPostfix) { PrefixPostfixSheet() }
-        .sheet(isPresented: $showRejectedPhrases) { RejectedResponsePhrasesSheet() }
         .onAppear {
             loadImageCreationDirectory()
             imagegenVenvPath = appState.config.imagegenVenvURL().path
