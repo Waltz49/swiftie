@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 /// Prepares registry payloads before MFLUX CLI invocation.
 enum ImageGenMfluxPrep {
@@ -34,7 +36,12 @@ enum ImageGenMfluxPrep {
         try? FileManager.default.removeItem(atPath: cliPath)
     }
 
-    static func apply(to payload: [String: Any]) async throws -> [String: Any] {
+    /// ``pythonOwnsKleinExpand``: the persistent Python worker runs ``_run_klein_expand_from_payload``,
+    /// which composites, generates, applies the keep-mask, and saves ``output_path`` itself.
+    static func apply(
+        to payload: [String: Any],
+        pythonOwnsKleinExpand: Bool = false
+    ) async throws -> [String: Any] {
         var run = payload
 
         let pipelineID = run["pipeline_id"] as? String ?? ""
@@ -57,7 +64,9 @@ enum ImageGenMfluxPrep {
         case "mflux_fill_infill":
             try applyInfill(&run)
         case "mflux_flux2_klein_expand":
-            try applyKleinExpand(&run)
+            if !pythonOwnsKleinExpand {
+                try applyKleinExpand(&run)
+            }
         case "mflux_flux2_klein_edit":
             try applyKleinEdit(&run)
         case "mflux_flux2_klein_create":
@@ -115,16 +124,68 @@ enum ImageGenMfluxPrep {
         guard let generated = ImageGenOutpaintMask.loadCGImage(path: cliOutputPath),
               let background = ImageGenOutpaintMask.loadCGImage(path: bgPath),
               let mask = ImageGenOutpaintMask.loadCGImage(path: maskPath) else {
-            return cliOutputPath
+            throw MfluxCLIError.processFailed(
+                "Klein expand could not read the generated image or mask (\(cliOutputPath))."
+            )
         }
         let final = ImageGenOutpaintMask.applyExpandKeepMask(
             generated: generated,
             background: background,
             mask: mask
         )
-        _ = ImageGenOutpaintMask.savePNG(final, path: finalPath)
-        try? FileManager.default.removeItem(atPath: cliOutputPath)
+        try writeFinalImage(final, to: finalPath)
+        if cliOutputPath != finalPath {
+            try? FileManager.default.removeItem(atPath: cliOutputPath)
+        }
         return finalPath
+    }
+
+    /// ImageIO cannot encode WebP. Writing ``public.png`` onto a ``.webp`` URL fails and used to
+    /// delete the file the generator had just written.
+    private static func writeFinalImage(_ image: CGImage, to path: String) throws {
+        let url = URL(fileURLWithPath: path)
+        let ext = url.pathExtension.lowercased()
+        let staged = url.deletingLastPathComponent()
+            .appendingPathComponent(".imagegen-klein-\(UUID().uuidString)")
+            .appendingPathExtension(ext.isEmpty ? "png" : ext)
+        defer { try? FileManager.default.removeItem(at: staged) }
+        switch ext {
+        case "webp":
+            try WebPImageWriter.write(image: image, to: staged)
+        case "jpg", "jpeg":
+            try writeImageIO(image, url: staged, uti: "public.jpeg", quality: 0.95)
+        default:
+            guard ImageGenOutpaintMask.savePNG(image, path: staged.path) else {
+                throw MfluxCLIError.processFailed("Could not write PNG at \(path)")
+            }
+        }
+        if FileManager.default.fileExists(atPath: path) {
+            if let backup = try FileManager.default.replaceItemAt(url, withItemAt: staged),
+               backup.path != path {
+                try? FileManager.default.removeItem(at: backup)
+            }
+        } else {
+            try FileManager.default.moveItem(at: staged, to: url)
+        }
+    }
+
+    private static func writeImageIO(
+        _ image: CGImage,
+        url: URL,
+        uti: String,
+        quality: Double?
+    ) throws {
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti as CFString, 1, nil) else {
+            throw MfluxCLIError.processFailed("Could not create image at \(url.path)")
+        }
+        var props: [CFString: Any] = [:]
+        if let quality {
+            props[kCGImageDestinationLossyCompressionQuality] = quality
+        }
+        CGImageDestinationAddImage(dest, image, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else {
+            throw MfluxCLIError.processFailed("Could not write image at \(url.path)")
+        }
     }
 
     private static func applyFillExpand(_ run: inout [String: Any]) throws {

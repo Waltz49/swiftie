@@ -680,26 +680,87 @@ def generate_flux2_klein_edit(
             session_key=session_key,
         )
 
+        from workers.model_tasks_worker import GenerationCancelledError
+
+        # Klein KV edit extracts reference tokens on step 0, then reuses that cache.
+        # Re-concatenating the reference on every step makes the model copy the
+        # gray expand fill instead of painting into it.
+        cache_enabled = (
+            bool(getattr(model.model_config, "supports_kv_cache", False))
+            and image_latents is not None
+            and getattr(image_latents, "shape", (0, 0))[1] > 0
+            and hasattr(model, "_cached_predict")
+        )
+        kv_cache = None
+        negative_kv_cache = None
+        if cache_enabled:
+            kv_cache, negative_kv_cache = model._create_kv_caches(
+                cache_enabled=True,
+                needs_negative_cache=cond.negative_prompt_embeds is not None,
+            )
+
         ctx = model.callbacks.start(seed=seed, prompt=prompt, config=config)
         ctx.before_loop(latents)
         predict = model._predict(model.transformer)
+        cached_predict = model._cached_predict(model.transformer) if cache_enabled else None
         total_steps = len(config.time_steps)
         denoise_t0 = time.perf_counter()
         for step_idx, t in enumerate(config.time_steps):
             step_t0 = time.perf_counter()
             try:
-                noise = predict(
-                    latents=latents,
-                    image_latents=image_latents,
-                    latent_ids=latent_ids,
-                    image_latent_ids=image_latent_ids,
-                    prompt_embeds=cond.prompt_embeds,
-                    text_ids=cond.text_ids,
-                    negative_prompt_embeds=cond.negative_prompt_embeds,
-                    negative_text_ids=cond.negative_text_ids,
-                    guidance=guidance,
-                    timestep=config.scheduler.timesteps[t],
-                )
+                if cache_enabled and step_idx == 0:
+                    model._configure_kv_caches(
+                        kv_cache=kv_cache,
+                        negative_kv_cache=negative_kv_cache,
+                        mode="extract",
+                        num_ref_tokens=image_latents.shape[1],
+                    )
+                    noise = predict(
+                        latents=latents,
+                        image_latents=image_latents,
+                        latent_ids=latent_ids,
+                        image_latent_ids=image_latent_ids,
+                        prompt_embeds=cond.prompt_embeds,
+                        text_ids=cond.text_ids,
+                        negative_prompt_embeds=cond.negative_prompt_embeds,
+                        negative_text_ids=cond.negative_text_ids,
+                        guidance=guidance,
+                        timestep=config.scheduler.timesteps[t],
+                        kv_cache=kv_cache,
+                        negative_kv_cache=negative_kv_cache,
+                    )
+                elif cache_enabled:
+                    model._configure_kv_caches(
+                        kv_cache=kv_cache,
+                        negative_kv_cache=negative_kv_cache,
+                        mode="cached",
+                        num_ref_tokens=image_latents.shape[1],
+                    )
+                    noise = cached_predict(
+                        latents=latents,
+                        latent_ids=latent_ids,
+                        prompt_embeds=cond.prompt_embeds,
+                        text_ids=cond.text_ids,
+                        negative_prompt_embeds=cond.negative_prompt_embeds,
+                        negative_text_ids=cond.negative_text_ids,
+                        guidance=guidance,
+                        timestep=config.scheduler.timesteps[t],
+                        kv_cache=kv_cache,
+                        negative_kv_cache=negative_kv_cache,
+                    )
+                else:
+                    noise = predict(
+                        latents=latents,
+                        image_latents=image_latents,
+                        latent_ids=latent_ids,
+                        image_latent_ids=image_latent_ids,
+                        prompt_embeds=cond.prompt_embeds,
+                        text_ids=cond.text_ids,
+                        negative_prompt_embeds=cond.negative_prompt_embeds,
+                        negative_text_ids=cond.negative_text_ids,
+                        guidance=guidance,
+                        timestep=config.scheduler.timesteps[t],
+                    )
                 latents = config.scheduler.step(
                     noise=noise,
                     timestep=t,
@@ -722,6 +783,7 @@ def generate_flux2_klein_edit(
                 elapsed=time.perf_counter() - step_t0,
             )
 
+        del predict, cached_predict
         perf_log_kv("denoise_total", steps=total_steps, elapsed=time.perf_counter() - denoise_t0)
         ctx.after_loop(latents)
 

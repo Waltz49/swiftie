@@ -400,6 +400,187 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         XCTAssertNil(payload["use_custom_size"])
     }
 
+    @MainActor
+    func testPythonOwnedKleinExpandLeavesOutputForWorker() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-expand-own-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("source.png").path
+        let output = dir.appendingPathComponent("imagegen-5818.webp").path
+        XCTAssertTrue(createSolidPNG(at: source, width: 64, height: 32))
+
+        let payload: [String: Any] = [
+            "pipeline_id": "mflux_flux2_klein_expand",
+            "source_image_path": source,
+            "output_path": output,
+            "width": 128,
+            "height": 64,
+            "placement_x": 8,
+            "placement_y": 4,
+            "placement_w": 64,
+            "placement_h": 32,
+            "steps": 4,
+            "prompt": "Extend the image only into the gray border areas",
+            "random_seed": false,
+            "seed": 7,
+        ]
+        let prepped = try await ImageGenMfluxPrep.apply(to: payload, pythonOwnsKleinExpand: true)
+        XCTAssertEqual(prepped["output_path"] as? String, output)
+        XCTAssertEqual(prepped["source_image_path"] as? String, source)
+        XCTAssertNil(prepped["_klein_expand_post"])
+    }
+
+    @MainActor
+    func testKleinExpandFinalizeWritesWebPAndKeepsSamePath() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-expand-final-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let generated = dir.appendingPathComponent("generated.png").path
+        let background = dir.appendingPathComponent("bg.png").path
+        let mask = dir.appendingPathComponent("mask.png").path
+        let finalWebp = dir.appendingPathComponent("imagegen-5818.webp").path
+        XCTAssertTrue(createSolidPNG(at: generated, width: 32, height: 32))
+        XCTAssertTrue(createSolidPNG(at: background, width: 32, height: 32))
+        XCTAssertTrue(createSolidPNG(at: mask, width: 32, height: 32))
+
+        let meta: [String: String] = [
+            "final_output": finalWebp,
+            "background": background,
+            "mask": mask,
+        ]
+        let payload: [String: Any] = [
+            "pipeline_id": "mflux_flux2_klein_expand",
+            "_klein_expand_post": meta,
+        ]
+        let written = try ImageGenMfluxPrep.finalizeKleinExpandIfNeeded(
+            payload: payload,
+            cliOutputPath: generated
+        )
+        XCTAssertEqual(written, finalWebp)
+        XCTAssertTrue(fm.fileExists(atPath: finalWebp))
+        let size = (try? fm.attributesOfItem(atPath: finalWebp)[.size] as? NSNumber)?.intValue ?? 0
+        XCTAssertGreaterThan(size, 32)
+        XCTAssertFalse(fm.fileExists(atPath: generated))
+
+        let same = dir.appendingPathComponent("same.png").path
+        XCTAssertTrue(createSolidPNG(at: same, width: 32, height: 32))
+        let sameMeta: [String: String] = [
+            "final_output": same,
+            "background": background,
+            "mask": mask,
+        ]
+        let samePayload: [String: Any] = [
+            "pipeline_id": "mflux_flux2_klein_expand",
+            "_klein_expand_post": sameMeta,
+        ]
+        let kept = try ImageGenMfluxPrep.finalizeKleinExpandIfNeeded(
+            payload: samePayload,
+            cliOutputPath: same
+        )
+        XCTAssertEqual(kept, same)
+        XCTAssertTrue(fm.fileExists(atPath: same))
+    }
+
+    @MainActor
+    func testExpandMaskMatchesPythonKeepAndGenerateRegions() throws {
+        let source = solidImage(width: 160, height: 120, red: 255, green: 0, blue: 0)
+        let (background, mask) = ImageGenOutpaintMask.prepareImageAndMaskAtRect(
+            source: source,
+            canvasW: 320,
+            canvasH: 240,
+            x: 40,
+            y: 30,
+            w: 160,
+            h: 120,
+            overlapPercentage: 2
+        )
+        let bgCenter = rgb(background, x: 120, yTop: 90)
+        XCTAssertGreaterThan(bgCenter.0, 200, "background center \(bgCenter)")
+        XCTAssertLessThan(bgCenter.1, 80, "background center \(bgCenter)")
+        XCTAssertLessThan(bgCenter.2, 80, "background center \(bgCenter)")
+
+        let maskBorder = rgb(mask, x: 0, yTop: 0)
+        let maskCenter = rgb(mask, x: 120, yTop: 90)
+        XCTAssertEqual(maskBorder.0, 255, "generate region must be white, got \(maskBorder)")
+        XCTAssertEqual(maskCenter.0, 0, "keep region must be black, got \(maskCenter)")
+
+        let composite = ImageGenOutpaintMask.compositeMaskedRegionsForKleinEdit(
+            background: background,
+            mask: mask
+        )
+        let generated = solidImage(width: 320, height: 240, red: 0, green: 255, blue: 0)
+        let kept = ImageGenOutpaintMask.applyExpandKeepMask(
+            generated: generated,
+            background: background,
+            mask: mask
+        )
+
+        // Outside the placement: generate. Composite is neutral gray; keep-mask leaves the generated pixels.
+        let border = rgb(composite, x: 0, yTop: 0)
+        XCTAssertEqual(border.0, 128, "composite border R \(border)")
+        XCTAssertEqual(border.1, 128, "composite border G \(border)")
+        XCTAssertEqual(border.2, 128, "composite border B \(border)")
+        let keptBorder = rgb(kept, x: 0, yTop: 0)
+        XCTAssertLessThan(keptBorder.0, 40, "keep-mask border \(keptBorder)")
+        XCTAssertGreaterThan(keptBorder.1, 200, "keep-mask border \(keptBorder)")
+        XCTAssertLessThan(keptBorder.2, 40, "keep-mask border \(keptBorder)")
+
+        // Inside the keep rect (inset by overlap): original photo, not gray and not the generated fill.
+        let center = rgb(composite, x: 120, yTop: 90)
+        XCTAssertGreaterThan(center.0, 200, "composite center \(center)")
+        XCTAssertLessThan(center.1, 80, "composite center \(center)")
+        XCTAssertLessThan(center.2, 80, "composite center \(center)")
+        let keptCenter = rgb(kept, x: 120, yTop: 90)
+        XCTAssertGreaterThan(keptCenter.0, 200, "keep-mask center \(keptCenter)")
+        XCTAssertLessThan(keptCenter.1, 80, "keep-mask center \(keptCenter)")
+        XCTAssertLessThan(keptCenter.2, 80, "keep-mask center \(keptCenter)")
+    }
+
+    private func solidImage(width: Int, height: Int, red: UInt8, green: UInt8, blue: UInt8) -> CGImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(
+            red: CGFloat(red) / 255,
+            green: CGFloat(green) / 255,
+            blue: CGFloat(blue) / 255,
+            alpha: 1
+        ))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
+    }
+
+    private func rgb(_ image: CGImage, x: Int, yTop: Int) -> (UInt8, UInt8, UInt8) {
+        let width = image.width
+        let height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: 1, y: -1)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let index = (yTop * width + x) * 4
+        return (pixels[index], pixels[index + 1], pixels[index + 2])
+    }
+
     private func createSolidPNG(at path: String, width: Int, height: Int) -> Bool {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(

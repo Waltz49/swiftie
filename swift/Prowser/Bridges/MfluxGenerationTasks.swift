@@ -154,7 +154,18 @@ final class MfluxGenerationTasks {
         onJobProcessingStarted?("generate")
         do {
             let userOutputPath = payload["output_path"] as? String ?? ""
-            var runPayload = try await ImageGenMfluxPrep.apply(to: payload)
+            let requestedPipeline = payload["pipeline_id"] as? String ?? ""
+            let requestedModel = payload["hf_model_id"] as? String ?? ""
+            let pythonOwnsKleinExpand = requestedPipeline == "mflux_flux2_klein_expand"
+                && ImageGenPipelineRouting.usesPersistentPythonWorker(
+                    pipelineID: requestedPipeline,
+                    hfModelID: requestedModel,
+                    config: config
+                )
+            var runPayload = try await ImageGenMfluxPrep.apply(
+                to: payload,
+                pythonOwnsKleinExpand: pythonOwnsKleinExpand
+            )
             onPreparedRunPayload?(runPayload)
             let prepTempPaths = ImageGenMfluxPrep.takePrepTempPaths(from: &runPayload)
             defer {
@@ -315,10 +326,16 @@ final class MfluxGenerationTasks {
             }
 
             var finalOutput = (lastGenerateResult["output_path"] as? String) ?? finalOutputPath
-            finalOutput = (try? ImageGenMfluxPrep.finalizeKleinExpandIfNeeded(
+            // CLI Klein expand writes the raw edit to the temp PNG (``directCLIPath``). The user
+            // path is only created by the keep-mask composite. The Python worker already saved it.
+            let kleinCLIOutput = directCLIPath
+            if runPayload["_klein_expand_post"] != nil {
+                finalOutput = kleinCLIOutput
+            }
+            finalOutput = try ImageGenMfluxPrep.finalizeKleinExpandIfNeeded(
                 payload: runPayload,
                 cliOutputPath: finalOutput
-            )) ?? finalOutput
+            )
             guard FileManager.default.fileExists(atPath: finalOutput) else {
                 throw MfluxCLIError.processFailed("MFLUX did not write output at \(finalOutput)")
             }
