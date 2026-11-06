@@ -103,7 +103,10 @@ enum PrefixPostfixStore {
             }
         }
         if prefixes.isEmpty, postfixes.isEmpty { return text }
-        return prefixes.joined() + text + postfixes.joined()
+        let pre = prefixes.joined()
+        let post = postfixes.joined()
+        // One space between prompt body and prefix/postfix segments (and between prefix-only vs postfix-only when body is empty).
+        return [pre, text, post].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     private static func normalizedCompareKey(_ text: String) -> String {
