@@ -8,34 +8,45 @@ struct FilterDialogSheet: View {
 
     @State private var entries: [FilterEntry] = []
     @State private var validationMessages: [UUID: String] = [:]
+    @FocusState private var focusedEntryID: UUID?
+    @State private var scrollTargetEntryID: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Edit Filters")
                 .font(.headline)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(entries) { entry in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                TextField("Pattern", text: binding(for: entry.id))
-                                    .textFieldStyle(.roundedBorder)
-                                Button("−") {
-                                    removeEntry(entry.id)
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(entries) { entry in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    TextField("Pattern", text: binding(for: entry.id))
+                                        .textFieldStyle(.roundedBorder)
+                                        .focused($focusedEntryID, equals: entry.id)
+                                    Button("−") {
+                                        removeEntry(entry.id)
+                                    }
+                                    .buttonStyle(.bordered)
                                 }
-                                .buttonStyle(.bordered)
+                                if let message = validationMessages[entry.id], !message.isEmpty {
+                                    Text(message)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
                             }
-                            if let message = validationMessages[entry.id], !message.isEmpty {
-                                Text(message)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
+                            .id(entry.id)
                         }
                     }
                 }
+                .frame(minHeight: 200)
+                .onChange(of: scrollTargetEntryID) { _, entryID in
+                    guard let entryID else { return }
+                    scrollProxy.scrollTo(entryID, anchor: .bottom)
+                    scrollTargetEntryID = nil
+                }
             }
-            .frame(minHeight: 200)
 
             DialogButtonRow([
                 DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
@@ -88,7 +99,14 @@ struct FilterDialogSheet: View {
     }
 
     private func addEntry(prefill: String) {
-        entries.append(FilterEntry(pattern: prefill))
+        let entry = FilterEntry(pattern: prefill)
+        entries.append(entry)
+        validateAll()
+        let newID = entry.id
+        DispatchQueue.main.async {
+            scrollTargetEntryID = newID
+            focusedEntryID = newID
+        }
     }
 
     private func removeEntry(_ id: UUID) {

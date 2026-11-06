@@ -1189,6 +1189,12 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
                     self?.listView?.ensureActiveRowOnScreen()
                 }
             }
+            bag.subscribe(.filterPatternChanged) { [weak self] _ in
+                self?.syncFromAppState()
+            }
+            bag.subscribe(.displayedImagesChanged) { [weak self] _ in
+                self?.syncFromAppState()
+            }
         }
 
         private func syncSelectionVisuals() {

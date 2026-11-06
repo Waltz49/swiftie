@@ -69,7 +69,7 @@ private struct FilterNoFilterMenuButton: View {
             get: { selected },
             set: { newValue in
                 if newValue, !selected {
-                    Task { @MainActor in appState.applyFilenameFilterPattern("*") }
+                    appState.applyFilenameFilterPattern("*")
                 }
             }
         )) {
@@ -87,7 +87,7 @@ private struct FilterPresetMenuButton: View {
             get: { entry.isSelected },
             set: { newValue in
                 if newValue, !entry.isSelected {
-                    Task { @MainActor in appState.applyFilenameFilterPattern(entry.applyPattern) }
+                    appState.applyFilenameFilterPattern(entry.applyPattern)
                 }
             }
         )) {

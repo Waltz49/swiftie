@@ -8,10 +8,53 @@ extension AppState {
     }
 
     func applyFilenameFilterPattern(_ pattern: String) {
+        let previousPattern = filterSettings.filterPattern
         filterSettings.setFilterPattern(pattern, persist: true)
+        guard filterSettings.filterPattern != previousPattern else { return }
+        applyImmediateFilenameFilterToDisplayedImages()
         refreshFileTreeFilter()
         refreshDirectory()
         config.applySettingsChange(emit: eventBus)
+    }
+
+    /// Subset the current listing by the active glob (Python `filter_images_by_pattern`) before the async rescan finishes.
+    private func applyImmediateFilenameFilterToDisplayedImages() {
+        let pattern = filterSettings.filterPattern
+        let current = fileData.displayedImages
+        guard !current.isEmpty else { return }
+
+        if referenceGraphActive, !specificFilesActive {
+            return
+        }
+
+        let filtered = current.filter { path in
+            let basename = (path as NSString).lastPathComponent
+            return DirectoryScanner.matchesGlob(basename, pattern: pattern)
+        }
+
+        guard filtered != current else { return }
+
+        let priorActive = fileData.currentImagePath
+        let ordered = DisplayOrderService.applyDisplayOrder(filtered, appState: self)
+        fileData.setDisplayedImages(ordered)
+
+        if let priorActive, ordered.contains(priorActive) {
+            fileData.setCurrentImagePath(priorActive)
+        } else if let priorActive, let index = current.firstIndex(of: priorActive) {
+            let next = current[(index + 1)...].first(where: { ordered.contains($0) })
+                ?? current[..<index].reversed().first(where: { ordered.contains($0) })
+                ?? ordered.first
+            fileData.setCurrentImagePath(next)
+        } else {
+            fileData.setCurrentImagePath(ordered.first)
+        }
+
+        let sortMode = SortMode(rawValue: config.string(forKey: "sort_mode", default: "date")) ?? .date
+        if sortMode == .duplicates {
+            applyCurrentSort()
+        }
+
+        DirectoryRefreshService.reconcileThumbnailGridListing(appState: self)
     }
 
     func refreshFileTreeFilter() {
