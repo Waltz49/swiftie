@@ -859,6 +859,7 @@ final class AppConfig {
             "shortcuts_splitter_sizes": [150, 250, 120],
             "jobs_display_mode": "pane",
             "jobs_pane_compact": false,
+            "jobs_pane_mini_option_bracket_mode": false,
             "file_tree_show_toolbar": true,
             "information_show_menu_bar": true,
             "information_section_expanded": defaultInformationSectionExpanded,

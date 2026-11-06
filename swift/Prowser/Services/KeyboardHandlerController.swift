@@ -284,8 +284,8 @@ final class KeyboardHandlerController {
             return true
         }
 
-        // ⌘[ compact, ⌘] one job, ⌘\ all jobs — same as Python ⌥[ / ⌥] / ⌥\.
-        if !hasShift, !hasControl, hasCommand != hasOption,
+        // ⌥[ compact, ⌥] one job, ⌥\ all jobs (Python parity); ⌘[⌘]⌘\ are not bound — use ⌥ only.
+        if !hasShift, !hasControl, hasOption, !hasCommand,
            let jobsMode = jobsQueueSizeShortcutMode(event) {
             return appState.setJobsQueueSizeMode(
                 jobsMode,

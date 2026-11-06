@@ -58,6 +58,12 @@ final class AppState {
     var jobsQueuePanelSync: (@MainActor () -> Void)?
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     var jobsToolbarVisible = true
+    /// User preference: use Mini ⌥[ chrome when the queue is in strip mode; persisted as `jobs_pane_mini_option_bracket_mode`.
+    var jobsPaneMiniOptionBracketMode = false
+    /// True when mini chrome applies: preference on **and** queue size is strip (one/all/full use normal chrome).
+    var jobsPaneMiniChromeActive: Bool {
+        jobsPaneMiniOptionBracketMode && jobsQueueSizeMode == .strip
+    }
     /// When false, held queue rows are hidden from job cards (toolbar queue counts unchanged).
     var jobsShowHeldJobs = true
     var jobsPanelAlwaysOnTop = false
@@ -347,6 +353,7 @@ final class AppState {
         // Python `apply_saved_jobs_display_mode`: panel mode hides the sidebar jobs pane; the
         // floating panel itself stays closed until the user shows it (⌘J).
         jobsDisplayMode = JobsDisplayMode.normalize(config.string(forKey: "jobs_display_mode", default: "pane"))
+        applyLoadedJobsPaneMiniOptionBracketMode()
         observeViewModeChanges()
         observeDirectoryLoadedForDeferredBrowseExitScroll()
         fileOperations.bind(self)

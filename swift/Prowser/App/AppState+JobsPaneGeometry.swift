@@ -70,10 +70,25 @@ extension AppState {
     /// Floating Job Control window height using the same measured body as the sidebar pane.
     func floatingJobsPanelContentHeight() -> CGFloat {
         var height = jobsPaneTargetPaneHeight()
-        if jobsToolbarVisible {
+        let floatingToolbar = jobsToolbarVisible && !jobsPaneMiniChromeActive
+        if floatingToolbar {
             height += JobQueuePaneMetrics.toolbarBlockHeight
         }
         return height
+    }
+
+    /// Jobs titlebar height for the active surface: 0 in Mini ⌥[ mode (sidebar or floating).
+    private func effectiveJobsPaneHeaderHeight() -> CGFloat {
+        if jobsPaneMiniChromeActive,
+           jobsDisplayMode == .pane || showFloatingJobsPanel {
+            return 0
+        }
+        return SidebarPaneLayout.headerHeight
+    }
+
+    private func jobsQueueActionToolbarShownForSizing() -> Bool {
+        guard jobsToolbarVisible, !jobsPaneMiniChromeActive else { return false }
+        return jobsDisplayMode == .pane || showFloatingJobsPanel
     }
 
     @discardableResult
@@ -158,7 +173,7 @@ extension AppState {
         let jobCount = visibleJobsQueueRowCount()
         let shrinkWrap = shouldShrinkWrapJobsClient()
         let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
-        let toolbarShown = jobsToolbarVisible && jobsDisplayMode == .pane
+        let toolbarShown = jobsQueueActionToolbarShownForSizing()
         let toolbar = toolbarShown ? JobQueuePaneMetrics.toolbarBlockHeight : 0
         let statusBarHeight = effectiveStatusBarHeight
 
@@ -221,7 +236,7 @@ extension AppState {
     }
 
     func jobsPaneTargetPaneHeight() -> CGFloat {
-        let header = SidebarPaneLayout.headerHeight
+        let header = effectiveJobsPaneHeaderHeight()
         let content = jobsPaneLiveContentHeight()
         if shouldShrinkWrapJobsClient() {
             return header + content
@@ -231,18 +246,19 @@ extension AppState {
 
     /// Port of ``_jobs_compact_pane_height`` body (header + strip-mode client height).
     func jobsCompactPaneHeight() -> CGFloat {
-        SidebarPaneLayout.headerHeight + jobsStripCompactContentHeight()
+        effectiveJobsPaneHeaderHeight() + jobsStripCompactContentHeight()
     }
 
     /// True when titlebar drag can snap jobs pane to strip floor (``_jobs_strip_compact_available``).
     func jobsStripCompactAvailable() -> Bool {
         guard jobsDisplayMode == .pane else { return false }
         guard !rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) else { return false }
-        return jobsCompactPaneHeight() > SidebarPaneLayout.headerHeight + 1
+        let header = effectiveJobsPaneHeaderHeight()
+        return jobsCompactPaneHeight() > header + 1
     }
 
     private func jobsStripCompactContentHeight() -> CGFloat {
-        let toolbarShown = jobsToolbarVisible && jobsDisplayMode == .pane
+        let toolbarShown = jobsQueueActionToolbarShownForSizing() && jobsDisplayMode == .pane
         let toolbar = toolbarShown ? JobQueuePaneMetrics.toolbarBlockHeight : 0
         let padding = JobQueuePaneMetrics.panelPadding * 2
         let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0

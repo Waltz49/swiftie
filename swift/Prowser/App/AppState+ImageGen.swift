@@ -334,6 +334,7 @@ extension AppState {
             forceRefit = true
         }
         if jobsQueueSizeMode == mode, !forceRefit { return }
+        let wasStrip = jobsQueueSizeMode == .strip
         if jobsQueueSizeMode != mode {
             jobsPaneUserSplitterSized = false
             // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
@@ -341,6 +342,11 @@ extension AppState {
             measuredJobsCardStackHeight = 0
         }
         jobsQueueSizeMode = mode
+        let isStrip = mode == .strip
+        if jobsPaneMiniOptionBracketMode, wasStrip != isStrip {
+            imageGenUIRevision += 1
+            sidebarLayoutRevision += 1
+        }
         JobsQueueSizePersistence.save(mode, config: config)
         config.updateSetting("jobs_pane_compact", value: mode == .strip)
         syncJobsPaneGeometry(forceRefit: forceRefit)
@@ -720,6 +726,28 @@ extension AppState {
         DispatchQueue.main.async { [weak self] in
             self?.syncJobsPaneGeometry()
         }
+    }
+
+    func setJobsPaneMiniOptionBracketMode(_ enabled: Bool) {
+        guard jobsPaneMiniOptionBracketMode != enabled else { return }
+        jobsPaneMiniOptionBracketMode = enabled
+        config.updateSetting("jobs_pane_mini_option_bracket_mode", value: enabled)
+        config.applySettingsChange(emit: eventBus)
+        if enabled {
+            applyJobsQueueSizeMode(.strip, forceRefit: true)
+        }
+        imageGenUIRevision += 1
+        sidebarLayoutRevision += 1
+        syncJobsPaneGeometry()
+    }
+
+    /// After loading `jobs_pane_mini_option_bracket_mode` from disk.
+    func applyLoadedJobsPaneMiniOptionBracketMode() {
+        guard jobsPaneMiniOptionBracketMode else { return }
+        guard BundleCapabilities.imageGenUIEnabled else { return }
+        applyJobsQueueSizeMode(.strip, forceRefit: true)
+        imageGenUIRevision += 1
+        sidebarLayoutRevision += 1
     }
 
     func setJobsShowHeldJobs(_ show: Bool) {

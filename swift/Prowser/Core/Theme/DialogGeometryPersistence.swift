@@ -339,14 +339,23 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
         coordinator.detach(from: nsView.window)
     }
 
-    /// Sheets and auxiliary dialogs can remember their own frame. Never resize the browser,
-    /// preferences, image-generation, or job-queue windows that host those sheets.
-    private static func canPersistGeometry(of window: NSWindow, onlyWhenSheet: Bool) -> Bool {
+    /// Sheets and auxiliary dialogs can remember their own frame. Never persist frame changes for the
+    /// browser, preferences, image-generation, or job-queue windows that host those sheets (resize
+    /// during sheet presentation must not overwrite saved geometry). Chrome (e.g. hiding traffic lights)
+    /// still applies; see ``shouldConfigureWindowChrome``.
+    private static func shouldPersistGeometry(of window: NSWindow, onlyWhenSheet: Bool) -> Bool {
         if BrowserWindowIdentity.isTaggedMainBrowserWindow(window) { return false }
         if BrowserWindowIdentity.isPreferencesWindow(window) { return false }
         let identifier = window.identifier?.rawValue ?? ""
         if identifier == "imagegen-unified" || identifier == "jobs-panel" { return false }
         if window.title == "Image Generation" || window.title == "Job Control" { return false }
+        if onlyWhenSheet, window is AuxiliaryDialogWindow { return false }
+        return true
+    }
+
+    private static func shouldConfigureWindowChrome(window: NSWindow, onlyWhenSheet: Bool) -> Bool {
+        if BrowserWindowIdentity.isTaggedMainBrowserWindow(window) { return false }
+        if BrowserWindowIdentity.isPreferencesWindow(window) { return false }
         if onlyWhenSheet, window is AuxiliaryDialogWindow { return false }
         return true
     }
@@ -369,10 +378,15 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
 
         func attach(to view: NSView, settings: DialogWindowGeometryConfigurator) {
             guard let window = view.window, let appState else { return }
-            guard DialogWindowGeometryConfigurator.canPersistGeometry(
+            let persistGeometry = DialogWindowGeometryConfigurator.shouldPersistGeometry(
                 of: window,
                 onlyWhenSheet: settings.onlyWhenSheet
-            ) else { return }
+            )
+            let configureChrome = DialogWindowGeometryConfigurator.shouldConfigureWindowChrome(
+                window: window,
+                onlyWhenSheet: settings.onlyWhenSheet
+            )
+            guard persistGeometry || configureChrome else { return }
             let id = ObjectIdentifier(window)
             if let existing = configuredWindows[id], existing.configKey != settings.configKey {
                 return
@@ -395,7 +409,7 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
                     window.collectionBehavior.insert(.fullScreenAuxiliary)
                 }
             }
-            if settings.hidesStandardWindowButtons {
+            if settings.hidesStandardWindowButtons, configureChrome {
                 DialogGeometryPersistence.applyFloatingPanelChrome(to: window)
             }
 
@@ -408,9 +422,11 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
                     minSize: NSSize(width: settings.minWidth, height: settings.minHeight),
                     nestedInImageGen: settings.nestedInImageGen,
                     sizeFallbackKey: settings.sizeFallbackKey,
-                    floatingPanelChrome: settings.hidesStandardWindowButtons
+                    floatingPanelChrome: settings.hidesStandardWindowButtons && configureChrome
                 )
-                installObservers(for: window, settings: settings)
+                if persistGeometry {
+                    installObservers(for: window, settings: settings)
+                }
             }
 
             configuredWindows[id] = configuredWindows[id] ?? Configuration(

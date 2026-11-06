@@ -73,6 +73,9 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             .onChange(of: appState.jobsQueueSizeMode) { _, _ in
                 relayout(totalHeight: geometry.size.height, displayed: displayed)
             }
+            .onChange(of: appState.jobsPaneMiniOptionBracketMode) { _, _ in
+                relayout(totalHeight: geometry.size.height, displayed: displayed)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(appState.theme.colors.sidebarBackground)
@@ -92,7 +95,8 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             configKey: descriptor.expandedConfigKey,
             default: descriptor.defaultExpanded
         )
-        let paneHeight = max(height, SidebarPaneLayout.headerHeight)
+        let headerFloor = paneHeaderFloor(descriptor: descriptor)
+        let paneHeight = max(height, headerFloor)
 
         let section = SidebarPaneSection(
             title: descriptor.title,
@@ -109,7 +113,8 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             omitLeftBorder: model.side == .right ? true : descriptor.omitLeftBorder,
             showsFlyoutButton: descriptor.showsFlyoutButton,
             onFlyout: descriptor.showsFlyoutButton ? { appState.showJobsPanel() } : nil,
-            contextMenuKind: descriptor.contextMenuKind
+            contextMenuKind: descriptor.contextMenuKind,
+            showsTitlebar: !(descriptor.isJobsPane && appState.jobsPaneMiniChromeActive)
         ) {
             SidebarPaneBody(kind: descriptor.contextMenuKind) {
                 paneContent(for: descriptor.index)
@@ -160,6 +165,17 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         }
     }
 
+    private func paneHeaderFloor(descriptor: SidebarPaneDescriptor) -> CGFloat {
+        if descriptor.isJobsPane, appState.jobsPaneMiniChromeActive {
+            return model.minHeight(for: 2, headerOnly: false, appState: appState)
+        }
+        return SidebarPaneLayout.headerHeight
+    }
+
+    private func displayedHeaderFloor(displayed: [SidebarPaneDescriptor]) -> CGFloat {
+        displayed.reduce(0) { $0 + paneHeaderFloor(descriptor: $1) }
+    }
+
     private func relayout(totalHeight: CGFloat, displayed: [SidebarPaneDescriptor]) {
         if model.userPaneResizeInProgress { return }
         let displayedCount = displayed.count
@@ -168,11 +184,13 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             viewBorderWidthPx: appState.theme.colors.viewBorderWidthPx
         )
         let splitterTotal = CGFloat(max(0, displayedCount - 1)) * handle
-        let allocHeight = max(totalHeight - splitterTotal, CGFloat(displayedCount) * SidebarPaneLayout.headerHeight)
+        let headerFloor = displayedHeaderFloor(displayed: displayed)
+        let allocHeight = max(totalHeight - splitterTotal, headerFloor)
         var updated = model.layoutSizes(totalHeight: allocHeight, appState: appState)
         let drift = totalHeight - (updated.reduce(0, +) + splitterTotal)
-        if abs(drift) > 1, let bottomIndex = displayed.last?.index {
-            updated[bottomIndex] = max(SidebarPaneLayout.headerHeight, updated[bottomIndex] + drift)
+        if abs(drift) > 1, let bottomDescriptor = displayed.last {
+            let floor = paneHeaderFloor(descriptor: bottomDescriptor)
+            updated[bottomDescriptor.index] = max(floor, updated[bottomDescriptor.index] + drift)
         }
         model.applySizes(updated, appState: appState, persist: false)
         if model.side == .right,

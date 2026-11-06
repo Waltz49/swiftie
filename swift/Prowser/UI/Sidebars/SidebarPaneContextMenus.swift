@@ -91,6 +91,12 @@ enum SidebarPaneContextMenus {
         menu.addItem(.separator())
         addCheckable(
             menu,
+            title: "Mini ⌥[ Mode",
+            checked: appState.jobsPaneMiniOptionBracketMode,
+            action: #selector(PaneMenuActions.jobsMiniOptionBracketMode(_:))
+        )
+        addCheckable(
+            menu,
             title: "Show Toolbar",
             checked: appState.jobsToolbarVisible,
             action: #selector(PaneMenuActions.jobsShowToolbar(_:))
@@ -290,6 +296,10 @@ final class PaneMenuActions: NSObject {
 
     @objc func jobsShowToolbar(_ sender: NSMenuItem) {
         appState?.setJobsToolbarVisible(toggledValue(sender))
+    }
+
+    @objc func jobsMiniOptionBracketMode(_ sender: NSMenuItem) {
+        appState?.setJobsPaneMiniOptionBracketMode(toggledValue(sender))
     }
 
     @objc func chatSystemPrompt(_ sender: NSMenuItem) {

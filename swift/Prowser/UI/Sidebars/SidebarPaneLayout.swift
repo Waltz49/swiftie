@@ -162,8 +162,16 @@ enum SidebarPaneLayout {
         saved: [CGFloat],
         visibility: [Bool],
         expanded: [Bool],
-        totalHeight: CGFloat
+        totalHeight: CGFloat,
+        headerHeights: [CGFloat]? = nil
     ) -> [CGFloat] {
+        func headerFor(_ idx: Int) -> CGFloat {
+            if let headerHeights, headerHeights.indices.contains(idx) {
+                return headerHeights[idx]
+            }
+            return headerHeight
+        }
+
         let visibleIndices = visibility.indices.filter { visibility[$0] }
         guard !visibleIndices.isEmpty else { return saved }
 
@@ -177,8 +185,9 @@ enum SidebarPaneLayout {
 
         let effective = visibility.indices.map { idx -> CGFloat in
             guard visibility[idx] else { return 0 }
-            if expanded[idx] { return max(saved[idx], headerHeight) }
-            return headerHeight
+            let h = headerFor(idx)
+            if expanded[idx] { return max(saved[idx], h) }
+            return h
         }
         let totalSaved = effective.reduce(0, +)
         guard totalSaved > 0 else { return effective }

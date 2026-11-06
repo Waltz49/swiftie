@@ -159,6 +159,8 @@ struct SidebarPaneSection<Content: View>: View {
     var showsFlyoutButton: Bool = false
     var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
+    /// When false (e.g. Mini ⌥[ Mode), the titlebar is omitted while expanded; collapsed panes still show the bar so the pane can be expanded again.
+    var showsTitlebar: Bool = true
     @ViewBuilder let content: () -> Content
 
     private var isJobsPaneContext: Bool {
@@ -166,23 +168,29 @@ struct SidebarPaneSection<Content: View>: View {
         return false
     }
 
+    private var titlebarVisible: Bool {
+        showsTitlebar || !isExpanded
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            SidebarPaneTitlebar(
-                title: title,
-                isExpanded: isExpanded,
-                onToggle: onToggle,
-                paneIndex: paneIndex,
-                allowsTitlebarDrag: allowsTitlebarDrag,
-                splitModel: splitModel,
-                onTitleClick: onTitleClick,
-                onTitleDoubleClick: onTitleDoubleClick,
-                status: status,
-                omitLeftBorder: omitLeftBorder,
-                showsFlyoutButton: showsFlyoutButton,
-                onFlyout: onFlyout,
-                contextMenuKind: contextMenuKind
-            )
+            if titlebarVisible {
+                SidebarPaneTitlebar(
+                    title: title,
+                    isExpanded: isExpanded,
+                    onToggle: onToggle,
+                    paneIndex: paneIndex,
+                    allowsTitlebarDrag: allowsTitlebarDrag,
+                    splitModel: splitModel,
+                    onTitleClick: onTitleClick,
+                    onTitleDoubleClick: onTitleDoubleClick,
+                    status: status,
+                    omitLeftBorder: omitLeftBorder,
+                    showsFlyoutButton: showsFlyoutButton,
+                    onFlyout: onFlyout,
+                    contextMenuKind: contextMenuKind
+                )
+            }
 
             if isExpanded {
                 content()
@@ -270,7 +278,7 @@ struct SidebarPaneBody<Content: View>: View {
         case .information:
             return appState.informationMenuBarVisible
         case .jobs:
-            return appState.jobsToolbarVisible
+            return appState.jobsToolbarVisible && !appState.jobsPaneMiniChromeActive
         case .chat:
             return false
         }

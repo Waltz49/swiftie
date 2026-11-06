@@ -53,12 +53,15 @@ final class SidebarPaneSplitModel {
         config.updateSetting(configKey, value: expanded)
     }
 
-    func headerHeight(for paneIndex: Int) -> CGFloat {
-        SidebarPaneLayout.headerHeight
+    func headerHeight(for paneIndex: Int, appState: AppState) -> CGFloat {
+        if side == .right, paneIndex == 2, appState.jobsPaneMiniChromeActive {
+            return 0
+        }
+        return SidebarPaneLayout.headerHeight
     }
 
     func minHeight(for paneIndex: Int, headerOnly: Bool, appState: AppState) -> CGFloat {
-        let header = headerHeight(for: paneIndex)
+        let header = headerHeight(for: paneIndex, appState: appState)
         switch side {
         case .left:
             if !paneExpanded(configKey: leftExpandedKey(paneIndex), default: leftDefaultExpanded(paneIndex)) {
@@ -144,11 +147,13 @@ final class SidebarPaneSplitModel {
     func layoutSizes(totalHeight: CGFloat, appState: AppState) -> [CGFloat] {
         let vis = visibility(appState: appState)
         let exp = expanded(appState: appState)
+        let headerHeights = (0..<3).map { headerHeight(for: $0, appState: appState) }
         return SidebarPaneLayout.scaledSizes(
             saved: savedSizes,
             visibility: vis,
             expanded: zip(vis, exp).map { shown, expanded in shown && expanded },
-            totalHeight: max(totalHeight, 1)
+            totalHeight: max(totalHeight, 1),
+            headerHeights: headerHeights
         )
     }
 
@@ -244,6 +249,8 @@ final class SidebarPaneSplitModel {
         let stripMode = appState.jobsQueueSizeMode == .strip
 
         if totalDy < 0, stripMode {
+            // Mini ⌥[ mode keeps strip + chromeless; do not auto-switch to ALL on titlebar drag.
+            guard !appState.jobsPaneMiniChromeActive else { return false }
             appState.applyJobsQueueSizeMode(.all, forceRefit: false)
             return true
         }
@@ -279,7 +286,11 @@ final class SidebarPaneSplitModel {
             }
             enforceJobsCompactSplitterSize(appState: appState)
         } else if appState.jobsQueueSizeMode == .strip, jobsHeight > compact + 1 {
-            appState.applyJobsQueueSizeMode(.all, forceRefit: false)
+            if appState.jobsPaneMiniChromeActive {
+                enforceJobsCompactSplitterSize(appState: appState)
+            } else {
+                appState.applyJobsQueueSizeMode(.all, forceRefit: false)
+            }
         }
     }
 
@@ -329,7 +340,7 @@ final class SidebarPaneSplitModel {
         appState: AppState,
         contentHeight: CGFloat
     ) -> CGFloat {
-        headerHeight(for: paneIndex) + contentHeight
+        headerHeight(for: paneIndex, appState: appState) + contentHeight
     }
 
     func togglePaneFit(
@@ -548,7 +559,7 @@ final class SidebarPaneSplitModel {
     }
 
     private func jobsPaneMinHeight(appState: AppState) -> CGFloat {
-        let header = headerHeight(for: 2)
+        let header = headerHeight(for: 2, appState: appState)
         // Splitter/titlebar drag floor only (see ``applyPaneTitlebarDragDelta``). Auto-fit uses
         // ``jobsPaneTargetPaneHeight`` via ``ensureJobsPaneFitsContent`` — not this minimum.
         // Using fitted content height here (2c8b436+) made adjustedDY zero whenever the pane
@@ -607,7 +618,7 @@ final class SidebarPaneSplitModel {
             targetIdx: paneIndex,
             neededTarget: cappedTarget,
             visibility: vis,
-            headerHeightForPane: headerHeight(for:),
+            headerHeightForPane: { [self] idx in headerHeight(for: idx, appState: appState) },
             minHeightForPane: { idx, headerOnly in
                 minHeight(for: idx, headerOnly: headerOnly, appState: appState)
             },

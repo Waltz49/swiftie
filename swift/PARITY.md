@@ -253,7 +253,7 @@ WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and i
 - [~] Show Job Queue (⌘J floating panel)
 - [~] Job queue in right sidebar pane (AppKit cards + drag reorder)
 - [~] Progressive preview path display (tap opens browse)
-- [~] Job shortcuts: J pane, ⌘J panel, ⌃J size cycle, ⌥[/]\\, ⌥/, ⇧⌥/, ⌘⌥/
+- [~] Job shortcuts: J pane, ⌘J panel, ⌃J size cycle, ⌥[/]\\ (⌘[/]\\ not bound), ⌥/, ⇧⌥/, ⌘⌥/
 - [~] LoRA stack picker UI — `ImageGenLoraPicker` + MFLUX `--lora-paths` via submit snapshot
 
 ## Menus — Tools
@@ -410,6 +410,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `chat_use_rejected_response_phrases`, `chat_rejected_response_phrases.json` | hardcoded phrases in chat worker only | done (settings UI + JSON; matcher/retry helper for chat LM Studio stream, not flux/caption) |
 | `say_exit` | done | done (`UserCommentSpeaker` + `ExitScriptUtils.sayExitArgv`) |
 | `jobs_pane_compact`, `jobs_display_mode` | done | done |
+| `jobs_pane_mini_option_bracket_mode` (Mini ⌥[ Mode) | — | done (Swift-only) |
 | Job queue / active job JSON (`job_step_persistence`) | done | done |
 
 ### Chat & search
