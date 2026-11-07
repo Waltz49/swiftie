@@ -17,7 +17,11 @@ from typing import Any, Dict, Final
 
 from PIL import Image
 
-from imagegen_plugins.outpaint_mask import clamp_outpaint_dims, prepare_image_and_mask_at_rect
+from imagegen_plugins.outpaint_mask import (
+    clamp_outpaint_dims,
+    pixelmator_mask_to_mflux,
+    prepare_image_and_mask_at_rect,
+)
 from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
@@ -318,8 +322,6 @@ def _run_infill_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if (w, h) != (background.width, background.height):
             background = background.resize((w, h), Image.LANCZOS)
             mask_src = mask_src.resize((w, h), Image.LANCZOS)
-        from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux
-
         mask = pixelmator_mask_to_mflux(mask_src)
     finally:
         mask_src.close()

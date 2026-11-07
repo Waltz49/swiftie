@@ -118,12 +118,32 @@ enum InfillExportService {
         guard FileManager.default.isReadableFile(atPath: source) else {
             throw InfillExportError.sourceMissing(source)
         }
+        guard let oriented = ImageRecognitionImageLoader.loadCGImage(path: source) else {
+            throw InfillExportError.sourceUnreadable
+        }
+        // Match InfillPaintCanvas / Python `write_paint_infill_for_pixelmator`: base and mask share pixel size.
+        // When sizes match, copy the source file bytes (preserves format); never write PNG data under a .jpg/.webp name.
+        let targetW = mask.width
+        let targetH = mask.height
         let jobDir = ProwserTempFiles.makeInfillBatchDirectory(tempRoot: tempRoot)
         let ext = (source as NSString).pathExtension
         let baseExt = ext.isEmpty ? "png" : ext
-        let baseDest = (jobDir as NSString).appendingPathComponent("base.\(baseExt)")
+        let baseDest: String
+        if oriented.width == targetW && oriented.height == targetH {
+            baseDest = (jobDir as NSString).appendingPathComponent("base.\(baseExt)")
+            do {
+                try FileManager.default.copyItem(atPath: source, toPath: baseDest)
+            } catch {
+                throw InfillExportError.writeFailed
+            }
+        } else {
+            let baseCG = ImageGenOutpaintMask.resizeImagePublic(oriented, width: targetW, height: targetH)
+            baseDest = (jobDir as NSString).appendingPathComponent("base.png")
+            guard ImageGenOutpaintMask.savePNG(baseCG, path: baseDest) else {
+                throw InfillExportError.writeFailed
+            }
+        }
         let maskDest = (jobDir as NSString).appendingPathComponent("mask.png")
-        try FileManager.default.copyItem(atPath: source, toPath: baseDest)
         guard let pixel = ImageGenInfillMath.paintMaskToPixelmatorRGBA(mask),
               ImageGenOutpaintMask.savePNG(pixel, path: maskDest) else {
             throw InfillExportError.writeFailed

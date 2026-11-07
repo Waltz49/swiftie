@@ -12,6 +12,15 @@ from typing import Tuple
 from PIL import Image, ImageDraw
 
 
+def pixelmator_mask_to_mflux(mask: Image.Image) -> Image.Image:
+    """Pixelmator / paint infill mask → MFLUX L (white = fill, black = keep).
+
+    Opaque alpha = region to inpaint; transparent = preserve. Pillow-only (no Qt).
+    """
+    alpha = mask.convert("RGBA").getchannel("A")
+    return alpha.point(lambda a: 255 if a > 127 else 0, mode="L")
+
+
 def clamp_outpaint_dims(width: int, height: int, *, max_side: int = 1024) -> Tuple[int, int]:
     """Round to 32px and cap for 16GB-class Macs."""
     w = max(128, min(max_side, round(width / 32) * 32))

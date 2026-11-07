@@ -17,10 +17,13 @@ from typing import Any, Dict, Final
 
 from PIL import Image
 
-from imagegen_plugins.outpaint_mask import clamp_outpaint_dims, prepare_image_and_mask_at_rect
+from imagegen_plugins.outpaint_mask import (
+    clamp_outpaint_dims,
+    pixelmator_mask_to_mflux,
+    prepare_image_and_mask_at_rect,
+)
 from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
-from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux
 from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
 from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     atomic_copy2,

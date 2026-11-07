@@ -9,13 +9,15 @@ import subprocess
 from prowser_temp_files import prowser_mkdtemp, prowser_temp_subdir
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from PIL import Image
-from PySide6.QtGui import QImage
 
-from imagegen_plugins.outpaint_mask import fit_infill_paint_dims
+from imagegen_plugins.outpaint_mask import fit_infill_paint_dims, pixelmator_mask_to_mflux
 from pil_image_io import open_pil_with_exif_correction
+
+if TYPE_CHECKING:
+    from PySide6.QtGui import QImage
 
 _IMAGE_REFERENCE_EXTS = frozenset(
     {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"}
@@ -98,12 +100,6 @@ def get_pixelmator_front_document_path() -> Optional[str]:
     return None
 
 
-def pixelmator_mask_to_mflux(mask: Image.Image) -> Image.Image:
-    """Pixelmator mask export: opaque = fill, transparent = keep → MFLUX L (white = fill)."""
-    alpha = mask.convert("RGBA").getchannel("A")
-    return alpha.point(lambda a: 255 if a > 127 else 0, mode="L")
-
-
 def validate_infill_export_dimensions(
     base_path: str, mask_path: str
 ) -> Optional[str]:
@@ -149,6 +145,8 @@ def pixelmator_mask_file_to_paint_qimage(mask_path: str) -> Optional[QImage]:
 
 def paint_mask_qimage_to_pixelmator_image(mask_image: QImage) -> Image.Image:
     """Convert paint-canvas mask (white on transparent) to Pixelmator mask RGBA."""
+    from PySide6.QtGui import QImage
+
     if mask_image is None or mask_image.isNull():
         raise ValueError("Mask image is empty.")
     mask = mask_image.convertToFormat(QImage.Format.Format_ARGB32)

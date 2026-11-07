@@ -158,32 +158,9 @@ if [[ ! -f "$DEST/workers/__init__.py" ]]; then
   echo '"""Workers package (bundle subset)."""' > "$DEST/workers/__init__.py"
 fi
 
-# Swift headless registry runs in the imagegen venv (no PySide6). Keep availability checks
-# and plugin listing from importing Qt-only pixelmator helpers at module load.
+# Swift headless registry runs in the imagegen venv (no PySide6). Patched modules use lazy
+# imports where Qt is still needed; MFLUX infill mask conversion lives in outpaint_mask (Pillow-only).
 apply_bundle_patches() {
-  local fill_py="$DEST/imagegen_plugins/pipelines/mflux_fill_expand.py"
-  if [[ -f "$fill_py" ]] && grep -q '^from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux' "$fill_py"; then
-    python3 - "$fill_py" <<'PY'
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text()
-old = "from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux\n"
-if old not in text:
-    sys.exit(0)
-text = text.replace(old, "", 1)
-needle = "        mask = pixelmator_mask_to_mflux(mask_src)\n"
-if needle in text and "from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux" not in text:
-    text = text.replace(
-        needle,
-        "        from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux\n\n        mask = pixelmator_mask_to_mflux(mask_src)\n",
-        1,
-    )
-path.write_text(text)
-PY
-  fi
-
   local check_py="$DEST/imagegen_plugins/pipeline_check_registry.py"
   if [[ -f "$check_py" ]]; then
     python3 - "$check_py" <<'PY'
