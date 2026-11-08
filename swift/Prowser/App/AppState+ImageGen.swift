@@ -79,7 +79,12 @@ extension AppState {
             completedStep: completedStep > 0 ? completedStep : nil,
             totalSteps: stepTotal > 0 ? stepTotal : nil
         )
-        refreshProgressiveImageInBrowse(at: readablePath, forceEnterBrowse: forceEnterBrowse)
+        let isFinalStep = completedStep > 0 && stepTotal > 0 && completedStep >= stepTotal
+        refreshProgressiveImageInBrowse(
+            at: readablePath,
+            forceEnterBrowse: forceEnterBrowse,
+            isFinalStep: isFinalStep
+        )
     }
 
     /// Port of Python ``_progressive_image_readable`` (skip truncated/incomplete image files).
@@ -119,12 +124,19 @@ extension AppState {
         }
     }
 
-    private func refreshProgressiveImageInBrowse(at path: String, forceEnterBrowse: Bool) {
+    private func refreshProgressiveImageInBrowse(
+        at path: String,
+        forceEnterBrowse: Bool,
+        isFinalStep: Bool
+    ) {
         guard imageGen.showProgressiveImages else { return }
         guard !isSlideshowActive else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
 
         let inPlace = tryInPlaceProgressiveRefresh(at: path)
+        if imageGenUnifiedDialogIsVisible && !isFinalStep {
+            return
+        }
         let wantBrowse = forceEnterBrowse || !imageGen.progressiveBrowseWasOpened
         if inPlace {
             if !wantBrowse { return }
