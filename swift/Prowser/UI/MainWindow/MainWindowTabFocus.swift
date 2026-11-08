@@ -16,8 +16,17 @@ final class MainWindowTabFocusStopView: NSView {
     override var acceptsFirstResponder: Bool { isTabStopActive }
     override var canBecomeKeyView: Bool { isTabStopActive && !isHiddenOrHasHiddenAncestor }
 
-    /// Tab stops are for keyboard focus only; never intercept pointer or trackpad gestures.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    /// Tab stops are for keyboard focus only; pass hits through to subviews (file tree scroll, etc.).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        for subview in subviews.reversed() {
+            let local = convert(point, to: subview)
+            if let hit = subview.hitTest(local) {
+                return hit
+            }
+        }
+        return nil
+    }
 
     override func becomeFirstResponder() -> Bool {
         guard isTabStopActive, let appState else { return false }
