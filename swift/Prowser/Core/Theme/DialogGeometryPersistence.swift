@@ -295,7 +295,18 @@ enum DialogGeometryPersistence {
         if let value = value as? Double { return value }
         if let value = value as? Int { return Double(value) }
         if let value = value as? CGFloat { return Double(value) }
+        if let value = value as? NSNumber { return value.doubleValue }
         return 0
+    }
+}
+
+/// Fires when ``NSView/window`` is attached so geometry restore is not skipped on the first layout pass.
+private final class DialogGeometryAttachmentView: NSView {
+    var onWindowAttached: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowAttached?(window)
     }
 }
 
@@ -322,17 +333,21 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
+        let view = DialogGeometryAttachmentView(frame: .zero)
+        view.onWindowAttached = { [weak view] _ in
+            guard let view else { return }
             context.coordinator.attach(to: view, settings: self)
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            context.coordinator.attach(to: nsView, settings: self)
+        guard let attachmentView = nsView as? DialogGeometryAttachmentView else { return }
+        attachmentView.onWindowAttached = { [weak attachmentView] _ in
+            guard let attachmentView else { return }
+            context.coordinator.attach(to: attachmentView, settings: self)
         }
+        context.coordinator.attach(to: attachmentView, settings: self)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -346,10 +361,15 @@ struct DialogWindowGeometryConfigurator: NSViewRepresentable {
     private static func shouldPersistGeometry(of window: NSWindow, onlyWhenSheet: Bool) -> Bool {
         if BrowserWindowIdentity.isTaggedMainBrowserWindow(window) { return false }
         if BrowserWindowIdentity.isPreferencesWindow(window) { return false }
-        let identifier = window.identifier?.rawValue ?? ""
-        if identifier == "imagegen-unified" || identifier == "jobs-panel" { return false }
-        if window.title == "Image Generation" || window.title == "Job Control" { return false }
-        if onlyWhenSheet, window is AuxiliaryDialogWindow { return false }
+        // Nested sheets presented on a host must not resize or overwrite that host's saved frame.
+        if onlyWhenSheet {
+            let identifier = window.identifier?.rawValue ?? ""
+            if identifier == SceneWindowChrome.imageGenUnifiedID || identifier == SceneWindowChrome.jobsPanelID {
+                return false
+            }
+            if window.title == "Image Generation" || window.title == "Job Control" { return false }
+            if window is AuxiliaryDialogWindow { return false }
+        }
         return true
     }
 
