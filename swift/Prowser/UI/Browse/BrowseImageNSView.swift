@@ -3,7 +3,7 @@ import CoreImage
 import Foundation
 
 /// Browse view with zoom and pan. Port of `files/browse_view_handler.py` (phase 1).
-final class BrowseImageNSView: NSView {
+final class BrowseImageNSView: NSView, NSDraggingSource {
     weak var appState: AppState?
     var imagePath: String? {
         didSet { loadImage() }
@@ -32,6 +32,10 @@ final class BrowseImageNSView: NSView {
     private var preferredActualSize = false
     private var dragStart: CGPoint?
     private var scrollAtDragStart = CGPoint.zero
+    private var isPanning = false
+    private var fileDragStarted = false
+    private var fileDragPaths: [String] = []
+    private let fileDragThreshold: CGFloat = 5
     /// Pinch zoom anchor (Python `zoom_center_point` at gesture start).
     private var magnifyAnchor: CGPoint?
     private var rotationDegrees: CGFloat = 0
@@ -623,9 +627,12 @@ final class BrowseImageNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         appState?.browseCursorAutoHide.noteMouseActivity()
-        guard sourceImage != nil else { return }
+        guard event.buttonNumber == 0 else { return }
+        guard browseFileDragPath() != nil || canPan() else { return }
         dragStart = convert(event.locationInWindow, from: nil)
         scrollAtDragStart = scrollOffset
+        isPanning = false
+        fileDragStarted = false
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -634,16 +641,89 @@ final class BrowseImageNSView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         appState?.browseCursorAutoHide.noteMouseActivity()
-        guard let dragStart else { return }
+        guard let start = dragStart, !fileDragStarted else { return }
         let point = convert(event.locationInWindow, from: nil)
+        let distance = hypot(point.x - start.x, point.y - start.y)
+        guard distance >= fileDragThreshold else { return }
+
+        let cmdHeld = event.modifierFlags.contains(.command)
+        let path = browseFileDragPath()
+        let wantFileDrag = path != nil && (!canPan() || cmdHeld)
+        if wantFileDrag {
+            dragStart = nil
+            beginBrowseFileDrag(event: event)
+            return
+        }
         guard canPan() else { return }
-        scrollOffset.x = scrollAtDragStart.x - (point.x - dragStart.x)
-        scrollOffset.y = scrollAtDragStart.y - (point.y - dragStart.y)
+        if !isPanning {
+            isPanning = true
+            NSCursor.closedHand.set()
+        }
+        scrollOffset.x = scrollAtDragStart.x - (point.x - start.x)
+        scrollOffset.y = scrollAtDragStart.y - (point.y - start.y)
         clampScroll()
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isPanning {
+            if canPan() {
+                NSCursor.openHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+        isPanning = false
+        dragStart = nil
+    }
+
+    private func browseFileDragPath() -> String? {
+        guard let path = imagePath, !path.isEmpty else { return nil }
+        let abs = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard FileManager.default.isReadableFile(atPath: abs) else { return nil }
+        return abs
+    }
+
+    private func beginBrowseFileDrag(event: NSEvent) {
+        guard let path = browseFileDragPath() else { return }
+        fileDragStarted = true
+        fileDragPaths = [path]
+
+        let pbItem = NSPasteboardItem()
+        pbItem.setString(URL(fileURLWithPath: path).absoluteString, forType: .fileURL)
+        pbItem.setString(path, forType: .string)
+        let dragging = NSDraggingItem(pasteboardWriter: pbItem)
+        let preview = browseDragPreviewImage()
+        let size = preview?.size ?? NSSize(width: 64, height: 64)
+        dragging.setDraggingFrame(NSRect(origin: .zero, size: size), contents: preview)
+        let session = beginDraggingSession(with: [dragging], event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
+    private func browseDragPreviewImage() -> NSImage? {
+        guard let image = sourceImage, image.size.width > 0, image.size.height > 0 else { return nil }
+        let maxSide: CGFloat = 64
+        let scale = min(maxSide / image.size.width, maxSide / image.size.height, 1)
+        let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        let preview = NSImage(size: size)
+        preview.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: size))
+        preview.unlockFocus()
+        return preview
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        FileDragDropOperations.sourceOperationMask(for: context, filePaths: fileDragPaths)
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        fileDragPaths = []
+        fileDragStarted = false
+        isPanning = false
         dragStart = nil
     }
 

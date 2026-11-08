@@ -16,14 +16,14 @@ struct PreviewPaneView: View {
                         viewportSize: geometry.size
                     )
 
-                    Image(nsImage: previewImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: display.width, height: display.height)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .contentShape(Rectangle())
-                        .onTapGesture { openBrowse() }
-                        .help("Click to open in browse view")
+                    PreviewPaneDraggableImage(
+                        image: previewImage,
+                        filePath: loadedPath ?? appState.fileData.currentImagePath ?? "",
+                        onClick: { openBrowse() }
+                    )
+                    .frame(width: display.width, height: display.height)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .help("Click to open in browse view. Drag the image to drop it elsewhere.")
                 } else {
                     Text("No image selected")
                         .foregroundStyle(.secondary)

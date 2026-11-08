@@ -57,18 +57,24 @@ enum HiddenGemsHelpContent {
         |-------|--------|
         | **Folder tree** | Move or copy image files onto a folder (highlight shows the target folder). |
         | **Thumbnail grid** | Reorder thumbnails within the current folder (insertion indicator shows drop position). |
+        | **Image generation** — edit dialog source previews | Add source images or reorder existing ones (up to four total). |
 
         ### Drag sources (drag files out)
 
         | Where | Action |
         |-------|--------|
         | **Thumbnail grid** | Drag selected image(s) to Finder, another folder, or another app. Multiselect drags all selected files. |
+        | **Browse mode** | Drag the current image out of the viewer. |
+        | **Preview** (left sidebar) | Drag the active preview image (e.g. onto the unified Edit source preview). |
+        | **Image generation** — edit dialog source thumbnails | Drag thumbnails to reorder within the source list. |
 
         ### Modifier keys while dragging
 
         | Modifier | Where | Action |
         |----------|-------|--------|
         | **\(opt)** (hold while dragging) | Thumbnail grid | Force **copy** when dragging files to another folder or app. Default is move (macOS still copies across volumes). |
+        | **\(opt)** (hold while dragging) | Browse mode | Force **copy** when dragging the current image out of the viewer. |
+        | **\(cmd)** (hold while dragging) | Browse mode | When the image is zoomed enough to pan, prefer **file drag** over panning. |
         | **\(opt)** (at drop) | Folder tree | Copy instead of move. Also copies **locked** files when move is blocked. |
 
         #

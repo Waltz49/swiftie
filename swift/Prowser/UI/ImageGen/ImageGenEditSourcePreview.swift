@@ -9,6 +9,7 @@ struct ImageGenEditSourcePreview: View {
     @Environment(\.themeColors) private var themeColors
     @Binding var sourcePaths: [String]
     var onPathsChanged: (() -> Void)?
+    var onPrimaryPathSelected: ((String) -> Void)?
 
     var body: some View {
         Group {
@@ -35,7 +36,8 @@ struct ImageGenEditSourcePreview: View {
             },
             onOpenInBrowse: { path in
                 appState.openImageInBrowse(path: path)
-            }
+            },
+            onPrimaryPathSelected: onPrimaryPathSelected
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -55,11 +57,13 @@ struct ImageGenEditSourcePreviewRepresentable: NSViewRepresentable {
     var themeColors: ThemeColors
     var onPathsChanged: ([String]) -> Void
     var onOpenInBrowse: (String) -> Void
+    var onPrimaryPathSelected: ((String) -> Void)?
 
     func makeNSView(context: Context) -> ImageGenEditSourcePreviewNSView {
         let view = ImageGenEditSourcePreviewNSView()
         view.onPathsChanged = onPathsChanged
         view.onOpenInBrowse = onOpenInBrowse
+        view.onPrimaryPathSelected = onPrimaryPathSelected
         view.imageExtensions = imageExtensions
         view.applyTheme(themeColors)
         view.sourcePaths = sourcePaths
@@ -69,6 +73,7 @@ struct ImageGenEditSourcePreviewRepresentable: NSViewRepresentable {
     func updateNSView(_ nsView: ImageGenEditSourcePreviewNSView, context: Context) {
         nsView.onPathsChanged = onPathsChanged
         nsView.onOpenInBrowse = onOpenInBrowse
+        nsView.onPrimaryPathSelected = onPrimaryPathSelected
         nsView.imageExtensions = imageExtensions
         nsView.applyTheme(themeColors)
         nsView.sourcePaths = sourcePaths
@@ -105,13 +110,25 @@ final class ImageGenEditSourcePreviewNSView: NSView, NSDraggingSource {
                 return
             }
             rebuildThumbsIfNeeded()
+            updateSingleSourceTooltip()
             needsDisplay = true
+        }
+    }
+
+    private func updateSingleSourceTooltip() {
+        if sourcePaths.count == 1 {
+            var tip = "Drag image files here to add source images (up to 4 total)."
+            tip += "\n\nDouble-click to open in browse mode."
+            toolTip = tip
+        } else {
+            toolTip = nil
         }
     }
 
     var imageExtensions: [String] = []
     var onPathsChanged: (([String]) -> Void)?
     var onOpenInBrowse: ((String) -> Void)?
+    var onPrimaryPathSelected: ((String) -> Void)?
 
     private var themeColors = ThemeColors.dark
     private var thumbViews: [ImageGenEditSourceThumbView] = []
@@ -144,6 +161,7 @@ final class ImageGenEditSourcePreviewNSView: NSView, NSDraggingSource {
         dropLine.wantsLayer = true
         dropLine.isHidden = true
         addSubview(dropLine)
+        updateSingleSourceTooltip()
     }
 
     required init?(coder: NSCoder) {
@@ -221,9 +239,13 @@ final class ImageGenEditSourcePreviewNSView: NSView, NSDraggingSource {
                 thumb.onBeginDrag = { [weak self] path, event in
                     self?.beginInternalDrag(path: path, event: event, from: thumb)
                 }
+                thumb.onSelectPrimary = { [weak self] path in
+                    self?.onPrimaryPathSelected?(path)
+                }
                 thumb.imageProvider = { [weak self] path in
                     self?.cachedImage(for: path)
                 }
+                thumb.registerForDraggedTypes([.fileURL, Self.internalDragType])
                 addSubview(thumb)
                 thumbViews.append(thumb)
             }
@@ -433,6 +455,52 @@ final class ImageGenEditSourcePreviewNSView: NSView, NSDraggingSource {
         }
         return pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
     }
+
+    // MARK: - Drop forwarding (thumb subviews)
+
+    func subviewDraggingEntered(_ sender: NSDraggingInfo, from subview: NSView) -> NSDragOperation {
+        draggingEntered(sender)
+    }
+
+    func subviewDraggingUpdated(_ sender: NSDraggingInfo, from subview: NSView) -> NSDragOperation {
+        guard acceptDrag(sender) else { return [] }
+        if sourcePaths.count > 1 {
+            let point = convert(sender.draggingLocation, from: subview)
+            dropInsertIndex = insertIndex(at: point)
+            updateDropLineFrame()
+        }
+        return sender.draggingSourceOperationMask.intersection([.copy, .move])
+    }
+
+    func subviewDraggingExited(_ sender: NSDraggingInfo?) {
+        draggingExited(sender)
+    }
+
+    func subviewPerformDragOperation(_ sender: NSDraggingInfo, from subview: NSView) -> Bool {
+        let point = convert(sender.draggingLocation, from: subview)
+        let insertIndex = sourcePaths.count > 1 ? insertIndex(at: point) : nil
+        dropInsertIndex = nil
+        dropLine.isHidden = true
+
+        if let path = Self.internalDragPath(from: sender.draggingPasteboard) {
+            let reordered = ImageGenEditSourcePaths.reorder(
+                paths: sourcePaths,
+                moving: path,
+                to: insertIndex ?? sourcePaths.count
+            )
+            if reordered != sourcePaths {
+                commitPaths(reordered)
+            }
+            return true
+        }
+
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true,
+        ]) as? [URL]
+        let paths = urls?.map(\.path) ?? []
+        mergeExternal(paths, insertIndex: insertIndex)
+        return true
+    }
 }
 
 @MainActor
@@ -446,6 +514,7 @@ final class ImageGenEditSourceThumbView: NSView {
     var onRemove: ((String) -> Void)?
     var onOpenInBrowse: ((String) -> Void)?
     var onBeginDrag: ((String, NSEvent) -> Void)?
+    var onSelectPrimary: ((String) -> Void)?
     var imageProvider: ((String) -> NSImage?)?
 
     private var themeColors = ThemeColors.dark
@@ -587,11 +656,34 @@ final class ImageGenEditSourceThumbView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !dragStarted, event.clickCount >= 2 {
-            onOpenInBrowse?(path)
+        if !dragStarted {
+            if event.clickCount >= 2 {
+                onOpenInBrowse?(path)
+            } else {
+                onSelectPrimary?(path)
+            }
         }
         dragStartPoint = nil
         dragStarted = false
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let parent = superview as? ImageGenEditSourcePreviewNSView else { return [] }
+        return parent.subviewDraggingEntered(sender, from: self)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let parent = superview as? ImageGenEditSourcePreviewNSView else { return [] }
+        return parent.subviewDraggingUpdated(sender, from: self)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        (superview as? ImageGenEditSourcePreviewNSView)?.subviewDraggingExited(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let parent = superview as? ImageGenEditSourcePreviewNSView else { return false }
+        return parent.subviewPerformDragOperation(sender, from: self)
     }
 }
 

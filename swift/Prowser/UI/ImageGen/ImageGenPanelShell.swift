@@ -160,7 +160,12 @@ struct ImageGenPanelShell: View {
             } else {
                 ImageGenEditSourcePreview(
                     sourcePaths: editSourcePathsBinding,
-                    onPathsChanged: { syncEditSourceValues() }
+                    onPathsChanged: { syncEditSourceValues() },
+                    onPrimaryPathSelected: { path in
+                        let abs = URL(fileURLWithPath: path).standardizedFileURL.path
+                        values["source_image_path"] = abs
+                        onValuesChanged?()
+                    }
                 )
             }
         }
