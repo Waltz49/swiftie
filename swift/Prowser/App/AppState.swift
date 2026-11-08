@@ -57,6 +57,8 @@ final class AppState {
     /// Refreshes the AppKit job queue panel when queue rows change (copies, status, etc.).
     var jobsQueuePanelSync: (@MainActor () -> Void)?
     var imageGenDialogRequest = ImageGenDialogRequest.empty
+    /// Last expand/infill source when the unified dialog closed (not written to plugin_settings).
+    var imageGenLastDialogSourceByFunction: [String: String] = [:]
     var jobsToolbarVisible = true
     /// User preference: use Mini ⌥[ chrome when the queue is in strip mode; persisted as `jobs_pane_mini_option_bracket_mode`.
     var jobsPaneMiniOptionBracketMode = false

@@ -36,12 +36,9 @@ enum ImageGenMfluxPrep {
         try? FileManager.default.removeItem(atPath: cliPath)
     }
 
-    /// ``pythonOwnsKleinExpand``: the persistent Python worker runs ``_run_klein_expand_from_payload``,
-    /// which composites, generates, applies the keep-mask, and saves ``output_path`` itself.
-    static func apply(
-        to payload: [String: Any],
-        pythonOwnsKleinExpand: Bool = false
-    ) async throws -> [String: Any] {
+    /// Klein expand: Swift builds composite/bg/mask; worker writes raw model output to a temp PNG;
+    /// ``finalizeKleinExpandIfNeeded`` promotes it to the user's ``final_output`` path (no photo paste).
+    static func apply(to payload: [String: Any]) async throws -> [String: Any] {
         var run = payload
 
         let pipelineID = run["pipeline_id"] as? String ?? ""
@@ -64,9 +61,7 @@ enum ImageGenMfluxPrep {
         case "mflux_fill_infill":
             try applyInfill(&run)
         case "mflux_flux2_klein_expand":
-            if !pythonOwnsKleinExpand {
-                try applyKleinExpand(&run)
-            }
+            try applyKleinExpand(&run)
         case "mflux_flux2_klein_edit":
             try applyKleinEdit(&run)
         case "mflux_flux2_klein_create":
@@ -75,10 +70,9 @@ enum ImageGenMfluxPrep {
             break
         }
 
-        let progressiveTarget = (run["_klein_expand_post"] as? [String: String])?["final_output"]
-            ?? userOutputPath
+        // Stepwise / browse previews always target the job output path (port of ``stepwise_dirs_for_run``).
         let steps = intValue(run["steps"], default: 4)
-        let (stepwiseDir, progressivePath) = stepwisePaths(steps: steps, outputPath: progressiveTarget)
+        let (stepwiseDir, progressivePath) = stepwisePaths(steps: steps, outputPath: userOutputPath)
         if let stepwiseDir {
             run["stepwise_image_output_dir"] = stepwiseDir
         } else {
@@ -116,24 +110,15 @@ enum ImageGenMfluxPrep {
     static func finalizeKleinExpandIfNeeded(payload: [String: Any], cliOutputPath: String) throws -> String {
         guard payload["pipeline_id"] as? String == "mflux_flux2_klein_expand",
               let meta = payload["_klein_expand_post"] as? [String: String],
-              let finalPath = meta["final_output"],
-              let bgPath = meta["background"],
-              let maskPath = meta["mask"] else {
+              let finalPath = meta["final_output"] else {
             return cliOutputPath
         }
-        guard let generated = ImageGenOutpaintMask.loadCGImage(path: cliOutputPath),
-              let background = ImageGenOutpaintMask.loadCGImage(path: bgPath),
-              let mask = ImageGenOutpaintMask.loadCGImage(path: maskPath) else {
+        guard let generated = ImageGenOutpaintMask.loadRasterCGImage(path: cliOutputPath) else {
             throw MfluxCLIError.processFailed(
-                "Klein expand could not read the generated image or mask (\(cliOutputPath))."
+                "Klein expand could not read the generated image (\(cliOutputPath))."
             )
         }
-        let final = ImageGenOutpaintMask.applyExpandKeepMask(
-            generated: generated,
-            background: background,
-            mask: mask
-        )
-        try writeFinalImage(final, to: finalPath)
+        try writeFinalImage(generated, to: finalPath)
         if cliOutputPath != finalPath {
             try? FileManager.default.removeItem(atPath: cliOutputPath)
         }
@@ -188,11 +173,24 @@ enum ImageGenMfluxPrep {
         }
     }
 
+    /// MFLUX CLI expects ``source_image_path`` on the prepared canvas; the Python worker uses
+    /// ``prepared_fill_image_path`` plus the original photo at ``source_image_path``.
+    static func usePreparedFillBaseForCLIIfNeeded(_ run: inout [String: Any]) {
+        guard run["pipeline_id"] as? String == "mflux_fill_expand",
+              let prepared = run["prepared_fill_image_path"] as? String,
+              !prepared.isEmpty,
+              FileManager.default.isReadableFile(atPath: prepared) else {
+            return
+        }
+        run["source_image_path"] = prepared
+        run["source_image_paths"] = [prepared]
+    }
+
     private static func applyFillExpand(_ run: inout [String: Any]) throws {
-        let source = run["source_image_path"] as? String
+        let originalSource = run["source_image_path"] as? String
             ?? (run["source_image_paths"] as? [String])?.first
-        guard let source, FileManager.default.isReadableFile(atPath: source),
-              let cg = ImageGenOutpaintMask.loadCGImage(path: source) else {
+        guard let originalSource, FileManager.default.isReadableFile(atPath: originalSource),
+              let cg = loadExpandSourceCGImage(path: originalSource) else {
             throw MfluxCLIError.missingField("source_image_path")
         }
         let maxSide = intValue(run["max_generation_dimension"], default: 1024)
@@ -219,14 +217,15 @@ enum ImageGenMfluxPrep {
             overlapPercentage: overlap
         )
         let basePath = tempPNG(prefix: "imagegen-expand-base-")
-        _ = ImageGenOutpaintMask.savePNG(background, path: basePath)
         let maskPath = tempPNG(prefix: "imagegen-expand-mask-")
+        _ = ImageGenOutpaintMask.savePNG(background, path: basePath)
         _ = ImageGenOutpaintMask.savePNG(mask, path: maskPath)
         notePrepTemp(&run, path: basePath)
         notePrepTemp(&run, path: maskPath)
-        run["source_image_path"] = basePath
-        run["source_image_paths"] = [basePath]
+        run["prepared_fill_image_path"] = basePath
         run["mask_image_path"] = maskPath
+        run["source_image_path"] = originalSource
+        run["source_image_paths"] = [originalSource]
     }
 
     private static func applyInfill(_ run: inout [String: Any]) throws {
@@ -280,12 +279,17 @@ enum ImageGenMfluxPrep {
         run["height"] = h
     }
 
+    /// Matches expand preview canvas (``ExpandPlacementCanvas`` / ``ImageDisplayLoader``).
+    private static func loadExpandSourceCGImage(path: String) -> CGImage? {
+        ImageDisplayLoader.orientedCGImage(for: path)
+            ?? ImageGenOutpaintMask.loadSourceCGImage(path: path)
+    }
+
     private static func applyKleinExpand(_ run: inout [String: Any]) throws {
         let source = run["source_image_path"] as? String ?? ""
-        guard let cg = ImageGenOutpaintMask.loadCGImage(path: source) else {
+        guard let cg = loadExpandSourceCGImage(path: source) else {
             throw MfluxCLIError.missingField("source_image_path")
         }
-        // let maxSide = intValue(run["max_generation_dimension"], default: 2048)
         let w = intValue(run["width"], default: 1024)
         let h = intValue(run["height"], default: 1024)
         let px = intValue(run["placement_x"], default: 0)
@@ -303,27 +307,17 @@ enum ImageGenMfluxPrep {
             h: ph,
             overlapPercentage: overlap
         )
-        let bgPath = tempPNG(prefix: "imagegen-klein-expand-bg-")
-        let maskPath = tempPNG(prefix: "imagegen-klein-expand-mask-")
-        _ = ImageGenOutpaintMask.savePNG(background, path: bgPath)
-        _ = ImageGenOutpaintMask.savePNG(mask, path: maskPath)
         let composite = ImageGenOutpaintMask.compositeMaskedRegionsForKleinEdit(background: background, mask: mask)
         let compositePath = tempPNG(prefix: "imagegen-klein-expand-composite-")
         _ = ImageGenOutpaintMask.savePNG(composite, path: compositePath)
         let kleinOut = tempPNG(prefix: "imagegen-klein-expand-out-")
-        notePrepTemp(&run, path: bgPath)
-        notePrepTemp(&run, path: maskPath)
         notePrepTemp(&run, path: compositePath)
         notePrepTemp(&run, path: kleinOut)
         let finalOutput = run["output_path"] as? String ?? kleinOut
         run["source_image_path"] = compositePath
         run["source_image_paths"] = [compositePath]
         run["output_path"] = kleinOut
-        run["_klein_expand_post"] = [
-            "final_output": finalOutput,
-            "background": bgPath,
-            "mask": maskPath,
-        ]
+        run["_klein_expand_post"] = ["final_output": finalOutput]
     }
 
     private static func applyKleinEdit(_ run: inout [String: Any]) throws {

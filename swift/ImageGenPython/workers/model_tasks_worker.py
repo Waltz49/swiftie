@@ -341,10 +341,25 @@ def _resolve_run_from_payload(pipeline_id: str):
     raise ValueError(f"Unknown imagegen pipeline_id: {pipeline_id!r}")
 
 
+def _apply_swift_profile_from_payload(payload: Dict[str, Any]) -> None:
+    profile = (
+        str(payload.get("prowser_profile") or "").strip()
+        or os.environ.get("PROWSER_PROFILE", "").strip()
+    )
+    if profile:
+        from config import get_config
+
+        get_config(profile_dir=profile)
+        from prowser_temp_files import invalidate_temporary_files_directory_cache
+
+        invalidate_temporary_files_directory_cache()
+
+
 def run_generate_from_payload(payload: Dict[str, Any], job_id: str) -> Dict[str, Any]:
     global _LOADED_KIND, _active_job_id
 
     _active_job_id = job_id
+    _apply_swift_profile_from_payload(payload)
     clear_generation_cancel()
     apply_mflux_macos_subprocess_shim()
     apply_mflux_worker_tqdm_shim()

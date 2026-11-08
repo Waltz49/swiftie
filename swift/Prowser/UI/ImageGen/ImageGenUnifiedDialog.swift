@@ -9,6 +9,8 @@ extension Notification.Name {
     static let prowserCycleImageGenFunction = Notification.Name("prowser.cycleImageGenFunction")
     /// ⌥← / ⌥→ step source when the app keyboard monitor forwards (dialog-local monitor is primary).
     static let prowserStepImageGenSource = Notification.Name("prowser.stepImageGenSource")
+    /// ⌥/ toggle while the unified dialog is visible (Python ``start_active_imagegen_generation``).
+    static let prowserDismissImageGenDialog = Notification.Name("prowser.dismissImageGenDialog")
 }
 
 @MainActor
@@ -206,6 +208,9 @@ struct ImageGenUnifiedDialog: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserRaiseImageGenDialog)) { _ in
             raiseWindow()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .prowserDismissImageGenDialog)) { _ in
+            performClose()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserCycleImageGenFunction)) { note in
             let delta = (note.userInfo?[AnyHashable("delta")] as? NSNumber)?.intValue ?? 0
@@ -440,10 +445,18 @@ struct ImageGenUnifiedDialog: View {
                 lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
                 await switchFunction(from: "", to: targetFunction, pluginsAlreadyLoaded: true)
                 bootstrapEditSourcePaths(from: pendingRequest, force: true)
-                if targetFunction == "infill", pendingRequest.function == "infill" {
+                if targetFunction == "infill", pendingRequest.function == "infill", !pendingRequest.isPlainLastSettingsOpen {
                     refreshInfillFromMenuRequest()
-                } else if targetFunction == "expand", pendingRequest.function == "expand" {
-                    bootstrapSingleSourcePath(function: "expand", force: true)
+                } else if targetFunction == "infill" {
+                    bootstrapSingleSourcePath(
+                        function: "infill",
+                        pendingRequest: pendingRequest
+                    )
+                } else if targetFunction == "expand" {
+                    bootstrapSingleSourcePath(
+                        function: "expand",
+                        pendingRequest: pendingRequest
+                    )
                 }
                 if let prompt = pendingRequest.initialPrompt {
                     values["prompt"] = prompt.isEmpty
@@ -483,13 +496,23 @@ struct ImageGenUnifiedDialog: View {
             errorMessage = error.localizedDescription
             return
         }
+        if pendingRequest.isPlainLastSettingsOpen, targetFunction == selectedFunction {
+            presentImageGenUnifiedDialogWindowIfNeeded()
+            return
+        }
         lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
         if targetFunction != selectedFunction {
             let previous = selectedFunction
             guard await switchFunction(from: previous, to: targetFunction) else { return }
             bootstrapEditSourcePaths(from: pendingRequest, force: true)
             if targetFunction == "infill" {
-                refreshInfillFromMenuRequest()
+                if pendingRequest.primeSourceFromActiveImage {
+                    refreshInfillFromMenuRequest()
+                } else {
+                    bootstrapSingleSourcePath(function: "infill", pendingRequest: pendingRequest)
+                }
+            } else if targetFunction == "expand" {
+                bootstrapSingleSourcePath(function: "expand", pendingRequest: pendingRequest)
             }
             if let prompt = pendingRequest.initialPrompt {
                 values["prompt"] = prompt.isEmpty
@@ -499,7 +522,15 @@ struct ImageGenUnifiedDialog: View {
         } else {
             bootstrapEditSourcePaths(from: pendingRequest, force: true)
             if targetFunction == "infill" {
-                refreshInfillFromMenuRequest()
+                if pendingRequest.primeSourceFromActiveImage {
+                    refreshInfillFromMenuRequest()
+                } else if !pendingRequest.isPlainLastSettingsOpen {
+                    refreshInfillFromMenuRequest()
+                } else {
+                    bootstrapSingleSourcePath(function: "infill", pendingRequest: pendingRequest)
+                }
+            } else if targetFunction == "expand", pendingRequest.primeSourceFromActiveImage {
+                bootstrapSingleSourcePath(function: "expand", pendingRequest: pendingRequest)
             }
             if let prompt = pendingRequest.initialPrompt {
                 values["prompt"] = prompt.isEmpty
@@ -513,6 +544,12 @@ struct ImageGenUnifiedDialog: View {
             pendingRequest: pendingRequest,
             pendingAutoGenerate: pendingRequest.autoGenerate
         )
+    }
+
+    private func presentImageGenUnifiedDialogWindowIfNeeded() {
+        if SceneWindowChrome.bringImageGenUnifiedWindowToFront() {
+            raiseWindow()
+        }
     }
 
     private func savedDialogValues(function: String) -> [String: Any]? {
@@ -704,14 +741,15 @@ struct ImageGenUnifiedDialog: View {
         }
 
         if newFunction == "expand" {
-            bootstrapSingleSourcePath(function: "expand", force: oldFunction.isEmpty)
+            bootstrapSingleSourcePath(function: "expand", pendingRequest: request)
         } else if newFunction == "infill" {
-            let forceInfillSource = oldFunction.isEmpty
-                || (request.function == "infill" && oldFunction != "infill")
-            bootstrapSingleSourcePath(function: "infill", force: forceInfillSource)
-            if forceInfillSource {
-                session.setInfillMaskPNGData(nil)
+            let resetPaint = request.primeSourceFromActiveImage
+                || (oldFunction.isEmpty && !request.openWithLastSettings)
+                || (request.function == "infill" && oldFunction != "infill" && !request.isPlainLastSettingsOpen)
+            if resetPaint {
+                refreshInfillFromMenuRequest()
             } else {
+                bootstrapSingleSourcePath(function: "infill", pendingRequest: request)
                 restoreInfillSessionFromJobOrMask()
             }
         }
@@ -781,7 +819,9 @@ struct ImageGenUnifiedDialog: View {
     }
 
     private func refreshInfillFromMenuRequest() {
-        bootstrapSingleSourcePath(function: "infill", force: true)
+        var primeRequest = request
+        primeRequest.primeSourceFromActiveImage = true
+        bootstrapSingleSourcePath(function: "infill", pendingRequest: primeRequest)
         session.setInfillMaskPNGData(nil)
         session.setInfillPixelmatorDocPath(nil)
         infillHasPaint = false
@@ -793,44 +833,26 @@ struct ImageGenUnifiedDialog: View {
         values.removeValue(forKey: "_pixelmator_batch_dir")
     }
 
-    private func bootstrapSingleSourcePath(function: String, force: Bool) {
+    private func bootstrapSingleSourcePath(function: String, pendingRequest: ImageGenDialogRequest) {
         let locked = function == "expand" ? lockedExpandSourcePath : lockedInfillSourcePath
-        if !force, let locked, FileManager.default.fileExists(atPath: locked) {
-            values["source_image_path"] = locked
-            values["source_image_paths"] = [locked]
-            return
+        let restored = pendingRequest.openWithLastSettings
+            ? appState.imageGenLastDialogSource(for: function)
+            : nil
+        let input = ImageGenSingleSourceBootstrap.Input(
+            forceFromActive: pendingRequest.primeSourceFromActiveImage,
+            lockedPath: locked,
+            valuePath: values["source_image_path"] as? String,
+            restoredLastDialogPath: restored,
+            activePath: ImageGenFunctionPrerequisites.activeImagePathForExpandOrInfill(appState: appState)
+        )
+        guard let path = ImageGenSingleSourceBootstrap.resolve(input).path else { return }
+        if function == "expand" {
+            lockedExpandSourcePath = path
+        } else {
+            lockedInfillSourcePath = path
         }
-        if force, let active = ImageGenFunctionPrerequisites.activeImagePathForExpandOrInfill(appState: appState) {
-            if function == "expand" {
-                lockedExpandSourcePath = active
-            } else {
-                lockedInfillSourcePath = active
-            }
-            values["source_image_path"] = active
-            values["source_image_paths"] = [active]
-            return
-        }
-        if let persisted = ImageGenFunctionPrerequisites.normalizedExistingFile(
-            values["source_image_path"] as? String
-        ) {
-            if function == "expand" {
-                lockedExpandSourcePath = persisted
-            } else {
-                lockedInfillSourcePath = persisted
-            }
-            values["source_image_path"] = persisted
-            values["source_image_paths"] = [persisted]
-            return
-        }
-        if let active = ImageGenFunctionPrerequisites.activeImagePathForExpandOrInfill(appState: appState) {
-            if function == "expand" {
-                lockedExpandSourcePath = active
-            } else {
-                lockedInfillSourcePath = active
-            }
-            values["source_image_path"] = active
-            values["source_image_paths"] = [active]
-        }
+        values["source_image_path"] = path
+        values["source_image_paths"] = [path]
     }
 
     /// True when Python would install ``ImageGenSourceNavRow`` / source key filter for this mode.
@@ -1089,6 +1111,8 @@ struct ImageGenUnifiedDialog: View {
         fluxRefineCoordinator.teardown(appState: appState)
         dismissing = true
         persistVisitedFunctions()
+        appState.setImageGenLastDialogSource(lockedExpandSourcePath, for: "expand")
+        appState.setImageGenLastDialogSource(lockedInfillSourcePath, for: "infill")
         closeDialog()
     }
 

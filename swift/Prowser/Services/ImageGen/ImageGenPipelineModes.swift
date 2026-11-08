@@ -21,7 +21,7 @@ enum ImageGenPipelineModes {
         "mflux_z_image_turbo": Mode(stepsMin: 1, stepsMax: 20, stepsDefault: 9, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: true),
         "sd15_diffusers": Mode(stepsMin: 1, stepsMax: 50, stepsDefault: 25, supportsProgressiveImages: true, supportsLowRAM: false, includesOutputDimensions: true),
         "sdxl_diffusers": Mode(stepsMin: 1, stepsMax: 50, stepsDefault: 30, supportsProgressiveImages: true, supportsLowRAM: false, includesOutputDimensions: true),
-        "mflux_fill_expand": Mode(stepsMin: 4, stepsMax: 30, stepsDefault: 20, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: true),
+        "mflux_fill_expand": Mode(stepsMin: 4, stepsMax: 50, stepsDefault: 20, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: true),
         "mflux_fill_infill": Mode(stepsMin: 4, stepsMax: 30, stepsDefault: 20, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: false),
         "mflux_flux2_klein_create": Mode(stepsMin: 1, stepsMax: 12, stepsDefault: 4, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: true),
         "mflux_flux2_klein_edit": Mode(stepsMin: 1, stepsMax: 12, stepsDefault: 4, supportsProgressiveImages: true, supportsLowRAM: true, includesOutputDimensions: false),
@@ -60,6 +60,21 @@ enum ImageGenPipelineModes {
     static func showProgressiveImages(config: AppConfig) -> Bool {
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         return showProgressiveImages(in: imagegen)
+    }
+
+    private static let kleinExpandPromptPrefix =
+        "Extend the provided image to fill the unused space in the image. " +
+        "The existing photograph stays exactly where it is in the frame; do not move, " +
+        "recenter, resize, or duplicate the subject. Change only the neutral gray areas. " +
+        "New regions:\n\n"
+
+    /// Port of ``klein_expand_prompt`` in ``image_gen_pipeline_modes.py``.
+    static func kleinExpandPrompt(_ userPrompt: String) -> String {
+        let text = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            return kleinExpandPromptPrefix.trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+        }
+        return kleinExpandPromptPrefix + text
     }
 
     static func finalizeRunValues(pipelineID: String, values: [String: Any], config: AppConfig) -> [String: Any] {

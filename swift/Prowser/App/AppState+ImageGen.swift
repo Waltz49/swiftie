@@ -556,13 +556,42 @@ extension AppState {
         NotificationCenter.default.post(name: .prowserPresentImageGenUnifiedWindow, object: nil)
     }
 
+    func imageGenLastDialogSource(for function: String) -> String? {
+        imageGenLastDialogSourceByFunction[function]
+    }
+
+    func setImageGenLastDialogSource(_ path: String?, for function: String) {
+        guard function == "expand" || function == "infill" else { return }
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            imageGenLastDialogSourceByFunction.removeValue(forKey: function)
+        } else {
+            imageGenLastDialogSourceByFunction[function] = (trimmed as NSString).standardizingPath
+        }
+    }
+
+    /// ⌥/ — last-used function with saved settings (Python ``start_active_imagegen_generation``).
+    func openImageGenDialogWithLastSettings() {
+        guard imageGen.isEnabled else {
+            status.show(imageGen.unavailableStatusMessage())
+            return
+        }
+        if showImageGenUnifiedDialog {
+            NotificationCenter.default.post(name: .prowserDismissImageGenDialog, object: nil)
+            return
+        }
+        openImageGenDialog(openWithLastSettings: true)
+    }
+
     func openImageGenDialog(
         function: String? = nil,
         replaceJobID: String? = nil,
         initialPrompt: String? = nil,
         autoImportEXIF: Bool = false,
         autoGenerate: Bool = false,
-        editSourcePaths: [String] = []
+        editSourcePaths: [String] = [],
+        openWithLastSettings: Bool = false,
+        primeSourceFromActiveImage: Bool = false
     ) {
         guard imageGen.isEnabled else {
             status.show(imageGen.unavailableStatusMessage())
@@ -584,15 +613,15 @@ extension AppState {
             initialPrompt: initialPrompt,
             autoImportEXIF: autoImportEXIF,
             autoGenerate: autoGenerate,
-            editSourcePaths: editSourcePaths
+            editSourcePaths: editSourcePaths,
+            openWithLastSettings: openWithLastSettings,
+            primeSourceFromActiveImage: primeSourceFromActiveImage
         )
         let wasAlreadyOpen = showImageGenUnifiedDialog
         let requestUnchanged = newRequest == imageGenDialogRequest
         imageGenDialogRequest = newRequest
         if wasAlreadyOpen {
-            let refreshActiveSource = replaceJobID == nil
-                && (resolvedFunction == "infill" || resolvedFunction == "expand")
-            if requestUnchanged, !refreshActiveSource {
+            if requestUnchanged {
                 presentImageGenUnifiedDialogWindow()
                 return
             }
@@ -619,7 +648,8 @@ extension AppState {
             openImageGenDialog(
                 function: resolvedFunction,
                 initialPrompt: prompt,
-                autoImportEXIF: true
+                autoImportEXIF: true,
+                primeSourceFromActiveImage: true
             )
         }
     }

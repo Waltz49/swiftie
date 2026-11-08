@@ -58,6 +58,7 @@ def _source_paths_from_payload(payload: Dict[str, Any]) -> list[str]:
 
 def _run_mflux_klein_edit(
     *,
+    payload: Dict[str, Any],
     image_paths: list[str],
     output_path: str,
     prompt: str,
@@ -110,59 +111,114 @@ def _klein_expand_dims(payload: Dict[str, Any]) -> tuple[int, int]:
     )
 
 
+def _swift_klein_expand_post(payload: Dict[str, Any]) -> Dict[str, str] | None:
+    post = payload.get("_klein_expand_post")
+    if not isinstance(post, dict):
+        return None
+    final_output = str(post.get("final_output") or "").strip()
+    if not final_output:
+        return None
+    return {"final_output": final_output}
+
+
 def _run_klein_expand_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     source_path = str(payload.get("source_image_path") or "")
     if not source_path or not os.path.isfile(source_path):
         raise ValueError("source_image_path is required and must exist")
 
-    w, h = _klein_expand_dims(payload)
+    swift_post = _swift_klein_expand_post(payload)
+    swift_prepared = swift_post is not None
+    if swift_prepared:
+        source_path = str(payload.get("source_image_path") or "")
+        with Image.open(source_path) as composite_probe:
+            w, h = composite_probe.size
+    else:
+        w, h = _klein_expand_dims(payload)
     px = int(payload.get("placement_x", 0))
     py = int(payload.get("placement_y", 0))
     pw = int(payload.get("placement_w", w))
     ph = int(payload.get("placement_h", h))
     overlap = max(0, min(20, int(payload.get("overlap_percentage", 2))))
 
-    image = Image.open(source_path).convert("RGB")
-    try:
-        background, mask = prepare_image_and_mask_at_rect(
-            image, w, h, px, py, pw, ph, overlap
-        )
-        composite = composite_masked_regions_for_klein_edit(background, mask)
-    finally:
-        image.close()
+    composite_path = ""
+    klein_output_path = ""
+    owned_temp_paths: list[str] = []
+    background: Image.Image | None = None
+    mask: Image.Image | None = None
 
-    output_path = str(payload["output_path"])
-    composite_path = prowser_mkstemp_path(
-        prefix="imagegen-klein-expand-", suffix=".png"
-    )
-    klein_output_path = prowser_mkstemp_path(
-        prefix="imagegen-klein-expand-out-", suffix=".png"
-    )
-    for path in (composite_path, klein_output_path):
+    if swift_prepared:
+        assert swift_post is not None
+        composite_path = source_path
+        klein_output_path = str(payload["output_path"])
+    else:
+        from pil_image_io import open_pil_with_exif_correction
+
+        image = open_pil_with_exif_correction(source_path)
+        if image is None:
+            raise ValueError(f"Could not load source image: {source_path}")
+        image = image.convert("RGB")
         try:
-            os.unlink(path)
-        except OSError:
-            pass
-    try:
+            background, mask = prepare_image_and_mask_at_rect(
+                image, w, h, px, py, pw, ph, overlap
+            )
+            composite = composite_masked_regions_for_klein_edit(background, mask)
+        finally:
+            image.close()
+
+        composite_path = prowser_mkstemp_path(
+            prefix="imagegen-klein-expand-", suffix=".png"
+        )
+        klein_output_path = prowser_mkstemp_path(
+            prefix="imagegen-klein-expand-out-", suffix=".png"
+        )
+        owned_temp_paths = [composite_path, klein_output_path]
+        for path in owned_temp_paths:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         composite.save(composite_path)
+
+    user_output_path = (
+        swift_post["final_output"] if swift_prepared and swift_post else str(payload["output_path"])
+    )
+    try:
         run_payload = dict(payload)
         run_payload["source_image_path"] = composite_path
         run_payload["source_image_paths"] = [composite_path]
         run_payload["width"] = w
         run_payload["height"] = h
+        user_progressive = str(payload.get("progressive_output_path") or user_output_path)
         run_payload["output_path"] = klein_output_path
+        run_payload["progressive_output_path"] = user_progressive
+        run_payload["pipeline_id"] = str(payload.get("pipeline_id") or "mflux_flux2_klein_expand")
         result = _run_klein_edit_from_payload(run_payload)
+        if swift_prepared:
+            result["output_path"] = klein_output_path
+            return result
+
+        assert background is not None and mask is not None
         with Image.open(klein_output_path) as klein_out:
             final = apply_expand_keep_mask(klein_out, background, mask)
-            final.save(output_path)
-        result["output_path"] = output_path
+            final.save(user_output_path)
+        result["output_path"] = user_output_path
         return result
     finally:
-        for path in (composite_path, klein_output_path):
+        for path in owned_temp_paths:
             try:
                 if os.path.isfile(path):
                     os.unlink(path)
             except OSError:
+                pass
+        if background is not None:
+            try:
+                background.close()
+            except Exception:
+                pass
+        if mask is not None:
+            try:
+                mask.close()
+            except Exception:
                 pass
 
 
@@ -227,6 +283,8 @@ def _run_klein_edit_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
 
+    stepwise_emit_path = progressive_output_path or output_path
+
     if os.path.isfile(output_path):
         try:
             os.unlink(output_path)
@@ -250,6 +308,7 @@ def _run_klein_edit_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             progressive_output_path=progressive_output_path,
             expected_steps=steps,
             run=lambda: _run_mflux_klein_edit(
+                payload=payload,
                 image_paths=source_paths,
                 output_path=mflux_output_path,
                 prompt=prompt,
@@ -277,7 +336,7 @@ def _run_klein_edit_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         with PerfTimer("save_output", pipeline="flux2_klein_edit"):
             atomic_copy2(mflux_output_path, output_path)
-        finalize_stepwise_progress(output_path, steps)
+        finalize_stepwise_progress(stepwise_emit_path, steps)
         generation_time_seconds = time.perf_counter() - t0
     finally:
         try:

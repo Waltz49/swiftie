@@ -25,7 +25,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 
 - [~] Thumbnail grid (`ThumbnailGridNSView` — cache-backed, selection, arrow/return keyboard nav + wrap-around + menu sync + drag-reorder → `.prsort`, browse-exit scroll restore; ⌘X session filter via `exclude_directories` + `ThumbnailExcludeService`; filename overlay wraps full basename with variable row heights in standard/duplicate/EXIF/reference-graph layouts)
 - [~] List view (`ImageListView` with thumbnails)
-- [~] Browse (`BrowseImageNSView` — zoom, pan, pinch, checkerboard, actual size toggle A + persist across images)
+- [~] Browse (`BrowseImageNSView` — zoom, pan, pinch, checkerboard, actual size toggle A + persist across images). **Trackpad pinch:** Python `QGestureEvent` on the main widget (`browse_view_handler.handle_gesture_event`). Swift implements zoom in `BrowseImageNSView.magnify(with:)` but **must** forward events via `BrowseView` (`NSEvent.addLocalMonitorForEvents(.magnify)` → `browseImageHost`); `NSHostingView` in the center stack does not deliver `.magnify` to the representable (scroll wheel still reaches the view). Two-finger scroll pans only when zoomed in (`canPan()` / Python `can_pan_image()`); ⌃/⌘ scroll zooms when fitted.
 - [~] Slideshow (multiple images — `SlideshowView`, Tools → Slideshow / S key)
 - [~] Slideshow2 (panning — `Slideshow2View`, ⇧S)
 - [~] Slideshow3 (floating frames — `Slideshow3View` MVP; full Qt parity deferred)

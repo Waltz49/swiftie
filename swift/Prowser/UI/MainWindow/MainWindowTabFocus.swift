@@ -16,6 +16,9 @@ final class MainWindowTabFocusStopView: NSView {
     override var acceptsFirstResponder: Bool { isTabStopActive }
     override var canBecomeKeyView: Bool { isTabStopActive && !isHiddenOrHasHiddenAncestor }
 
+    /// Tab stops are for keyboard focus only; never intercept pointer or trackpad gestures.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
     override func becomeFirstResponder() -> Bool {
         guard isTabStopActive, let appState else { return false }
         switch role {

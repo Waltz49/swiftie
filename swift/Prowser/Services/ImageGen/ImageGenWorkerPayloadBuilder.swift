@@ -3,9 +3,6 @@ import Foundation
 /// Port of ``image_gen_pipeline_modes.build_worker_payload``.
 @MainActor
 enum ImageGenWorkerPayloadBuilder {
-    private static let kleinExpandPrefix =
-        "Extend the image only into the gray border areas; preserve the existing center content.\n"
-
     static func build(
         plugin: ImageGenPluginDescriptor,
         values: [String: Any],
@@ -31,17 +28,27 @@ enum ImageGenWorkerPayloadBuilder {
         merged["hf_model_id"] = plugin.hfModelID
         merged["max_generation_dimension"] = effectiveMax
         merged["debug_mode"] = config.bool(forKey: "debug_mode", default: false)
+        merged["prowser_profile"] = config.prowserHome.path
 
         let mode = ImageGenPipelineModes.mode(pipelineID: pipelineID)
         if mode?.includesOutputDimensions == true {
-            let w = intValue(merged["width"]) ?? 1024
-            let h = intValue(merged["height"]) ?? 1024
+            let uiW = intValue(merged["width"]) ?? 1024
+            let uiH = intValue(merged["height"]) ?? 1024
             let aligned = ImageGenDimMath.alignDimsForPipeline(
                 pipelineID: pipelineID,
-                width: w,
-                height: h,
+                width: uiW,
+                height: uiH,
                 effectiveMaxSide: effectiveMax
             )
+            if pipelineID == "mflux_flux2_klein_expand" || pipelineID == "mflux_fill_expand" {
+                ExpandPlacementMath.remapPlacementAfterCanvasResize(
+                    values: &merged,
+                    fromCanvasW: uiW,
+                    fromCanvasH: uiH,
+                    toCanvasW: aligned.width,
+                    toCanvasH: aligned.height
+                )
+            }
             merged["width"] = aligned.width
             merged["height"] = aligned.height
         }
@@ -62,9 +69,9 @@ enum ImageGenWorkerPayloadBuilder {
             merged.removeValue(forKey: "copies")
         }
         if pipelineID == "mflux_flux2_klein_expand" {
-            merged["prompt"] = kleinExpandPrompt(merged["prompt"] as? String ?? "")
             applyMfluxLoraStub(&merged)
             attachSourcePaths(&merged, canonical: true)
+            merged["prompt"] = ImageGenPipelineModes.kleinExpandPrompt(merged["prompt"] as? String ?? "")
         }
         if pipelineID == "mflux_flux2_klein_edit" {
             applyMfluxLoraStub(&merged)
@@ -135,12 +142,6 @@ enum ImageGenWorkerPayloadBuilder {
             merged = ImageGenMfluxPayloadBuilder.applyImagePromptRules(values: merged, config: config)
         }
         return merged
-    }
-
-    private static func kleinExpandPrompt(_ user: String) -> String {
-        let text = user.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty { return kleinExpandPrefix.trimmingCharacters(in: .newlines) }
-        return kleinExpandPrefix + text
     }
 
     private static func attachSourcePaths(_ merged: inout [String: Any], canonical: Bool = false) {

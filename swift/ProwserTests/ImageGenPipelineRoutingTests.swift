@@ -106,6 +106,14 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
     }
 
     func testAvailableMfluxCLIsDoNotReceiveUnsupportedNoBakeLoraFlag() throws {
+        // Klein edit resolves sources via ``resolveSourceImagePaths``, which drops missing files.
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("routing-cli-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let sourcePath = dir.appendingPathComponent("source.png").path
+        XCTAssertTrue(fm.createFile(atPath: sourcePath, contents: Data([0x89, 0x50, 0x4E, 0x47])))
+
         let payloads: [[String: Any]] = [
             [
                 "pipeline_id": "flux_schnell_mflux_play",
@@ -121,7 +129,7 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
                 "pipeline_id": "mflux_fill_expand",
                 "prompt": "test",
                 "output_path": "/tmp/output.png",
-                "source_image_path": "/tmp/source.png",
+                "source_image_path": sourcePath,
             ],
             [
                 "pipeline_id": "mflux_flux2_klein_create",
@@ -133,7 +141,7 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
                 "pipeline_id": "mflux_flux2_klein_edit",
                 "prompt": "test",
                 "output_path": "/tmp/output.png",
-                "source_image_path": "/tmp/source.png",
+                "source_image_path": sourcePath,
                 "hf_model_id": "black-forest-labs/FLUX.2-klein-4B",
             ],
         ]
@@ -152,7 +160,7 @@ final class ImageGenPipelineRoutingTests: XCTestCase {
             "pipeline_id": "mflux_flux2_klein_edit",
             "prompt": "test",
             "output_path": "/tmp/output.png",
-            "source_image_path": "/tmp/source.png",
+            "source_image_path": sourcePath,
             "hf_model_id": "black-forest-labs/FLUX.2-klein-4B",
         ])
         XCTAssertTrue(kleinEditArgs.contains("--image-paths"))

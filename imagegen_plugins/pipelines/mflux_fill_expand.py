@@ -407,15 +407,19 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         lora_scales = [float(lora_scales)]
 
     prepared = str(payload.get("prepared_fill_image_path") or "")
+    swift_mask_path = str(payload.get("mask_image_path") or "")
     if prepared and os.path.isfile(prepared):
         background = Image.open(prepared).convert("RGB")
-        image = Image.open(source_path).convert("RGB")
-        try:
-            _, mask = prepare_image_and_mask_at_rect(
-                image, w, h, px, py, pw, ph, overlap
-            )
-        finally:
-            image.close()
+        if swift_mask_path and os.path.isfile(swift_mask_path):
+            mask = Image.open(swift_mask_path).convert("L")
+        else:
+            image = Image.open(source_path).convert("RGB")
+            try:
+                _, mask = prepare_image_and_mask_at_rect(
+                    image, w, h, px, py, pw, ph, overlap
+                )
+            finally:
+                image.close()
     else:
         image = Image.open(source_path).convert("RGB")
         background, mask = prepare_image_and_mask_at_rect(

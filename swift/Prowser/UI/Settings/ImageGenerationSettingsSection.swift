@@ -76,14 +76,20 @@ struct ImageGenerationSettingsSection: View {
             cooldownSlider(title: "Inter-job cooldown time", key: "imagegen_job_cooldown_seconds", defaultValue: ImageGenDimLimits.jobCooldownSecondsDefault)
             cooldownSlider(title: "Inter copy cooldown", key: "imagegen_inter_copy_cooldown_seconds", defaultValue: ImageGenDimLimits.interCopyCooldownSecondsDefault)
 
-            Picker("Output format", selection: stringBinding("imagegen_output_format", default: "png")) {
-                ForEach(ImageGenDimLimits.outputFormats, id: \.self) { format in
-                    Text(format.uppercased()).tag(format)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Output format")
+                    .font(.headline)
+                    .preferencesScanRecordsLabel("Output format")
+                Picker("Output format", selection: stringBinding("imagegen_output_format", default: "png")) {
+                    ForEach(ImageGenDimLimits.outputFormats, id: \.self) { format in
+                        Text(format.uppercased()).tag(format)
+                    }
                 }
+                .preferencesScanRecordsLabel("Output format")
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                .padding(.leading, 40)
             }
-            .preferencesScanRecordsLabel("Output format")
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 200)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("MFLUX generation backend")
@@ -94,8 +100,9 @@ struct ImageGenerationSettingsSection: View {
                     Text("MFLUX CLI").tag("mflux_cli")
                 }
                 .preferencesScanRecordsLabel("MFLUX generation backend")
-                .pickerStyle(.segmented)
+                .pickerStyle(.radioGroup)
                 .labelsHidden()
+                .padding(.leading, 40)
                 Text(
                     "Optimized runs pipelines in the imagegen venv and reuses loaded models between jobs. "
                         + "MFLUX CLI starts a separate tool per job (compatibility or debugging)."

@@ -378,7 +378,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         int(payload["height"]),
         max_side=payload_max_generation_dimension(payload),
     )
-    steps = max(8, min(40, int(payload.get("steps", 20)))) # DGN was 30
+    steps = max(8, min(50, int(payload.get("steps", 20))))
     guidance = max(1.0, min(50.0, float(payload.get("guidance_scale", 30.0))))
     quantize = int(payload.get("mflux_quantize", 4))
     if quantize not in _MFLUX_ALLOWED_QUANT:
@@ -407,15 +407,19 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         lora_scales = [float(lora_scales)]
 
     prepared = str(payload.get("prepared_fill_image_path") or "")
+    swift_mask_path = str(payload.get("mask_image_path") or "")
     if prepared and os.path.isfile(prepared):
         background = Image.open(prepared).convert("RGB")
-        image = Image.open(source_path).convert("RGB")
-        try:
-            _, mask = prepare_image_and_mask_at_rect(
-                image, w, h, px, py, pw, ph, overlap
-            )
-        finally:
-            image.close()
+        if swift_mask_path and os.path.isfile(swift_mask_path):
+            mask = Image.open(swift_mask_path).convert("L")
+        else:
+            image = Image.open(source_path).convert("RGB")
+            try:
+                _, mask = prepare_image_and_mask_at_rect(
+                    image, w, h, px, py, pw, ph, overlap
+                )
+            finally:
+                image.close()
     else:
         image = Image.open(source_path).convert("RGB")
         background, mask = prepare_image_and_mask_at_rect(

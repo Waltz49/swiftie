@@ -401,7 +401,48 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     }
 
     @MainActor
-    func testPythonOwnedKleinExpandLeavesOutputForWorker() async throws {
+    func testFillExpandPrepSetsPreparedBaseAndKeepsOriginalSourceForWorker() async throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("fill-expand-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("source.png").path
+        let output = dir.appendingPathComponent("imagegen-fill.webp").path
+        XCTAssertTrue(createSolidPNG(at: source, width: 64, height: 48))
+
+        let payload: [String: Any] = [
+            "pipeline_id": "mflux_fill_expand",
+            "source_image_path": source,
+            "output_path": output,
+            "width": 256,
+            "height": 192,
+            "placement_x": 12,
+            "placement_y": 8,
+            "placement_w": 128,
+            "placement_h": 96,
+            "steps": 20,
+            "prompt": "outfill",
+            "random_seed": false,
+            "seed": 3,
+        ]
+        let prepped = try await ImageGenMfluxPrep.apply(to: payload)
+        XCTAssertEqual(prepped["source_image_path"] as? String, source)
+        let prepared = prepped["prepared_fill_image_path"] as? String ?? ""
+        XCTAssertTrue(prepared.contains("imagegen-expand-base-"))
+        XCTAssertTrue(fm.fileExists(atPath: prepared))
+        let mask = prepped["mask_image_path"] as? String ?? ""
+        XCTAssertTrue(mask.contains("imagegen-expand-mask-"))
+        XCTAssertTrue(fm.fileExists(atPath: mask))
+
+        var cliPayload = prepped
+        ImageGenMfluxPrep.usePreparedFillBaseForCLIIfNeeded(&cliPayload)
+        XCTAssertEqual(cliPayload["source_image_path"] as? String, prepared)
+        XCTAssertEqual(cliPayload["mask_image_path"] as? String, mask)
+    }
+
+    @MainActor
+    func testPythonOwnedKleinExpandPreparesCompositeForWorker() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("klein-expand-own-\(UUID().uuidString)")
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -426,10 +467,45 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
             "random_seed": false,
             "seed": 7,
         ]
-        let prepped = try await ImageGenMfluxPrep.apply(to: payload, pythonOwnsKleinExpand: true)
-        XCTAssertEqual(prepped["output_path"] as? String, output)
-        XCTAssertEqual(prepped["source_image_path"] as? String, source)
-        XCTAssertNil(prepped["_klein_expand_post"])
+        let prepped = try await ImageGenMfluxPrep.apply(to: payload)
+        let workerSource = prepped["source_image_path"] as? String ?? ""
+        XCTAssertNotEqual(workerSource, source)
+        XCTAssertTrue(workerSource.contains("imagegen-klein-expand-composite-"))
+        XCTAssertTrue(fm.fileExists(atPath: workerSource))
+        XCTAssertNotEqual(prepped["output_path"] as? String, output)
+        let post = prepped["_klein_expand_post"] as? [String: String]
+        XCTAssertEqual(post?["final_output"], output)
+        XCTAssertNil(post?["background"])
+        XCTAssertNil(post?["mask"])
+        XCTAssertEqual(prepped["progressive_output_path"] as? String, output)
+        XCTAssertNotEqual(prepped["output_path"] as? String, output)
+    }
+
+    @MainActor
+    func testKleinExpandFinalizePassesThroughGeneratedWithoutPhotoPaste() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-expand-keep-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let generated = solidImage(width: 160, height: 120, red: 0, green: 255, blue: 0)
+        let genPath = dir.appendingPathComponent("gen.png").path
+        let finalPath = dir.appendingPathComponent("out.png").path
+        XCTAssertTrue(ImageGenOutpaintMask.savePNG(generated, path: genPath))
+
+        let payload: [String: Any] = [
+            "pipeline_id": "mflux_flux2_klein_expand",
+            "_klein_expand_post": ["final_output": finalPath],
+        ]
+        let written = try ImageGenMfluxPrep.finalizeKleinExpandIfNeeded(payload: payload, cliOutputPath: genPath)
+        XCTAssertEqual(written, finalPath)
+        guard let out = ImageGenOutpaintMask.loadRasterCGImage(path: finalPath) else {
+            XCTFail("missing final output")
+            return
+        }
+        let sample = rgb(out, x: 50, yTop: 40)
+        XCTAssertGreaterThan(sample.1, 200, "finalize should keep model green \(sample)")
+        XCTAssertLessThan(sample.0, 40, "finalize should not paste red source \(sample)")
     }
 
     @MainActor
@@ -440,18 +516,10 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         defer { try? fm.removeItem(at: dir) }
 
         let generated = dir.appendingPathComponent("generated.png").path
-        let background = dir.appendingPathComponent("bg.png").path
-        let mask = dir.appendingPathComponent("mask.png").path
         let finalWebp = dir.appendingPathComponent("imagegen-5818.webp").path
         XCTAssertTrue(createSolidPNG(at: generated, width: 32, height: 32))
-        XCTAssertTrue(createSolidPNG(at: background, width: 32, height: 32))
-        XCTAssertTrue(createSolidPNG(at: mask, width: 32, height: 32))
 
-        let meta: [String: String] = [
-            "final_output": finalWebp,
-            "background": background,
-            "mask": mask,
-        ]
+        let meta: [String: String] = ["final_output": finalWebp]
         let payload: [String: Any] = [
             "pipeline_id": "mflux_flux2_klein_expand",
             "_klein_expand_post": meta,
@@ -468,11 +536,7 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
 
         let same = dir.appendingPathComponent("same.png").path
         XCTAssertTrue(createSolidPNG(at: same, width: 32, height: 32))
-        let sameMeta: [String: String] = [
-            "final_output": same,
-            "background": background,
-            "mask": mask,
-        ]
+        let sameMeta: [String: String] = ["final_output": same]
         let samePayload: [String: Any] = [
             "pipeline_id": "mflux_flux2_klein_expand",
             "_klein_expand_post": sameMeta,
@@ -483,6 +547,60 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         )
         XCTAssertEqual(kept, same)
         XCTAssertTrue(fm.fileExists(atPath: same))
+    }
+
+    @MainActor
+    func testKleinExpandPayloadRemapsPlacementWhenOutputDimsAlign() throws {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_klein_9b_kv_expand") else {
+            XCTFail("missing expand plugin")
+            return
+        }
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        let values: [String: Any] = [
+            "width": 1030,
+            "height": 770,
+            "placement_x": 100,
+            "placement_y": 50,
+            "placement_w": 830,
+            "placement_h": 670,
+            "prompt": "extend sky",
+            "steps": 4,
+            "random_seed": true,
+            "source_image_path": "/tmp/unused-source.png",
+        ]
+        let payload = try ImageGenWorkerPayloadBuilder.build(
+            plugin: plugin,
+            values: values,
+            outputPath: "/tmp/out.webp",
+            config: config,
+            applyImageExit: false
+        )
+        let alignedW = payload["width"] as? Int ?? 0
+        let alignedH = payload["height"] as? Int ?? 0
+        XCTAssertEqual(alignedW % 16, 0)
+        XCTAssertEqual(alignedH % 16, 0)
+        XCTAssertLessThanOrEqual(alignedW, 1030)
+        XCTAssertLessThanOrEqual(alignedH, 770)
+        let prompt = payload["prompt"] as? String ?? ""
+        XCTAssertTrue(
+            prompt.hasPrefix("Extend the provided image to fill the unused space in the image."),
+            "klein expand prompt prefix missing: \(prompt)"
+        )
+        XCTAssertTrue(prompt.lowercased().contains("extend sky"), "user prompt not appended: \(prompt)")
+        guard alignedW != 1030 || alignedH != 770 else {
+            XCTFail("expected snap from 1030×770")
+            return
+        }
+        let px = payload["placement_x"] as? Int ?? -1
+        let py = payload["placement_y"] as? Int ?? -1
+        let pw = payload["placement_w"] as? Int ?? -1
+        let ph = payload["placement_h"] as? Int ?? -1
+        XCTAssertNotEqual(px, 100)
+        XCTAssertGreaterThanOrEqual(px, 0)
+        XCTAssertLessThanOrEqual(px + pw, alignedW)
+        XCTAssertLessThanOrEqual(py + ph, alignedH)
+        XCTAssertGreaterThanOrEqual(pw, ExpandPlacementMath.minPlacementEdge)
+        XCTAssertGreaterThanOrEqual(ph, ExpandPlacementMath.minPlacementEdge)
     }
 
     @MainActor
@@ -512,32 +630,170 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
             background: background,
             mask: mask
         )
-        let generated = solidImage(width: 320, height: 240, red: 0, green: 255, blue: 0)
-        let kept = ImageGenOutpaintMask.applyExpandKeepMask(
-            generated: generated,
-            background: background,
-            mask: mask
-        )
 
-        // Outside the placement: generate. Composite is neutral gray; keep-mask leaves the generated pixels.
+        // Outside the placement: composite uses neutral gray for the generate region.
         let border = rgb(composite, x: 0, yTop: 0)
         XCTAssertEqual(border.0, 128, "composite border R \(border)")
         XCTAssertEqual(border.1, 128, "composite border G \(border)")
         XCTAssertEqual(border.2, 128, "composite border B \(border)")
-        let keptBorder = rgb(kept, x: 0, yTop: 0)
-        XCTAssertLessThan(keptBorder.0, 40, "keep-mask border \(keptBorder)")
-        XCTAssertGreaterThan(keptBorder.1, 200, "keep-mask border \(keptBorder)")
-        XCTAssertLessThan(keptBorder.2, 40, "keep-mask border \(keptBorder)")
 
-        // Inside the keep rect (inset by overlap): original photo, not gray and not the generated fill.
+        // Inside the keep rect (inset by overlap): original photo, not gray.
         let center = rgb(composite, x: 120, yTop: 90)
         XCTAssertGreaterThan(center.0, 200, "composite center \(center)")
         XCTAssertLessThan(center.1, 80, "composite center \(center)")
         XCTAssertLessThan(center.2, 80, "composite center \(center)")
-        let keptCenter = rgb(kept, x: 120, yTop: 90)
-        XCTAssertGreaterThan(keptCenter.0, 200, "keep-mask center \(keptCenter)")
-        XCTAssertLessThan(keptCenter.1, 80, "keep-mask center \(keptCenter)")
-        XCTAssertLessThan(keptCenter.2, 80, "keep-mask center \(keptCenter)")
+    }
+
+    @MainActor
+    func testResizeImagePublicPreservesVerticalOrientation() throws {
+        let source = halfRedTopHalfBlueBottomImage(width: 100, height: 100)
+        let topBefore = rgb(source, x: 50, yTop: 10)
+        let bottomBefore = rgb(source, x: 50, yTop: 90)
+        XCTAssertFalse(
+            topBefore.0 == bottomBefore.0 && topBefore.1 == bottomBefore.1 && topBefore.2 == bottomBefore.2,
+            "fixture must differ vertically \(topBefore) vs \(bottomBefore)"
+        )
+        let resized = ImageGenOutpaintMask.resizeImagePublic(source, width: 50, height: 50)
+        let topAfter = rgb(resized, x: 25, yTop: 5)
+        let bottomAfter = rgb(resized, x: 25, yTop: 45)
+        XCTAssertEqual(topAfter.0, topBefore.0, accuracy: 8, "resize should preserve top R \(topBefore) → \(topAfter)")
+        XCTAssertEqual(topAfter.2, topBefore.2, accuracy: 8, "resize should preserve top B")
+        XCTAssertEqual(bottomAfter.0, bottomBefore.0, accuracy: 8, "resize should preserve bottom R")
+        XCTAssertEqual(bottomAfter.2, bottomBefore.2, accuracy: 8, "resize should preserve bottom B")
+    }
+
+    @MainActor
+    func testExpandCompositePreservesVerticalOrientationThroughPNG() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-expand-orient-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let pngPath = dir.appendingPathComponent("half.png").path
+        let raw = halfRedTopHalfBlueBottomImage(width: 100, height: 100)
+        XCTAssertTrue(ImageGenOutpaintMask.savePNG(raw, path: pngPath))
+        guard let oriented = ImageDisplayLoader.orientedCGImage(for: pngPath) else {
+            XCTFail("could not load half PNG via ImageDisplayLoader")
+            return
+        }
+        let (background, mask) = ImageGenOutpaintMask.prepareImageAndMaskAtRect(
+            source: oriented,
+            canvasW: 200,
+            canvasH: 200,
+            x: 50,
+            y: 50,
+            w: 100,
+            h: 100,
+            overlapPercentage: 2
+        )
+        let bgTop = rgb(background, x: 100, yTop: 55)
+        let bgBottom = rgb(background, x: 100, yTop: 145)
+        XCTAssertFalse(bgTop.0 == bgBottom.0 && bgTop.1 == bgBottom.1 && bgTop.2 == bgBottom.2,
+                       "placement should preserve distinct vertical samples")
+
+        let composite = ImageGenOutpaintMask.compositeMaskedRegionsForKleinEdit(
+            background: background,
+            mask: mask
+        )
+        let beforeSaveTop = rgb(composite, x: 100, yTop: 55)
+        XCTAssertEqual(beforeSaveTop.0, bgTop.0, "composite top R")
+        XCTAssertEqual(beforeSaveTop.2, bgTop.2, "composite top B")
+
+        let compositePath = dir.appendingPathComponent("composite.png").path
+        XCTAssertTrue(ImageGenOutpaintMask.savePNG(composite, path: compositePath))
+        guard let reloaded = ImageGenOutpaintMask.loadRasterCGImage(path: compositePath) else {
+            XCTFail("could not reload composite PNG")
+            return
+        }
+        let topInside = rgb(reloaded, x: 100, yTop: 55)
+        let bottomInside = rgb(reloaded, x: 100, yTop: 145)
+        XCTAssertEqual(topInside.0, bgTop.0, accuracy: 4, "PNG top R")
+        XCTAssertEqual(topInside.2, bgTop.2, accuracy: 4, "PNG top B")
+        XCTAssertEqual(bottomInside.0, bgBottom.0, accuracy: 4, "PNG bottom R")
+        XCTAssertEqual(bottomInside.2, bgBottom.2, accuracy: 4, "PNG bottom B")
+    }
+
+    @MainActor
+    func testExpandPrepPreservesAspectRatioInsidePlacementBox() throws {
+        let wide = solidImage(width: 400, height: 200, red: 255, green: 0, blue: 0)
+        let (background, mask) = ImageGenOutpaintMask.prepareImageAndMaskAtRect(
+            source: wide,
+            canvasW: 736,
+            canvasH: 448,
+            x: 0,
+            y: 0,
+            w: 736,
+            h: 448,
+            overlapPercentage: 2
+        )
+        _ = mask
+        let leftCorner = rgb(background, x: 4, yTop: 4)
+        XCTAssertGreaterThan(leftCorner.0, 250, "white margin expected, got \(leftCorner)")
+        let composite = ImageGenOutpaintMask.compositeMaskedRegionsForKleinEdit(
+            background: background,
+            mask: mask
+        )
+        let border = rgb(composite, x: 4, yTop: 4)
+        XCTAssertGreaterThan(border.0, 100, "gray margin R \(border)")
+        XCTAssertGreaterThan(border.1, 100, "gray margin G \(border)")
+        XCTAssertGreaterThan(border.2, 100, "gray margin B \(border)")
+    }
+
+    @MainActor
+    func testExpandPrepPreservesImageDisplayLoaderOrientation() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("klein-expand-loader-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let pngPath = dir.appendingPathComponent("source.png").path
+        let source = halfRedTopHalfBlueBottomImage(width: 100, height: 100)
+        XCTAssertTrue(ImageGenOutpaintMask.savePNG(source, path: pngPath))
+        guard let oriented = ImageDisplayLoader.orientedCGImage(for: pngPath) else {
+            XCTFail("ImageDisplayLoader could not load PNG")
+            return
+        }
+        let sampleY = 12
+        let loaderSample = rgb(oriented, x: 50, yTop: sampleY)
+
+        let px = 50
+        let py = 50
+        let (background, mask) = ImageGenOutpaintMask.prepareImageAndMaskAtRect(
+            source: oriented,
+            canvasW: 200,
+            canvasH: 200,
+            x: px,
+            y: py,
+            w: 100,
+            h: 100,
+            overlapPercentage: 2
+        )
+        _ = mask
+        let prepSample = rgb(background, x: px + 50, yTop: py + sampleY)
+        XCTAssertEqual(loaderSample.0, prepSample.0, accuracy: 4, "R \(loaderSample) vs \(prepSample)")
+        XCTAssertEqual(loaderSample.1, prepSample.1, accuracy: 4, "G")
+        XCTAssertEqual(loaderSample.2, prepSample.2, accuracy: 4, "B")
+    }
+
+    private func halfRedTopHalfBlueBottomImage(width: Int, height: Int) -> CGImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return solidImage(width: width, height: height, red: 255, green: 0, blue: 0)
+        }
+        let half = height / 2
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: CGFloat(half), width: CGFloat(width), height: CGFloat(height - half)))
+        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(half)))
+        return ctx.makeImage() ?? solidImage(width: width, height: height, red: 255, green: 0, blue: 0)
     }
 
     private func solidImage(width: Int, height: Int, red: UInt8, green: UInt8, blue: UInt8) -> CGImage {

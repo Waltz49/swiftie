@@ -22,6 +22,9 @@ final class ExpandPlacementCanvasView: NSView {
     private var pressLocation = CGPoint.zero
     private var pressPlacement = (0, 0, 0, 0)
 
+    /// True while the user is moving or resizing the placement rect (SwiftUI must not push bindings back in).
+    var isDraggingPlacement: Bool { dragMode != nil }
+
     private let handleSize: CGFloat = 14
     private let handleHitPad: CGFloat = 8
     private let targetBorderWidth: CGFloat = 4
@@ -72,10 +75,27 @@ final class ExpandPlacementCanvasView: NSView {
     func setCanvasPlacement(px: Int, py: Int, pw: Int, ph: Int, emit: Bool = false) {
         let maxW = max(ExpandPlacementMath.minPlacementEdge, canvasW)
         let maxH = max(ExpandPlacementMath.minPlacementEdge, canvasH)
-        let pwI = max(ExpandPlacementMath.minPlacementEdge, min(pw, maxW))
-        let phI = max(ExpandPlacementMath.minPlacementEdge, min(ph, maxH))
+        var pwI = max(ExpandPlacementMath.minPlacementEdge, min(pw, maxW))
+        var phI = max(ExpandPlacementMath.minPlacementEdge, min(ph, maxH))
         let pxI = max(0, min(px, canvasW - pwI))
         let pyI = max(0, min(py, canvasH - phI))
+        if let sourceImage, sourceImage.height > 0, phI > 0 {
+            let imageAspect = Double(sourceImage.width) / Double(sourceImage.height)
+            let placementAspect = Double(pwI) / Double(phI)
+            if abs(imageAspect - placementAspect) / imageAspect >= 0.01 {
+                let fitMaxW = max(ExpandPlacementMath.minPlacementEdge, canvasW - pxI)
+                let fitMaxH = max(ExpandPlacementMath.minPlacementEdge, canvasH - pyI)
+                let corrected = ExpandPlacementMath.clampAspectSize(
+                    w: pwI,
+                    h: phI,
+                    aspect: imageAspect,
+                    maxW: fitMaxW,
+                    maxH: fitMaxH
+                )
+                pwI = corrected.0
+                phI = corrected.1
+            }
+        }
         placementX = pxI
         placementY = pyI
         placementW = pwI
@@ -434,7 +454,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
         view.onPlacementChanged = { [weak view] in
             guard let view else { return }
             let p = view.canvasPlacement()
-            context.coordinator.onPlacementChanged?(p.0, p.1, p.2, p.3)
+            context.coordinator.notePlacementFromView(p)
         }
         context.coordinator.onPlacementChanged = onPlacementChanged
         context.coordinator.honorPersistedPlacement = honorPersistedPlacement
@@ -467,6 +487,11 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
         private var lastSourcePath = ""
         private var appliedPlacementKey = ""
 
+        func notePlacementFromView(_ p: (Int, Int, Int, Int)) {
+            appliedPlacementKey = "\(p.0),\(p.1),\(p.2),\(p.3)"
+            onPlacementChanged?(p.0, p.1, p.2, p.3)
+        }
+
         func apply(
             to view: ExpandPlacementCanvasView,
             sourcePath: String,
@@ -474,6 +499,9 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
             canvasH: Int,
             placement: (x: Int, y: Int, w: Int, h: Int)?
         ) {
+            if view.isDraggingPlacement {
+                return
+            }
             let sourceChanged = sourcePath != lastSourcePath
             /// Prefer the view's fit over the SwiftUI binding when the source path becomes available
             /// or changes, unless we are restoring a queue job snapshot (``honorPersistedPlacement``).
@@ -499,7 +527,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
                 } else if key != appliedPlacementKey || sourceChanged {
                     // SwiftUI can deliver a second `updateNSView` with a stale `placement` binding
                     // (previous session rect) after we already fitted the new source; applying it distorts.
-                    if !sourceChanged, !honorPersistedPlacement, !storedMatchesImage {
+                    if !sourceChanged, !storedMatchesImage {
                         let fit = view.canvasPlacement()
                         let fitKey = "\(fit.0),\(fit.1),\(fit.2),\(fit.3)"
                         appliedPlacementKey = fitKey
@@ -525,7 +553,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
             placementHeight: Int,
             image: CGImage?
         ) -> Bool {
-            guard let image, image.height > 0, placementHeight > 0 else { return true }
+            guard let image, image.height > 0, placementHeight > 0 else { return false }
             let imageAspect = Double(image.width) / Double(image.height)
             let placementAspect = Double(placementWidth) / Double(placementHeight)
             return abs(imageAspect - placementAspect) / imageAspect < 0.01

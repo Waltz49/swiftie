@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import gc
+import inspect
 import os
 import time
 from argparse import Namespace
@@ -38,10 +39,15 @@ def _reference_cache_key(
     image_paths: list[str],
     batch_size: int,
     session_key: tuple[Any, ...],
+    *,
+    width: int,
+    height: int,
 ) -> tuple[Any, ...]:
     return (
         session_key,
         int(batch_size),
+        int(width),
+        int(height),
         tuple(_image_stat_key(p) for p in image_paths),
     )
 
@@ -559,11 +565,15 @@ def _reference_conditioning(
     *,
     batch_size: int,
     session_key: tuple[Any, ...],
+    width: int,
+    height: int,
 ) -> tuple[mx.array | None, mx.array | None]:
     if not image_paths:
         return None, None
 
-    cache_key = _reference_cache_key(image_paths, batch_size, session_key)
+    cache_key = _reference_cache_key(
+        image_paths, batch_size, session_key, width=width, height=height
+    )
     cached = _vae_cache.get(cache_key)
     if cached is not None:
         perf_log_kv(
@@ -578,12 +588,22 @@ def _reference_conditioning(
         _Flux2KleinEditHelpers,
     )
 
+    base_kwargs: dict[str, Any] = {
+        "vae": model.vae,
+        "tiling_config": model.tiling_config,
+        "image_paths": [Path(p) for p in image_paths],
+        "batch_size": batch_size,
+    }
+    prep_params = inspect.signature(
+        _Flux2KleinEditHelpers.prepare_reference_image_conditioning
+    ).parameters
+    if "height" in prep_params and "width" in prep_params:
+        base_kwargs["height"] = int(height)
+        base_kwargs["width"] = int(width)
+
     t0 = time.perf_counter()
-    image_latents, image_latent_ids = _Flux2KleinEditHelpers.prepare_reference_image_conditioning(
-        vae=model.vae,
-        tiling_config=model.tiling_config,
-        image_paths=[Path(p) for p in image_paths],
-        batch_size=batch_size,
+    image_latents, image_latent_ids = (
+        _Flux2KleinEditHelpers.prepare_reference_image_conditioning(**base_kwargs)
     )
     elapsed = time.perf_counter() - t0
     _vae_cache.put(cache_key, (image_latents, image_latent_ids))
@@ -678,6 +698,8 @@ def generate_flux2_klein_edit(
             image_paths,
             batch_size=latents.shape[0],
             session_key=session_key,
+            width=int(config.width),
+            height=int(config.height),
         )
 
         from workers.model_tasks_worker import GenerationCancelledError

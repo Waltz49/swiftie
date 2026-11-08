@@ -134,12 +134,17 @@ struct ContentStackView: View {
                 EmptyView()
             case .browse:
                 BrowseView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .zIndex(2)
             case .slideshow:
                 SlideshowView()
+                    .zIndex(2)
             case .slideshow2:
                 Slideshow2View()
+                    .zIndex(2)
             case .slideshow3:
                 Slideshow3View()
+                    .zIndex(2)
             }
         }
     }

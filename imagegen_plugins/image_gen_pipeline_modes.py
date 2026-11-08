@@ -38,8 +38,10 @@ _MFLUX_PIPELINE_IDS = frozenset(
 )
 
 _KLEIN_EXPAND_PROMPT_PREFIX = (
-    "Extend the image only into the gray border areas; "
-    "preserve the existing center content.\n"
+    "Extend the provided image to fill the unused space in the image. "
+    "The existing photograph stays exactly where it is in the frame; do not move, "
+    "recenter, resize, or duplicate the subject. Change only the neutral gray areas. "
+    "New regions:\n\n"
 )
 
 

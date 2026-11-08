@@ -24,7 +24,12 @@ struct BrowseView: NSViewRepresentable {
         appState.browseImageHost = view
         appState.syncBrowseCursorAutoHide()
         context.coordinator.startObserving()
+        context.coordinator.installMagnifyMonitorIfNeeded()
         return view
+    }
+
+    static func dismantleNSView(_ nsView: BrowseImageNSView, coordinator: Coordinator) {
+        coordinator.removeMagnifyMonitor()
     }
 
     func updateNSView(_ nsView: BrowseImageNSView, context: Context) {
@@ -44,6 +49,8 @@ struct BrowseView: NSViewRepresentable {
         if appState.numberOverlayVisible {
             nsView.needsDisplay = true
         }
+        context.coordinator.view = nsView
+        context.coordinator.installMagnifyMonitorIfNeeded()
     }
 
     @MainActor
@@ -51,6 +58,7 @@ struct BrowseView: NSViewRepresentable {
         let appState: AppState
         weak var view: BrowseImageNSView?
         private var eventSubscriptions: EventBusSubscriptionBag?
+        private var magnifyMonitor: Any?
 
         init(appState: AppState) {
             self.appState = appState
@@ -79,6 +87,32 @@ struct BrowseView: NSViewRepresentable {
                 case .fitCanvasHeight: self.view?.fitToCanvasHeight()
                 }
             }
+        }
+
+        /// SwiftUI hosting can swallow trackpad pinch before it reaches ``BrowseImageNSView``; forward from a local monitor.
+        func installMagnifyMonitorIfNeeded() {
+            guard magnifyMonitor == nil else { return }
+            magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
+                guard let self else { return event }
+                return self.handleMagnifyMonitor(event)
+            }
+        }
+
+        func removeMagnifyMonitor() {
+            if let magnifyMonitor {
+                NSEvent.removeMonitor(magnifyMonitor)
+                self.magnifyMonitor = nil
+            }
+        }
+
+        private func handleMagnifyMonitor(_ event: NSEvent) -> NSEvent? {
+            guard appState.fileData.currentViewMode == .browse else { return event }
+            guard let host = view ?? appState.browseImageHost else { return event }
+            guard let window = host.window, event.window === window, window.isKeyWindow else { return event }
+            let point = host.convert(event.locationInWindow, from: nil)
+            guard host.bounds.contains(point) else { return event }
+            host.magnify(with: event)
+            return event
         }
     }
 }

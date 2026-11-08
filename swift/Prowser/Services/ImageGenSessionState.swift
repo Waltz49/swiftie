@@ -89,6 +89,10 @@ struct ImageGenDialogRequest: Equatable {
     var autoImportEXIF: Bool
     var autoGenerate: Bool
     var editSourcePaths: [String]
+    /// ⌥/ last-settings entry (restore dialog source cache after close).
+    var openWithLastSettings: Bool
+    /// ⇧⌥/ fast open: expand/infill use the active browser image over cached source.
+    var primeSourceFromActiveImage: Bool
 
     static let empty = ImageGenDialogRequest(
         function: "create",
@@ -96,6 +100,8 @@ struct ImageGenDialogRequest: Equatable {
         initialPrompt: nil,
         autoImportEXIF: false,
         autoGenerate: false,
-        editSourcePaths: []
+        editSourcePaths: [],
+        openWithLastSettings: false,
+        primeSourceFromActiveImage: false
     )
 }

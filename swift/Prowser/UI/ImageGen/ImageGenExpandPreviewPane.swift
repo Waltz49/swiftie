@@ -90,7 +90,18 @@ struct ImageGenExpandPreviewPane: View {
     }
 
     private func seedPlacementIfNeeded() {
-        guard placementFromValues == nil, sourcePath != nil, !placementSeedApplied else { return }
+        guard sourcePath != nil, !placementSeedApplied else { return }
+        if honorPersistedPlacement, let path = sourcePath, let placement = placementFromValues {
+            if placementAspectMismatch(path: path, placement: placement) {
+                rewritePlacementAspectFit(path: path)
+            }
+            placementSeedApplied = true
+            return
+        }
+        guard placementFromValues == nil else {
+            placementSeedApplied = true
+            return
+        }
         let aspect = sourceAspect(path: sourcePath!)
         let fit = ExpandPlacementMath.centeredFit(
             canvasW: canvasWidth,
@@ -128,5 +139,44 @@ struct ImageGenExpandPreviewPane: View {
             return Double(cg.width) / Double(cg.height)
         }
         return 1
+    }
+
+    private func placementAspectMismatch(path: String, placement: (x: Int, y: Int, w: Int, h: Int)) -> Bool {
+        guard placement.h > 0 else { return true }
+        let imageAspect = sourceAspect(path: path)
+        let placementAspect = Double(placement.w) / Double(placement.h)
+        return abs(imageAspect - placementAspect) / imageAspect >= 0.01
+    }
+
+    /// Preserve placement center on the canvas but fix width/height to the oriented source aspect.
+    private func rewritePlacementAspectFit(path: String) {
+        let aspect = sourceAspect(path: path)
+        guard let current = placementFromValues else { return }
+        let maxW = max(ExpandPlacementMath.minPlacementEdge, canvasWidth - current.x)
+        let maxH = max(ExpandPlacementMath.minPlacementEdge, canvasHeight - current.y)
+        let sized = ExpandPlacementMath.clampAspectSize(
+            w: current.w,
+            h: current.h,
+            aspect: aspect,
+            maxW: maxW,
+            maxH: maxH
+        )
+        var px = current.x + (current.w - sized.0) / 2
+        var py = current.y + (current.h - sized.1) / 2
+        let clamped = ExpandPlacementMath.clampPosition(
+            x: px,
+            y: py,
+            w: sized.0,
+            h: sized.1,
+            canvasW: canvasWidth,
+            canvasH: canvasHeight
+        )
+        px = clamped.0
+        py = clamped.1
+        values["placement_x"] = px
+        values["placement_y"] = py
+        values["placement_w"] = sized.0
+        values["placement_h"] = sized.1
+        onValuesChanged?()
     }
 }

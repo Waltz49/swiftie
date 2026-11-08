@@ -155,17 +155,7 @@ final class MfluxGenerationTasks {
         do {
             let userOutputPath = payload["output_path"] as? String ?? ""
             let requestedPipeline = payload["pipeline_id"] as? String ?? ""
-            let requestedModel = payload["hf_model_id"] as? String ?? ""
-            let pythonOwnsKleinExpand = requestedPipeline == "mflux_flux2_klein_expand"
-                && ImageGenPipelineRouting.usesPersistentPythonWorker(
-                    pipelineID: requestedPipeline,
-                    hfModelID: requestedModel,
-                    config: config
-                )
-            var runPayload = try await ImageGenMfluxPrep.apply(
-                to: payload,
-                pythonOwnsKleinExpand: pythonOwnsKleinExpand
-            )
+            var runPayload = try await ImageGenMfluxPrep.apply(to: payload)
             onPreparedRunPayload?(runPayload)
             let prepTempPaths = ImageGenMfluxPrep.takePrepTempPaths(from: &runPayload)
             defer {
@@ -240,7 +230,9 @@ final class MfluxGenerationTasks {
                     "step_total": steps,
                     "phase": "loading_model",
                 ])
-                runPayload["output_path"] = finalOutputPath
+                if runPayload["_klein_expand_post"] == nil {
+                    runPayload["output_path"] = finalOutputPath
+                }
                 if let flag = runPayload["show_progressive_images"] {
                     runPayload["show_progressive_images"] = ImageGenPipelineModes.boolFromSettingsValue(flag)
                 } else {
@@ -275,6 +267,7 @@ final class MfluxGenerationTasks {
                     : directCLIPath
                 try? FileManager.default.removeItem(atPath: mfluxCLIPath)
                 runPayload["output_path"] = mfluxCLIPath
+                ImageGenMfluxPrep.usePreparedFillBaseForCLIIfNeeded(&runPayload)
                 let args = try MfluxCLIPipeline.buildArguments(payload: runPayload)
                 let env = MfluxToolchain.shared.processEnvironment()
                 let request = MfluxProcessRunner.Request(
@@ -326,16 +319,23 @@ final class MfluxGenerationTasks {
             }
 
             var finalOutput = (lastGenerateResult["output_path"] as? String) ?? finalOutputPath
-            // CLI Klein expand writes the raw edit to the temp PNG (``directCLIPath``). The user
-            // path is only created by the keep-mask composite. The Python worker already saved it.
-            let kleinCLIOutput = directCLIPath
+            // Klein expand: worker PNG → Swift finalize promotes to user path (no photo paste).
             if runPayload["_klein_expand_post"] != nil {
-                finalOutput = kleinCLIOutput
+                finalOutput = directCLIPath
             }
             finalOutput = try ImageGenMfluxPrep.finalizeKleinExpandIfNeeded(
                 payload: runPayload,
                 cliOutputPath: finalOutput
             )
+            if requestedPipeline == "mflux_flux2_klein_expand", !finalOutput.isEmpty {
+                progressHandler([
+                    "type": "progress",
+                    "step": steps,
+                    "step_total": steps,
+                    "path": finalOutput,
+                    "phase": "klein_expand_final",
+                ])
+            }
             guard FileManager.default.fileExists(atPath: finalOutput) else {
                 throw MfluxCLIError.processFailed("MFLUX did not write output at \(finalOutput)")
             }

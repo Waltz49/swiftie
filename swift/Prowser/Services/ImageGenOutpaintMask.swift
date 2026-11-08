@@ -28,7 +28,6 @@ enum ImageGenOutpaintMask {
         let py = max(0, min(y, ch - 1))
         let pw = max(128, min(w, cw - px))
         let ph = max(128, min(h, ch - py))
-
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let bgCtx = CGContext(
             data: nil,
@@ -44,18 +43,24 @@ enum ImageGenOutpaintMask {
         bgCtx.setShouldAntialias(false)
         bgCtx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
         bgCtx.fill(CGRect(x: 0, y: 0, width: cw, height: ch))
-
-        let resized = resizeImage(source, width: pw, height: ph)
-        bgCtx.draw(resized, in: CGRect(x: px, y: ch - py - ph, width: pw, height: ph))
+        let (drawW, drawH) = aspectFitDrawSize(
+            sourceW: source.width,
+            sourceH: source.height,
+            boxW: pw,
+            boxH: ph
+        )
+        let resized = resizeImage(source, width: drawW, height: drawH)
+        bgCtx.interpolationQuality = .high
+        bgCtx.draw(resized, in: CGRect(x: px, y: ch - py - drawH, width: drawW, height: drawH))
         let background = bgCtx.makeImage()!
 
-        let overlapX = max(1, Int(Double(pw) * Double(overlapPercentage) / 100))
-        let overlapY = max(1, Int(Double(ph) * Double(overlapPercentage) / 100))
+        let overlapX = max(1, Int(Double(drawW) * Double(overlapPercentage) / 100))
+        let overlapY = max(1, Int(Double(drawH) * Double(overlapPercentage) / 100))
         let whiteGaps = 2
         let left = max(px + whiteGaps, px + overlapX)
-        let right = min(px + pw - whiteGaps, px + pw - overlapX)
+        let right = min(px + drawW - whiteGaps, px + drawW - overlapX)
         let top = max(py + whiteGaps, py + overlapY)
-        let bottom = min(py + ph - whiteGaps, py + ph - overlapY)
+        let bottom = min(py + drawH - whiteGaps, py + drawH - overlapY)
 
         guard let maskCtx = CGContext(
             data: nil,
@@ -73,8 +78,7 @@ enum ImageGenOutpaintMask {
         maskCtx.setFillColor(gray: 1, alpha: 1)
         maskCtx.fill(CGRect(x: 0, y: 0, width: cw, height: ch))
         maskCtx.setFillColor(gray: 0, alpha: 1)
-        let rect = CGRect(x: left, y: ch - bottom, width: right - left, height: bottom - top)
-        maskCtx.fill(rect)
+        maskCtx.fill(CGRect(x: left, y: ch - bottom, width: right - left, height: bottom - top))
         let mask = maskCtx.makeImage()!
         return (background, mask)
     }
@@ -94,26 +98,6 @@ enum ImageGenOutpaintMask {
             out[o] = UInt8((128 * coverage + Int(bg[o]) * keep) / 255)
             out[o + 1] = UInt8((128 * coverage + Int(bg[o + 1]) * keep) / 255)
             out[o + 2] = UInt8((128 * coverage + Int(bg[o + 2]) * keep) / 255)
-            out[o + 3] = 255
-        }
-        return imageFromTopLeftRGBA(out, width: width, height: height)
-    }
-
-    /// Black mask → paste the original. White mask → keep the generated pixels.
-    static func applyExpandKeepMask(generated: CGImage, background: CGImage, mask: CGImage) -> CGImage {
-        let width = generated.width
-        let height = generated.height
-        let bgImage = fitted(background, width: width, height: height)
-        let maskImage = fitted(mask, width: width, height: height)
-        let gen = topLeftRGBA(generated)
-        let bg = topLeftRGBA(bgImage)
-        let m = topLeftRGBA(maskImage)
-        var out = gen
-        for i in 0..<(width * height) where m[i * 4] < 128 {
-            let o = i * 4
-            out[o] = bg[o]
-            out[o + 1] = bg[o + 1]
-            out[o + 2] = bg[o + 2]
             out[o + 3] = 255
         }
         return imageFromTopLeftRGBA(out, width: width, height: height)
@@ -146,21 +130,26 @@ enum ImageGenOutpaintMask {
     }
 
     private static func imageFromTopLeftRGBA(_ pixels: [UInt8], width: Int, height: Int) -> CGImage {
-        let data = Data(pixels) as CFData
-        guard let provider = CGDataProvider(data: data),
-              let image = CGImage(
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bitsPerPixel: 32,
-                bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider,
-                decode: nil,
-                shouldInterpolate: false,
-                intent: .defaultIntent
-              ) else {
+        let rowBytes = width * 4
+        guard pixels.count >= rowBytes * height else {
+            return blankImage(width: max(1, width), height: max(1, height))
+        }
+        // ``pixels`` is top-left row-major (PIL / ``topLeftRGBA``). CG bitmap contexts use bottom-left rows.
+        var buffer = [UInt8](repeating: 0, count: rowBytes * height)
+        for row in 0..<height {
+            let src = row * rowBytes
+            let dst = (height - 1 - row) * rowBytes
+            buffer.replaceSubrange(dst..<(dst + rowBytes), with: pixels[src..<(src + rowBytes)])
+        }
+        guard let ctx = CGContext(
+            data: &buffer,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: rowBytes,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let image = ctx.makeImage() else {
             return blankImage(width: max(1, width), height: max(1, height))
         }
         return image
@@ -183,6 +172,19 @@ enum ImageGenOutpaintMask {
         resizeImage(image, width: width, height: height)
     }
 
+    /// Size to draw inside a placement box without changing aspect ratio (top-left aligned).
+    private static func aspectFitDrawSize(sourceW: Int, sourceH: Int, boxW: Int, boxH: Int) -> (width: Int, height: Int) {
+        guard sourceW > 0, sourceH > 0, boxW > 0, boxH > 0 else {
+            return (max(1, boxW), max(1, boxH))
+        }
+        let scale = min(Double(boxW) / Double(sourceW), Double(boxH) / Double(sourceH))
+        var drawW = Int((Double(sourceW) * scale).rounded())
+        var drawH = Int((Double(sourceH) * scale).rounded())
+        drawW = max(1, min(boxW, drawW))
+        drawH = max(1, min(boxH, drawH))
+        return (drawW, drawH)
+    }
+
     private static func resizeImage(_ image: CGImage, width: Int, height: Int) -> CGImage {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
@@ -199,10 +201,35 @@ enum ImageGenOutpaintMask {
         return ctx.makeImage() ?? image
     }
 
+    /// Source photos for expand placement (matches expand canvas / ``ImageDisplayLoader``).
+    static func loadSourceCGImage(path: String) -> CGImage? {
+        if let cg = ImageRecognitionImageLoader.loadCGImage(path: path) { return cg }
+        return ImageDisplayLoader.orientedCGImage(for: path)
+    }
+
+    /// PNG/raster files written by imagegen (no EXIF); avoids ``NSImage`` point-size vs pixel mismatch.
+    static func loadRasterCGImage(path: String) -> CGImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
     static func loadCGImage(path: String) -> CGImage? {
-        guard let image = NSImage(contentsOfFile: path) else { return nil }
-        var rect = CGRect(origin: .zero, size: image.size)
-        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        loadRasterCGImage(path: path)
+            ?? loadSourceCGImage(path: path)
+    }
+
+    /// Debug: sample RGB at top-left coordinates (matches expand placement / PIL).
+    static func debugTopLeftRGBSample(_ image: CGImage, x: Int, yTop: Int) -> [Int] {
+        let rgba = topLeftRGBA(image)
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return [-1, -1, -1] }
+        let sx = min(max(0, x), width - 1)
+        let sy = min(max(0, yTop), height - 1)
+        let index = (sy * width + sx) * 4
+        guard index + 2 < rgba.count else { return [-1, -1, -1] }
+        return [Int(rgba[index]), Int(rgba[index + 1]), Int(rgba[index + 2])]
     }
 
     @discardableResult

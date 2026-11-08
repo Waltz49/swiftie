@@ -169,6 +169,45 @@ enum ExpandPlacementMath {
         return (px, py)
     }
 
+    /// When worker output ``width``/``height`` are aligned/snapped after the placement canvas size, remap
+    /// ``placement_*`` by relative fractions (port of keeping placement when the expand canvas resizes).
+    static func remapPlacementAfterCanvasResize(
+        values: inout [String: Any],
+        fromCanvasW: Int,
+        fromCanvasH: Int,
+        toCanvasW: Int,
+        toCanvasH: Int
+    ) {
+        guard fromCanvasW > 0, fromCanvasH > 0, toCanvasW > 0, toCanvasH > 0 else { return }
+        guard fromCanvasW != toCanvasW || fromCanvasH != toCanvasH else { return }
+        guard let px = intValue(values["placement_x"]),
+              let py = intValue(values["placement_y"]),
+              let pw = intValue(values["placement_w"]),
+              let ph = intValue(values["placement_h"]) else {
+            return
+        }
+        let rel = storeRelative(
+            placementX: px,
+            placementY: py,
+            placementW: pw,
+            placementH: ph,
+            canvasW: fromCanvasW,
+            canvasH: fromCanvasH
+        )
+        let applied = applyRelative(rel, canvasW: toCanvasW, canvasH: toCanvasH)
+        values["placement_x"] = applied.x
+        values["placement_y"] = applied.y
+        values["placement_w"] = applied.w
+        values["placement_h"] = applied.h
+    }
+
+    private static func intValue(_ any: Any?) -> Int? {
+        if let value = any as? Int { return value }
+        if let value = any as? NSNumber { return value.intValue }
+        if let value = any as? Double { return Int(value) }
+        return nil
+    }
+
     static func applyResizeDrag(
         px: Int,
         py: Int,

@@ -1448,7 +1448,7 @@
                 "key": "steps",
                 "kind": "int_slider",
                 "label": "Steps",
-                "max_value": 40,
+                "max_value": 50,
                 "min_value": 8,
                 "required": false,
                 "reset_default": 20,
