@@ -45,6 +45,8 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
     var onCommandOptionReturn: (() -> Bool)? = nil
     let onCommandW: () -> Void
     let onEscape: () -> Void
+    /// ⌥/ dismiss unified dialog (Python ``QShortcut`` Alt+Slash → ``_on_close``).
+    let onOptionSlash: () -> Void
     let onOptionReturn: () -> Bool
     let onShiftOptionReturn: () -> Bool
     var onOptionLeft: (() -> Bool)? = nil
@@ -85,6 +87,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
         private var onCommandOptionReturn: (() -> Bool)?
         private var onCommandW: (() -> Void)?
         private var onEscape: (() -> Void)?
+        private var onOptionSlash: (() -> Void)?
         private var onOptionReturn: (() -> Bool)?
         private var onShiftOptionReturn: (() -> Bool)?
         private var onOptionLeft: (() -> Bool)?
@@ -102,6 +105,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                 onCommandOptionReturn = settings.onCommandOptionReturn
                 onCommandW = settings.onCommandW
                 onEscape = settings.onEscape
+                onOptionSlash = settings.onOptionSlash
                 onOptionReturn = settings.onOptionReturn
                 onShiftOptionReturn = settings.onShiftOptionReturn
                 onOptionLeft = settings.onOptionLeft
@@ -118,6 +122,7 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
             onCommandOptionReturn = settings.onCommandOptionReturn
             onCommandW = settings.onCommandW
             onEscape = settings.onEscape
+            onOptionSlash = settings.onOptionSlash
             onOptionReturn = settings.onOptionReturn
             onShiftOptionReturn = settings.onShiftOptionReturn
             onOptionLeft = settings.onOptionLeft
@@ -149,6 +154,16 @@ struct ImageGenDialogKeyHandler: NSViewRepresentable {
                         ? self.onOptionLeft?() == true
                         : self.onOptionRight?() == true
                     if handled { return nil }
+                }
+
+                if ImageGenDialogKeyRouting.isOptionOnly(flags) {
+                    switch event.charactersIgnoringModifiers {
+                    case "/", "÷":
+                        self.onOptionSlash?()
+                        return nil
+                    default:
+                        break
+                    }
                 }
 
                 if event.keyCode == 36 || event.keyCode == 76 {

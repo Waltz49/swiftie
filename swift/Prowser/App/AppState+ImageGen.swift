@@ -570,13 +570,24 @@ extension AppState {
         }
     }
 
+    func setImageGenLastEditSourcePaths(_ paths: [String]) {
+        imageGenLastEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(paths)
+    }
+
+    /// True when the unified dialog window is on screen (Python ``existing.isVisible()``).
+    var imageGenUnifiedDialogIsVisible: Bool {
+        if showImageGenUnifiedDialog { return true }
+        guard let window = SceneWindowChrome.imageGenUnifiedWindow() else { return false }
+        return window.isVisible
+    }
+
     /// ⌥/ — last-used function with saved settings (Python ``start_active_imagegen_generation``).
     func openImageGenDialogWithLastSettings() {
         guard imageGen.isEnabled else {
             status.show(imageGen.unavailableStatusMessage())
             return
         }
-        if showImageGenUnifiedDialog {
+        if imageGenUnifiedDialogIsVisible {
             NotificationCenter.default.post(name: .prowserDismissImageGenDialog, object: nil)
             return
         }

@@ -161,6 +161,7 @@ struct ImageGenUnifiedDialog: View {
                 },
                 onCommandW: { performClose() },
                 onEscape: { performClose() },
+                onOptionSlash: { performClose() },
                 onOptionReturn: {
                     fluxContext.promptText = normalizedDialogPromptText()
                     if fluxRefineCoordinator.genShortcutActive(context: fluxContext) {
@@ -372,10 +373,7 @@ struct ImageGenUnifiedDialog: View {
         return activeImagePath
     }
 
-    private func resolveInitialEditSourcePaths(from request: ImageGenDialogRequest) -> [String] {
-        if !request.editSourcePaths.isEmpty {
-            return ImageGenEditSourcePaths.normalizedPaths(request.editSourcePaths)
-        }
+    private func activeImagePathsForEditOpen() -> [String] {
         let active = ImageGenEditSourcePaths.activeImagePathsForEdit(appState: appState)
         if !active.isEmpty { return active }
         if let path = activeImagePath {
@@ -384,17 +382,29 @@ struct ImageGenUnifiedDialog: View {
         return []
     }
 
+    /// Edit sources when opening the unified dialog (Python: override, session, else active — not persisted plugin fields).
+    private func resolveEditSourcePathsForOpen(from request: ImageGenDialogRequest) -> [String] {
+        if !request.editSourcePaths.isEmpty {
+            return ImageGenEditSourcePaths.normalizedPaths(request.editSourcePaths)
+        }
+        if request.primeSourceFromActiveImage {
+            return activeImagePathsForEditOpen()
+        }
+        if request.openWithLastSettings {
+            let cached = appState.imageGenLastEditSourcePaths
+            if !cached.isEmpty { return cached }
+        }
+        if !lockedEditSourcePaths.isEmpty {
+            return lockedEditSourcePaths
+        }
+        return activeImagePathsForEditOpen()
+    }
+
     /// Snapshot edit sources when opening or switching to edit; ignore live thumbnail selection afterward.
-    /// Python ``_resolve_edit_source_paths``: explicit override, else the active image(s). Persisted
-    /// ``source_image_paths`` from an earlier session are never used as sources.
     private func bootstrapEditSourcePaths(from request: ImageGenDialogRequest, force: Bool = false) {
         guard selectedFunction == "edit" else { return }
         if force || lockedEditSourcePaths.isEmpty {
-            if !request.editSourcePaths.isEmpty {
-                lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(request.editSourcePaths)
-            } else {
-                lockedEditSourcePaths = resolveInitialEditSourcePaths(from: request)
-            }
+            lockedEditSourcePaths = resolveEditSourcePathsForOpen(from: request)
         }
 
         guard !lockedEditSourcePaths.isEmpty else { return }
@@ -442,9 +452,16 @@ struct ImageGenUnifiedDialog: View {
             } else {
                 let targetFunction = selectedFunction
                 try await ensurePluginsLoaded(function: targetFunction, availability: .fast)
-                lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
+                if pendingRequest.isPlainLastSettingsOpen {
+                    lockedEditSourcePaths = appState.imageGenLastEditSourcePaths
+                } else {
+                    lockedEditSourcePaths = ImageGenEditSourcePaths.normalizedPaths(pendingRequest.editSourcePaths)
+                }
                 await switchFunction(from: "", to: targetFunction, pluginsAlreadyLoaded: true)
-                bootstrapEditSourcePaths(from: pendingRequest, force: true)
+                bootstrapEditSourcePaths(
+                    from: pendingRequest,
+                    force: pendingRequest.primeSourceFromActiveImage
+                )
                 if targetFunction == "infill", pendingRequest.function == "infill", !pendingRequest.isPlainLastSettingsOpen {
                     refreshInfillFromMenuRequest()
                 } else if targetFunction == "infill" {
@@ -504,7 +521,10 @@ struct ImageGenUnifiedDialog: View {
         if targetFunction != selectedFunction {
             let previous = selectedFunction
             guard await switchFunction(from: previous, to: targetFunction) else { return }
-            bootstrapEditSourcePaths(from: pendingRequest, force: true)
+            bootstrapEditSourcePaths(
+                from: pendingRequest,
+                force: pendingRequest.primeSourceFromActiveImage
+            )
             if targetFunction == "infill" {
                 if pendingRequest.primeSourceFromActiveImage {
                     refreshInfillFromMenuRequest()
@@ -520,7 +540,10 @@ struct ImageGenUnifiedDialog: View {
                     : (ExifService.initialPromptFromUserComment(prompt) ?? prompt)
             }
         } else {
-            bootstrapEditSourcePaths(from: pendingRequest, force: true)
+            bootstrapEditSourcePaths(
+                from: pendingRequest,
+                force: pendingRequest.primeSourceFromActiveImage
+            )
             if targetFunction == "infill" {
                 if pendingRequest.primeSourceFromActiveImage {
                     refreshInfillFromMenuRequest()
@@ -1043,6 +1066,43 @@ struct ImageGenUnifiedDialog: View {
         ImageGenPersistence.saveDialogSessions(sessions, config: appState.config)
     }
 
+    /// Port of Python ``_after_successful_submit`` / ``_on_close`` (disk + in-memory last sources).
+    private func persistDialogSessionOnClose() {
+        syncLockedSourcePathsFromCurrentValues()
+        session.saveLastFunction(selectedFunction, config: appState.config)
+        persistVisitedFunctions()
+        appState.setImageGenLastDialogSource(lockedExpandSourcePath, for: "expand")
+        appState.setImageGenLastDialogSource(lockedInfillSourcePath, for: "infill")
+        appState.setImageGenLastEditSourcePaths(lockedEditSourcePaths)
+    }
+
+    private func syncLockedSourcePathsFromCurrentValues() {
+        if selectedFunction == "expand",
+           let path = panelSourcePath ?? ImageGenFunctionPrerequisites.normalizedExistingFile(
+               values["source_image_path"] as? String
+           ) {
+            lockedExpandSourcePath = path
+        }
+        if selectedFunction == "infill",
+           let path = panelSourcePath ?? ImageGenFunctionPrerequisites.normalizedExistingFile(
+               values["source_image_path"] as? String
+           ) {
+            lockedInfillSourcePath = path
+        }
+        if selectedFunction == "edit" {
+            var rawPaths = values["source_image_paths"] as? [String] ?? []
+            if rawPaths.isEmpty, let single = values["source_image_path"] as? String {
+                rawPaths = [single]
+            }
+            let paths = ImageGenEditSourcePaths.normalizedPaths(
+                rawPaths.isEmpty ? lockedEditSourcePaths : rawPaths
+            )
+            if !paths.isEmpty {
+                lockedEditSourcePaths = paths
+            }
+        }
+    }
+
     private func cycleFunction(delta: Int) {
         guard let index = functions.firstIndex(of: selectedFunction) else { return }
         let next = functions[(index + delta + functions.count) % functions.count]
@@ -1110,9 +1170,7 @@ struct ImageGenUnifiedDialog: View {
         appState.imageGen.cancelFluxPromptRefine()
         fluxRefineCoordinator.teardown(appState: appState)
         dismissing = true
-        persistVisitedFunctions()
-        appState.setImageGenLastDialogSource(lockedExpandSourcePath, for: "expand")
-        appState.setImageGenLastDialogSource(lockedInfillSourcePath, for: "infill")
+        persistDialogSessionOnClose()
         closeDialog()
     }
 
@@ -1472,10 +1530,10 @@ struct ImageGenUnifiedDialog: View {
                 values: submitValues,
                 config: appState.config
             )
+            persistDialogSessionOnClose()
             if closeOnGenerate {
                 dismissing = true
                 skipWorkingFileCleanupOnClose = true
-                persistVisitedFunctions()
                 closeDialog()
             }
         } catch {

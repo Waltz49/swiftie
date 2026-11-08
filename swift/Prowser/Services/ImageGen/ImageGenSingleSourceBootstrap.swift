@@ -21,10 +21,12 @@ enum ImageGenSingleSourceBootstrap {
         if let path = normalizedExistingFile(input.lockedPath) {
             return Output(path: path)
         }
-        if let path = normalizedExistingFile(input.valuePath) {
+        // After switching away from edit, ``values["source_image_path"]`` may still be edit paths;
+        // prefer the close/submit cache (Python session ``source_path``) over that stale binding.
+        if let path = normalizedExistingFile(input.restoredLastDialogPath) {
             return Output(path: path)
         }
-        if let path = normalizedExistingFile(input.restoredLastDialogPath) {
+        if let path = normalizedExistingFile(input.valuePath) {
             return Output(path: path)
         }
         if let path = normalizedExistingFile(input.activePath) {

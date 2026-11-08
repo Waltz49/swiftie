@@ -527,7 +527,7 @@ struct ExpandPlacementCanvasRepresentable: NSViewRepresentable {
                 } else if key != appliedPlacementKey || sourceChanged {
                     // SwiftUI can deliver a second `updateNSView` with a stale `placement` binding
                     // (previous session rect) after we already fitted the new source; applying it distorts.
-                    if !sourceChanged, !storedMatchesImage {
+                    if !sourceChanged, !honorPersistedPlacement, !storedMatchesImage {
                         let fit = view.canvasPlacement()
                         let fitKey = "\(fit.0),\(fit.1),\(fit.2),\(fit.3)"
                         appliedPlacementKey = fitKey

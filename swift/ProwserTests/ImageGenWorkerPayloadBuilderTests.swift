@@ -621,10 +621,10 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         XCTAssertLessThan(bgCenter.1, 80, "background center \(bgCenter)")
         XCTAssertLessThan(bgCenter.2, 80, "background center \(bgCenter)")
 
-        let maskBorder = rgb(mask, x: 0, yTop: 0)
-        let maskCenter = rgb(mask, x: 120, yTop: 90)
-        XCTAssertEqual(maskBorder.0, 255, "generate region must be white, got \(maskBorder)")
-        XCTAssertEqual(maskCenter.0, 0, "keep region must be black, got \(maskCenter)")
+        let maskBorder = maskLuma(mask, x: 0, yTop: 0)
+        let maskCenter = maskLuma(mask, x: 120, yTop: 90)
+        XCTAssertEqual(maskBorder, 255, "generate region must be white, got \(maskBorder)")
+        XCTAssertEqual(maskCenter, 0, "keep region must be black, got \(maskCenter)")
 
         let composite = ImageGenOutpaintMask.compositeMaskedRegionsForKleinEdit(
             background: background,
@@ -815,6 +815,24 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
         ))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()!
+    }
+
+    /// Device Gray mask sample (top-left coords); RGB ``rgb`` cannot represent L-mode masks.
+    private func maskLuma(_ image: CGImage, x: Int, yTop: Int) -> UInt8 {
+        let width = image.width
+        let height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height)
+        let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        )!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return pixels[yTop * width + x]
     }
 
     private func rgb(_ image: CGImage, x: Int, yTop: Int) -> (UInt8, UInt8, UInt8) {

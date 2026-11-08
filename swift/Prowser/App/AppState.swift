@@ -59,6 +59,8 @@ final class AppState {
     var imageGenDialogRequest = ImageGenDialogRequest.empty
     /// Last expand/infill source when the unified dialog closed (not written to plugin_settings).
     var imageGenLastDialogSourceByFunction: [String: String] = [:]
+    /// Last edit source list when the unified dialog closed (not written to plugin_settings).
+    var imageGenLastEditSourcePaths: [String] = []
     var jobsToolbarVisible = true
     /// User preference: use Mini ⌥[ chrome when the queue is in strip mode; persisted as `jobs_pane_mini_option_bracket_mode`.
     var jobsPaneMiniOptionBracketMode = false

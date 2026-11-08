@@ -37,6 +37,22 @@ final class ImageGenSingleSourceBootstrapTests: XCTestCase {
         XCTAssertEqual(ImageGenSingleSourceBootstrap.resolve(input).path, active)
     }
 
+    func testRestoredBeatsStaleValuePathAfterEditSwitch() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let restored = touch("expand-last.png", in: dir)
+        let staleEdit = touch("edit-stale.png", in: dir)
+        let input = ImageGenSingleSourceBootstrap.Input(
+            forceFromActive: false,
+            lockedPath: nil,
+            valuePath: staleEdit,
+            restoredLastDialogPath: restored,
+            activePath: touch("browser-active.png", in: dir)
+        )
+        XCTAssertEqual(ImageGenSingleSourceBootstrap.resolve(input).path, restored)
+    }
+
     func testRestoredLastDialogUsedWhenNoLockedOrValues() throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
