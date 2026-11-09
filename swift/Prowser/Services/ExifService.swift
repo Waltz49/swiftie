@@ -210,6 +210,32 @@ enum ExifService {
         return ExifEmbeddedTIFFReader.userComment(fromFile: path)
     }
 
+    /// EXIF ``UserComment`` only (Python ``get_usercomment_from_path``); not TIFF ``ImageDescription``.
+    static func exifUserCommentText(path: String) -> String? {
+        let url = URL(fileURLWithPath: path)
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+            if let raw = exif[kCGImagePropertyExifUserComment],
+               let decoded = decodeUserCommentValue(raw) {
+                let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return decoded }
+            }
+        }
+        if detectedRasterExtension(path: path) == "webp",
+           let fileData = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let tiff = WebPImageWriter.extractExifChunk(from: fileData),
+           let comment = ExifEmbeddedTIFFReader.userComment(fromEmbeddedTIFF: tiff) {
+            let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return comment }
+        }
+        if let comment = ExifEmbeddedTIFFReader.userComment(fromFile: path) {
+            let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return comment }
+        }
+        return nil
+    }
+
     /// Lightweight read of description / user-comment fields only (list view comments column).
     static func readUserDescription(path: String) -> String? {
         let url = URL(fileURLWithPath: path)
@@ -251,6 +277,33 @@ enum ExifService {
         return false
     }
 
+    /// True only when EXIF UserComment carries an importable prompt (MFLUX ``prompt`` or ``Prompt:`` body).
+    @MainActor
+    static func exifUserCommentHasImportablePrompt(path: String) -> Bool {
+        extractImportablePromptFromExifUserComment(path: path) != nil
+    }
+
+    @MainActor
+    static func extractImportablePromptFromExifUserComment(path: String) -> String? {
+        guard let comment = exifUserCommentText(path: path) else { return nil }
+        return extractImportablePromptFromExifUserCommentText(comment)
+    }
+
+    @MainActor
+    static func extractImportablePromptFromExifUserCommentText(_ comment: String) -> String? {
+        let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(trimmed) {
+            let prompt = (meta["prompt"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return prompt.isEmpty ? nil : prompt
+        }
+        guard hasPromptSection(trimmed) else { return nil }
+        let prompt = truncateUserCommentBeforePrompt(comment)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return prompt.isEmpty ? nil : prompt
+    }
+
     /// Python/piexif-backed user description (matches information sidebar in Qt app).
     @MainActor
     static func userDescription(path: String) async -> String? {
@@ -276,11 +329,11 @@ enum ExifService {
     /// Prompt text for image-gen import / ⇧⌥/ priming (display-normalized comment → prompt section only).
     @MainActor
     static func importPromptFromPath(_ path: String) async -> String? {
-        guard let comment = await userDescription(path: path) else { return nil }
-        return initialPromptFromUserComment(comment)
+        importPromptText(from: path)
     }
 
     /// Sync fallback when the Python EXIF bridge is unavailable (`load_import_prompt_from_path`).
+    @MainActor
     static func importPromptFromPathSync(_ path: String) -> String? {
         importPromptText(from: path)
     }
@@ -306,13 +359,10 @@ enum ExifService {
         return trimmed
     }
 
+    /// Sync import prompt; same rules as ``extractImportablePromptFromExifUserComment``.
+    @MainActor
     static func importPromptText(from path: String) -> String? {
-        guard let comment = userComment(path: path)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !comment.isEmpty else {
-            return nil
-        }
-        let prompt = ImageGenExifCommentFormatting.extractedPromptText(from: comment)
-        return prompt.isEmpty ? nil : prompt
+        extractImportablePromptFromExifUserComment(path: path)
     }
 
     static func exifTimestamp(path: String) -> Date? {

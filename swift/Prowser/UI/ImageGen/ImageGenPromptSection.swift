@@ -40,8 +40,18 @@ struct ImageGenPromptSection: View {
 
             if showImportButtons {
                 HStack(spacing: 6) {
-                    importSideButton(title: "Import Prompt", action: importPrompt)
-                    importSideButton(title: "Import Rest", action: importRest)
+                    importSideButton(
+                        title: "Import Prompt",
+                        tooltip: importPromptTooltip,
+                        action: importPrompt
+                    )
+                    .id(importPromptTooltip)
+                    importSideButton(
+                        title: "Import Rest",
+                        tooltip: importRestTooltip,
+                        action: importRest
+                    )
+                    .id(importRestTooltip)
                     ImageGenGrammarButton(
                         text: promptBinding,
                         onTextChanged: onValuesChanged
@@ -84,14 +94,53 @@ struct ImageGenPromptSection: View {
         }
     }
 
-    private func importSideButton(title: String, action: @escaping () -> Void) -> some View {
+    private var importTooltipImage: NSImage? {
+        let _ = appState.fileData.currentImagePath
+        let _ = appState.fileData.currentViewMode
+        return ImageGenExifImport.importTooltipImage(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState
+        )
+    }
+
+    private var importPromptTooltip: String {
+        let _ = appState.fileData.currentImagePath
+        let _ = appState.fileData.currentViewMode
+        return ImageGenExifImport.importButtonTooltip(
+            base: "Load prompt text from the image EXIF user comment.",
+            kind: .prompt,
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState,
+            plugins: plugins
+        )
+    }
+
+    private var importRestTooltip: String {
+        let _ = appState.fileData.currentImagePath
+        let _ = appState.fileData.currentViewMode
+        let _ = selectedPluginID
+        return ImageGenExifImport.importButtonTooltip(
+            base: "Import seed, steps, model, and other generation settings from EXIF.",
+            kind: .rest,
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState,
+            plugins: plugins
+        )
+    }
+
+    private func importSideButton(title: String, tooltip: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .buttonStyle(.bordered)
             .controlSize(.small)
             .frame(width: 112, alignment: .center)
-            .help(title == "Import Prompt"
-                ? "Load prompt text from the image EXIF user comment."
-                : "Import seed, steps, model, and other generation settings from EXIF.")
+            .graphicButtonTooltip(
+                text: tooltip,
+                icon: importTooltipImage,
+                iconPixelSize: ImageGenExifImport.importTooltipImageSide
+            )
     }
 
     private var promptBinding: Binding<String> {
@@ -109,7 +158,7 @@ struct ImageGenPromptSection: View {
     }
 
     private func importPrompt() {
-        if !isBrowseOrThumbnail {
+        if function == "create", !isBrowseOrThumbnail {
             ImageGenExifImport.showWarning(
                 title: "Import Text",
                 message: "Select an image in browse view, or select a single thumbnail, before importing."
@@ -137,7 +186,7 @@ struct ImageGenPromptSection: View {
     }
 
     private func importRest() {
-        if !isBrowseOrThumbnail {
+        if function == "create", !isBrowseOrThumbnail {
             ImageGenExifImport.showWarning(
                 title: "Import Rest",
                 message: "Select an image in browse view, or select a single thumbnail, before importing."

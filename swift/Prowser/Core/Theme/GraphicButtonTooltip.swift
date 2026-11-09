@@ -17,7 +17,12 @@ final class GraphicButtonTooltipPopup: NSObject {
     private let chrome: GraphicTooltipChromeView
     private let stack: NSStackView
     private let iconView: NSImageView
+    private let iconWidthConstraint: NSLayoutConstraint
+    private let iconHeightConstraint: NSLayoutConstraint
+    private let textColumn: NSStackView
     private let textField: NSTextField
+    private let footerField: NSTextField
+    private static let importNoDataMarker = ImageGenExifImport.importTooltipNoDataLine
     private var showTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private var forceHideTask: Task<Void, Never>?
@@ -45,12 +50,12 @@ final class GraphicButtonTooltipPopup: NSObject {
         iconView = NSImageView()
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.imageAlignment = .alignCenter
-        iconView.wantsLayer = false
+        iconView.wantsLayer = true
+        iconView.layer?.masksToBounds = true
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: Self.iconPx),
-            iconView.heightAnchor.constraint(equalToConstant: Self.iconPx),
-        ])
+        iconWidthConstraint = iconView.widthAnchor.constraint(equalToConstant: Self.iconPx)
+        iconHeightConstraint = iconView.heightAnchor.constraint(equalToConstant: Self.iconPx)
+        NSLayoutConstraint.activate([iconWidthConstraint, iconHeightConstraint])
 
         textField = NSTextField(wrappingLabelWithString: "")
         textField.isEditable = false
@@ -65,9 +70,28 @@ final class GraphicButtonTooltipPopup: NSObject {
         textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        stack = NSStackView(views: [iconView, textField])
+        footerField = NSTextField(wrappingLabelWithString: "")
+        footerField.isEditable = false
+        footerField.isSelectable = false
+        footerField.isBezeled = false
+        footerField.drawsBackground = false
+        footerField.backgroundColor = .clear
+        footerField.font = NSFont.systemFont(ofSize: 11)
+        footerField.maximumNumberOfLines = 0
+        footerField.lineBreakMode = .byWordWrapping
+        footerField.preferredMaxLayoutWidth = Self.textMaxWidth
+        footerField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        footerField.setContentCompressionResistancePriority(.required, for: .vertical)
+        footerField.isHidden = true
+
+        textColumn = NSStackView(views: [textField, footerField])
+        textColumn.orientation = .vertical
+        textColumn.alignment = .leading
+        textColumn.spacing = 6
+
+        stack = NSStackView(views: [iconView, textColumn])
         stack.orientation = .horizontal
-        stack.alignment = .centerY
+        stack.alignment = .top
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 8)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -76,10 +100,10 @@ final class GraphicButtonTooltipPopup: NSObject {
         chrome.translatesAutoresizingMaskIntoConstraints = false
         chrome.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: chrome.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: chrome.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: chrome.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: chrome.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: chrome.leadingAnchor, constant: 1),
+            stack.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -1),
+            stack.topAnchor.constraint(equalTo: chrome.topAnchor, constant: 1),
+            stack.bottomAnchor.constraint(equalTo: chrome.bottomAnchor, constant: -1),
         ])
         panel.contentView = chrome
         super.init()
@@ -96,17 +120,25 @@ final class GraphicButtonTooltipPopup: NSObject {
         text: String,
         icon: NSImage,
         colors: ThemeColors,
-        anchorView: NSView?
+        anchorView: NSView?,
+        iconPixelSize: CGFloat = 48
     ) {
         showTask?.cancel()
         stopMonitoring()
         panel.orderOut(nil)
         activeToken = token
         let delayNs = UInt64(TimingConstants.graphicButtonTooltipDelayMs) * 1_000_000
+        let pixelSize = iconPixelSize
         showTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: delayNs)
             guard !Task.isCancelled, activeToken == token else { return }
-            present(text: text, icon: icon, colors: colors, anchorView: anchorView)
+            present(
+                text: text,
+                icon: icon,
+                colors: colors,
+                anchorView: anchorView,
+                iconPixelSize: pixelSize
+            )
         }
     }
 
@@ -181,7 +213,21 @@ final class GraphicButtonTooltipPopup: NSObject {
         return view.bounds.contains(pointInView)
     }
 
-    private func present(text: String, icon: NSImage, colors: ThemeColors, anchorView: NSView?) {
+    private func present(
+        text: String,
+        icon: NSImage,
+        colors: ThemeColors,
+        anchorView: NSView?,
+        iconPixelSize: CGFloat = 48
+    ) {
+        let iconSide = max(1, iconPixelSize)
+        iconWidthConstraint.constant = iconSide
+        iconHeightConstraint.constant = iconSide
+        if iconSide > Self.iconPx {
+            stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        } else {
+            stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 8)
+        }
         // Python `graphic_button_tooltip_stylesheet`: qtooltip_bg_hex / fg / border.
         // Draw in sRGB AppKit colors — SwiftUI layer colors and light NSPanel chrome
         // otherwise yield a white system tooltip fill.
@@ -195,16 +241,7 @@ final class GraphicButtonTooltipPopup: NSObject {
             ? .darkAqua
             : .aqua
         panel.appearance = NSAppearance(named: appearanceName)
-        textField.appearance = NSAppearance(named: appearanceName)
-        textField.textColor = fg
-        textField.stringValue = text
-        let font = textField.font ?? NSFont.systemFont(ofSize: 11)
-        let textBounds = (text as NSString).boundingRect(
-            with: NSSize(width: Self.textMaxWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font]
-        )
-        textField.preferredMaxLayoutWidth = min(Self.textMaxWidth, ceil(textBounds.width))
+        applyTooltipText(text, appearanceName: appearanceName, foreground: fg)
         iconView.image = icon
         iconView.isHidden = false
 
@@ -228,6 +265,50 @@ final class GraphicButtonTooltipPopup: NSObject {
 
     /// Python `position_tooltip_near_cursor`: below-right of the cursor, flipped/clamped to the host window.
     /// Cursor is taken only when it is still over the hovered button so the box stays near that control.
+    private func applyTooltipText(_ text: String, appearanceName: NSAppearance.Name, foreground fg: NSColor) {
+        let appearance = NSAppearance(named: appearanceName)
+        textField.appearance = appearance
+        footerField.appearance = appearance
+        textField.textColor = fg
+        footerField.textColor = fg
+        let font = textField.font ?? NSFont.systemFont(ofSize: 11)
+        let marker = Self.importNoDataMarker
+        let markerPrefix = "\n\n" + marker
+        if let range = text.range(of: markerPrefix, options: .backwards) {
+            let body = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            textField.stringValue = body
+            footerField.stringValue = marker
+            footerField.isHidden = false
+        } else if text.trimmingCharacters(in: .whitespacesAndNewlines) == marker {
+            textField.stringValue = ""
+            footerField.stringValue = marker
+            footerField.isHidden = false
+        } else {
+            textField.stringValue = text
+            footerField.stringValue = ""
+            footerField.isHidden = true
+        }
+        for field in [textField, footerField] {
+            if let cell = field.cell as? NSTextFieldCell {
+                cell.wraps = true
+                cell.isScrollable = false
+                cell.truncatesLastVisibleLine = false
+            }
+        }
+        let bodyText = textField.stringValue
+        if bodyText.contains("\n") || !footerField.isHidden {
+            textField.preferredMaxLayoutWidth = Self.textMaxWidth
+            footerField.preferredMaxLayoutWidth = Self.textMaxWidth
+        } else {
+            let textBounds = (bodyText as NSString).boundingRect(
+                with: NSSize(width: Self.textMaxWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: font]
+            )
+            textField.preferredMaxLayoutWidth = min(Self.textMaxWidth, max(ceil(textBounds.width), 1))
+        }
+    }
+
     private func positionNearButton(size: NSSize, anchorView: NSView?) -> NSPoint {
         let cursor = NSEvent.mouseLocation
         let buttonRect = Self.screenRect(for: anchorView)
@@ -351,45 +432,61 @@ private struct GraphicTooltipAnchorView: NSViewRepresentable {
 struct GraphicButtonTooltipModifier: ViewModifier {
     let text: String
     let icon: NSImage?
+    var iconPixelSize: CGFloat = 48
 
     @Environment(\.themeColors) private var colors
     @State private var token = UUID()
     @State private var anchorView: NSView?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        let tip = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if tip.isEmpty {
-            content
-        } else if let icon, icon.size.width > 0, icon.size.height > 0 {
-            content
-                .background {
+        let hasIcon = icon.map { $0.size.width > 0 && $0.size.height > 0 } ?? false
+        let decorated = content
+            .background {
+                if hasIcon {
                     GraphicTooltipAnchorView(nsView: $anchorView)
                         .allowsHitTesting(false)
                 }
-                .onHover { hovering in
-                    if hovering {
+            }
+            .onChange(of: text) { _, _ in
+                GraphicButtonTooltipPopup.shared.hide(token: token)
+            }
+            .onHover { hovering in
+                let tip = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !tip.isEmpty else { return }
+                if hovering {
+                    if hasIcon, let icon {
                         GraphicButtonTooltipPopup.shared.scheduleShow(
                             token: token,
                             text: tip,
                             icon: icon,
                             colors: colors,
-                            anchorView: anchorView
+                            anchorView: anchorView,
+                            iconPixelSize: iconPixelSize
                         )
-                    } else {
-                        GraphicButtonTooltipPopup.shared.hide(token: token)
                     }
-                }
-                .onDisappear {
+                } else {
                     GraphicButtonTooltipPopup.shared.hide(token: token)
                 }
+            }
+            .onDisappear {
+                GraphicButtonTooltipPopup.shared.hide(token: token)
+            }
+        let tip = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hasIcon || tip.isEmpty {
+            decorated
         } else {
-            content.help(tip)
+            decorated.help(tip)
         }
     }
 }
 
 extension View {
-    func graphicButtonTooltip(text: String, icon: NSImage?) -> some View {
-        modifier(GraphicButtonTooltipModifier(text: text, icon: icon))
+    func graphicButtonTooltip(
+        text: String,
+        icon: NSImage?,
+        iconPixelSize: CGFloat = 48
+    ) -> some View {
+        modifier(GraphicButtonTooltipModifier(text: text, icon: icon, iconPixelSize: iconPixelSize))
     }
 }

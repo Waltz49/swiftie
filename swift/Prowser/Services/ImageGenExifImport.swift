@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 
 /// EXIF import helpers ported from `image_gen_dialog.py` and `image_gen_naming.py`.
 @MainActor
@@ -8,10 +9,88 @@ enum ImageGenExifImport {
         "jpg", "jpeg", "png", "tiff", "tif", "webp",
     ]
 
+    /// Tooltip slot size; preview pixels are inset so the thumb does not cover the tooltip border.
+    static let importTooltipImageSide: CGFloat = 96
+    private static let importTooltipImageContentInset: CGFloat = 4
+    static let importTooltipNoDataLine = "** No data in file to import **"
+
     struct ImportResult {
         var values: [String: Any]
         var selectedPluginID: String?
         var sourcePaths: [String]?
+    }
+
+    enum ImportTooltipKind {
+        case prompt
+        case rest
+    }
+
+    static func importTooltipText(base: String, hasImportableData: Bool) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hasImportableData else { return trimmed }
+        guard !trimmed.isEmpty else { return importTooltipNoDataLine }
+        return trimmed + "\n\n" + importTooltipNoDataLine
+    }
+
+    /// Unified resolver for import image path (shared by prompt/rest tooltips and actions).
+    static func importImagePathForTooltip(
+        function: String,
+        sourcePath: String?,
+        appState: AppState
+    ) -> String? {
+        imagePathForImport(function: function, sourcePath: sourcePath, appState: appState)
+    }
+
+    static func importFromFileDataAvailable(
+        kind: ImportTooltipKind,
+        function: String,
+        sourcePath: String?,
+        appState: AppState,
+        plugins: [[String: Any]]
+    ) -> Bool {
+        guard let path = importImagePathForTooltip(function: function, sourcePath: sourcePath, appState: appState) else {
+            return false
+        }
+        switch kind {
+        case .prompt:
+            return ExifService.exifUserCommentHasImportablePrompt(path: path)
+        case .rest:
+            guard let comment = ExifService.exifUserCommentText(path: path) else { return false }
+            let gated = gatedExifParams(parseExifGenerationMetadata(comment), plugins: plugins)
+            return !gated.isEmpty
+        }
+    }
+
+    static func importButtonTooltip(
+        base: String,
+        kind: ImportTooltipKind,
+        function: String,
+        sourcePath: String?,
+        appState: AppState,
+        plugins: [[String: Any]]
+    ) -> String {
+        importTooltipText(
+            base: base,
+            hasImportableData: importFromFileDataAvailable(
+                kind: kind,
+                function: function,
+                sourcePath: sourcePath,
+                appState: appState,
+                plugins: plugins
+            )
+        )
+    }
+
+    /// EXIF-oriented thumb for unified-dialog Import Prompt / Import Rest graphic tooltips.
+    static func importTooltipImage(
+        function: String,
+        sourcePath: String?,
+        appState: AppState
+    ) -> NSImage? {
+        guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
+            return nil
+        }
+        return loadSquareTooltipImage(path: path, side: importTooltipImageSide)
     }
 
     static func imagePathForImport(
@@ -19,15 +98,17 @@ enum ImageGenExifImport {
         sourcePath: String?,
         appState: AppState
     ) -> String? {
-        if isBrowseOrThumbnail(appState) {
+        switch function {
+        case "edit", "expand", "infill":
+            // Python edit/expand/infill panels: EXIF import from dialog ``source_path`` (canvas),
+            // not the browse-list active image.
+            guard let sourcePath, FileManager.default.isReadableFile(atPath: sourcePath) else { return nil }
+            return exifImportablePath(sourcePath)
+        default:
+            guard isBrowseOrThumbnail(appState) else { return nil }
             guard let path = activeImagePath(appState) else { return nil }
             return exifImportablePath(path)
         }
-        if function == "edit" || function == "expand" || function == "infill" {
-            guard let sourcePath, FileManager.default.isReadableFile(atPath: sourcePath) else { return nil }
-            return exifImportablePath(sourcePath)
-        }
-        return nil
     }
 
     /// Image path for custom-size **Import** (pixel dimensions). Port of ``_image_path_for_import_size``.
@@ -92,7 +173,7 @@ enum ImageGenExifImport {
         guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
             return nil
         }
-        guard let comment = await ExifService.userDescription(path: path), !comment.isEmpty else {
+        guard let comment = ExifService.exifUserCommentText(path: path) else {
             return nil
         }
         let parsed = parseExifGenerationMetadata(comment)
@@ -216,6 +297,48 @@ enum ImageGenExifImport {
         guard exifUserCommentExtensions.contains(ext) else { return nil }
         guard FileManager.default.isReadableFile(atPath: path) else { return nil }
         return path
+    }
+
+    private static func loadSquareTooltipImage(path: String, side: CGFloat) -> NSImage? {
+        let maxPixel = max(1, Int(side.rounded()))
+        let url = URL(fileURLWithPath: path) as CFURL
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url, sourceOptions as CFDictionary) else {
+            return scaledSquareTooltipImage(ImageDisplayLoader.orientedImage(for: path, maxPixelSize: maxPixel), side: side)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return scaledSquareTooltipImage(ImageDisplayLoader.orientedImage(for: path, maxPixelSize: maxPixel), side: side)
+        }
+        let display = ThumbnailTransparencyCompositor.compositeOntoCheckerboardIfNeeded(cgImage)
+        let image = NSImage(size: NSSize(width: display.width, height: display.height))
+        image.lockFocus()
+        NSGraphicsContext.current?.cgContext.draw(display, in: NSRect(origin: .zero, size: image.size))
+        image.unlockFocus()
+        return scaledSquareTooltipImage(image, side: side)
+    }
+
+    private static func scaledSquareTooltipImage(_ image: NSImage?, side: CGFloat) -> NSImage? {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return nil }
+        let square = NSSize(width: side, height: side)
+        let inset = importTooltipImageContentInset
+        let contentSide = max(1, side - 2 * inset)
+        let scale = min(contentSide / image.size.width, contentSide / image.size.height, 1)
+        let drawSize = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        let drawOrigin = NSPoint(
+            x: inset + (contentSide - drawSize.width) / 2,
+            y: inset + (contentSide - drawSize.height) / 2
+        )
+        let preview = NSImage(size: square)
+        preview.lockFocus()
+        ImageDisplayLoader.draw(image, in: NSRect(origin: drawOrigin, size: drawSize))
+        preview.unlockFocus()
+        return preview
     }
 
     /// Lowercase match token; align ``FLUX 2`` (generation EXIF) with ``FLUX.2`` (HF menu labels).
