@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import subprocess
 
@@ -12,7 +11,6 @@ from config import get_config
 from exit_scripts import (
     SETTING_IMAGE_AI_EXIT,
     SETTING_TEXT_AI_EXIT,
-    any_prompt_filter_exit_configured,
     build_exit_script_argv,
     get_exit_script_setting,
 )
@@ -81,14 +79,7 @@ def imagegen_values_for_dialog_save(values: dict, panel) -> dict:
 
 def _prompt_filter_exits_enabled() -> bool:
     settings = get_config().load_settings()
-    if settings.get("use_prompt_filter_exits"):
-        return True
-    if any_prompt_filter_exit_configured():
-        return True
-    for env_var in ("PROWSER_TEXT_AI_EXIT", "PROWSER_IMAGE_AI_EXIT"):
-        if os.environ.get(env_var, "").strip():
-            return True
-    return False
+    return bool(settings.get("use_prompt_filter_exits"))
 
 
 def apply_prompt_exits_after_flux_job_resolution(values: dict) -> bool:
@@ -111,8 +102,7 @@ def apply_prompt_exits_after_flux_job_resolution(values: dict) -> bool:
 def _invoke_exit_for_setting(text: str, setting_key: str) -> str:
     if not _prompt_filter_exits_enabled():
         logging.debug(
-            "prompt filter exit skipped (%s): use_prompt_filter_exits disabled "
-            "and no exit script configured",
+            "prompt filter exit skipped (%s): use_prompt_filter_exits disabled",
             setting_key,
         )
         return text

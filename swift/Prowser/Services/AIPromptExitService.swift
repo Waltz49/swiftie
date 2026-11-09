@@ -38,16 +38,7 @@ enum AIPromptExitService {
     }
 
     private static func promptFilterExitsEnabled(config: AppConfig) -> Bool {
-        if config.bool(forKey: "use_prompt_filter_exits", default: false) { return true }
-        if !config.string(forKey: ExitScriptUtils.settingTextAIExit).isEmpty { return true }
-        if !config.string(forKey: ExitScriptUtils.settingImageAIExit).isEmpty { return true }
-        if !(ProcessInfo.processInfo.environment["PROWSER_TEXT_AI_EXIT"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return true
-        }
-        if !(ProcessInfo.processInfo.environment["PROWSER_IMAGE_AI_EXIT"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return true
-        }
-        return false
+        config.bool(forKey: "use_prompt_filter_exits", default: false)
     }
 
     private static func invokeExitScript(raw: String, text: String) -> String {
