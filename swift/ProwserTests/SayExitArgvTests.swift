@@ -72,6 +72,12 @@ final class SayExitArgvTests: XCTestCase {
         XCTAssertEqual(ExitScriptUtils.textForSpeech(" *hello* "), "hello")
     }
 
+    func testExitScriptProcessEnvironmentSetsProwserTmpDir() {
+        let scratch = "/tmp/prowser-exit-test"
+        let env = ExitScriptUtils.exitScriptProcessEnvironment(scriptPath: "/bin/echo", tmpDir: scratch)
+        XCTAssertEqual(env[ExitScriptUtils.envTmpDir], scratch)
+    }
+
     @MainActor
     func testNormalizeExitScriptPreservesTrailingArgs() {
         let raw = "/bin/echo -v semaine"

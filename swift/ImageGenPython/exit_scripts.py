@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import sys
+import tempfile
 from typing import NamedTuple
 
 from config import get_config
@@ -23,6 +24,9 @@ _LEGACY_ENV_BY_SETTING = {
     SETTING_IMAGE_AI_EXIT: "PROWSER_IMAGE_AI_EXIT",
     SETTING_SAY_EXIT: "PROWSER_SAY_EXIT",
 }
+
+ENV_PROWSER_TMP_DIR = "PROWSER_TMP_DIR"
+_EXIT_INVOCATION_SCRATCH_PREFIX = "exit-"
 
 
 class ParsedExitScript(NamedTuple):
@@ -190,3 +194,37 @@ def any_prompt_filter_exit_configured() -> bool:
         get_exit_script_setting(SETTING_TEXT_AI_EXIT)
         or get_exit_script_setting(SETTING_IMAGE_AI_EXIT)
     )
+
+
+def make_exit_invocation_scratch_directory() -> str | None:
+    """Create a per-invocation scratch dir under the configured profile work-temp root."""
+    from prowser_temp_files import ensure_temporary_files_directory
+
+    try:
+        base = ensure_temporary_files_directory()
+        return tempfile.mkdtemp(prefix=_EXIT_INVOCATION_SCRATCH_PREFIX, dir=base)
+    except OSError:
+        return None
+
+
+def remove_exit_invocation_scratch_directory(path: str | None) -> None:
+    if not path:
+        return
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def exit_script_process_environment(
+    script_path: str,
+    *,
+    tmp_dir: str | None = None,
+) -> dict[str, str]:
+    """Environment for exit-script subprocesses (port of Swift ``exitScriptProcessEnvironment``)."""
+    env = dict(os.environ)
+    if tmp_dir and tmp_dir.strip():
+        env[ENV_PROWSER_TMP_DIR] = os.path.abspath(tmp_dir)
+    env.setdefault("LANG", "en_US.UTF-8")
+    env.setdefault("LC_ALL", "en_US.UTF-8")
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8:utf-8"
+    _ = script_path  # reserved for PATH/shebang augmentation on Swift
+    return env

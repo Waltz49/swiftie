@@ -8,6 +8,9 @@ enum ExitScriptUtils {
     static let useReadAloudExitKey = "use_read_aloud_exit"
     static let envSayExit = "PROWSER_SAY_EXIT"
     static let envSayVoice = "PROWSER_SAY_VOICE"
+    static let envTmpDir = "PROWSER_TMP_DIR"
+
+    private static let exitInvocationScratchPrefix = "exit-"
 
     static let exitScriptPrefixes = ["python", "python3", "pypy"]
 
@@ -166,8 +169,28 @@ enum ExitScriptUtils {
         return [scriptPath] + Array(parts.dropFirst(1))
     }
 
+    /// Per-invocation scratch directory under the profile work-temp root (``temporaryFilesDirectory``).
+    static func makeExitInvocationScratchDirectory(tempRoot: URL) -> String? {
+        let base = tempRoot.standardizedFileURL
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let path = base
+            .appendingPathComponent("\(exitInvocationScratchPrefix)\(UUID().uuidString)", isDirectory: true)
+            .path
+        do {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+            return path
+        } catch {
+            return nil
+        }
+    }
+
+    static func removeExitInvocationScratchDirectory(_ path: String?) {
+        guard let path, !path.isEmpty else { return }
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
     /// Environment for exit-script subprocesses (venv bin on PATH for pocket-tts etc.).
-    static func exitScriptProcessEnvironment(scriptPath: String) -> [String: String] {
+    static func exitScriptProcessEnvironment(scriptPath: String, tmpDir: String? = nil) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         var pathPrefixes: [String] = []
         if let shebangBin = shebangInterpreterBinDirectory(scriptPath) {
@@ -187,6 +210,9 @@ enum ExitScriptUtils {
         env["LC_ALL"] = env["LC_ALL"] ?? "en_US.UTF-8"
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8:utf-8"
+        if let tmpDir, !tmpDir.isEmpty {
+            env[envTmpDir] = tmpDir
+        }
         return env
     }
 

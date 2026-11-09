@@ -54,6 +54,7 @@ enum SpeechReader {
     private static var exitSpeaking = false
     private static var exitProcessGeneration: UInt = 0
     private static var exitStartMonotonic: UInt64 = 0
+    private static var exitInvocationScratchByGeneration: [UInt: String] = [:]
 
     static var isSpeaking: Bool { helper.isSpeaking || exitSpeaking }
 
@@ -117,11 +118,19 @@ enum SpeechReader {
         onStateChange?()
     }
 
+    private static func cleanupExitScratch(generation: UInt) {
+        if let path = exitInvocationScratchByGeneration.removeValue(forKey: generation) {
+            ExitScriptUtils.removeExitInvocationScratchDirectory(path)
+        }
+    }
+
     private static func stopAll() {
         helper.stop()
         if let proc = exitProcess, proc.isRunning {
             proc.terminate()
         }
+        let generation = exitProcessGeneration
+        cleanupExitScratch(generation: generation)
         exitProcess = nil
         exitSpeaking = false
         exitProcessGeneration &+= 1
@@ -145,7 +154,11 @@ enum SpeechReader {
 
         SayExitLog.log(config, "before argv=\(argvSummary) chars=\(text.count)")
 
-        let env = ExitScriptUtils.exitScriptProcessEnvironment(scriptPath: scriptPath)
+        let scratch = ExitScriptUtils.makeExitInvocationScratchDirectory(tempRoot: config.temporaryFilesDirectory)
+        if let scratch {
+            exitInvocationScratchByGeneration[generation] = scratch
+        }
+        let env = ExitScriptUtils.exitScriptProcessEnvironment(scriptPath: scriptPath, tmpDir: scratch)
 
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
@@ -183,6 +196,7 @@ enum SpeechReader {
                 Task { @MainActor in
                     SayExitLog.log(config, "after start_failed error=\(error.localizedDescription) duration_ms=0")
                     if generation == exitProcessGeneration {
+                        cleanupExitScratch(generation: generation)
                         exitProcess = nil
                         exitSpeaking = false
                         onStateChange?()
@@ -224,6 +238,7 @@ enum SpeechReader {
         let code = process.terminationStatus
         let suffix = timedOut ? " timed_out=true" : ""
         SayExitLog.log(config, "after exitCode=\(code) duration_ms=\(elapsedSinceStartMs())\(suffix)")
+        cleanupExitScratch(generation: generation)
         exitProcess = nil
         exitSpeaking = false
         onStateChange?()

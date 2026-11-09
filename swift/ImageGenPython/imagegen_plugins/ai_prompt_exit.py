@@ -12,7 +12,10 @@ from exit_scripts import (
     SETTING_IMAGE_AI_EXIT,
     SETTING_TEXT_AI_EXIT,
     build_exit_script_argv,
+    exit_script_process_environment,
     get_exit_script_setting,
+    make_exit_invocation_scratch_directory,
+    remove_exit_invocation_scratch_directory,
 )
 
 _EXIT_TIMEOUT_SEC = 30
@@ -125,30 +128,37 @@ def _invoke_exit_script(raw: str, text: str, *, setting_key: str = "") -> str:
         )
         return text
 
+    script_path = argv[1] if len(argv) > 1 else argv[0]
+    scratch = make_exit_invocation_scratch_directory()
+    env = exit_script_process_environment(script_path, tmp_dir=scratch)
     try:
-        result = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=_EXIT_TIMEOUT_SEC,
-        )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        logging.debug(
-            "prompt filter exit failed (%s): %s argv=%r",
-            setting_key or "exit",
-            e,
-            argv,
-        )
-        return text
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=_EXIT_TIMEOUT_SEC,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logging.debug(
+                "prompt filter exit failed (%s): %s argv=%r",
+                setting_key or "exit",
+                e,
+                argv,
+            )
+            return text
 
-    if result.returncode != 0:
-        logging.debug(
-            "prompt filter exit nonzero (%s): code=%s stderr=%r argv=%r",
-            setting_key or "exit",
-            result.returncode,
-            (result.stderr or "").strip(),
-            argv,
-        )
-        return text
+        if result.returncode != 0:
+            logging.debug(
+                "prompt filter exit nonzero (%s): code=%s stderr=%r argv=%r",
+                setting_key or "exit",
+                result.returncode,
+                (result.stderr or "").strip(),
+                argv,
+            )
+            return text
 
-    return result.stdout.rstrip("\n")
+        return result.stdout.rstrip("\n")
+    finally:
+        remove_exit_invocation_scratch_directory(scratch)

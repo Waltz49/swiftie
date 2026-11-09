@@ -27,28 +27,30 @@ enum AIPromptExitService {
         guard promptFilterExitsEnabled(config: config) else { return text }
         let raw = config.string(forKey: ExitScriptUtils.settingTextAIExit)
         guard !raw.isEmpty else { return text }
-        return invokeExitScript(raw: raw, text: text)
+        return invokeExitScript(raw: raw, text: text, config: config)
     }
 
     static func applyImageAIExit(_ text: String, config: AppConfig) -> String {
         guard promptFilterExitsEnabled(config: config) else { return text }
         let raw = config.string(forKey: ExitScriptUtils.settingImageAIExit)
         guard !raw.isEmpty else { return text }
-        return invokeExitScript(raw: raw, text: text)
+        return invokeExitScript(raw: raw, text: text, config: config)
     }
 
     private static func promptFilterExitsEnabled(config: AppConfig) -> Bool {
         config.bool(forKey: "use_prompt_filter_exits", default: false)
     }
 
-    private static func invokeExitScript(raw: String, text: String) -> String {
+    private static func invokeExitScript(raw: String, text: String, config: AppConfig) -> String {
         let argv = ExitScriptUtils.buildExitScriptArgv(raw: raw, promptText: text)
         guard !argv.isEmpty else { return text }
         let scriptPath = argv.count > 1 ? argv[1] : argv[0]
+        let scratch = ExitScriptUtils.makeExitInvocationScratchDirectory(tempRoot: config.temporaryFilesDirectory)
+        defer { ExitScriptUtils.removeExitInvocationScratchDirectory(scratch) }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: argv[0])
         process.arguments = Array(argv.dropFirst())
-        process.environment = ExitScriptUtils.exitScriptProcessEnvironment(scriptPath: scriptPath)
+        process.environment = ExitScriptUtils.exitScriptProcessEnvironment(scriptPath: scriptPath, tmpDir: scratch)
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
