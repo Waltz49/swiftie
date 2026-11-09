@@ -1383,14 +1383,8 @@ final class ImageGenController {
 
     func jobsHeaderStatusText() -> String {
         let rows = queueSnapshot()
-        let activeIndex = rows.firstIndex(where: { $0.isActive })
-        let tail: [QueueRowSnapshot]
-        if let activeIndex {
-            tail = Array(rows[(activeIndex + 1)...])
-        } else {
-            tail = rows
-        }
-        let waiting = tail.filter { !$0.held }.count
+        // Include queued rows before the active display slot (reorder can place them ahead of the runner).
+        let waiting = rows.filter { !$0.isActive && !$0.held }.count
         if waiting <= 0 { return "" }
         if holdJobQueue {
             return "=\(waiting) "
