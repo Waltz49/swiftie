@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingOpenFlush: DispatchWorkItem?
     private var menuBarDedupObserver: NSObjectProtocol?
     private var chatToggleShortcutMonitor: Any?
+    private var cooperativeTerminationSignals: CooperativeTerminationSignals?
+    private var signalTerminateInFlight = false
 
     override init() {
         launchOptions = LaunchOptions.parse()
@@ -70,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installChatToggleShortcutMonitor()
         installMenuBarDeduplication()
         installMainWindowGuard()
+        installCooperativeTerminationSignals()
         applyLaunchOptions()
     }
 
@@ -130,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
         appState.clearQuitTerminateCancellationState()
+        signalTerminateInFlight = false
         return .terminateCancel
     }
 
@@ -174,6 +178,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             title: "Prowser is already running",
             message: "Could not forward the open request to the running instance."
         )
+        NSApp.terminate(nil)
+    }
+
+    private func installCooperativeTerminationSignals() {
+        guard cooperativeTerminationSignals == nil else { return }
+        let bridge = CooperativeTerminationSignals { [weak self] in
+            self?.handleCooperativeTerminationSignal()
+        }
+        bridge.install()
+        cooperativeTerminationSignals = bridge
+    }
+
+    private func handleCooperativeTerminationSignal() {
+        if ProwserProcessEnvironment.fastExit {
+            exit(0)
+        }
+        guard !signalTerminateInFlight else { return }
+        signalTerminateInFlight = true
         NSApp.terminate(nil)
     }
 

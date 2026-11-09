@@ -76,6 +76,7 @@ struct LaunchOptions: Sendable {
 
         Environment:
           PROWSER_PROFILE       Profile directory (same as -p/--profile)
+          PROWSER_FAST_EXIT=1   SIGTERM/SIGINT (e.g. pkill) exit immediately without quit UI
         """
         print(text)
     }
