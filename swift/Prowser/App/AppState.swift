@@ -788,6 +788,7 @@ final class AppState {
     /// Main window tagged and ready — refresh menu shortcut enablement (launch / restore).
     func noteMainBrowserWindowReady() {
         menuRefresh.refreshBrowserWindowShortcuts()
+        WindowFullscreen.applyPendingLaunchFullscreenIfNeeded()
     }
 
     func bumpMenuCommandsRevision() {

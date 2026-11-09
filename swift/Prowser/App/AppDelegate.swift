@@ -242,11 +242,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func closeDuplicateMainWindows() {
         guard isPrimary else { return }
+        if WindowFullscreen.isLaunchFullscreenSettling() { return }
         let candidates = NSApp.windows.filter { window in
             BrowserWindowIdentity.isTaggedMainBrowserWindow(window)
         }
         guard candidates.count > 1 else { return }
-        let keeper = candidates.first { $0.identifier?.rawValue == BrowserWindowIdentity.main }
+        let keeper = candidates.first(where: { $0.styleMask.contains(.fullScreen) })
+            ?? candidates.first { $0.identifier?.rawValue == BrowserWindowIdentity.main }
             ?? candidates.first(where: \.isVisible)
             ?? candidates.first
         guard let keeper else { return }

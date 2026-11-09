@@ -5,8 +5,21 @@ import SwiftUI
 @MainActor
 final class ChatComposePromptNSTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
+    var onKeyboardFocusChange: ((Bool) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onKeyboardFocusChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onKeyboardFocusChange?(false) }
+        return resigned
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if ChatKeyCommand.isCommandReturn(event) {
@@ -32,7 +45,12 @@ final class ChatComposePromptHostView: NSView {
     private let minHeight: CGFloat = 44
     private let maxHeight: CGFloat = 140
     var onExitKeyboardFocus: (() -> Void)?
+    var onKeyboardFocusChange: ((Bool) -> Void)?
     private var clickAwayMonitor: Any?
+    private var chromeTextColor: NSColor = .labelColor
+    private var chromeUnfocusedBackground: NSColor = .clear
+    private var chromeFocusedBackground: NSColor = .clear
+    private var keyboardFocused = false
 
     init() {
         scrollView = ChatComposePromptScrollView()
@@ -62,6 +80,10 @@ final class ChatComposePromptHostView: NSView {
         ImageGenPromptPlainTextFieldSettings.applyUnicodePlainTextInputDefaults(to: textView)
         ImageGenPromptPlainTextFieldSettings.applyAutomaticTextReplacementEnabled(to: textView)
 
+        textView.onKeyboardFocusChange = { [weak self] focused in
+            self?.handleKeyboardFocus(focused)
+        }
+
         scrollView.documentView = textView
         addSubview(scrollView)
         NSLayoutConstraint.activate([
@@ -74,13 +96,35 @@ final class ChatComposePromptHostView: NSView {
         ])
     }
 
+    func setChromePalette(
+        textColor: NSColor,
+        unfocusedBackground: NSColor,
+        focusedBackground: NSColor,
+        keyboardFocused: Bool
+    ) {
+        chromeTextColor = textColor
+        chromeUnfocusedBackground = unfocusedBackground
+        chromeFocusedBackground = focusedBackground
+        let resolvedFocus = keyboardFocused || window?.firstResponder === textView
+        self.keyboardFocused = resolvedFocus
+        let bg = resolvedFocus ? focusedBackground : unfocusedBackground
+        applyChrome(textColor: textColor, backgroundColor: bg)
+    }
+
+    private func handleKeyboardFocus(_ focused: Bool) {
+        guard keyboardFocused != focused else { return }
+        keyboardFocused = focused
+        let bg = focused ? chromeFocusedBackground : chromeUnfocusedBackground
+        applyChrome(textColor: chromeTextColor, backgroundColor: bg)
+        onKeyboardFocusChange?(focused)
+    }
+
     func applyChrome(textColor: NSColor, backgroundColor: NSColor) {
         textView.textColor = textColor
         textView.backgroundColor = .clear
-        scrollView.drawsBackground = false
-        if backgroundColor != .clear {
-            scrollView.backgroundColor = backgroundColor
-        }
+        let paintsBackground = backgroundColor != .clear
+        scrollView.drawsBackground = paintsBackground
+        scrollView.backgroundColor = paintsBackground ? backgroundColor : .clear
     }
 
     func setInputEnabled(_ enabled: Bool) {
@@ -162,8 +206,10 @@ final class ChatComposePromptScrollView: NSScrollView {
 
 struct ChatComposePromptTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var isKeyboardFocused: Bool
     var textColor: NSColor
-    var backgroundColor: NSColor
+    var unfocusedBackgroundColor: NSColor
+    var focusedBackgroundColor: NSColor
     var inputEnabled: Bool
     var isStreaming: Bool
     var onCommandReturn: () -> Void
@@ -179,7 +225,7 @@ struct ChatComposePromptTextView: NSViewRepresentable {
         host.textView.string = text
         host.textView.delegate = context.coordinator
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
-        host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
+        wireChrome(host: host, coordinator: context.coordinator)
         host.setInputEnabled(inputEnabled)
         host.onExitKeyboardFocus = onExitKeyboardFocus
         context.coordinator.wasStreaming = isStreaming
@@ -191,7 +237,7 @@ struct ChatComposePromptTextView: NSViewRepresentable {
         context.coordinator.parent = self
         host.onExitKeyboardFocus = onExitKeyboardFocus
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
-        host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
+        wireChrome(host: host, coordinator: context.coordinator)
         host.setInputEnabled(inputEnabled)
         let wasStreaming = context.coordinator.wasStreaming
         context.coordinator.wasStreaming = isStreaming
@@ -214,6 +260,17 @@ struct ChatComposePromptTextView: NSViewRepresentable {
     }
 
     @MainActor
+    private func wireChrome(host: ChatComposePromptHostView, coordinator: Coordinator) {
+        host.setChromePalette(
+            textColor: textColor,
+            unfocusedBackground: unfocusedBackgroundColor,
+            focusedBackground: focusedBackgroundColor,
+            keyboardFocused: isKeyboardFocused
+        )
+        host.onKeyboardFocusChange = { coordinator.reportKeyboardFocus($0) }
+    }
+
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ChatComposePromptTextView
         var isUpdatingFromView = false
@@ -221,6 +278,12 @@ struct ChatComposePromptTextView: NSViewRepresentable {
 
         init(parent: ChatComposePromptTextView) {
             self.parent = parent
+        }
+
+        func reportKeyboardFocus(_ focused: Bool) {
+            if parent.isKeyboardFocused != focused {
+                parent.isKeyboardFocused = focused
+            }
         }
 
         func fireCommandReturn() {
@@ -253,5 +316,6 @@ struct ChatComposePromptTextView: NSViewRepresentable {
             parent.onTextChange(value)
             isUpdatingFromView = false
         }
+
     }
 }

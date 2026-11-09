@@ -5,8 +5,21 @@ import SwiftUI
 final class ChatMessageEditNSTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
     var onEscape: (() -> Void)?
+    var onKeyboardFocusChange: ((Bool) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onKeyboardFocusChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onKeyboardFocusChange?(false) }
+        return resigned
+    }
 
     override func mouseDown(with event: NSEvent) {
         if window?.firstResponder !== self {
@@ -54,6 +67,11 @@ final class ChatMessageEditScrollView: NSScrollView {
 final class ChatMessageEditHostView: NSView {
     let scrollView: ChatMessageEditScrollView
     let textView: ChatMessageEditNSTextView
+    var onKeyboardFocusChange: ((Bool) -> Void)?
+    private var chromeTextColor: NSColor = .labelColor
+    private var chromeUnfocusedBackground: NSColor = .clear
+    private var chromeFocusedBackground: NSColor = .clear
+    private var keyboardFocused = false
 
     init() {
         scrollView = ChatMessageEditScrollView()
@@ -80,6 +98,10 @@ final class ChatMessageEditHostView: NSView {
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
+        textView.onKeyboardFocusChange = { [weak self] focused in
+            self?.handleKeyboardFocus(focused)
+        }
+
         scrollView.documentView = textView
         addSubview(scrollView)
         NSLayoutConstraint.activate([
@@ -90,6 +112,29 @@ final class ChatMessageEditHostView: NSView {
             scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 72),
             scrollView.heightAnchor.constraint(lessThanOrEqualToConstant: 180),
         ])
+    }
+
+    func setChromePalette(
+        textColor: NSColor,
+        unfocusedBackground: NSColor,
+        focusedBackground: NSColor,
+        keyboardFocused: Bool
+    ) {
+        chromeTextColor = textColor
+        chromeUnfocusedBackground = unfocusedBackground
+        chromeFocusedBackground = focusedBackground
+        let resolvedFocus = keyboardFocused || window?.firstResponder === textView
+        self.keyboardFocused = resolvedFocus
+        let bg = resolvedFocus ? focusedBackground : unfocusedBackground
+        applyChrome(textColor: textColor, backgroundColor: bg)
+    }
+
+    private func handleKeyboardFocus(_ focused: Bool) {
+        guard keyboardFocused != focused else { return }
+        keyboardFocused = focused
+        let bg = focused ? chromeFocusedBackground : chromeUnfocusedBackground
+        applyChrome(textColor: chromeTextColor, backgroundColor: bg)
+        onKeyboardFocusChange?(focused)
     }
 
     func applyChrome(textColor: NSColor, backgroundColor: NSColor) {
@@ -139,10 +184,12 @@ final class ChatMessageEditHostView: NSView {
 
 struct ChatMessageEditTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var isKeyboardFocused: Bool
     /// Message text when edit opens (used when SwiftUI binding lags behind ``editingMessageID``).
     var seedText: String
     var textColor: NSColor
-    var backgroundColor: NSColor
+    var unfocusedBackgroundColor: NSColor
+    var focusedBackgroundColor: NSColor
     var onCommandReturn: () -> Void
     var onEscape: () -> Void
     var onTextChange: (String) -> Void
@@ -159,7 +206,7 @@ struct ChatMessageEditTextView: NSViewRepresentable {
         host.textView.delegate = context.coordinator
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
         host.textView.onEscape = { context.coordinator.fireEscape() }
-        host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
+        wireChrome(host: host, coordinator: context.coordinator)
         context.coordinator.seedBindingIfNeeded(displayed: initial)
         host.refreshDocumentLayout()
         context.coordinator.scheduleInitialFocus(on: host)
@@ -170,7 +217,7 @@ struct ChatMessageEditTextView: NSViewRepresentable {
         context.coordinator.parent = self
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
         host.textView.onEscape = { context.coordinator.fireEscape() }
-        host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
+        wireChrome(host: host, coordinator: context.coordinator)
         let hostLen = host.textView.string.count
         let willOverwriteWithEmpty = text.isEmpty && hostLen > 0
         if willOverwriteWithEmpty {
@@ -191,6 +238,17 @@ struct ChatMessageEditTextView: NSViewRepresentable {
     }
 
     @MainActor
+    private func wireChrome(host: ChatMessageEditHostView, coordinator: Coordinator) {
+        host.setChromePalette(
+            textColor: textColor,
+            unfocusedBackground: unfocusedBackgroundColor,
+            focusedBackground: focusedBackgroundColor,
+            keyboardFocused: isKeyboardFocused
+        )
+        host.onKeyboardFocusChange = { coordinator.reportKeyboardFocus($0) }
+    }
+
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ChatMessageEditTextView
         private var didSeedBinding = false
@@ -198,6 +256,12 @@ struct ChatMessageEditTextView: NSViewRepresentable {
 
         init(parent: ChatMessageEditTextView) {
             self.parent = parent
+        }
+
+        func reportKeyboardFocus(_ focused: Bool) {
+            if parent.isKeyboardFocused != focused {
+                parent.isKeyboardFocused = focused
+            }
         }
 
         func prepareForNewEditSession() {
@@ -256,5 +320,6 @@ struct ChatMessageEditTextView: NSViewRepresentable {
             }
             parent.onTextChange(value)
         }
+
     }
 }

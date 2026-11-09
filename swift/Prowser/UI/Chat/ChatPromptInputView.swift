@@ -10,6 +10,7 @@ enum ChatPromptInputLayout {
 
 struct ChatPromptInputView: View {
     @Environment(AppState.self) private var appState
+    @State private var composeKeyboardFocused = false
 
     private static let automaticCreateTooltip =
         "When on, chat messages with images or /create automatically submit an image-generation job."
@@ -17,6 +18,9 @@ struct ChatPromptInputView: View {
     var body: some View {
         @Bindable var chat = appState.chat
         let colors = appState.theme.colors
+        let composeFieldBackground = composeKeyboardFocused
+            ? colors.chatEditableFieldBackground
+            : colors.sidebarBackground
         VStack(alignment: .leading, spacing: 4) {
             if !chat.composeAttachmentPaths.isEmpty {
                 ChatImageThumbRow(
@@ -37,8 +41,10 @@ struct ChatPromptInputView: View {
                 }
                 ChatComposePromptTextView(
                     text: $chat.composePromptText,
+                    isKeyboardFocused: $composeKeyboardFocused,
                     textColor: colors.dialogText.nsColor,
-                    backgroundColor: colors.sidebarBackground.nsColor,
+                    unfocusedBackgroundColor: colors.sidebarBackground.nsColor,
+                    focusedBackgroundColor: colors.chatEditableFieldBackground.nsColor,
                     inputEnabled: chat.composeFieldEnabled,
                     isStreaming: chat.isStreaming,
                     onCommandReturn: {
@@ -56,7 +62,7 @@ struct ChatPromptInputView: View {
                     }
             }
             .padding(8)
-            .background(colors.sidebarBackground)
+            .background(composeFieldBackground)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(colors.sidebarHeaderBorder)

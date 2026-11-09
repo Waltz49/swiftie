@@ -45,6 +45,66 @@ enum ThemeBlendUtils {
         return adjustBrightness(c, factor: 1.0 / factor)
     }
 
+    static func lighterHex(_ hex: String, factor: CGFloat) -> String {
+        guard let c = NSColor(hex: hex)?.usingColorSpace(.sRGB) else { return hex }
+        return adjustBrightness(c, factor: factor)
+    }
+
+    /// Qt-style emphasis on focused chat text fields (compose + inline edit).
+    /// Qt factor: ``100`` = no change; ``110`` ≈ 10% toward white / scaled darker; ``120`` ≈ 20%.
+    static let chatEditableFieldBackgroundQtFactor = 110
+
+    static func chatEditableFieldBackgroundHex(sidebarHex: String, themeID: String) -> String {
+        guard let base = NSColor(hex: sidebarHex)?.usingColorSpace(.sRGB) else { return sidebarHex }
+        let qtFactor = chatEditableFieldBackgroundQtFactor
+        let blended: NSColor
+        if themeID == "light" {
+            blended = qtRgbDarker(base, qtFactor: qtFactor)
+        } else {
+            blended = qtRgbLighter(base, qtFactor: qtFactor)
+        }
+        if blended.hexString == base.hexString {
+            let nudge = CGFloat(max(0, qtFactor - 100)) / 100
+            let step = nudge * 255
+            if themeID == "light" {
+                return NSColor(
+                    red: max(0, base.redComponent - step / 255),
+                    green: max(0, base.greenComponent - step / 255),
+                    blue: max(0, base.blueComponent - step / 255),
+                    alpha: base.alphaComponent
+                ).hexString
+            }
+            return NSColor(
+                red: min(1, base.redComponent + step / 255),
+                green: min(1, base.greenComponent + step / 255),
+                blue: min(1, base.blueComponent + step / 255),
+                alpha: base.alphaComponent
+            ).hexString
+        }
+        return blended.hexString
+    }
+
+    /// Qt ``QColor::lighter(f)`` — each sRGB channel moves ``(f - 100) / 100`` toward white.
+    private static func qtRgbLighter(_ color: NSColor, qtFactor: Int) -> NSColor {
+        let t = CGFloat(max(0, qtFactor - 100)) / 100
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return NSColor(
+            red: r + (1 - r) * t,
+            green: g + (1 - g) * t,
+            blue: b + (1 - b) * t,
+            alpha: a
+        )
+    }
+
+    /// Qt ``QColor::darker(f)`` — each sRGB channel scales by ``100 / f``.
+    private static func qtRgbDarker(_ color: NSColor, qtFactor: Int) -> NSColor {
+        let scale = CGFloat(100) / CGFloat(max(1, qtFactor))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return NSColor(red: r * scale, green: g * scale, blue: b * scale, alpha: a)
+    }
+
     /// Running job card fill: slightly darker on light theme, lighter on dark/user.
     static func jobQueueRunningCellBackground(cellHex: String, themeID: String) -> String {
         guard let base = NSColor(hex: cellHex)?.usingColorSpace(.sRGB) else { return cellHex }

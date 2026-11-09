@@ -8,6 +8,7 @@ struct ChatMessageRowView: View {
     let message: ChatMessage
 
     @State private var editText = ""
+    @State private var editKeyboardFocused = false
     @State private var speakHighlighted = false
 
     private var isUser: Bool { message.role == .user }
@@ -44,17 +45,25 @@ struct ChatMessageRowView: View {
             }
 
             if isEditing {
+                let editUnfocusedBackground = isUser
+                    ? colors.jobQueueCellBackground
+                    : colors.sidebarBackground
+                let editFieldBackground = editKeyboardFocused
+                    ? colors.chatEditableFieldBackground
+                    : editUnfocusedBackground
                 ChatMessageEditTextView(
                     text: $editText,
+                    isKeyboardFocused: $editKeyboardFocused,
                     seedText: message.text,
                     textColor: colors.dialogText.nsColor,
-                    backgroundColor: colors.sidebarBackground.nsColor,
+                    unfocusedBackgroundColor: editUnfocusedBackground.nsColor,
+                    focusedBackgroundColor: colors.chatEditableFieldBackground.nsColor,
                     onCommandReturn: { commitEdit() },
                     onEscape: { appState.chat.cancelMessageEdit() },
                     onTextChange: { appState.chat.syncPendingEditText($0) }
                 )
                 .id(message.messageID)
-                .background(colors.sidebarBackground)
+                .background(editFieldBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(colors.defaultBorder, lineWidth: 1)
@@ -214,6 +223,7 @@ struct ChatMessageRowView: View {
 
     @MainActor
     private func beginEdit() {
+        editKeyboardFocused = false
         editText = message.text
         appState.chat.beginMessageEdit(
             messageID: message.messageID,

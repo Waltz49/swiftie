@@ -284,6 +284,16 @@ enum ThemeHexColor {
     }
 }
 
+extension ThemeColors {
+    var chatEditableFieldBackground: Color {
+        let hex = ThemeBlendUtils.chatEditableFieldBackgroundHex(
+            sidebarHex: sidebarBackground.nsColor.hexString,
+            themeID: themeID
+        )
+        return Color(hex: hex) ?? sidebarBackground
+    }
+}
+
 extension Color {
     init?(hex: String) {
         guard let c = ThemeHexColor.components(from: hex) else { return nil }
