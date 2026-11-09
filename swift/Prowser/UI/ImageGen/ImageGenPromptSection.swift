@@ -38,6 +38,17 @@ struct ImageGenPromptSection: View {
                 )
             }
 
+            if showImportButtons {
+                HStack(spacing: 6) {
+                    importSideButton(title: "Import Prompt", action: importPrompt)
+                    importSideButton(title: "Import Rest", action: importRest)
+                    ImageGenGrammarButton(
+                        text: promptBinding,
+                        onTextChanged: onValuesChanged
+                    )
+                }
+            }
+
             ImageGenPromptPlainTextEdit(
                 text: promptBinding,
                 streamSession: promptStreamSession,
@@ -51,17 +62,6 @@ struct ImageGenPromptSection: View {
                     maxLines: ImageGenPromptLayout.negativeMaxLines,
                     onEditingEnded: { onValuesChanged?() }
                 )
-            }
-
-            if showImportButtons {
-                HStack(spacing: 6) {
-                    importSideButton(title: "Import Prompt", action: importPrompt)
-                    importSideButton(title: "Import Rest", action: importRest)
-                    ImageGenGrammarButton(
-                        text: promptBinding,
-                        onTextChanged: onValuesChanged
-                    )
-                }
             }
         }
         .onAppear {
