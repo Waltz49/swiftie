@@ -9,6 +9,8 @@ final class BrowseImageHistoryController {
     private var history: [String] = []
     private var debounceTask: Task<Void, Never>?
     private var pendingPath: String?
+    /// Invalidates in-flight debounce work after `cancelPending()` or a new schedule.
+    private var debounceSequence = 0
 
     func bind(_ appState: AppState) {
         self.appState = appState
@@ -39,6 +41,7 @@ final class BrowseImageHistoryController {
     }
 
     func cancelPending() {
+        debounceSequence += 1
         debounceTask?.cancel()
         debounceTask = nil
         pendingPath = nil
@@ -46,26 +49,43 @@ final class BrowseImageHistoryController {
 
     func scheduleRecord(path: String) {
         guard let appState else { return }
-        cancelPending()
         guard appState.fileData.currentViewMode == .browse else { return }
         guard let normalized = FileDataModel.normalizePath(path),
               Self.isExistingImageFile(normalized) else { return }
 
         let delayMS = max(0, min(5000, appState.config.int(forKey: "browse_image_history_save_after_ms", default: 3000)))
         if delayMS <= 0 {
+            cancelPending()
             touch(normalized)
             return
         }
 
+        // Same membership / reordered listings re-emit `currentImageChanged` without a new path;
+        // do not reset an in-flight debounce (Python only schedules from `display_image`).
+        if let pending = pendingPath, debounceTask != nil,
+           FileDataModel.pathsReferToSameFile(pending, normalized) {
+            return
+        }
+
+        cancelPending()
+        let sequence = debounceSequence
         pendingPath = normalized
         debounceTask = Task { @MainActor in
+            defer {
+                if sequence == self.debounceSequence {
+                    if self.pendingPath == normalized {
+                        self.pendingPath = nil
+                    }
+                    self.debounceTask = nil
+                }
+            }
             try? await Task.sleep(nanoseconds: UInt64(delayMS) * 1_000_000)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, sequence == self.debounceSequence else { return }
             guard let appState = self.appState,
                   appState.fileData.currentViewMode == .browse,
-                  appState.fileData.currentImagePath == normalized else { return }
+                  let current = appState.fileData.currentImagePath,
+                  FileDataModel.pathsReferToSameFile(current, normalized) else { return }
             self.touch(normalized)
-            self.pendingPath = nil
         }
     }
 
@@ -144,7 +164,8 @@ final class BrowseImageHistoryController {
 
         let newFirst = history[0]
         guard Self.isExistingImageFile(newFirst) else { return }
-        appState.openImageInBrowse(path: newFirst)
+        // Python uses `load_file_with_directory_thumbnails`; here we avoid pushing directory stack on each toggle.
+        appState.openImageInBrowse(path: newFirst, saveHistory: false)
     }
 
     /// Python `os.path.isfile` — skip directories and missing paths.

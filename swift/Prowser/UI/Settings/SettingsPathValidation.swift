@@ -52,7 +52,11 @@ enum SettingsPathValidation {
         let parsed = ExitScriptUtils.parseExitScriptCommand(trimmed)
         guard !parsed.path.isEmpty else { return trimmed }
         let pathForDisplay = displayPath(pathWithFilesystemNameCasing(parsed.path))
-        return ExitScriptUtils.formatExitScriptCommand(prefix: parsed.prefix, path: pathForDisplay)
+        return ExitScriptUtils.formatExitScriptCommand(
+            prefix: parsed.prefix,
+            path: pathForDisplay,
+            extraArgs: parsed.extraArgs
+        )
     }
 
     static func normalizedStoredExitScriptCommand(_ raw: String) -> String {
@@ -61,7 +65,11 @@ enum SettingsPathValidation {
         let parsed = ExitScriptUtils.parseExitScriptCommand(trimmed)
         guard !parsed.path.isEmpty else { return trimmed }
         let expandedScriptPath = normalizedStoredPath(parsed.path)
-        return ExitScriptUtils.formatExitScriptCommand(prefix: parsed.prefix, path: expandedScriptPath)
+        return ExitScriptUtils.formatExitScriptCommand(
+            prefix: parsed.prefix,
+            path: expandedScriptPath,
+            extraArgs: parsed.extraArgs
+        )
     }
 
     static func normalizedOptionalPathSlotsForStorage(_ values: [String?]) -> [String?] {
@@ -124,6 +132,10 @@ enum SettingsPathValidation {
             normalizedStoredExitScriptCommand(config.string(forKey: ExitScriptUtils.settingImageAIExit)),
             forKey: ExitScriptUtils.settingImageAIExit
         )
+        config.setValue(
+            normalizedStoredExitScriptCommand(config.string(forKey: ExitScriptUtils.settingSayExit)),
+            forKey: ExitScriptUtils.settingSayExit
+        )
     }
 
     /// Rewrites each resolved path component to the on-disk name (APFS/HFS+ case-insensitive, case-preserving).
@@ -164,6 +176,19 @@ enum SettingsPathValidation {
             resolved += "/"
         }
         return resolved
+    }
+
+    /// Uncommitted text in the key window field editor (SwiftUI path fields when OK/Test is clicked without blur).
+    static func liveEditedText(fallback: String) -> String {
+        if let responder = NSApp.keyWindow?.firstResponder {
+            if let textView = responder as? NSTextView {
+                return textView.string
+            }
+            if let field = responder as? NSTextField {
+                return field.stringValue
+            }
+        }
+        return fallback
     }
 
     /// End field editing and notify `SettingsPathTextField` instances to run blur normalization.
@@ -301,16 +326,18 @@ struct SettingsPathTextField: View {
         }
         .onSubmit { shortenOnBlur() }
         .onReceive(NotificationCenter.default.publisher(for: .prowserCommitSettingsPathFields)) { _ in
+            guard isFocused else { return }
             shortenOnBlur()
         }
         .help(help ?? title)
     }
 
     private func shortenOnBlur() {
+        let source = SettingsPathValidation.liveEditedText(fallback: text)
         let normalized = if exitScriptCommand {
-            SettingsPathValidation.normalizedExitScriptCommandDisplay(text)
+            SettingsPathValidation.normalizedExitScriptCommandDisplay(source)
         } else {
-            SettingsPathValidation.normalizedTypedPathDisplayPath(text)
+            SettingsPathValidation.normalizedTypedPathDisplayPath(source)
         }
         if normalized != text {
             text = normalized

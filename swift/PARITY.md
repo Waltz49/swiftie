@@ -408,7 +408,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `imagegen_unload_lmstudio_models_before_generation` | always on in worker | done (`LmStudioCaptionService` before `startGenerate`; default on) |
 | `use_prompt_filter_exits`, text/image exit scripts, prefix/postfix | done | partial (runtime on Python bridges for prompts) |
 | `chat_use_rejected_response_phrases`, `chat_rejected_response_phrases.json` | hardcoded phrases in chat worker only | done (settings UI + JSON; matcher/retry helper for chat LM Studio stream, not flux/caption) |
-| `say_exit` | done | done (`UserCommentSpeaker` + `ExitScriptUtils.sayExitArgv`) |
+| `say_exit` | done | done (`SpeechReader` + `use_read_aloud_exit` + `ExitScriptUtils.buildSayExitArgv`; AVSpeech when off/unset) |
 | `jobs_pane_compact`, `jobs_display_mode` | done | done |
 | `jobs_pane_mini_option_bracket_mode` (Mini ⌥[ Mode) | — | done (Swift-only) |
 | Job queue / active job JSON (`job_step_persistence`) | done | done |

@@ -15,7 +15,8 @@ struct ChatPromptInputView: View {
         "When on, chat messages with images or /create automatically submit an image-generation job."
 
     var body: some View {
-        let chat = appState.chat
+        @Bindable var chat = appState.chat
+        let colors = appState.theme.colors
         VStack(alignment: .leading, spacing: 4) {
             if !chat.composeAttachmentPaths.isEmpty {
                 ChatMessageThumbRow(paths: chat.composeAttachmentPaths)
@@ -23,40 +24,39 @@ struct ChatPromptInputView: View {
 
             ZStack(alignment: .topLeading) {
                 if chat.composePromptText.isEmpty {
-                    Text("Message… (Return to send, Shift+Return for newline)")
+                    Text("Message… (⌘Return to send, Return for newline)")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 8)
                         .allowsHitTesting(false)
                 }
-                TextEditor(text: Binding(
-                    get: { chat.composePromptText },
-                    set: { newValue in
-                        chat.composePromptText = newValue
-                        chat.refreshComposeAttachmentsForSelectionTrigger(in: newValue)
-                    }
-                ))
-                    .frame(minHeight: 44, maxHeight: 140)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .disabled(!chat.promptInputEnabled)
+                ChatComposePromptTextView(
+                    text: $chat.composePromptText,
+                    textColor: colors.dialogText.nsColor,
+                    backgroundColor: colors.sidebarBackground.nsColor,
+                    inputEnabled: chat.composeFieldEnabled,
+                    isStreaming: chat.isStreaming,
+                    onCommandReturn: {
+                        guard chat.canSubmitUserMessage else { return }
+                        submit()
+                    },
+                    onExitKeyboardFocus: {
+                        appState.focusMainCanvas()
+                    },
+                    onTextChange: { chat.refreshComposeAttachmentsForSelectionTrigger(in: $0) }
+                )
+                .frame(minHeight: 44, maxHeight: 140)
                     .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                         handleDrop(providers)
                     }
             }
             .padding(8)
-            .background(appState.theme.colors.sidebarBackground)
+            .background(colors.sidebarBackground)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(appState.theme.colors.sidebarHeaderBorder)
+                    .stroke(colors.sidebarHeaderBorder)
             )
-            .onKeyPress(.return, phases: .down) { press in
-                if press.modifiers.contains(.shift) { return .ignored }
-                if !chat.promptInputEnabled || chat.isStreaming { return .ignored }
-                submit()
-                return .handled
-            }
 
             SettingsPreferenceCompactToggleRow(
                 title: "Submit Job Automatically",
@@ -71,7 +71,6 @@ struct ChatPromptInputView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .frame(height: ChatPromptInputLayout.cursorPeekZoneHeight)
-            .disabled(!chat.promptInputEnabled)
         }
         .padding(.horizontal, 6)
         .padding(.top, 4)

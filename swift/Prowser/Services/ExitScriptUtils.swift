@@ -4,37 +4,53 @@ import Foundation
 enum ExitScriptUtils {
     static let settingTextAIExit = "text_ai_exit"
     static let settingImageAIExit = "image_ai_exit"
+    static let settingSayExit = "say_exit"
+    static let useReadAloudExitKey = "use_read_aloud_exit"
+    static let envSayExit = "PROWSER_SAY_EXIT"
+    static let envSayVoice = "PROWSER_SAY_VOICE"
 
     static let exitScriptPrefixes = ["python", "python3", "pypy"]
 
     struct ParsedExitScript {
         var prefix: String
         var path: String
+        /// Tokens after the script path (`-v Joe`, `--rate 1.2`, etc.).
+        var extraArgs: [String]
         var raw: String
     }
 
     static func parseExitScriptCommand(_ raw: String) -> ParsedExitScript {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
-            return ParsedExitScript(prefix: "", path: "", raw: "")
+            return ParsedExitScript(prefix: "", path: "", extraArgs: [], raw: "")
         }
         let parts = splitCommand(text)
         if parts.isEmpty {
-            return ParsedExitScript(prefix: "", path: "", raw: text)
+            return ParsedExitScript(prefix: "", path: "", extraArgs: [], raw: text)
         }
         if let matched = prefixToken(parts[0]) {
             let path = parts.count > 1 ? parts[1] : ""
-            return ParsedExitScript(prefix: matched, path: path, raw: text)
+            let extra = parts.count > 2 ? Array(parts.dropFirst(2)) : []
+            return ParsedExitScript(prefix: matched, path: path, extraArgs: extra, raw: text)
         }
-        return ParsedExitScript(prefix: "", path: parts[0], raw: text)
+        let extra = parts.count > 1 ? Array(parts.dropFirst(1)) : []
+        return ParsedExitScript(prefix: "", path: parts[0], extraArgs: extra, raw: text)
     }
 
-    static func formatExitScriptCommand(prefix: String, path: String) -> String {
+    static func formatExitScriptCommand(prefix: String, path: String, extraArgs: [String] = []) -> String {
         let scriptPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
         if scriptPath.isEmpty { return "" }
         let interpreter = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        if interpreter.isEmpty { return scriptPath }
-        return "\(interpreter) \(scriptPath)"
+        var tokens: [String]
+        if interpreter.isEmpty {
+            tokens = [scriptPath]
+        } else {
+            tokens = [interpreter, scriptPath]
+        }
+        if !extraArgs.isEmpty {
+            tokens.append(contentsOf: extraArgs)
+        }
+        return tokens.joined(separator: " ")
     }
 
     static func validateExitScriptCommand(_ raw: String) -> (valid: Bool, message: String) {
@@ -74,6 +90,53 @@ enum ExitScriptUtils {
         guard !argv.isEmpty else { return [] }
         argv.append(contentsOf: ["-p", promptText])
         return argv
+    }
+
+    /// Settings value for say exit, else `PROWSER_SAY_EXIT` (port of `get_exit_script_setting`).
+    @MainActor
+    static func resolvedSayExitCommandRaw(config: AppConfig) -> String {
+        let value = config.string(forKey: settingSayExit).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !value.isEmpty { return value }
+        let legacy = ProcessInfo.processInfo.environment[envSayExit]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return legacy
+    }
+
+    /// Port of ``speech_exit.say_exit_argv``.
+    static func buildSayExitArgv(raw: String, promptText: String) -> [String] {
+        var argv = resolveExitScriptArgv(raw: raw)
+        guard !argv.isEmpty else { return [] }
+        let voice = ProcessInfo.processInfo.environment[envSayVoice]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !voice.isEmpty, !argv.contains("-v"), !argv.contains("--voice") {
+            argv.append(contentsOf: ["-v", voice])
+        }
+        argv.append(contentsOf: ["-p", promptText])
+        return argv
+    }
+
+    @MainActor
+    static func buildSayExitArgv(config: AppConfig, promptText: String) -> [String] {
+        let raw = resolvedSayExitCommandRaw(config: config)
+        guard !raw.isEmpty else { return [] }
+        return buildSayExitArgv(raw: raw, promptText: promptText)
+    }
+
+    /// Port of `speech_utils.text_for_speech`.
+    static func textForSpeech(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "*", with: "")
+    }
+
+    static func formatArgvForDebugLog(_ argv: [String]) -> String {
+        argv.map { part in
+            if part.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+                || part.contains("\"") || part.contains("'") {
+                let escaped = part.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                return "\"\(escaped)\""
+            }
+            return part
+        }.joined(separator: " ")
     }
 
     static func resolveExitScriptArgv(raw: String) -> [String] {

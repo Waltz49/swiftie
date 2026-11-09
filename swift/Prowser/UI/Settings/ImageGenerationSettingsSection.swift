@@ -62,7 +62,16 @@ struct ImageGenerationSettingsSection: View {
                 title: "Use prompt filter exits",
                 subtitle: "Use exit scripts to modify prompt data before model calls.",
                 key: "use_prompt_filter_exits",
+                gearHelp: "Configure text and image prompt exit scripts",
                 onGear: { appState.chat.openExitScripts() }
+            )
+
+            gearToggleRow(
+                title: "Use read aloud exit",
+                subtitle: "External script for speak buttons instead of built-in speech.",
+                key: ExitScriptUtils.useReadAloudExitKey,
+                gearHelp: "Configure read aloud exit script",
+                onGear: { appState.chat.openReadAloudExit() }
             )
 
             gearToggleRow(
@@ -292,6 +301,7 @@ struct ImageGenerationSettingsSection: View {
         subtitle: String,
         key: String,
         defaultValue: Bool = false,
+        gearHelp: String = "Edit settings",
         onGear: @escaping () -> Void
     ) -> some View {
         HStack(alignment: .top) {
@@ -306,7 +316,7 @@ struct ImageGenerationSettingsSection: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-            .help("Edit settings")
+            .help(gearHelp)
         }
         .preferencesScanRecordsLabel(title)
     }

@@ -6,13 +6,10 @@ struct ExitScriptsSheet: View {
     @Environment(\.closeDialog) private var closeDialog
     @Environment(AppState.self) private var appState
 
-    @State private var textAIExit = ""
-    @State private var imageAIExit = ""
-
     private static let usePromptFilterExitsKey = "use_prompt_filter_exits"
 
     var body: some View {
-        let _ = appState.config.settingsEditRevision
+        @Bindable var chat = appState.chat
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 Text("Exit Scripts")
@@ -30,21 +27,26 @@ struct ExitScriptsSheet: View {
                 SettingsPreferenceSwitch(isOn: usePromptFilterExitsBinding)
             }
 
-            exitScriptRow(title: "Text AI exit", subtitle: "LM Studio / caption prompts", text: $textAIExit)
-            exitScriptRow(title: "Image AI exit", subtitle: "Image generation prompts", text: $imageAIExit)
+            ExitScriptCommandRow(
+                title: "Text AI exit",
+                subtitle: "LM Studio / caption prompts",
+                text: $chat.textAIExitDraft
+            )
+            ExitScriptCommandRow(
+                title: "Image AI exit",
+                subtitle: "Image generation prompts",
+                text: $chat.imageAIExitDraft
+            )
 
             DialogButtonRow([
                 DialogButton("Cancel", isCancel: true) { closeDialog(); dismiss() },
                 DialogButton("OK", isDefault: true) {
-                    SettingsPathValidation.commitPendingPathFieldEdits()
-                    appState.config.setValue(
-                        SettingsPathValidation.normalizedStoredExitScriptCommand(textAIExit),
-                        forKey: ExitScriptUtils.settingTextAIExit
-                    )
-                    appState.config.setValue(
-                        SettingsPathValidation.normalizedStoredExitScriptCommand(imageAIExit),
-                        forKey: ExitScriptUtils.settingImageAIExit
-                    )
+                    let textStored = SettingsPathValidation.normalizedStoredExitScriptCommand(chat.textAIExitDraft)
+                    let imageStored = SettingsPathValidation.normalizedStoredExitScriptCommand(chat.imageAIExitDraft)
+                    chat.textAIExitDraft = SettingsPathValidation.normalizedExitScriptCommandDisplay(chat.textAIExitDraft)
+                    chat.imageAIExitDraft = SettingsPathValidation.normalizedExitScriptCommandDisplay(chat.imageAIExitDraft)
+                    appState.config.setValue(textStored, forKey: ExitScriptUtils.settingTextAIExit)
+                    appState.config.setValue(imageStored, forKey: ExitScriptUtils.settingImageAIExit)
                     appState.config.applySettingsChange(emit: appState.eventBus)
                     closeDialog()
                     dismiss()
@@ -61,14 +63,6 @@ struct ExitScriptsSheet: View {
             minWidth: 520,
             minHeight: 240
         )
-        .onAppear {
-            textAIExit = SettingsPathValidation.normalizedExitScriptCommandDisplay(
-                appState.config.string(forKey: ExitScriptUtils.settingTextAIExit)
-            )
-            imageAIExit = SettingsPathValidation.normalizedExitScriptCommandDisplay(
-                appState.config.string(forKey: ExitScriptUtils.settingImageAIExit)
-            )
-        }
     }
 
     private var usePromptFilterExitsBinding: Binding<Bool> {
@@ -80,31 +74,5 @@ struct ExitScriptsSheet: View {
                 appState.config.applySettingsChange(emit: appState.eventBus)
             }
         )
-    }
-
-    @ViewBuilder
-    private func exitScriptRow(title: String, subtitle: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.headline)
-            Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            HStack {
-                SettingsPathTextField(
-                    title: "python /path/to/script.py",
-                    text: text,
-                    exitScriptCommand: true
-                )
-                Button("Browse…") {
-                    SettingsSupport.pickFile(into: text, allowedTypes: ["py", "sh", ""])
-                }
-                let validation = ExitScriptUtils.validateExitScriptCommand(text.wrappedValue)
-                if validation.message.isEmpty {
-                    SettingsPathValidationIndicator(state: .empty)
-                } else if validation.valid {
-                    SettingsPathValidationIndicator(state: .valid(tooltip: validation.message))
-                } else {
-                    SettingsPathValidationIndicator(state: .invalid(tooltip: validation.message))
-                }
-            }
-        }
     }
 }

@@ -35,6 +35,8 @@ final class ChatMessageEditNSTextView: NSTextView {
 final class ChatMessageEditHostView: NSView {
     let scrollView: NSScrollView
     let textView: ChatMessageEditNSTextView
+    var onExitKeyboardFocus: (() -> Void)?
+    private var clickAwayMonitor: Any?
 
     init() {
         scrollView = NSScrollView()
@@ -105,6 +107,23 @@ final class ChatMessageEditHostView: NSView {
         }
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let onExitKeyboardFocus else { return }
+        ChatTextFieldFocusRouting.syncClickAwayMonitor(
+            host: self,
+            textView: textView,
+            onExit: onExitKeyboardFocus,
+            storage: &clickAwayMonitor
+        )
+    }
+
+    deinit {
+        if let clickAwayMonitor {
+            NSEvent.removeMonitor(clickAwayMonitor)
+        }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -119,6 +138,7 @@ struct ChatMessageEditTextView: NSViewRepresentable {
     var backgroundColor: NSColor
     var onCommandReturn: () -> Void
     var onEscape: () -> Void
+    var onExitKeyboardFocus: () -> Void
     var onTextChange: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -134,6 +154,7 @@ struct ChatMessageEditTextView: NSViewRepresentable {
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
         host.textView.onEscape = { context.coordinator.fireEscape() }
         host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
+        host.onExitKeyboardFocus = onExitKeyboardFocus
         context.coordinator.seedBindingIfNeeded(displayed: initial)
         host.refreshDocumentLayout()
         DispatchQueue.main.async {
@@ -144,6 +165,7 @@ struct ChatMessageEditTextView: NSViewRepresentable {
 
     func updateNSView(_ host: ChatMessageEditHostView, context: Context) {
         context.coordinator.parent = self
+        host.onExitKeyboardFocus = onExitKeyboardFocus
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
         host.textView.onEscape = { context.coordinator.fireEscape() }
         host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)

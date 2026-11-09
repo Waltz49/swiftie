@@ -36,6 +36,7 @@ enum DialogGeometryKey {
     static let prefixPostfix = "prefix_postfix_dialog_geometry"
     static let prefixPostfixText = "prefix_postfix_text_dialog_geometry"
     static let exitScripts = "exit_scripts_dialog_geometry"
+    static let readAloudExit = "read_aloud_exit_dialog_geometry"
     static let rejectedPhrases = "rejected_response_phrases_dialog_geometry"
     static let loraImport = "lora_import_dialog_geometry"
     static let loraFind = "lora_find_dialog_geometry"
@@ -76,6 +77,7 @@ enum DialogGeometryKey {
         prefixPostfix,
         prefixPostfixText,
         exitScripts,
+        readAloudExit,
         rejectedPhrases,
         loraImport,
         loraFind,

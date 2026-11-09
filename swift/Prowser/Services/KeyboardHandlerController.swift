@@ -47,6 +47,12 @@ final class KeyboardHandlerController {
             if self.tryHandleChatMessageEditEscape(event) {
                 return nil
             }
+            if self.tryHandleChatTabExitShortcut(event) {
+                return nil
+            }
+            if self.tryHandleChatRedoShortcut(event) {
+                return nil
+            }
             if Self.isolateNonBrowserKeyDown(event, appState: self.appState) {
                 return nil
             }
@@ -604,6 +610,7 @@ final class KeyboardHandlerController {
         if isTextNavigationCommand(event) { return false }
         if dialogOwns, isDialogSaveCommand(event) { return false }
         if isChatMessageEditSaveCommand(event, appState: appState) { return false }
+        if isChatComposeCommandReturn(event) { return false }
 
         if isStandardEditingShortcut(event) {
             // When sendAction fails, pass the event through so NSTextView can undo/redo.
@@ -635,6 +642,33 @@ final class KeyboardHandlerController {
         event.keyCode == 36 || event.keyCode == 76
     }
 
+    /// Tab / Shift+Tab in chat text fields → main canvas or file tree (Python ``_ChatTabKeyFilter``).
+    private func tryHandleChatTabExitShortcut(_ event: NSEvent) -> Bool {
+        guard event.keyCode == 48 else { return false }
+        guard let appState else { return false }
+        guard ChatKeyCommand.isChatPaneKeyboardTarget(event: event, appState: appState) else { return false }
+        let shift = event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift)
+        if shift {
+            appState.focusLeftSidebarTabStop()
+        } else {
+            appState.focusMainCanvas()
+        }
+        return true
+    }
+
+    /// ⌘R in chat text fields — save pending edit, then regenerate (Python ``_ChatRedoKeyFilter``).
+    private func tryHandleChatRedoShortcut(_ event: NSEvent) -> Bool {
+        guard BundleCapabilities.chatUIEnabled, let appState else { return false }
+        guard ChatKeyCommand.isChatCommandR(event) else { return false }
+        guard ChatKeyCommand.isChatPaneKeyboardTarget(event: event, appState: appState) else { return false }
+        if appState.chat.showUnavailableOnly {
+            appState.chat.refreshConnection()
+            return true
+        }
+        appState.chat.redoLastUserMessage()
+        return true
+    }
+
     /// Escape in chat inline message edit (same as Cancel); must not fall through to thumbnail back navigation.
     private func tryHandleChatMessageEditEscape(_ event: NSEvent) -> Bool {
         guard ChatKeyCommand.isPlainEscape(event) else { return false }
@@ -662,11 +696,29 @@ final class KeyboardHandlerController {
         if let view = responder as? NSView {
             var current: NSView? = view
             while let candidate = current {
-                if candidate is ChatMessageEditNSTextView { return true }
+                if candidate is ChatMessageEditHostView || candidate is ChatMessageEditNSTextView { return true }
                 if let scroll = candidate as? NSScrollView,
                    scroll.documentView is ChatMessageEditNSTextView {
                     return true
                 }
+                current = candidate.superview
+            }
+        }
+        return false
+    }
+
+    private static func isChatComposeCommandReturn(_ event: NSEvent) -> Bool {
+        guard ChatKeyCommand.isCommandReturn(event) else { return false }
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        if responder is ChatComposePromptNSTextView { return true }
+        if let textView = responder as? NSTextView,
+           textView.delegate is ChatComposePromptTextView.Coordinator {
+            return true
+        }
+        if let view = responder as? NSView {
+            var current: NSView? = view
+            while let candidate = current {
+                if candidate is ChatComposePromptHostView { return true }
                 current = candidate.superview
             }
         }

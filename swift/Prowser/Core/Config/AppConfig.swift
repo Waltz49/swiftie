@@ -227,6 +227,28 @@ final class AppConfig {
         saveSettings()
     }
 
+    /// Commits top-level keys to disk, the open settings draft, and the cancel snapshot (auxiliary settings dialogs).
+    func persistTopLevelSettingKeys(_ values: [String: Any]) {
+        guard !values.isEmpty else { return }
+        func merge(into storage: inout [String: Any]) {
+            for (key, value) in values {
+                storage[key] = value
+            }
+            storage.removeValue(forKey: "debug_mode")
+        }
+        merge(into: &settings)
+        if var draft = settingsDraft {
+            merge(into: &draft)
+            settingsDraft = draft
+        }
+        if var snap = settingsSnapshot {
+            merge(into: &snap)
+            settingsSnapshot = snap
+        }
+        settingsEditRevision += 1
+        saveSettings()
+    }
+
     /// Update last file/folder/view without changing the launch-restore toggle.
     func updateRestoreSnapshot(
         filePath: String?,
@@ -976,6 +998,8 @@ final class AppConfig {
             "use_prompt_filter_exits": false,
             "text_ai_exit": "",
             "image_ai_exit": "",
+            "say_exit": "",
+            "use_read_aloud_exit": false,
             "general_settings_groups_expanded": [
                 "general": true,
                 "thumbnails": true,

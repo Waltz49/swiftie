@@ -31,9 +31,19 @@ final class ChatController {
     var showExitScripts = false {
         didSet { publishDialogVisibilityChange(from: oldValue, to: showExitScripts) }
     }
+    var showReadAloudExit = false {
+        didSet { publishDialogVisibilityChange(from: oldValue, to: showReadAloudExit) }
+    }
     var showRejectedPhrases = false {
         didSet { publishDialogVisibilityChange(from: oldValue, to: showRejectedPhrases) }
     }
+
+    /// Unsaved script command while the read-aloud exit dialog is open (survives view re-creation).
+    var readAloudExitCommandDraft = ""
+    private var readAloudExitDialogPrepared = false
+    var textAIExitDraft = ""
+    var imageAIExitDraft = ""
+    private var exitScriptsDialogPrepared = false
 
     enum UserPromptLibraryApplyMode: Equatable {
         case chatCompose
@@ -71,8 +81,13 @@ final class ChatController {
     }
     var isStreaming: Bool { streamTask != nil }
     var streamingAssistantMessageID: String? { streamingMessageID }
-    var promptInputEnabled: Bool {
-        !isStreaming && (lmAvailableOnShow || chatStarted)
+    /// Compose area editable when chat is active (LM up or prior messages). Stays on during prediction.
+    var composeFieldEnabled: Bool {
+        lmAvailableOnShow || chatStarted
+    }
+
+    var canSubmitUserMessage: Bool {
+        !isStreaming && composeFieldEnabled
     }
 
     init(appState: AppState) {
@@ -168,7 +183,7 @@ final class ChatController {
     }
 
     func submitUserMessage(text: String, imagePaths: [String]) {
-        guard promptInputEnabled else { return }
+        guard canSubmitUserMessage else { return }
         let prepared = prepareUserMessage(text: text, imagePaths: imagePaths)
         guard !prepared.text.isEmpty || !prepared.imagePaths.isEmpty else { return }
         showUnavailableOnly = false
@@ -314,7 +329,43 @@ final class ChatController {
     }
 
     func openExitScripts() {
+        prepareExitScriptsDialogIfNeeded()
         showExitScripts = true
+    }
+
+    func openReadAloudExit() {
+        prepareReadAloudExitDialogIfNeeded()
+        showReadAloudExit = true
+    }
+
+    func prepareReadAloudExitDialogIfNeeded() {
+        guard !readAloudExitDialogPrepared else { return }
+        readAloudExitCommandDraft = SettingsPathValidation.normalizedExitScriptCommandDisplay(
+            appState.config.string(forKey: ExitScriptUtils.settingSayExit)
+        )
+        readAloudExitDialogPrepared = true
+    }
+
+    func resetReadAloudExitDialog() {
+        readAloudExitDialogPrepared = false
+        readAloudExitCommandDraft = ""
+    }
+
+    func prepareExitScriptsDialogIfNeeded() {
+        guard !exitScriptsDialogPrepared else { return }
+        textAIExitDraft = SettingsPathValidation.normalizedExitScriptCommandDisplay(
+            appState.config.string(forKey: ExitScriptUtils.settingTextAIExit)
+        )
+        imageAIExitDraft = SettingsPathValidation.normalizedExitScriptCommandDisplay(
+            appState.config.string(forKey: ExitScriptUtils.settingImageAIExit)
+        )
+        exitScriptsDialogPrepared = true
+    }
+
+    func resetExitScriptsDialog() {
+        exitScriptsDialogPrepared = false
+        textAIExitDraft = ""
+        imageAIExitDraft = ""
     }
 
     func openRejectedPhrases() {

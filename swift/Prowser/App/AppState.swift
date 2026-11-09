@@ -304,6 +304,7 @@ final class AppState {
         }
 
         config.loadSettings()
+        SpeechReader.bind(config: config)
         ChatProfileMigration.migrateFromPythonProfile(config: config)
         config.applyLaunchDebugFlag(launchOptions.debug)
         sessionViewLogURL = SessionViewLog.logFileURL(config: config)
@@ -1746,6 +1747,7 @@ final class AppState {
         static let chatSystemPrompt = "chatSystemPrompt"
         static let prefixPostfix = "prefixPostfix"
         static let exitScripts = "exitScripts"
+        static let readAloudExit = "readAloudExit"
         static let rejectedPhrases = "rejectedPhrases"
     }
 
@@ -2034,9 +2036,24 @@ final class AppState {
             focusTextOnShow: true,
             onClose: { [weak self] in
                 self?.chat.showExitScripts = false
+                self?.chat.resetExitScriptsDialog()
             }
         ) {
             ExitScriptsSheet()
+        }
+        syncDialog(
+            id: DialogID.readAloudExit,
+            show: chat.showReadAloudExit,
+            title: "Read aloud exit",
+            defaultSize: NSSize(width: 560, height: 240),
+            minSize: NSSize(width: 520, height: 200),
+            focusTextOnShow: true,
+            onClose: { [weak self] in
+                self?.chat.showReadAloudExit = false
+                self?.chat.resetReadAloudExitDialog()
+            }
+        ) {
+            ReadAloudExitSheet()
         }
         syncDialog(
             id: DialogID.rejectedPhrases,

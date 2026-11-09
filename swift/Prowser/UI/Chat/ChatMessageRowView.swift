@@ -39,6 +39,7 @@ struct ChatMessageRowView: View {
                     backgroundColor: colors.sidebarBackground.nsColor,
                     onCommandReturn: { commitEdit() },
                     onEscape: { appState.chat.cancelMessageEdit() },
+                    onExitKeyboardFocus: { appState.focusMainCanvas() },
                     onTextChange: { appState.chat.syncPendingEditText($0) }
                 )
                 .background(colors.sidebarBackground)
