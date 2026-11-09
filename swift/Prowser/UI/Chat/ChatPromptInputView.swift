@@ -19,12 +19,16 @@ struct ChatPromptInputView: View {
         let colors = appState.theme.colors
         VStack(alignment: .leading, spacing: 4) {
             if !chat.composeAttachmentPaths.isEmpty {
-                ChatMessageThumbRow(paths: chat.composeAttachmentPaths)
+                ChatImageThumbRow(
+                    paths: $chat.composeAttachmentPaths,
+                    allowRemove: true,
+                    canOpen: true
+                )
             }
 
             ZStack(alignment: .topLeading) {
                 if chat.composePromptText.isEmpty {
-                    Text("Message… (⌘Return to send, Return for newline)")
+                    Text("Message…  (Enter to send, Shift+Enter for newline)")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
@@ -90,23 +94,13 @@ struct ChatPromptInputView: View {
     @MainActor
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         let chat = appState.chat
-        var accepted = false
-        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            accepted = true
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil),
-                      url.isFileURL else { return }
-                let path = url.standardizedFileURL.path
-                Task { @MainActor in
-                    guard FileManager.default.isReadableFile(atPath: path) else { return }
-                    if !chat.composeAttachmentPaths.contains(path),
-                       chat.composeAttachmentPaths.count < ChatSelectionImageTrigger.maxChatImages {
-                        chat.composeAttachmentPaths.append(path)
-                    }
-                }
-            }
+        return ChatImageThumbDrop.acceptFileURLs(
+            from: providers,
+            imageExtensions: appState.config.imageExtensions,
+            existingPaths: chat.composeAttachmentPaths,
+            maxImages: ChatSelectionImageTrigger.maxChatImages
+        ) { added in
+            chat.composeAttachmentPaths.append(contentsOf: added)
         }
-        return accepted
     }
 }

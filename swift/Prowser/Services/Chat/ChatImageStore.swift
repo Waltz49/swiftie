@@ -40,10 +40,15 @@ final class ChatImageStore {
         referencedElsewhere: Set<String>
     ) -> [String] {
         var stored: [String] = []
+        let sessionRoot = sessionDirectory.standardizedFileURL.path
         for (idx, src) in paths.prefix(Self.maxChatImages).enumerated() {
             guard !src.isEmpty, FileManager.default.isReadableFile(atPath: src) else { continue }
             let absSrc = URL(fileURLWithPath: src).standardizedFileURL.path
-            if referencedElsewhere.contains(absSrc), absSrc.hasPrefix(sessionDirectory.path) {
+            if absSrc == sessionRoot || absSrc.hasPrefix(sessionRoot + "/") {
+                stored.append(absSrc)
+                continue
+            }
+            if referencedElsewhere.contains(absSrc) {
                 stored.append(absSrc)
                 continue
             }

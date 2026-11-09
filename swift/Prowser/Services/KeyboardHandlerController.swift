@@ -656,11 +656,11 @@ final class KeyboardHandlerController {
         return true
     }
 
-    /// ⌘R in chat text fields — save pending edit, then regenerate (Python ``_ChatRedoKeyFilter``).
+    /// ⌘R with chat visible — redo last user turn (Python ``_ChatRedoKeyFilter``; blocks global ⌘R sort).
     private func tryHandleChatRedoShortcut(_ event: NSEvent) -> Bool {
         guard BundleCapabilities.chatUIEnabled, let appState else { return false }
         guard ChatKeyCommand.isChatCommandR(event) else { return false }
-        guard ChatKeyCommand.isChatPaneKeyboardTarget(event: event, appState: appState) else { return false }
+        guard ChatKeyCommand.isChatPaneActive(appState: appState) else { return false }
         if appState.chat.showUnavailableOnly {
             appState.chat.refreshConnection()
             return true

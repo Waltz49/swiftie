@@ -234,6 +234,11 @@ struct ChatComposePromptTextView: NSViewRepresentable {
                 parent.onCommandReturn()
                 return true
             }
+            // Python ``ChatPromptPlainTextEdit``: Return sends; Shift+Return inserts a newline.
+            if !flags.contains(.shift) {
+                parent.onCommandReturn()
+                return true
+            }
             return false
         }
 

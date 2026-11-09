@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 struct ChatMessageRowView: View {
@@ -16,7 +17,7 @@ struct ChatMessageRowView: View {
         let colors = appState.theme.colors
         let chat = appState.chat
         VStack(alignment: .leading, spacing: 4) {
-            messageBubble(colors: colors)
+            messageBubble(colors: colors, chat: chat)
             messageActionBar(chat: chat)
         }
         .padding(.horizontal, ChatMessageChrome.outerHorizontalPadding)
@@ -25,10 +26,21 @@ struct ChatMessageRowView: View {
     }
 
     @ViewBuilder
-    private func messageBubble(colors: ThemeColors) -> some View {
+    private func messageBubble(colors: ThemeColors, chat: ChatController) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !message.imagePaths.isEmpty {
-                ChatMessageThumbRow(paths: message.imagePaths)
+            if isEditing, messageSupportsAttachments {
+                ChatImageThumbRow(
+                    paths: Binding(
+                        get: { chat.messageEditImagePaths },
+                        set: { chat.messageEditImagePaths = $0 }
+                    ),
+                    allowRemove: true
+                )
+            } else if !message.imagePaths.isEmpty {
+                ChatImageThumbRow(
+                    paths: .constant(message.imagePaths),
+                    allowRemove: false
+                )
             }
 
             if isEditing {
@@ -39,9 +51,9 @@ struct ChatMessageRowView: View {
                     backgroundColor: colors.sidebarBackground.nsColor,
                     onCommandReturn: { commitEdit() },
                     onEscape: { appState.chat.cancelMessageEdit() },
-                    onExitKeyboardFocus: { appState.focusMainCanvas() },
                     onTextChange: { appState.chat.syncPendingEditText($0) }
                 )
+                .id(message.messageID)
                 .background(colors.sidebarBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
@@ -65,6 +77,13 @@ struct ChatMessageRowView: View {
         .padding(8)
         .background(bubbleBackground(colors: colors))
         .overlay(bubbleBorder(colors: colors))
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleMessageImageDrop(providers)
+        }
+    }
+
+    private var messageSupportsAttachments: Bool {
+        message.role == .user || message.role == .assistant
     }
 
     @ViewBuilder
@@ -208,49 +227,21 @@ struct ChatMessageRowView: View {
         appState.chat.syncPendingEditText(editText)
         appState.chat.commitPendingMessageEditIfNeeded()
     }
-}
 
-struct ChatMessageThumbRow: View {
-    let paths: [String]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(paths, id: \.self) { path in
-                    ChatThumbImage(path: path)
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .onTapGesture {
-                            guard let first = paths.first else { return }
-                            let dir = URL(fileURLWithPath: first).deletingLastPathComponent().path
-                            NotificationCenter.default.post(
-                                name: .prowserChatOpenImagePaths,
-                                object: nil,
-                                userInfo: ["paths": paths, "directory": dir]
-                            )
-                        }
-                }
-            }
+    @MainActor
+    private func handleMessageImageDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard messageSupportsAttachments else { return false }
+        if !isEditing {
+            beginEdit()
         }
-    }
-}
-
-struct ChatThumbImage: View {
-    let path: String
-    @State private var image: NSImage?
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle().fill(Color.gray.opacity(0.3))
-            }
-        }
-        .onAppear {
-            image = NSImage(contentsOfFile: path)
+        let chat = appState.chat
+        return ChatImageThumbDrop.acceptFileURLs(
+            from: providers,
+            imageExtensions: appState.config.imageExtensions,
+            existingPaths: chat.messageEditImagePaths,
+            maxImages: ChatSelectionImageTrigger.maxChatImages
+        ) { added in
+            chat.messageEditImagePaths.append(contentsOf: added)
         }
     }
 }

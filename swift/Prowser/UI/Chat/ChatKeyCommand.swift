@@ -57,11 +57,16 @@ enum ChatKeyCommand {
         return false
     }
 
+    /// Chat column is showing (not file tree + preview stack).
+    @MainActor
+    static func isChatPaneActive(appState: AppState) -> Bool {
+        guard appState.isChatVisible else { return false }
+        return SidebarPaneSplitModel.leftDisplayPaneVisibility(appState: appState)[2]
+    }
+
     @MainActor
     static func isChatPaneKeyboardTarget(event: NSEvent, appState: AppState) -> Bool {
-        guard appState.isChatVisible else { return false }
-        let display = SidebarPaneSplitModel.leftDisplayPaneVisibility(appState: appState)
-        guard display[2] else { return false }
+        guard isChatPaneActive(appState: appState) else { return false }
         guard let responder = (event.window ?? NSApp.keyWindow)?.firstResponder else { return false }
         return isChatTextInputResponder(responder)
     }

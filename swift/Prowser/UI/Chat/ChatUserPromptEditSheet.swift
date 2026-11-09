@@ -2,58 +2,6 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Thumbnail row with remove controls and file drop (Python ``ChatImageThumbRow`` in edit dialogs).
-@MainActor
-struct ChatEditableThumbRow: View {
-    @Binding var paths: [String]
-    var maxImages: Int = ChatSelectionImageTrigger.maxChatImages
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(Array(paths.enumerated()), id: \.offset) { index, path in
-                    ZStack(alignment: .topTrailing) {
-                        ChatThumbImage(path: path)
-                            .frame(width: 64, height: 64)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        Button {
-                            paths.remove(at: index)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 14))
-                                .symbolRenderingMode(.palette)
-                                .foregroundStyle(.white, .black.opacity(0.55))
-                        }
-                        .buttonStyle(.plain)
-                        .offset(x: 4, y: -4)
-                    }
-                }
-            }
-        }
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            handleDrop(providers)
-        }
-    }
-
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var accepted = false
-        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            accepted = true
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil),
-                      url.isFileURL else { return }
-                let path = url.standardizedFileURL.path
-                Task { @MainActor in
-                    guard !paths.contains(path), paths.count < maxImages else { return }
-                    paths.append(path)
-                }
-            }
-        }
-        return accepted
-    }
-}
-
 @MainActor
 struct ChatUserPromptEditSheet: View {
     @Environment(AppState.self) private var appState
@@ -93,7 +41,7 @@ struct ChatUserPromptEditSheet: View {
                     appendDroppedImages(providers)
                 }
 
-            ChatEditableThumbRow(paths: $imagePaths)
+            ChatImageThumbRow(paths: $imagePaths, allowRemove: true)
                 .padding(.horizontal)
 
             DialogButtonRow(
@@ -149,23 +97,14 @@ struct ChatUserPromptEditSheet: View {
     }
 
     private func appendDroppedImages(_ providers: [NSItemProvider]) -> Bool {
-        var accepted = false
-        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            accepted = true
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil),
-                      url.isFileURL else { return }
-                let path = url.standardizedFileURL.path
-                Task { @MainActor in
-                    guard !imagePaths.contains(path), imagePaths.count < ChatSelectionImageTrigger.maxChatImages else {
-                        return
-                    }
-                    imagePaths.append(path)
-                }
-            }
+        ChatImageThumbDrop.acceptFileURLs(
+            from: providers,
+            imageExtensions: appState.config.imageExtensions,
+            existingPaths: imagePaths,
+            maxImages: ChatSelectionImageTrigger.maxChatImages
+        ) { added in
+            imagePaths.append(contentsOf: added)
         }
-        return accepted
     }
 }
 

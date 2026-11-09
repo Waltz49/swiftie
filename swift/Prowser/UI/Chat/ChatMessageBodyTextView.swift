@@ -67,16 +67,25 @@ final class ChatMessageBodyHostView: NSView {
     }
 
     func apply(text: String, color: NSColor) {
+        var heightChanged = false
         if textView.string != text {
             textView.string = text
+            heightChanged = true
         }
-        textView.textColor = color
-        invalidateIntrinsicContentSize()
+        if textView.textColor != color {
+            textView.textColor = color
+        }
+        if heightChanged {
+            invalidateIntrinsicContentSize()
+        }
     }
 
-    override func layout() {
-        super.layout()
-        invalidateIntrinsicContentSize()
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(newSize.width - frame.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged {
+            invalidateIntrinsicContentSize()
+        }
     }
 }
 

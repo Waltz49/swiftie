@@ -419,7 +419,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 |-----|--------|-------|
 | Chat messages / system prompts (`chat_system_prompts.json`) | done | done |
 | LM Studio rejected response phrases (`CHAT_REJECTED_RESPONSE_PHRASES`) | hardcoded; chat worker retry (max 5) | Swift: editable list + enable toggle; `ChatRejectedPhraseStreamRetry` for chat stream only |
-| `{}` in stored user message after **new** submit | removed (`keep_selection_trigger=False` in `prepare_user_message_for_storage`) | **kept** in message text (`keepSelectionTrigger` default `true`); LM Studio payload still strips `{}` at send time |
+| `{}` in stored user message after **new** submit | removed (`keep_selection_trigger=False` in `prepare_user_message_for_storage`) | done (same; LM Studio payload strips `{}` at send time) |
 | `{}` on edit save / redo | kept in text (`keep_selection_trigger=True`) | same |
 | CNN / known-person search last directory settings (`find_person_*`) | done | done |
 

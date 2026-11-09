@@ -40,8 +40,13 @@ enum ChatTextFieldFocusRouting {
                 }
                 let point = contentView.convert(event.locationInWindow, from: nil)
                 let hit = contentView.hitTest(point)
-                if !hitIsInsideChatTextField(hit) {
-                    onExit()
+                guard !hitIsInsideChatTextField(hit) else { return }
+                DispatchQueue.main.async {
+                    guard window.firstResponder === textView else { return }
+                    let current = contentView.hitTest(point)
+                    if !hitIsInsideChatTextField(current) {
+                        onExit()
+                    }
                 }
             }
             return event

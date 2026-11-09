@@ -73,7 +73,7 @@ final class ChatController {
 
     var editingMessageID: String?
     private var pendingEditText = ""
-    private var pendingEditImagePaths: [String] = []
+    var messageEditImagePaths: [String] = []
 
     var messages: [ChatMessage] { session.messages }
     var systemPromptLabel: String {
@@ -162,7 +162,7 @@ final class ChatController {
     func prepareUserMessage(
         text: String,
         imagePaths: [String],
-        keepSelectionTrigger: Bool = true
+        keepSelectionTrigger: Bool = false
     ) -> (text: String, imagePaths: [String], mode: ChatImageGenTrigger.Mode?) {
         let applied = ChatSelectionImageTrigger.applySelectionTrigger(
             text: text,
@@ -467,7 +467,7 @@ final class ChatController {
         let msg = session.messages[idx]
         var paths = msg.imagePaths
         if paths.isEmpty, editingMessageID == messageID {
-            paths = pendingEditImagePaths
+            paths = messageEditImagePaths
         }
         userPromptSaveDraft = UserPromptSaveDraft(defaultName: "", text: msg.text, imagePaths: paths)
         showUserPromptSave = true
@@ -504,12 +504,33 @@ final class ChatController {
     func redoMessage(messageID: String) {
         commitPendingMessageEditIfNeeded()
         guard let userIdx = session.userIndexForRedo(messageID: messageID) else { return }
+        stopGeneration()
+        removeStreamingPlaceholder()
         while session.messages.count > userIdx + 1 {
             session.removeAt(session.messages.count - 1)
         }
         let userMsg = session.messages[userIdx]
-        session.removeAt(userIdx)
-        submitUserMessage(text: userMsg.text, imagePaths: userMsg.imagePaths)
+        refreshUserMessageSelectionTriggerOnRedo(messageID: userMsg.messageID)
+        maybePersistSession()
+        bumpScroll()
+        requestAssistantResponse()
+    }
+
+    /// Re-apply ``{}`` on redo so images match the current browser selection (Python ``_refresh_user_message_selection_trigger``).
+    private func refreshUserMessageSelectionTriggerOnRedo(messageID: String) {
+        guard let idx = session.indexOf(messageID: messageID) else { return }
+        let msg = session.messages[idx]
+        guard msg.role == .user, ChatSelectionImageTrigger.hasSelectionTrigger(msg.text) else { return }
+        let prepared = prepareUserMessage(
+            text: msg.text,
+            imagePaths: msg.imagePaths,
+            keepSelectionTrigger: true
+        )
+        if prepared.text == msg.text,
+           Set(prepared.imagePaths) == Set(msg.imagePaths) {
+            return
+        }
+        updateMessage(messageID: messageID, text: prepared.text, imagePaths: prepared.imagePaths)
     }
 
     func redoLastUserMessage() {
@@ -525,7 +546,7 @@ final class ChatController {
         }
         editingMessageID = messageID
         pendingEditText = text
-        pendingEditImagePaths = imagePaths
+        messageEditImagePaths = imagePaths
     }
 
     func syncPendingEditText(_ text: String) {
@@ -537,7 +558,7 @@ final class ChatController {
     func commitPendingMessageEditIfNeeded() {
         guard let messageID = editingMessageID else { return }
         let text = pendingEditText
-        let paths = pendingEditImagePaths
+        let paths = messageEditImagePaths
         cancelMessageEdit()
         updateMessage(messageID: messageID, text: text, imagePaths: paths)
     }
@@ -545,16 +566,20 @@ final class ChatController {
     func cancelMessageEdit() {
         editingMessageID = nil
         pendingEditText = ""
-        pendingEditImagePaths = []
+        messageEditImagePaths = []
     }
 
     func updateMessage(messageID: String, text: String, imagePaths: [String]) {
         guard let idx = session.indexOf(messageID: messageID) else { return }
         var msg = session.messages[idx]
-        let prepared = prepareUserMessage(text: text, imagePaths: imagePaths)
-        msg.text = prepared.text
-        msg.imageGenAuto = prepared.mode.map { $0 == .create ? .create : .edit }
         if msg.role == .user {
+            let prepared = prepareUserMessage(
+                text: text,
+                imagePaths: imagePaths,
+                keepSelectionTrigger: true
+            )
+            msg.text = prepared.text
+            msg.imageGenAuto = prepared.mode.map { $0 == .create ? .create : .edit }
             let refs = ChatImagePaths.pathsReferencedByMessages(session.messages, exceptMessageID: messageID)
             let sources = ChatImagePaths.sourcesForNewAttachments(
                 newPaths: prepared.imagePaths,
@@ -563,6 +588,9 @@ final class ChatController {
             )
             msg.imagePaths = imageStore.storeImages(prepared.imagePaths, messageID: msg.messageID, referencedElsewhere: refs)
             msg.sourceImagePaths = ChatImagePaths.alignSourceImagePaths(storedPaths: msg.imagePaths, sourcePaths: sources)
+        } else {
+            msg.text = text
+            msg.imagePaths = ChatAssistantImagePaths.normalize(imagePaths)
         }
         session.replaceMessage(at: idx, with: msg)
         maybePersistSession()

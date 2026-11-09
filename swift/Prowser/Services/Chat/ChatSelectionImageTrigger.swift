@@ -26,7 +26,7 @@ enum ChatSelectionImageTrigger {
         text: String,
         imagePaths: [String],
         appState: AppState,
-        keepTriggerInText: Bool = true
+        keepTriggerInText: Bool = false
     ) -> (text: String, imagePaths: [String]) {
         guard hasSelectionTrigger(text) else { return (text, imagePaths) }
         var outText = text

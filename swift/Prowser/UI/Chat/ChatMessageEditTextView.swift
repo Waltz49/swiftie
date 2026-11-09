@@ -6,6 +6,15 @@ final class ChatMessageEditNSTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
     var onEscape: (() -> Void)?
 
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+        }
+        super.mouseDown(with: event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if ChatKeyCommand.isCommandReturn(event) {
             onCommandReturn?()
@@ -32,14 +41,22 @@ final class ChatMessageEditNSTextView: NSTextView {
 }
 
 @MainActor
+final class ChatMessageEditScrollView: NSScrollView {
+    override func mouseDown(with event: NSEvent) {
+        if let textView = documentView as? NSTextView {
+            window?.makeFirstResponder(textView)
+        }
+        super.mouseDown(with: event)
+    }
+}
+
+@MainActor
 final class ChatMessageEditHostView: NSView {
-    let scrollView: NSScrollView
+    let scrollView: ChatMessageEditScrollView
     let textView: ChatMessageEditNSTextView
-    var onExitKeyboardFocus: (() -> Void)?
-    private var clickAwayMonitor: Any?
 
     init() {
-        scrollView = NSScrollView()
+        scrollView = ChatMessageEditScrollView()
         textView = ChatMessageEditNSTextView()
         super.init(frame: .zero)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -107,21 +124,11 @@ final class ChatMessageEditHostView: NSView {
         }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let onExitKeyboardFocus else { return }
-        ChatTextFieldFocusRouting.syncClickAwayMonitor(
-            host: self,
-            textView: textView,
-            onExit: onExitKeyboardFocus,
-            storage: &clickAwayMonitor
-        )
-    }
-
-    deinit {
-        if let clickAwayMonitor {
-            NSEvent.removeMonitor(clickAwayMonitor)
+    override func mouseDown(with event: NSEvent) {
+        if window?.firstResponder !== textView {
+            window?.makeFirstResponder(textView)
         }
+        textView.mouseDown(with: event)
     }
 
     @available(*, unavailable)
@@ -138,7 +145,6 @@ struct ChatMessageEditTextView: NSViewRepresentable {
     var backgroundColor: NSColor
     var onCommandReturn: () -> Void
     var onEscape: () -> Void
-    var onExitKeyboardFocus: () -> Void
     var onTextChange: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -154,18 +160,14 @@ struct ChatMessageEditTextView: NSViewRepresentable {
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
         host.textView.onEscape = { context.coordinator.fireEscape() }
         host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
-        host.onExitKeyboardFocus = onExitKeyboardFocus
         context.coordinator.seedBindingIfNeeded(displayed: initial)
         host.refreshDocumentLayout()
-        DispatchQueue.main.async {
-            host.window?.makeFirstResponder(host.textView)
-        }
+        context.coordinator.scheduleInitialFocus(on: host)
         return host
     }
 
     func updateNSView(_ host: ChatMessageEditHostView, context: Context) {
         context.coordinator.parent = self
-        host.onExitKeyboardFocus = onExitKeyboardFocus
         host.textView.onCommandReturn = { context.coordinator.fireCommandReturn() }
         host.textView.onEscape = { context.coordinator.fireEscape() }
         host.applyChrome(textColor: textColor, backgroundColor: backgroundColor)
@@ -185,12 +187,14 @@ struct ChatMessageEditTextView: NSViewRepresentable {
             }
         }
         host.refreshDocumentLayout()
+        context.coordinator.maintainKeyboardFocus(on: host)
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ChatMessageEditTextView
         private var didSeedBinding = false
+        private var needsInitialFocus = false
 
         init(parent: ChatMessageEditTextView) {
             self.parent = parent
@@ -198,6 +202,23 @@ struct ChatMessageEditTextView: NSViewRepresentable {
 
         func prepareForNewEditSession() {
             didSeedBinding = false
+            needsInitialFocus = true
+        }
+
+        func scheduleInitialFocus(on host: ChatMessageEditHostView) {
+            needsInitialFocus = true
+            maintainKeyboardFocus(on: host)
+        }
+
+        func maintainKeyboardFocus(on host: ChatMessageEditHostView) {
+            guard needsInitialFocus else { return }
+            guard host.window != nil else { return }
+            DispatchQueue.main.async { [weak self, weak host] in
+                guard let self, self.needsInitialFocus, let host, let window = host.window else { return }
+                if window.makeFirstResponder(host.textView) {
+                    self.needsInitialFocus = false
+                }
+            }
         }
 
         func seedBindingIfNeeded(displayed: String) {
