@@ -70,10 +70,11 @@ enum ImageGenGenerationExifService {
     ) async throws -> Bool {
         guard FileManager.default.isReadableFile(atPath: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
-        guard let existing = ExifService.userComment(path: outputPath),
-              existing.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).hasPrefix("Image Model:") else {
+        guard let data = ExifCommentData.read(from: outputPath),
+              data.trimmedText.hasPrefix("Image Model:") else {
             return false
         }
+        let existing = data.rawText
         let entries = referenceEntries(
             plugin: plugin,
             values: values,
@@ -111,8 +112,9 @@ enum ImageGenGenerationExifService {
               ExifService.canWriteExifToOnDiskRaster(path: outputPath),
               let plugin = ImageGenPluginCatalog.plugin(pluginID: pluginID) else { return false }
 
-        let existingRaw = ExifService.userComment(path: outputPath)
-        let meta = mfluxMetadataFromUserComment(at: outputPath)
+        let existingData = ExifCommentData.read(from: outputPath)
+        let existingRaw = existingData?.rawText
+        let meta = existingData?.mflux
         let workerResult = progressiveWorkerResult(
             meta: meta,
             values: values,
@@ -221,11 +223,6 @@ enum ImageGenGenerationExifService {
             outputPath: outputPath,
             tempRoot: tempRoot
         )
-    }
-
-    private static func mfluxMetadataFromUserComment(at path: String) -> [String: Any]? {
-        guard let raw = ExifService.userComment(path: path) else { return nil }
-        return ImageGenExifCommentFormatting.parseMfluxMetadataJSON(raw)
     }
 
     private static func progressiveWorkerResult(

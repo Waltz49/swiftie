@@ -233,20 +233,7 @@ enum ImageGenExifCommentFormatting {
 
     /// Seed line from a finished-style Image Model block (progressive rewrites).
     static func seedFromFormattedGenerationComment(_ text: String) -> Int? {
-        let seedPattern = try? NSRegularExpression(
-            pattern: #"^\s*Seed\s*:\s*(\d+)\s*$"#,
-            options: [.caseInsensitive]
-        )
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let stripped = String(line).trimmingCharacters(in: .whitespaces)
-            guard !stripped.isEmpty else { continue }
-            if let match = seedPattern?.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
-               let valueRange = Range(match.range(at: 1), in: stripped),
-               let value = Int(stripped[valueRange]) {
-                return value
-            }
-        }
-        return nil
+        ExifCommentData(text: text).generation["seed"] as? Int
     }
 
     /// Port of `format_image_exif_prompt`.

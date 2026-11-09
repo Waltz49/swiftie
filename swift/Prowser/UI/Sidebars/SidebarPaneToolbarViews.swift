@@ -198,9 +198,13 @@ struct InformationActionBarView: View {
     private func readAloud() {
         guard let comment = appState.userCommentForActiveImage() else { return }
         let formatted = ImageGenExifCommentFormatting.formatUserCommentTextForDisplay(comment)
-        let text = NSEvent.modifierFlags.contains(.option)
-            ? formatted
-            : ExifService.truncateUserCommentBeforePrompt(formatted)
+        let text: String
+        if NSEvent.modifierFlags.contains(.option) {
+            text = formatted
+        } else {
+            text = ExifCommentData.bodyAfterPromptHeading(formatted)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         SpeechReader.speakOrStop(text) {
             speakHighlighted = SpeechReader.isSpeaking
         }

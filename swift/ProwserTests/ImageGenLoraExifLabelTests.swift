@@ -70,7 +70,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         Prompt:
         cat
         """
-        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        let parsed = ExifCommentData(text: comment).generation
         XCTAssertEqual(parsed["lora"] as? String, "First [1] + Second [0.5]")
     }
 
@@ -135,7 +135,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         Prompt:
         test
         """
-        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        let parsed = ExifCommentData(text: comment).generation
         XCTAssertEqual(parsed["model"] as? String, "FLUX 2 Klein 9B KV MLX")
         XCTAssertEqual(parsed["lora"] as? String, "F2K9B_BallgagV2_2020E10 [1]")
         XCTAssertEqual(parsed["seed"] as? Int, 1_335_284_087)
@@ -186,7 +186,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         Prompt:
         cat
         """
-        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        let parsed = ExifCommentData(text: comment).generation
         XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
     }
 
@@ -219,7 +219,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         let json = """
         {"prompt":"cat","seed":1,"steps":9,"quantize":4,"model":"\(LoRAHFModelIDs.zImageTurboMflux4Bit)"}
         """
-        let parsed = ImageGenExifImport.parseExifGenerationMetadata(json)
+        let parsed = ExifCommentData(text: json).generation
         XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
         XCTAssertEqual(
             ImageGenExifImport.resolvePluginID(
@@ -260,7 +260,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         Prompt:
         cat
         """
-        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        let parsed = ExifCommentData(text: comment).generation
         XCTAssertEqual(
             ImageGenExifImport.resolvePluginID(
                 forExifModel: parsed["model"] as? String ?? "",
@@ -282,7 +282,7 @@ final class ImageGenLoraExifLabelTests: XCTestCase {
         Prompt:
         cat
         """
-        let parsed = ImageGenExifImport.parseExifGenerationMetadata(comment)
+        let parsed = ExifCommentData(text: comment).generation
         XCTAssertEqual(parsed["model"] as? String, "Z-Image Turbo (4-bit)")
     }
 

@@ -151,8 +151,8 @@ enum ThumbnailContextMenu {
 
         if singleOnly, let path = paths.first {
             let imageDir = (path as NSString).deletingLastPathComponent
-            let comment = ExifService.userComment(path: path) ?? ""
-            let entries = ReferenceGraphService.parseReferenceEntries(from: comment)
+            let entries = ExifCommentData.read(from: path)?
+                .references.map { ($0.label, $0.mtime) } ?? []
             let (resolved, _, _) = ReferenceGraphService.resolveExifReferencePaths(
                 imageDir: imageDir,
                 currentPath: path,

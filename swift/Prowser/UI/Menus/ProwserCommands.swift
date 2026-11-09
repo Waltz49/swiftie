@@ -464,6 +464,10 @@ struct ProwserCommands: Commands {
                     }
                     .keyboardShortcut("l", modifiers: .control)
 
+                    Button("Show EXIF API Structure") {
+                        Task { @MainActor in appState.openExifAPIStructureDebug() }
+                    }
+
                     Divider()
 
                     Button("Print Cache Status") {

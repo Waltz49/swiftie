@@ -1079,6 +1079,10 @@ final class AppState {
         )
     }
 
+    func openExifAPIStructureDebug() {
+        ExifAPIStructureDialogController.show(appState: self)
+    }
+
     func removeFacialRecognitionModels() {
         guard FaceEngine.isBridgeLinked() else {
             status.show("Face recognition is not available in this build")

@@ -15,6 +15,14 @@ enum ImageListCommentIndicator: Int, Sendable {
 
     /// Default list sort: fire → check → blank.
     var sortRank: Int { rawValue }
+
+    var debugLabel: String {
+        switch self {
+        case .blank: return "blank"
+        case .exifComment: return "exifComment"
+        case .prowserFormatted: return "prowserFormatted"
+        }
+    }
 }
 
 struct ImageListCommentInfo: Equatable, Sendable {
@@ -36,14 +44,15 @@ struct ImageListCommentInfo: Equatable, Sendable {
 /// Classifies EXIF user comments for the list view comments column.
 enum ImageListCommentService {
     static func classify(path: String) -> ImageListCommentInfo {
-        guard let comment = ExifService.readUserDescription(path: path)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !comment.isEmpty else {
+        guard let data = ExifCommentData.read(from: path) else {
             return ImageListCommentInfo(indicator: .blank, fullComment: "")
         }
-        if ExifService.isProwserFormattedUserComment(comment) {
-            return ImageListCommentInfo(indicator: .prowserFormatted, fullComment: comment)
+        let indicator: ImageListCommentIndicator
+        if data.kind == .mflux || data.kind == .prowserFormatted {
+            indicator = .prowserFormatted
+        } else {
+            indicator = .exifComment
         }
-        return ImageListCommentInfo(indicator: .exifComment, fullComment: comment)
+        return ImageListCommentInfo(indicator: indicator, fullComment: data.rawText)
     }
 }

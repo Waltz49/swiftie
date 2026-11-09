@@ -42,6 +42,7 @@ enum DialogGeometryKey {
     static let loraFind = "lora_find_dialog_geometry"
     /// View log (``ViewLogDialogController``).
     static let viewPrintLog = "view_print_log_dialog_geometry"
+    static let exifAPIStructure = "exif_api_structure_dialog_geometry"
     static let imageGenCreateSheet = "imagegen_create_sheet_geometry"
 
     /// Every settings key that stores a persisted auxiliary window frame (`[x,y,w,h]` or `[w,h]`), including values nested under `imagegen`.
@@ -82,6 +83,7 @@ enum DialogGeometryKey {
         loraImport,
         loraFind,
         viewPrintLog,
+        exifAPIStructure,
         imageGenCreateSheet,
     ]
 }

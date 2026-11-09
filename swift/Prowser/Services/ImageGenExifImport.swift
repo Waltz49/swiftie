@@ -32,15 +32,6 @@ enum ImageGenExifImport {
         return trimmed + "\n\n" + importTooltipNoDataLine
     }
 
-    /// Unified resolver for import image path (shared by prompt/rest tooltips and actions).
-    static func importImagePathForTooltip(
-        function: String,
-        sourcePath: String?,
-        appState: AppState
-    ) -> String? {
-        imagePathForImport(function: function, sourcePath: sourcePath, appState: appState)
-    }
-
     static func importFromFileDataAvailable(
         kind: ImportTooltipKind,
         function: String,
@@ -48,15 +39,15 @@ enum ImageGenExifImport {
         appState: AppState,
         plugins: [[String: Any]]
     ) -> Bool {
-        guard let path = importImagePathForTooltip(function: function, sourcePath: sourcePath, appState: appState) else {
+        guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
             return false
         }
+        guard let data = ExifCommentData.readForImageGenImport(from: path) else { return false }
         switch kind {
         case .prompt:
-            return ExifService.exifUserCommentHasImportablePrompt(path: path)
+            return ExifCommentData.imageGenImportPrompt(from: data) != nil
         case .rest:
-            guard let comment = ExifService.exifUserCommentText(path: path) else { return false }
-            let gated = gatedExifParams(parseExifGenerationMetadata(comment), plugins: plugins)
+            let gated = gatedExifParams(data.generation, plugins: plugins)
             return !gated.isEmpty
         }
     }
@@ -173,16 +164,16 @@ enum ImageGenExifImport {
         guard let path = imagePathForImport(function: function, sourcePath: sourcePath, appState: appState) else {
             return nil
         }
-        guard let comment = ExifService.exifUserCommentText(path: path) else {
+        guard let data = ExifCommentData.readForImageGenImport(from: path) else {
             return nil
         }
-        let parsed = parseExifGenerationMetadata(comment)
+        let parsed = data.generation
         let gated = gatedExifParams(parsed, plugins: plugins)
         guard !gated.isEmpty else { return nil }
         var updated = values
         var pluginID = selectedPluginID
 
-        let hfFromMeta = mfluxHfModelID(from: comment)
+        let hfFromMeta = mfluxHFModelID(from: data)
         if let model = parsed["model"] as? String,
            let resolved = resolvePluginID(
                forExifModel: model,
@@ -435,8 +426,8 @@ enum ImageGenExifImport {
         return nil
     }
 
-    private static func mfluxHfModelID(from comment: String) -> String? {
-        guard let meta = ImageGenExifCommentFormatting.parseMfluxMetadataJSON(comment) else { return nil }
+    private static func mfluxHFModelID(from data: ExifCommentData) -> String? {
+        guard let meta = data.mflux else { return nil }
         let raw = (meta["model_config"] as? String) ?? (meta["model"] as? String) ?? ""
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.lowercased() != "none" else { return nil }
@@ -454,134 +445,5 @@ enum ImageGenExifImport {
         }
         out.removeValue(forKey: "model")
         return out
-    }
-
-    static func parseExifGenerationMetadata(_ fullComment: String) -> [String: Any] {
-        var out: [String: Any] = [:]
-        let trimmed = fullComment.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return out }
-
-        if let modelName = parseExifModelName(trimmed) {
-            out["model"] = ImageGenExifCommentFormatting.presentedModelName(modelName)
-        }
-
-        var inModelBlock = false
-        let intPattern = try? NSRegularExpression(
-            pattern: #"^\s*(Seed|Steps|Quantization)\s*:\s*(\d+)\s*$"#,
-            options: [.caseInsensitive]
-        )
-        let guidancePattern = try? NSRegularExpression(
-            pattern: #"^\s*Guidance\s*:\s*([\d.]+)\s*$"#,
-            options: [.caseInsensitive]
-        )
-        let loraPattern = try? NSRegularExpression(
-            pattern: #"^\s*LoRA\s*:\s*(.+?)\s*$"#,
-            options: [.caseInsensitive]
-        )
-        let stepsSuffixPattern = try? NSRegularExpression(pattern: #"\[(\d+)\]\s*$"#)
-
-        for line in trimmed.split(separator: "\n", omittingEmptySubsequences: false) {
-            let stripped = line.trimmingCharacters(in: .whitespaces)
-            guard !stripped.isEmpty else { continue }
-            let lower = stripped.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-            if lower == "image model" {
-                inModelBlock = true
-                continue
-            }
-            if lower.hasPrefix("prompt") || lower.hasPrefix("references") {
-                inModelBlock = false
-            }
-
-            if inModelBlock, out["steps"] == nil,
-               let match = stepsSuffixPattern?.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
-               let range = Range(match.range(at: 1), in: stripped),
-               let steps = Int(stripped[range]) {
-                out["steps"] = steps
-            }
-
-            if let match = intPattern?.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
-               let labelRange = Range(match.range(at: 1), in: stripped),
-               let valueRange = Range(match.range(at: 2), in: stripped),
-               let value = Int(stripped[valueRange]) {
-                let label = stripped[labelRange].lowercased()
-                if label == "quantization" {
-                    out["quantization"] = value
-                } else {
-                    out[label] = value
-                }
-                continue
-            }
-
-            if let match = guidancePattern?.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
-               let valueRange = Range(match.range(at: 1), in: stripped),
-               let guidance = Double(stripped[valueRange]) {
-                out["guidance"] = guidance
-                continue
-            }
-
-            if let match = loraPattern?.firstMatch(in: stripped, range: NSRange(stripped.startIndex..., in: stripped)),
-               let valueRange = Range(match.range(at: 1), in: stripped) {
-                let name = String(stripped[valueRange]).trimmingCharacters(in: .whitespaces)
-                guard !name.isEmpty else { continue }
-                out["lora"] = ImageGenExifCommentFormatting.appendExifLoraImportToken(
-                    existing: out["lora"] as? String,
-                    name: name
-                )
-                continue
-            }
-
-            if let contName = ImageGenExifCommentFormatting.exifLoraContinuationName(from: String(line)) {
-                out["lora"] = ImageGenExifCommentFormatting.appendExifLoraImportToken(
-                    existing: out["lora"] as? String,
-                    name: contName
-                )
-            }
-        }
-        return out
-    }
-
-    private static func parseExifModelName(_ fullComment: String) -> String? {
-        if hasFormattedImageModelSection(fullComment),
-           let block = imageModelNameFromFormattedBlock(fullComment) {
-            return ImageGenExifCommentFormatting.presentedModelName(block)
-        }
-        if let hf = mfluxHfModelID(from: fullComment) {
-            return ImageGenExifCommentFormatting.presentedModelName(hf)
-        }
-        return imageModelNameFromFormattedBlock(fullComment)
-            .map { ImageGenExifCommentFormatting.presentedModelName($0) }
-    }
-
-    private static func hasFormattedImageModelSection(_ text: String) -> Bool {
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let lower = line.trimmingCharacters(in: .whitespaces).lowercased()
-            if lower == "image model" || lower == "image model:" {
-                return true
-            }
-        }
-        return false
-    }
-
-    private static func imageModelNameFromFormattedBlock(_ fullComment: String) -> String? {
-        var inModelBlock = false
-        for line in fullComment.split(separator: "\n", omittingEmptySubsequences: false) {
-            let stripped = line.trimmingCharacters(in: .whitespaces)
-            guard !stripped.isEmpty else { continue }
-            let lower = stripped.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-            if lower == "image model" {
-                inModelBlock = true
-                continue
-            }
-            if lower.hasPrefix("prompt") || lower.hasPrefix("references") {
-                inModelBlock = false
-            }
-            guard inModelBlock else { continue }
-            if stripped.range(of: #"^\s*(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\s*:"#, options: .regularExpression) != nil {
-                continue
-            }
-            if ImageGenExifCommentFormatting.isExifLoraContinuationLine(String(line)) { continue }
-            return stripped
-        }
-        return nil
     }
 }

@@ -119,7 +119,7 @@ enum ReferenceGraphService {
     @MainActor
     private static func referenceEntries(for path: String) async -> [(String, Double?)] {
         guard let text = await ExifService.userDescription(path: path), !text.isEmpty else { return [] }
-        return parseReferenceEntries(from: text)
+        return ExifCommentData(text: text).references.map { ($0.label, $0.mtime) }
     }
 
     static func isReferenceFileDateLine(_ line: String) -> Bool {
