@@ -28,10 +28,11 @@ enum FluxPromptJobValues {
             }
         }
         guard !current.isEmpty else { return "" }
-        return ImageGenLoraTriggerPromptGuard.augmentPromptWithMissingLoraTriggers(
+        let augmented = ImageGenLoraTriggerPromptGuard.augmentPromptWithMissingLoraTriggers(
             prompt: current,
             values: values
         )
+        return AIPromptExitService.restoreLoremPlaceholdersForDialog(augmented)
     }
 
     static func syncFluxPromptAIUserPromptForNextCopy(

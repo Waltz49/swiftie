@@ -478,7 +478,8 @@ final class SidebarPaneSplitModel {
             let earlyTarget = appState.jobsPaneTargetPaneHeight()
             let current = sizes[2]
             let earlyTolerance = SidebarPaneLayout.paneFitHeightTolerance(needed: earlyTarget)
-            if earlyTarget > current + earlyTolerance {
+            if earlyTarget > current + earlyTolerance,
+               !appState.jobsPaneUserHeldAllMultijobHeight() {
                 resizePaneToHeight(
                     paneIndex: 2,
                     targetHeight: earlyTarget,
@@ -539,7 +540,8 @@ final class SidebarPaneSplitModel {
                 }
             } else if jobCount > 1 {
                 // Python multijob ALL: grow when splitter slice is shorter than content; never shrink (⌥\ uses snap).
-                if target > current + tolerance {
+                if target > current + tolerance,
+                   !appState.jobsPaneUserHeldAllMultijobHeight() {
                     resizePaneToHeight(
                         paneIndex: 2,
                         targetHeight: target,

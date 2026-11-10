@@ -64,8 +64,12 @@ enum ImageGenExifCommentFormatting {
         "generation_time_seconds", "generation_time", "prompt",
     ]
 
-    /// Strip BOM / EXIF charset prefix and isolate a JSON object when ImageIO returns a raw blob.
+    /// Strip BOM / EXIF charset prefix (no brace extraction — prowser formatted comments may contain `{{...}}`).
     static func normalizedUserCommentTextForParsing(_ text: String) -> String {
+        userCommentTextAfterEXIFCharsetDecode(text)
+    }
+
+    private static func userCommentTextAfterEXIFCharsetDecode(_ text: String) -> String {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("\u{FEFF}") {
             trimmed = String(trimmed.dropFirst())
@@ -76,18 +80,15 @@ enum ImageGenExifCommentFormatting {
                 trimmed = decoded
             }
         }
-        if trimmed.first != "{", trimmed.first != "[" {
-            if let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}"), start < end {
-                trimmed = String(trimmed[start...end])
-            }
-        }
         return trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Port of `parse_mflux_metadata_json`.
+    /// Port of `parse_mflux_metadata_json` — only when comment starts with `{` or `[`.
     static func parseMfluxMetadataJSON(_ text: String) -> [String: Any]? {
-        let trimmed = normalizedUserCommentTextForParsing(text)
+        let trimmed = userCommentTextAfterEXIFCharsetDecode(text)
         guard !trimmed.isEmpty else { return nil }
+        let first = trimmed[trimmed.startIndex]
+        guard first == "{" || first == "[" else { return nil }
         guard let payload = jsonObjectPayload(from: trimmed) else { return nil }
         guard let dict = payload as? [String: Any] else { return nil }
         if dict["mflux_version"] != nil { return dict }
@@ -103,22 +104,13 @@ enum ImageGenExifCommentFormatting {
 
     private static func jsonObjectPayload(from trimmed: String) -> Any? {
         guard let data = trimmed.data(using: .utf8) else { return nil }
-        if let json = try? JSONSerialization.jsonObject(with: data) {
-            if let nested = json as? String,
-               let nestedData = nested.data(using: .utf8),
-               let inner = try? JSONSerialization.jsonObject(with: nestedData) {
-                return inner
-            }
-            return json
+        guard let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        if let nested = json as? String,
+           let nestedData = nested.data(using: .utf8),
+           let inner = try? JSONSerialization.jsonObject(with: nestedData) {
+            return inner
         }
-        if let start = trimmed.firstIndex(of: "{"), let end = trimmed.lastIndex(of: "}") , start < end {
-            let slice = String(trimmed[start...end])
-            if let sliceData = slice.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: sliceData) {
-                return json
-            }
-        }
-        return nil
+        return json
     }
 
     // MARK: - Display

@@ -1356,11 +1356,7 @@ struct ImageGenUnifiedDialog: View {
         if resolvedCopies != JobStepQueue.normalizeCopies(values["copies"] ?? 1) {
             values["copies"] = resolvedCopies
         }
-        _ = FluxPromptJob.applyPromptExitsAfterFluxJobResolution(
-            values: &submitValues,
-            config: appState.config
-        )
-        syncNormalizedPromptFieldsFromSubmit(into: &values, submitValues: submitValues)
+        // Image exit runs at worker ``buildPayload`` time (per copy) so ``[L]`` can expand to new ``{{…}}`` each copy.
         ImageGenJobValuesSnapshot.applyJobQueueOnlyKeys(values: &submitValues, from: values)
         return submitValues
     }
@@ -1518,7 +1514,16 @@ struct ImageGenUnifiedDialog: View {
                     errorMessage = appState.imageGen.lastError
                 }
             }
-            values = submitValues
+            let dialogPrompt = values["prompt"] as? String ?? ""
+            let dialogNegative = values["negative_prompt"] as? String
+            let persistValues = ImageGenDialogPromptPersistence.valuesForDialogSave(
+                submitValues: submitValues,
+                dialogPrompt: dialogPrompt,
+                negativePrompt: dialogNegative
+            )
+            for (key, val) in persistValues where key != "prompt" && key != "negative_prompt" {
+                values[key] = val
+            }
             if replace {
                 adoptQueueJobEditorBaseline()
             }
@@ -1527,7 +1532,7 @@ struct ImageGenUnifiedDialog: View {
             ImageGenPersistence.savePluginDialogSettings(
                 function: selectedFunction,
                 pluginID: selectedPluginID,
-                values: submitValues,
+                values: persistValues,
                 config: appState.config
             )
             persistDialogSessionOnClose()

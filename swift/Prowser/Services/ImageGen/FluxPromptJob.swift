@@ -408,14 +408,13 @@ enum FluxPromptJob {
         )
     }
 
+    /// Dialog submit must not call this: exits run per copy in ``buildPayload`` so ``[L]`` can re-roll.
     static func applyPromptExitsAfterFluxJobResolution(values: inout [String: Any], config: AppConfig) -> Bool {
         if JobStepQueue.hasFluxPromptAIJob(values) { return false }
         let prompt = values["prompt"] as? String ?? ""
-        let merged = ImageGenMfluxPayloadBuilder.applyImagePromptRules(values: values, config: config)
-        let updated = merged["prompt"] as? String ?? ""
-        guard updated != prompt else { return false }
-        let recased = ImageGenPromptSentenceCase.afterPromptExit(updated)
-        values["prompt"] = recased
+        let filtered = ImageGenMfluxPayloadBuilder.applyImageAIExitForRun(prompt: prompt, config: config)
+        guard filtered != prompt else { return false }
+        values["prompt"] = ImageGenPromptSentenceCase.afterPromptExit(filtered)
         return true
     }
 }

@@ -61,6 +61,45 @@ final class ImageGenPromptTextEncodingTests: XCTestCase {
         XCTAssertEqual(AIPromptExitService.restoreLoremPlaceholdersForDialog(#"say "hi""#), #"say "hi""#)
     }
 
+    func testEffectiveJobTooltipShowsLoremPlaceholderNotExpandedBlocks() {
+        let values: [String: Any] = [
+            "prompt": "prefix {{old lorem block}} suffix",
+        ]
+        let tooltip = FluxPromptJobValues.effectiveJobPromptForTooltip(values)
+        XCTAssertTrue(tooltip.contains("[L]"))
+        XCTAssertFalse(tooltip.contains("{{old lorem"))
+    }
+
+    func testValuesForDialogSaveKeepsRawPromptNotExited() {
+        let submit: [String: Any] = [
+            "prompt": "arm binder {{lorem ipsum}}",
+            "negative_prompt": "blur",
+            "seed": 7,
+        ]
+        let saved = ImageGenDialogPromptPersistence.valuesForDialogSave(
+            submitValues: submit,
+            dialogPrompt: "arm binder [L]",
+            negativePrompt: "blur"
+        )
+        XCTAssertEqual(saved["prompt"] as? String, "arm binder [L]")
+        XCTAssertEqual(saved["negative_prompt"] as? String, "blur")
+        XCTAssertEqual(saved["seed"] as? Int, 7)
+    }
+
+    func testFormattedExifPromptWithDoubleBracesIsNotMfluxJSON() {
+        let body = "arm binder {{lorem ipsum}}"
+        let comment = ImageGenExifCommentFormatting.formatImageExifPrompt(
+            modelName: "Test Model",
+            promptText: body,
+            seed: 1
+        )
+        XCTAssertNil(ImageGenExifCommentFormatting.parseMfluxMetadataJSON(comment))
+        let data = ExifCommentData(text: comment)
+        XCTAssertEqual(data.prompt, body)
+        XCTAssertEqual(ImageGenExifCommentFormatting.extractedPromptText(from: comment), body)
+        XCTAssertTrue(ExifCommentData.hasImageModelSection(comment))
+    }
+
     func testRepairUTF8BytesMisinterpretedAsLatin1() {
         let once = String(data: Data([0x50, 0x61, 0x6e, 0x65, 0x6c, 0xc3, 0xb0, 0xc2, 0x9f, 0xc2, 0x9a, 0xc2, 0xab]), encoding: .utf8)!
         XCTAssertEqual(ImageGenPromptTextEncoding.repairUTF8BytesMisinterpretedAsLatin1(once), "Panel🚫")

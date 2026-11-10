@@ -666,7 +666,7 @@ final class ImageGenController {
 
         let exited = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !exited.isEmpty, !hasFluxAI {
-            job.fullPrompt = exited
+            job.fullPrompt = AIPromptExitService.restoreLoremPlaceholdersForDialog(exited)
         } else {
             job.fullPrompt = JobStepQueue.resolvedFullPrompt(
                 stored: job.fullPrompt,
@@ -1992,7 +1992,8 @@ final class ImageGenController {
             var payload = try await registry.buildPayload(
                 pluginID: activePluginID,
                 values: generationValues,
-                outputPath: outputPath
+                outputPath: outputPath,
+                applyImageExit: true
             )
             if let plugin = ImageGenPluginCatalog.plugin(pluginID: activePluginID),
                ImageGenPipelineModes.mode(pipelineID: plugin.pipelineID)?.supportsProgressiveImages == true {
@@ -2017,14 +2018,8 @@ final class ImageGenController {
                 cycleValues["steps"] = steps.intValue
             }
             ImageGenLoraWorkerPayloadEnrich.mergeLoraFields(from: payload, into: &cycleValues)
-            if let workerPrompt = payload["prompt"] as? String {
-                let trimmed = workerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    cycleValues["prompt"] = workerPrompt
-                }
-            }
             copyCycleValues = cycleValues
-            copyCycleWorkerPrompt = (cycleValues["prompt"] as? String ?? "")
+            copyCycleWorkerPrompt = (payload["prompt"] as? String ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             copyCyclePluginID = activePluginID
             if stepRunning != nil {
@@ -3659,7 +3654,7 @@ final class ImageGenController {
 
         let exited = (payload["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !exited.isEmpty, !hasFluxAI {
-            job.fullPrompt = exited
+            job.fullPrompt = AIPromptExitService.restoreLoremPlaceholdersForDialog(exited)
         } else {
             job.fullPrompt = JobStepQueue.resolvedFullPrompt(
                 stored: job.fullPrompt,
@@ -3839,7 +3834,7 @@ final class ImageGenController {
         await resolvedLoraStatusLabel(pluginID: pluginID, values: values)
     }
 
-    /// Python ``_copy_cycle_exif_values`` / ``_copy_cycle_exif_plugin``.
+    /// Python ``_copy_cycle_exif_values`` / ``_copy_cycle_exif_plugin`` (per-copy worker prompt for EXIF only).
     private var copyCycleExifValues: [String: Any] {
         var base = copyCycleValues.isEmpty ? pendingValues : copyCycleValues
         let worker = copyCycleWorkerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)

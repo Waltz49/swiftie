@@ -437,11 +437,19 @@ extension AppState {
         guard abs(measuredJobsCardStackHeight - cardStackHeight) > tolerance else { return }
         measuredJobsCardStackHeight = cardStackHeight
         jobsQueuePanelLayoutRevision += 1
-        if grew {
+        if grew, !jobsPaneUserHeldAllMultijobHeight() {
             jobsPaneGeometryForceRefit = true
         }
         guard shouldScheduleJobsPaneRefitForContentChange(onQueueChange: true) else { return }
         scheduleJobsPaneGeometryRefit()
+    }
+
+    /// User dragged the jobs splitter in ALL with multiple rows; hold height until queue size mode changes.
+    func jobsPaneUserHeldAllMultijobHeight() -> Bool {
+        guard jobsPaneUserSplitterSized else { return false }
+        guard jobsQueueSizeMode == .all else { return false }
+        guard visibleJobsQueueRowCount() > 1 else { return false }
+        return !shouldShrinkWrapJobsClient()
     }
 
     /// Port of ``JobQueuePanelWidget.should_auto_resize_sidebar_pane``.
@@ -478,6 +486,7 @@ extension AppState {
 
     /// Port of ``JobQueuePanelWidget._notify_sidebar_geometry_if_needed`` queue-change branch.
     func shouldScheduleJobsPaneRefitForQueueChange() -> Bool {
+        if jobsPaneUserHeldAllMultijobHeight() { return false }
         if shouldAutoResizeJobsSidebarOnQueueChange() { return true }
         if jobsQueueSizeMode == .all,
            visibleJobsQueueRowCount() > 1,
@@ -503,6 +512,7 @@ extension AppState {
 
     /// Whether ``ensureJobsPaneFitsContent`` should run (includes multijob grow-only refit).
     func shouldInvokeJobsPaneEnsureFitsRefit(forceRefit: Bool) -> Bool {
+        if jobsPaneUserHeldAllMultijobHeight() { return false }
         if jobsPaneUserSplitterSized, !forceRefit { return false }
         if rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) { return true }
         if forceRefit { return true }
