@@ -29,6 +29,7 @@ final class ActiveJobStripNSView: NSView {
     var onSkipCooldown: (() -> Void)?
     var onAddSeries: ((Int, Bool) -> Void)?
     var onSubtractSeries: ((Bool) -> Void)?
+    var onProgressOptionOpen: (() -> Void)?
 
     private struct BarHandle {
         let prefix: NSTextField
@@ -354,6 +355,7 @@ final class ActiveJobStripNSView: NSView {
         let tooltipHost = StripProgressTooltipHostNSView()
         tooltipHost.progressTooltipText = stripProgressTooltipText
         tooltipHost.themeColors = colors
+        tooltipHost.onOptionOpenJob = { [weak self] in self?.onProgressOptionOpen?() }
         tooltipHost.translatesAutoresizingMaskIntoConstraints = false
 
         container.addSubview(row)
@@ -563,6 +565,7 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     private func wireStripActions(on nsView: ActiveJobStripNSView, appState: AppState) {
         nsView.onCancel = { appState.confirmCancelGeneration() }
         nsView.onEdit = { appState.editActiveQueueJob() }
+        nsView.onProgressOptionOpen = { appState.editActiveQueueJob() }
         nsView.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
         nsView.onAddSeries = { delta, option in
             guard let jobID = appState.imageGen.activeJobID else { return }

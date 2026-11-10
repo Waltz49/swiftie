@@ -5,6 +5,7 @@ import AppKit
 final class StripProgressTooltipHostNSView: NSView {
     var progressTooltipText: String = ""
     var themeColors: ThemeColors = .dark
+    var onOptionOpenJob: (() -> Void)?
 
     private var trackingArea: NSTrackingArea?
 
@@ -54,7 +55,17 @@ final class StripProgressTooltipHostNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        ListPromptTooltip.shared.hide(for: self)
+        if event.modifierFlags.contains(.option) {
+            ListPromptTooltip.shared.hide(for: self)
+            onOptionOpenJob?()
+            return
+        }
+        if event.clickCount == 1 {
+            let tip = progressTooltipText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !tip.isEmpty {
+                ListPromptTooltip.shared.showImmediately(text: tip, colors: themeColors, anchorView: self)
+            }
+        }
         super.mouseDown(with: event)
     }
 }

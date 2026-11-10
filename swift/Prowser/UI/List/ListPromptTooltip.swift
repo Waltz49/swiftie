@@ -64,6 +64,13 @@ final class ListPromptTooltip {
         }
     }
 
+    /// Present without the hover delay (e.g. progress strip single-click).
+    func showImmediately(text: String, colors: ThemeColors, anchorView: NSView) {
+        cancelPending()
+        activeHost = anchorView
+        present(text: text, colors: colors, anchorView: anchorView)
+    }
+
     func hide(for host: NSView? = nil) {
         if let host, activeHost !== host { return }
         dismiss()

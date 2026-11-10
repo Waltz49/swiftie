@@ -987,19 +987,39 @@ final class LmStudioCaptionService {
         var temperature: Double
     }
 
+    private enum CaptionSettingDefaults {
+        static let host = "localhost:1234"
+        static let systemPrompt =
+            "Analyze the provided image thoroughly and write a highly detailed, visually rich, {CAPTION_WORD_COUNT}-word caption."
+        static let userPrompt =
+            "Carefully study the attached image and provide a comprehensive, vivid, and nuanced {CAPTION_WORD_COUNT}-word caption."
+        static let maxWords = 200
+        static let temperature = 0.7
+    }
+
+    static func captionFactoryDefaults() -> CaptionSettings {
+        CaptionSettings(
+            host: CaptionSettingDefaults.host,
+            systemPrompt: CaptionSettingDefaults.systemPrompt,
+            userPrompt: CaptionSettingDefaults.userPrompt,
+            maxWords: CaptionSettingDefaults.maxWords,
+            temperature: CaptionSettingDefaults.temperature
+        )
+    }
+
     func captionSettings(config: AppConfig) -> CaptionSettings {
         CaptionSettings(
-            host: config.string(forKey: "caption_lms_host", default: "localhost:1234"),
+            host: config.string(forKey: "caption_lms_host", default: CaptionSettingDefaults.host),
             systemPrompt: config.string(
                 forKey: "caption_system_prompt",
-                default: "Analyze the provided image thoroughly and write a highly detailed, visually rich, {CAPTION_WORD_COUNT}-word caption."
+                default: CaptionSettingDefaults.systemPrompt
             ),
             userPrompt: config.string(
                 forKey: "caption_user_prompt",
-                default: "Carefully study the attached image and provide a comprehensive, vivid, and nuanced {CAPTION_WORD_COUNT}-word caption."
+                default: CaptionSettingDefaults.userPrompt
             ),
-            maxWords: config.int(forKey: "caption_max_words", default: 200),
-            temperature: config.double(forKey: "caption_temperature", default: 0.7)
+            maxWords: config.int(forKey: "caption_max_words", default: CaptionSettingDefaults.maxWords),
+            temperature: config.double(forKey: "caption_temperature", default: CaptionSettingDefaults.temperature)
         )
     }
 

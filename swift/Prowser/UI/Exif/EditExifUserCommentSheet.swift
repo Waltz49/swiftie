@@ -256,6 +256,10 @@ struct EditExifUserCommentSheet: View {
 
     // MARK: - Server settings (inline; not in app Settings dialog)
 
+    private var captionDefaults: LmStudioCaptionService.CaptionSettings {
+        LmStudioCaptionService.captionFactoryDefaults()
+    }
+
     private var serverSettingsSection: some View {
         CollapsibleSettingsSection(
             title: "Server Settings",
@@ -263,59 +267,187 @@ struct EditExifUserCommentSheet: View {
             isExpanded: $serverSettingsExpanded
         ) {
             SettingsPreferencePanel {
-                SettingsPreferenceFormRow(
+                captionServerFormRow(
                     label: "LMS host:",
                     subtitle: "LMStudio API host and port (e.g. localhost:1234)",
-                    tooltip: "LMStudio API host and port (e.g. localhost:1234)"
+                    tooltip: "LMStudio API host and port (e.g. localhost:1234)",
+                    isResetActive: captionHostDiffersFromDefault
                 ) {
+                    resetCaptionHostToDefault()
+                } control: {
                     TextField("localhost:1234", text: $captionHost)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
                 }
-                SettingsPreferenceFormRow(
+                captionServerFormRow(
                     label: "Caption max words for {CAPTION_WORD_COUNT} in prompts:",
-                    tooltip: "Target word count for the caption (used in prompts)"
+                    tooltip: "Target word count for the caption (used in prompts)",
+                    isResetActive: captionMaxWordsDiffersFromDefault
                 ) {
+                    resetCaptionMaxWordsToDefault()
+                } control: {
                     TextField("", value: $captionMaxWords, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
                 }
-                SettingsPreferenceFormRow(
+                captionServerFormRow(
                     label: "Temperature (0–3):",
-                    tooltip: "Model temperature (0=deterministic, higher=more creative)"
+                    tooltip: "Model temperature (0=deterministic, higher=more creative)",
+                    isResetActive: captionTemperatureDiffersFromDefault
                 ) {
+                    resetCaptionTemperatureToDefault()
+                } control: {
                     TextField("", value: $captionTemperature, format: .number.precision(.fractionLength(1)))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("System prompt:")
-                        .font(.system(size: 13))
-                        .foregroundStyle(SettingsDialogChrome.rowTitle)
-                    TextEditor(text: $captionSystemPrompt)
-                        .font(.body)
-                        .frame(minHeight: 72, maxHeight: 100)
-                        .scrollContentBackground(.hidden)
-                        .background(colors.dialogInputBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("User prompt:")
-                        .font(.system(size: 13))
-                        .foregroundStyle(SettingsDialogChrome.rowTitle)
-                    TextEditor(text: $captionUserPrompt)
-                        .font(.body)
-                        .frame(minHeight: 72, maxHeight: 100)
-                        .scrollContentBackground(.hidden)
-                        .background(colors.dialogInputBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
+                captionPromptEditorBlock(
+                    title: "System prompt:",
+                    text: $captionSystemPrompt,
+                    isResetActive: captionSystemPromptDiffersFromDefault,
+                    reset: resetCaptionSystemPromptToDefault
+                )
+                captionPromptEditorBlock(
+                    title: "User prompt:",
+                    text: $captionUserPrompt,
+                    isResetActive: captionUserPromptDiffersFromDefault,
+                    reset: resetCaptionUserPromptToDefault
+                )
             }
         }
+    }
+
+    private var captionHostDiffersFromDefault: Bool {
+        !ImageGenFieldResetLogic.matchesDefault(
+            current: captionHost.trimmingCharacters(in: .whitespacesAndNewlines),
+            resetDefault: captionDefaults.host,
+            kind: "choice"
+        )
+    }
+
+    private var captionMaxWordsDiffersFromDefault: Bool {
+        !ImageGenFieldResetLogic.matchesDefault(
+            current: captionMaxWords,
+            resetDefault: captionDefaults.maxWords,
+            kind: "int_slider"
+        )
+    }
+
+    private var captionTemperatureDiffersFromDefault: Bool {
+        !ImageGenFieldResetLogic.matchesDefault(
+            current: captionTemperature,
+            resetDefault: captionDefaults.temperature,
+            kind: "float_slider",
+            step: 0.1
+        )
+    }
+
+    private var captionSystemPromptDiffersFromDefault: Bool {
+        !ImageGenFieldResetLogic.matchesDefault(
+            current: captionSystemPrompt,
+            resetDefault: captionDefaults.systemPrompt,
+            kind: "choice"
+        )
+    }
+
+    private var captionUserPromptDiffersFromDefault: Bool {
+        !ImageGenFieldResetLogic.matchesDefault(
+            current: captionUserPrompt,
+            resetDefault: captionDefaults.userPrompt,
+            kind: "choice"
+        )
+    }
+
+    private func resetCaptionHostToDefault() {
+        captionHost = captionDefaults.host
+    }
+
+    private func resetCaptionMaxWordsToDefault() {
+        captionMaxWords = captionDefaults.maxWords
+        persistCaptionSettingsDraft()
+    }
+
+    private func resetCaptionTemperatureToDefault() {
+        captionTemperature = captionDefaults.temperature
+        persistCaptionSettingsDraft()
+    }
+
+    private func resetCaptionSystemPromptToDefault() {
+        captionSystemPrompt = captionDefaults.systemPrompt
+        persistCaptionSettingsDraft()
+    }
+
+    private func resetCaptionUserPromptToDefault() {
+        captionUserPrompt = captionDefaults.userPrompt
+        persistCaptionSettingsDraft()
+    }
+
+    @ViewBuilder
+    private func captionFieldResetButton(isActive: Bool, action: @escaping () -> Void) -> some View {
+        ImageGenFieldResetButton(
+            isActive: isActive,
+            tooltip: "Reset to default",
+            action: action
+        )
+    }
+
+    @ViewBuilder
+    private func captionServerFormRow<Control: View>(
+        label: String,
+        subtitle: String? = nil,
+        tooltip: String? = nil,
+        isResetActive: Bool,
+        reset: @escaping () -> Void,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SettingsDialogChrome.rowTitle)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(SettingsDialogChrome.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 6) {
+                control()
+                captionFieldResetButton(isActive: isResetActive, action: reset)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .help(tooltip ?? label)
+    }
+
+    @ViewBuilder
+    private func captionPromptEditorBlock(
+        title: String,
+        text: Binding<String>,
+        isResetActive: Bool,
+        reset: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SettingsDialogChrome.rowTitle)
+                Spacer(minLength: 0)
+                captionFieldResetButton(isActive: isResetActive, action: reset)
+            }
+            TextEditor(text: text)
+                .font(.body)
+                .frame(minHeight: 72, maxHeight: 100)
+                .scrollContentBackground(.hidden)
+                .background(colors.dialogInputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Footer

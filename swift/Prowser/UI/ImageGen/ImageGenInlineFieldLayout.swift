@@ -15,6 +15,8 @@ enum ImageGenInlineFieldLayout {
     static let labelFontSize: CGFloat = 14
     /// Custom size width/height labels inside ``imageGenCustomSizeGroup``.
     static let customSizeDimLabelSize: CGFloat = 12
+    /// Unified dialog content inside the Custom Size outlined group.
+    static let unifiedCustomSizeContentLeadingPadding: CGFloat = 20
     static let infoLineFontSize: CGFloat = 11
     static let defaultLabelTexts = ["Model", "LoRAs"]
 

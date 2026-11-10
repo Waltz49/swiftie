@@ -105,6 +105,10 @@ struct ImageGenCustomSizeSection: View {
                         )
                     }
                 }
+                .padding(
+                    .leading,
+                    compactSliderTracks ? ImageGenInlineFieldLayout.unifiedCustomSizeContentLeadingPadding : 0
+                )
             }
         }
         .onAppear {
