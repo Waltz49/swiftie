@@ -118,6 +118,16 @@ enum HiddenGemsHelpContent {
 
         #
 
+        ## Jobs pane — active progress strip
+
+        While a job is running, the progress strip shows step/timing bars. Hover (about one second) or a plain click shows a tooltip with the model, LoRAs, and prompt in use.
+
+        | Modifier + click | Where | Action |
+        |------------------|-------|--------|
+        | **\(opt)+click** | Progress strip row (label, bar, or timing labels) | Open the unified image-generation dialog with settings for the **currently running** job (same as the strip edit icon — useful for the live worker or AI-refined prompt). |
+
+        #
+
         ## Not finding something?
 
         Press **/** for the full keyboard-shortcut list. This page covers modifier + click actions, drag-and-drop locations, and a few related shortcuts. Chat, image generation, and settings-only modifier actions from the PySide6 app are not in this Swift build.
