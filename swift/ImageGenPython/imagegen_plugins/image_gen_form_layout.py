@@ -64,14 +64,14 @@ IMAGE_GEN_PROMPT_STYLE_BORDER_V = 2  # 1px top + 1px bottom border
 IMAGE_GEN_SEED_SPIN_CHAR_COUNT = 11
 IMAGE_GEN_PROMPT_MIN_LINE_COUNT = 4
 IMAGE_GEN_PROMPT_MAX_LINE_COUNT = 22
-IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT = (
-    ""
+_UNIFIED_DIALOG_PROMPT_RESET_DEFAULT_TEXT = (
+    "* Respond with a 90 word image prompt (a description of a scene).\n\n"
+    "* No commentary, no conversation.\n\n"
+    "* If image provided, base your response on the image.\n\n"
+    "* Retain all details you receive from the user. Answer in documentary prose."
 )
-IMAGE_GEN_SYSTEM_PROMPT_RESET_DEFAULT_TEXT = (
-    "Respond with a 90 word image prompt. No commentary, no conversation.\n"
-    "If image provided, base your response on the image. Retain all details "
-    "you receive from the user. Answer in documentary prose."
-)
+IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT = _UNIFIED_DIALOG_PROMPT_RESET_DEFAULT_TEXT
+IMAGE_GEN_SYSTEM_PROMPT_RESET_DEFAULT_TEXT = _UNIFIED_DIALOG_PROMPT_RESET_DEFAULT_TEXT
 IMAGE_GEN_PROMPT_LABEL_ACTION_SPACING = 6
 
 

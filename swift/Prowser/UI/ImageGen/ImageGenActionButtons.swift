@@ -2,11 +2,14 @@ import AppKit
 import SwiftUI
 
 enum ImageGenPromptDefaults {
-    static let promptResetText = ""
-    static let systemPromptResetText =
-        "Respond with a 90 word image prompt. No commentary, no conversation.\n" +
-        "If image provided, base your response on the image. Retain all details " +
-        "you receive from the user. Answer in documentary prose."
+    private static let unifiedDialogPromptResetDefault =
+        "* Respond with a 90 word image prompt (a description of a scene).\n\n" +
+        "* No commentary, no conversation.\n\n" +
+        "* If image provided, base your response on the image.\n\n" +
+        "* Retain all details you receive from the user. Answer in documentary prose."
+
+    static let promptResetText = unifiedDialogPromptResetDefault
+    static let systemPromptResetText = unifiedDialogPromptResetDefault
 }
 
 /// Copy / speak / favorite / mic / clear strip matching Python `append_image_gen_prompt_label_action_buttons`.
