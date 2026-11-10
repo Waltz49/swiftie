@@ -43,6 +43,9 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var themeColors: ThemeColors = .dark
     /// Card under the pointer; drives selection chrome and the shared action bar.
     private var hoveredJobID: String?
+    /// Gap between cards: defer clearing hover so the next card can expand before this one shrinks.
+    private static let hoverClearDebounceInterval: TimeInterval = 0.1
+    private var pendingHoverClearWorkItem: DispatchWorkItem?
 
     private let scrollView = JobsPaneNonFocusScrollView()
     private let documentView = FlippedView()
@@ -158,8 +161,30 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         hoveredJobID
     }
 
+    private func cancelPendingHoverClear() {
+        pendingHoverClearWorkItem?.cancel()
+        pendingHoverClearWorkItem = nil
+    }
+
+    private func scheduleHoverClear() {
+        cancelPendingHoverClear()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            pendingHoverClearWorkItem = nil
+            setHoveredJobID(nil)
+        }
+        pendingHoverClearWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.hoverClearDebounceInterval,
+            execute: work
+        )
+    }
+
     private func setHoveredJobID(_ jobID: String?) {
         guard hoveredJobID != jobID else { return }
+        if jobID != nil {
+            cancelPendingHoverClear()
+        }
         hoveredJobID = jobID
         applyHoverSelection()
     }
@@ -250,6 +275,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     ) {
         self.rows = rows
         if let hoveredJobID, !rows.contains(where: { $0.jobID == hoveredJobID }) {
+            cancelPendingHoverClear()
             self.hoveredJobID = nil
         }
         let cardScrollWidth = scrollWidthForRowLayout(proposed: scrollWidth)
@@ -424,7 +450,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             if isHovered {
                 setHoveredJobID(card.boundJobID)
             } else if hoveredJobID == card.boundJobID {
-                setHoveredJobID(nil)
+                scheduleHoverClear()
             }
         }
         return card
@@ -452,6 +478,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             parkCard(card)
         }
         cardViews.removeAll()
+        cancelPendingHoverClear()
         hoveredJobID = nil
         attachActionBar(to: nil)
         refreshActionBarState()
