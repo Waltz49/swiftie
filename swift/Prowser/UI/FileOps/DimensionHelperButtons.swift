@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Dimension helper icons shared by Resize Images (screen / square / reverse / import).
@@ -6,6 +7,9 @@ struct ImageGenDimHelperIconButton: View {
     let normalName: String
     let hoverName: String
     var tooltip: String = ""
+    var graphicTooltipUsesButtonAsset: Bool = true
+    var graphicTooltipIcon: NSImage? = nil
+    var graphicTooltipIconPixelSize: CGFloat = ImageGenExifImport.importTooltipImageSide
     let action: () -> Void
 
     var body: some View {
@@ -15,6 +19,9 @@ struct ImageGenDimHelperIconButton: View {
             size: 22,
             iconSize: 16,
             tooltip: tooltip,
+            graphicTooltipUsesButtonAsset: graphicTooltipUsesButtonAsset,
+            graphicTooltipIcon: graphicTooltipIcon,
+            graphicTooltipIconPixelSize: graphicTooltipIconPixelSize,
             action: action
         )
     }

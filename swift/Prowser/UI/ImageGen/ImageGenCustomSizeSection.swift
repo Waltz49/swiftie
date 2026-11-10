@@ -183,6 +183,38 @@ struct ImageGenCustomSizeSection: View {
         ImageGenDimMath.Bounds(min: heightMin, max: effectiveMaxSide)
     }
 
+    private var importSizeTooltipRefreshID: String {
+        ImageGenExifImport.imagePathForImportSize(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState,
+            presentWarning: false
+        ) ?? ""
+    }
+
+    private var importSizeTooltipImage: NSImage? {
+        let _ = appState.fileData.currentImagePath
+        let _ = appState.fileData.currentViewMode
+        let _ = sourcePath
+        return ImageGenExifImport.importSizeTooltipImage(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState
+        )
+    }
+
+    private var importSizeTooltip: String {
+        let _ = appState.fileData.currentImagePath
+        let _ = appState.fileData.currentViewMode
+        let _ = sourcePath
+        return ImageGenExifImport.importSizeButtonTooltip(
+            base: ImageGenDimHelperTooltips.importSize,
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState
+        )
+    }
+
     private var controlsRow: some View {
         HStack(spacing: 8) {
             Toggle("Aspect Ratio Lock", isOn: $aspectLock)
@@ -219,9 +251,12 @@ struct ImageGenCustomSizeSection: View {
                 ImageGenDimHelperIconButton(
                     normalName: "import_icon",
                     hoverName: "import_icon_hover",
-                    tooltip: ImageGenDimHelperTooltips.importSize,
+                    tooltip: importSizeTooltip,
+                    graphicTooltipUsesButtonAsset: false,
+                    graphicTooltipIcon: importSizeTooltipImage,
                     action: applyImportDims
                 )
+                .id(importSizeTooltipRefreshID)
             }
         }
     }

@@ -84,6 +84,48 @@ enum ImageGenExifImport {
         return loadSquareTooltipImage(path: path, side: importTooltipImageSide)
     }
 
+    /// Pixel-dimension source thumb for custom-size and resize **Import** graphic tooltips.
+    static func importSizeTooltipImage(
+        function: String,
+        sourcePath: String?,
+        appState: AppState
+    ) -> NSImage? {
+        guard let path = imagePathForImportSize(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState,
+            presentWarning: false
+        ) else {
+            return nil
+        }
+        return importSizeTooltipImage(forReadablePath: path)
+    }
+
+    static func importSizeTooltipImage(forReadablePath path: String) -> NSImage? {
+        guard FileManager.default.isReadableFile(atPath: path) else { return nil }
+        return loadSquareTooltipImage(path: path, side: importTooltipImageSide)
+    }
+
+    static func importSizeButtonTooltip(
+        base: String,
+        function: String,
+        sourcePath: String?,
+        appState: AppState
+    ) -> String {
+        let hasSource = imagePathForImportSize(
+            function: function,
+            sourcePath: sourcePath,
+            appState: appState,
+            presentWarning: false
+        ) != nil
+        return importTooltipText(base: base, hasImportableData: hasSource)
+    }
+
+    static func importSizeButtonTooltip(base: String, sourcePath: String?) -> String {
+        let hasSource = sourcePath.map { FileManager.default.isReadableFile(atPath: $0) } ?? false
+        return importTooltipText(base: base, hasImportableData: hasSource)
+    }
+
     static func imagePathForImport(
         function: String,
         sourcePath: String?,

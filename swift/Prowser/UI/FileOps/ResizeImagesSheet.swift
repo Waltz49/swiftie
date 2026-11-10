@@ -55,6 +55,29 @@ struct ResizeImagesSheet: View {
         return "Final size: \(width) × \(height) pixels"
     }
 
+    private var resizeImportSizePath: String? {
+        let _ = appState.fileData.currentImagePath
+        guard let path = appState.fileData.currentImagePath ?? paths.first,
+              FileManager.default.isReadableFile(atPath: path) else { return nil }
+        return path
+    }
+
+    private var resizeImportSizeTooltipRefreshID: String {
+        resizeImportSizePath ?? ""
+    }
+
+    private var resizeImportSizeTooltipImage: NSImage? {
+        guard let path = resizeImportSizePath else { return nil }
+        return ImageGenExifImport.importSizeTooltipImage(forReadablePath: path)
+    }
+
+    private var resizeImportSizeTooltip: String {
+        ImageGenExifImport.importSizeButtonTooltip(
+            base: ImageGenDimHelperTooltips.importSize,
+            sourcePath: resizeImportSizePath
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(paths.count > 1 ? "Resize Images" : "Resize Image")
@@ -127,9 +150,12 @@ struct ResizeImagesSheet: View {
                     ImageGenDimHelperIconButton(
                         normalName: "import_icon",
                         hoverName: "import_icon_hover",
-                        tooltip: ImageGenDimHelperTooltips.importSize,
+                        tooltip: resizeImportSizeTooltip,
+                        graphicTooltipUsesButtonAsset: false,
+                        graphicTooltipIcon: resizeImportSizeTooltipImage,
                         action: applyImportDims
                     )
+                    .id(resizeImportSizeTooltipRefreshID)
                 }
             }
             .padding(.leading, 20)

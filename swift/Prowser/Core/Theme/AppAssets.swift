@@ -40,6 +40,10 @@ struct AppAssetIconButton: View {
     /// Checked / pressed toolbar state (e.g. chat copy-images toggle).
     var isSelected: Bool = false
     var tooltip: String = ""
+    /// When `false`, the graphic tooltip uses ``graphicTooltipIcon`` (e.g. a source image preview) instead of the button asset.
+    var graphicTooltipUsesButtonAsset: Bool = true
+    var graphicTooltipIcon: NSImage? = nil
+    var graphicTooltipIconPixelSize: CGFloat = 48
     let action: () -> Void
 
     @State private var isHovered = false
@@ -80,10 +84,21 @@ struct AppAssetIconButton: View {
                 .strokeBorder(Color.secondary.opacity(isHovered || isSelected ? 0.8 : 0.45), lineWidth: 1)
         )
         .onHover { isHovered = $0 }
-        .graphicButtonTooltip(text: tooltip, icon: tooltipIcon)
+        .graphicButtonTooltip(
+            text: tooltip,
+            icon: graphicTooltipIconForPopup,
+            iconPixelSize: graphicTooltipIconPixelSize
+        )
     }
 
-    private var tooltipIcon: NSImage? {
+    private var graphicTooltipIconForPopup: NSImage? {
+        if graphicTooltipUsesButtonAsset {
+            return buttonAssetTooltipIcon
+        }
+        return graphicTooltipIcon
+    }
+
+    private var buttonAssetTooltipIcon: NSImage? {
         AppAssets.nsImage(name: hoverName, fileExtension: fileExtension(forHover: true))
             ?? AppAssets.nsImage(name: normalName, fileExtension: fileExtension(forHover: false))
     }

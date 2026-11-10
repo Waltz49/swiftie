@@ -68,7 +68,7 @@ final class GraphicButtonTooltipPopup: NSObject {
         textField.lineBreakMode = .byWordWrapping
         textField.preferredMaxLayoutWidth = Self.textMaxWidth
         textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textField.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         footerField = NSTextField(wrappingLabelWithString: "")
         footerField.isEditable = false
@@ -88,6 +88,8 @@ final class GraphicButtonTooltipPopup: NSObject {
         textColumn.orientation = .vertical
         textColumn.alignment = .leading
         textColumn.spacing = 6
+        textColumn.translatesAutoresizingMaskIntoConstraints = false
+        textColumn.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         stack = NSStackView(views: [iconView, textColumn])
         stack.orientation = .horizontal
@@ -104,6 +106,8 @@ final class GraphicButtonTooltipPopup: NSObject {
             stack.trailingAnchor.constraint(equalTo: chrome.trailingAnchor, constant: -1),
             stack.topAnchor.constraint(equalTo: chrome.topAnchor, constant: 1),
             stack.bottomAnchor.constraint(equalTo: chrome.bottomAnchor, constant: -1),
+            // Python ``GraphicTooltipPopup``: ``setMaximumWidth(320)`` on the text label.
+            textColumn.widthAnchor.constraint(equalToConstant: Self.textMaxWidth),
         ])
         panel.contentView = chrome
         super.init()
