@@ -66,6 +66,8 @@ struct ImageGenerationSettingsSection: View {
                 onGear: { appState.chat.openExitScripts() }
             )
 
+            jobCardHoverPromptRow()
+
             gearToggleRow(
                 title: "Use read aloud exit",
                 subtitle: "External script for speak buttons instead of built-in speech.",
@@ -296,6 +298,47 @@ struct ImageGenerationSettingsSection: View {
     }
 
     @ViewBuilder
+    private func jobCardHoverPromptRow() -> some View {
+        let selection = stringBinding(
+            JobCardHoverPromptMode.settingsKey,
+            default: JobCardHoverPromptMode.originalValue
+        )
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("Jobcard hover shows:")
+                .preferencesScanRecordsLabel("Jobcard hover shows")
+            HStack(spacing: 16) {
+                jobCardHoverPromptRadio(
+                    "Original Prompt",
+                    tag: JobCardHoverPromptMode.originalValue,
+                    selection: selection
+                )
+                jobCardHoverPromptRadio(
+                    "Modified prompt",
+                    tag: JobCardHoverPromptMode.modifiedValue,
+                    selection: selection
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 20)
+        .preferencesScanRecordsLabel("Jobcard hover prompt")
+    }
+
+    private func jobCardHoverPromptRadio(_ title: String, tag: String, selection: Binding<String>) -> some View {
+        let selected = selection.wrappedValue == tag
+        return Button {
+            selection.wrappedValue = tag
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                Text(title)
+            }
+        }
+        .buttonStyle(.plain)
+        .preferencesScanRecordsLabel(title)
+    }
+
+    @ViewBuilder
     private func gearToggleRow(
         title: String,
         subtitle: String,
@@ -356,6 +399,7 @@ struct ImageGenerationSettingsSection: View {
         MfluxToolchain.shared.bind(config: appState.config)
         appState.workers.reloadSettings(config: appState.config)
         appState.imageGen.reloadEnvironment()
+        appState.imageGen.refreshJobCardTooltipPreference()
         appState.bumpMenuCommandsRevision()
     }
 

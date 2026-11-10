@@ -3253,15 +3253,42 @@ final class ImageGenController {
     }
 
     private func resolvedActiveWorkerPrompt(values: [String: Any]) -> String {
-        let worker = copyCycleWorkerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !worker.isEmpty { return worker }
-        let refined = launchRefinedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !refined.isEmpty { return refined }
-        let fromValues = FluxPromptJobValues.effectiveJobPromptForTooltip(values)
-        if !fromValues.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return fromValues
+        JobCardHoverFullPrompt.activeWorkerPrompt(
+            workerPrompt: copyCycleWorkerPrompt,
+            refinedPrompt: launchRefinedPrompt,
+            valuesPrompt: FluxPromptJobValues.effectiveJobPromptForTooltip(values),
+            displayFullPrompt: effectiveDisplayFullPrompt()
+        )
+    }
+
+    /// Settings → job card hover tooltip full prompt (resolved on hover).
+    func jobCardHoverFullPrompt(for row: QueueRowSnapshot) -> String {
+        switch JobCardHoverPromptMode.from(config: config) {
+        case .original:
+            return JobCardHoverFullPrompt.original(
+                rowFullPrompt: row.fullPrompt,
+                jobValues: queuedJob(byID: row.jobID)?.values
+            )
+        case .modified:
+            if row.isActive {
+                let values = copyCycleValues.isEmpty ? pendingValues : copyCycleExifValues
+                return resolvedActiveWorkerPrompt(values: values)
+            }
+            guard let job = queuedJob(byID: row.jobID) else {
+                return row.fullPrompt
+            }
+            let base = FluxPromptJobValues.effectiveJobPromptForTooltip(job.values)
+            guard !base.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+            let modified = ImageGenMfluxPayloadBuilder.applyImageAIExitForRun(
+                prompt: ImageGenPromptSentenceCase.normalized(base),
+                config: config
+            )
+            return AIPromptExitService.restoreLoremPlaceholdersForDialog(modified)
         }
-        return effectiveDisplayFullPrompt()
+    }
+
+    func refreshJobCardTooltipPreference() {
+        bumpQueueRevision()
     }
 
     private func wireBridgeCallbacks() {

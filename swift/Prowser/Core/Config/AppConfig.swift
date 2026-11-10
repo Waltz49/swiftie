@@ -996,6 +996,7 @@ final class AppConfig {
             "imagegen_unload_lmstudio_models_before_generation": true,
             "imagegen_execution_backend": "optimized",
             "use_prompt_filter_exits": false,
+            "imagegen_jobcard_hover_prompt": "original",
             "text_ai_exit": "",
             "image_ai_exit": "",
             "say_exit": "",

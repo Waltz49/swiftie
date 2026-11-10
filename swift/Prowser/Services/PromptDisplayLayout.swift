@@ -130,6 +130,51 @@ enum PromptDisplayLayout {
     }
 }
 
+/// Settings → Image Generation: job card hover tooltip prompt source.
+enum JobCardHoverPromptMode {
+    static let settingsKey = "imagegen_jobcard_hover_prompt"
+    static let originalValue = "original"
+    static let modifiedValue = "modified"
+
+    case original
+    case modified
+
+    @MainActor
+    static func from(config: AppConfig) -> JobCardHoverPromptMode {
+        let raw = config.string(forKey: settingsKey, default: originalValue)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw == modifiedValue ? .modified : .original
+    }
+}
+
+/// Resolves full prompt text for job card hover tooltips (original vs exit-modified).
+enum JobCardHoverFullPrompt {
+    static func original(rowFullPrompt: String, jobValues: [String: Any]?) -> String {
+        let fromRow = rowFullPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromRow.isEmpty { return fromRow }
+        if let jobValues {
+            return FluxPromptJobValues.effectiveJobPromptForTooltip(jobValues)
+        }
+        return ""
+    }
+
+    /// Mirrors ``ImageGenController.resolvedActiveWorkerPrompt`` for tests and shared logic.
+    static func activeWorkerPrompt(
+        workerPrompt: String,
+        refinedPrompt: String,
+        valuesPrompt: String,
+        displayFullPrompt: String
+    ) -> String {
+        let worker = workerPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !worker.isEmpty { return worker }
+        let refined = refinedPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !refined.isEmpty { return refined }
+        let fromValues = valuesPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromValues.isEmpty { return fromValues }
+        return displayFullPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// Hover tooltip text for job queue cards (`model_task_status_info.full_prompt_tooltip_text`).
 enum JobPromptTooltipText {
     static func make(fullPrompt: String, displayedPrompt: String?) -> String {

@@ -61,6 +61,57 @@ final class ImageGenPromptTextEncodingTests: XCTestCase {
         XCTAssertEqual(AIPromptExitService.restoreLoremPlaceholdersForDialog(#"say "hi""#), #"say "hi""#)
     }
 
+    func testJobCardHoverOriginalPrefersRowFullPrompt() {
+        let values: [String: Any] = ["prompt": "from values"]
+        XCTAssertEqual(
+            JobCardHoverFullPrompt.original(rowFullPrompt: "from row", jobValues: values),
+            "from row"
+        )
+    }
+
+    func testJobCardHoverOriginalFallsBackToEffectiveTooltip() {
+        let values: [String: Any] = ["prompt": "queued user text"]
+        XCTAssertEqual(JobCardHoverFullPrompt.original(rowFullPrompt: "", jobValues: values), "queued user text")
+    }
+
+    func testJobCardHoverActiveWorkerPromptMatchesProgressStripOrder() {
+        XCTAssertEqual(
+            JobCardHoverFullPrompt.activeWorkerPrompt(
+                workerPrompt: "worker",
+                refinedPrompt: "refined",
+                valuesPrompt: "values",
+                displayFullPrompt: "display"
+            ),
+            "worker"
+        )
+        XCTAssertEqual(
+            JobCardHoverFullPrompt.activeWorkerPrompt(
+                workerPrompt: "",
+                refinedPrompt: "refined",
+                valuesPrompt: "values",
+                displayFullPrompt: "display"
+            ),
+            "refined"
+        )
+        XCTAssertEqual(
+            JobCardHoverFullPrompt.activeWorkerPrompt(
+                workerPrompt: "",
+                refinedPrompt: "",
+                valuesPrompt: "values",
+                displayFullPrompt: "display"
+            ),
+            "values"
+        )
+    }
+
+    @MainActor
+    func testJobCardHoverPromptModeParsing() {
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        XCTAssertEqual(JobCardHoverPromptMode.from(config: config), .original)
+        config.setValue(JobCardHoverPromptMode.modifiedValue, forKey: JobCardHoverPromptMode.settingsKey)
+        XCTAssertEqual(JobCardHoverPromptMode.from(config: config), .modified)
+    }
+
     func testEffectiveJobTooltipShowsLoremPlaceholderNotExpandedBlocks() {
         let values: [String: Any] = [
             "prompt": "prefix {{old lorem block}} suffix",
