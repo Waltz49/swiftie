@@ -52,7 +52,7 @@ enum ThemeBlendUtils {
 
     /// Qt-style emphasis on focused chat text fields (compose + inline edit).
     /// Qt factor: ``100`` = no change; ``110`` ≈ 10% toward white / scaled darker; ``120`` ≈ 20%.
-    static let chatEditableFieldBackgroundQtFactor = 110
+    static let chatEditableFieldBackgroundQtFactor = 116 // DGN color delta for input field background in chat
 
     static func chatEditableFieldBackgroundHex(sidebarHex: String, themeID: String) -> String {
         guard let base = NSColor(hex: sidebarHex)?.usingColorSpace(.sRGB) else { return sidebarHex }
