@@ -2,7 +2,11 @@ import SwiftUI
 
 @MainActor
 struct InformationPaneContentView: View {
+    @Environment(\.informationPaneScrollCoordinator) private var scrollCoordinator
+
     let content: InformationPaneContent
+    /// Live active-job label (not tied to EXIF / metadata rebuild).
+    let activeJobHeading: String?
     let colors: ThemeColors
     let onToggleSection: (String, Bool) -> Void
     let onCopySeed: (String) -> Void
@@ -19,27 +23,39 @@ struct InformationPaneContentView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                InformationPaneScrollViewAttachment()
-                    .frame(width: 0, height: 0)
+        ZStack(alignment: .topLeading) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    InformationPaneScrollViewAttachment()
+                        .frame(width: 0, height: 0)
 
-                if let heading = content.activeJobHeading, !heading.isEmpty {
-                    Text(heading)
-                        .font(.system(size: sectionHeaderFontSize, weight: .semibold))
-                        .foregroundStyle(colors.sidebarHeaderText)
-                        .padding(.bottom, 8)
+                    filenameBlock(content.filenameSection)
+
+                    descriptionBlock(content.descriptionSection)
                 }
-
-                filenameBlock(content.filenameSection)
-
-                descriptionBlock(content.descriptionSection)
+                .padding(.horizontal, contentPaddingH)
+                .padding(.vertical, contentPaddingV)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, contentPaddingH)
-            .padding(.vertical, contentPaddingV)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(colors.sidebarBackground)
+
+            if let heading = activeJobHeading, !heading.isEmpty {
+                activeJobHeadingOverlay(heading)
+                    .zIndex(1)
+            }
         }
-        .background(colors.sidebarBackground)
+    }
+
+    /// Painted above the scroll surface; does not participate in scroll content layout.
+    private func activeJobHeadingOverlay(_ heading: String) -> some View {
+        Text(heading)
+            .font(.system(size: sectionHeaderFontSize, weight: .semibold))
+            .foregroundStyle(colors.sidebarEmphasizedText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, contentPaddingH)
+            .padding(.trailing, contentPaddingH + scrollCoordinator.verticalScrollbarReserve)
+            .background(colors.sidebarBackground)
+            .allowsHitTesting(false)
     }
 
     @ViewBuilder

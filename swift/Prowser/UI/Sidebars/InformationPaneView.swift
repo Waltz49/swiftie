@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct InformationPaneView: View {
     @Environment(AppState.self) private var appState
     @State private var record: ExifRecord = .empty
@@ -15,6 +16,7 @@ struct InformationPaneView: View {
     }
 
     var body: some View {
+        let _ = appState.imageGenUIRevision
         Group {
             if appState.fileData.currentImagePath == nil {
                 Text("No image selected")
@@ -22,11 +24,11 @@ struct InformationPaneView: View {
                     .padding(.horizontal, 18)
                     .padding(.vertical, 15)
                 Spacer()
-            } else if content == nil {
-                Spacer()
-            } else if let content {
+            } else if let path = appState.fileData.currentImagePath {
+                let displayContent = content ?? placeholderContent(for: path)
                 InformationPaneContentView(
-                    content: content,
+                    content: displayContent,
+                    activeJobHeading: liveActiveJobHeading,
                     colors: appState.theme.colors,
                     onToggleSection: { key, expandAll in
                         handleLink(.toggleSection(key, expandAll: expandAll))
@@ -74,13 +76,6 @@ struct InformationPaneView: View {
         .onChange(of: appState.theme.colors) { _, _ in
             rebuildContent()
         }
-        .onChange(of: appState.imageGenUIRevision) { _, _ in
-            let heading = appState.fileData.currentImagePath.flatMap {
-                appState.imageGen.activeJobRelationHeading(for: $0)
-            }
-            guard heading != content?.activeJobHeading else { return }
-            rebuildContent()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .prowserInformationAction)) { notification in
             guard let action = notification.userInfo?["action"] as? String else { return }
             switch action {
@@ -103,6 +98,26 @@ struct InformationPaneView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+    }
+
+    private var liveActiveJobHeading: String? {
+        guard let path = appState.fileData.currentImagePath else { return nil }
+        return appState.imageGen.activeJobRelationHeading(for: path)
+    }
+
+    private func placeholderContent(for path: String) -> InformationPaneContent {
+        let name = (path as NSString).lastPathComponent
+        return InformationPaneContent(
+            activeJobHeading: nil,
+            filenameSection: InformationFilenameSection(
+                title: name,
+                sectionKey: "filename",
+                expanded: sectionState.sectionExpanded("filename"),
+                fieldRows: [],
+                borderedTable: false
+            ),
+            descriptionSection: InformationDescriptionSection(body: .addUserComment)
+        )
     }
 
     private func scheduleReload(path: String?) {
