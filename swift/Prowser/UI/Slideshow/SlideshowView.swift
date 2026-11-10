@@ -228,7 +228,9 @@ struct SlideshowView: View {
 
     private func outgoingOpacity(progress: Double) -> Double {
         if transitionOpacityOnly {
-            return isTransitioning ? (1 - progress) : 1
+            return isTransitioning
+                ? SlideshowTransitionMath.opacityOnlyCrossfadeOutgoing(linearProgress: progress)
+                : 1
         }
         let t = SlideshowTransitionMath.overlapOutgoingProgress(
             linearProgress: progress,
@@ -240,7 +242,9 @@ struct SlideshowView: View {
 
     private func incomingOpacity(progress: Double) -> Double {
         if transitionOpacityOnly {
-            return isTransitioning ? progress : 1
+            return isTransitioning
+                ? SlideshowTransitionMath.opacityOnlyCrossfadeIncoming(linearProgress: progress)
+                : 1
         }
         return 1
     }

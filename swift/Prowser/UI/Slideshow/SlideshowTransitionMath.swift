@@ -155,6 +155,15 @@ enum SlideshowTransitionMath {
         return 1 - easeInCubic(fadeT)
     }
 
+    /// Crossfade with no slide (`direction == "none"`): incoming on top of full-opacity outgoing.
+    /// Fading both layers over a dark backdrop dims the composite at the midpoint; only the
+    /// incoming layer should fade in (`result = t·incoming + (1−t)·outgoing`).
+    static func opacityOnlyCrossfadeOutgoing(linearProgress _: Double) -> Double { 1 }
+
+    static func opacityOnlyCrossfadeIncoming(linearProgress: Double) -> Double {
+        min(1, max(0, linearProgress))
+    }
+
     static func lerpSize(_ from: CGSize, _ to: CGSize, t: Double) -> CGSize {
         CGSize(
             width: from.width + (to.width - from.width) * t,
