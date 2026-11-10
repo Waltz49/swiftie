@@ -118,9 +118,11 @@ enum HiddenGemsHelpContent {
 
         #
 
-        ## Jobs pane — active progress strip
+        ## Jobs pane — queue cards and active progress strip
 
-        While a job is running, the progress strip shows step/timing bars. Hover (about one second) or a plain click shows a tooltip with the model, LoRAs, and prompt in use.
+        Hover (a few seconds) or a plain click on a job card’s **status text** (not reference thumbnails or the action bar) shows the full prompt tooltip. Reference thumbnails still open those images on a plain click.
+
+        While a job is running, the progress strip shows step/timing bars. Hover (about one second) or a plain click on a progress row shows the same style of tooltip (model, LoRAs, prompt in use).
 
         | Modifier + click | Where | Action |
         |------------------|-------|--------|

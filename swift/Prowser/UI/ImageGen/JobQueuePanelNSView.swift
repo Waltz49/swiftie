@@ -1145,7 +1145,9 @@ private final class JobCardClickOverlay: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        card?.hidePromptTooltip(from: self)
+        if event.clickCount == 1 {
+            card?.showPromptTooltipImmediately(from: self)
+        }
         receivedMouseDown = true
         card?.handleSelectionMouseDown(event)
     }
@@ -1802,6 +1804,12 @@ final class JobCardNSView: NSView {
         )
     }
 
+    func showPromptTooltipImmediately(from host: NSView) {
+        let tip = promptTooltipText
+        guard !tip.isEmpty else { return }
+        ListPromptTooltip.shared.showImmediately(text: tip, colors: colors, anchorView: host)
+    }
+
     func hidePromptTooltip(from host: NSView) {
         ListPromptTooltip.shared.hide(for: host)
     }
@@ -1826,7 +1834,6 @@ final class JobCardNSView: NSView {
     }
 
     func handleSelectionMouseDown(_ event: NSEvent) {
-        hidePromptTooltip(from: clickOverlay)
         mouseDownLocation = event.locationInWindow
         clickCount = event.clickCount
     }
