@@ -1083,11 +1083,15 @@ struct ImageGenUnifiedDialog: View {
            ) {
             lockedExpandSourcePath = path
         }
-        if selectedFunction == "infill",
-           let path = panelSourcePath ?? ImageGenFunctionPrerequisites.normalizedExistingFile(
-               values["source_image_path"] as? String
-           ) {
-            lockedInfillSourcePath = path
+        if selectedFunction == "infill" {
+            let tempRoot = appState.config.temporaryFilesDirectory.path
+            if let path = ImageGenInfillLibrarySource.resolveCanonicalReference(
+                extraCandidates: infillDialogLibrarySourceCandidates(),
+                values: values,
+                tempRoot: tempRoot
+            ) {
+                lockedInfillSourcePath = path
+            }
         }
         if selectedFunction == "edit" {
             var rawPaths = values["source_image_paths"] as? [String] ?? []
@@ -1253,24 +1257,18 @@ struct ImageGenUnifiedDialog: View {
         return ImageGenFunctionPrerequisites.normalizedExistingFile(values["source_image_path"] as? String)
     }
 
+    private func infillDialogLibrarySourceCandidates() -> [String] {
+        [lockedInfillSourcePath, appState.imageGenLastDialogSource(for: "infill"), activeImagePath]
+            .compactMap { $0 }
+    }
+
     /// Original library path for EXIF/thumbnails — not Pixelmator/MFLUX temp exports.
     private func infillCanonicalSourcePathForSubmit(values: [String: Any], tempRoot: String) -> String? {
-        if let path = resolvedSubmitSourcePath(for: "infill"),
-           let normalized = ImageGenFunctionPrerequisites.normalizedExistingFile(path) {
-            let ap = URL(fileURLWithPath: normalized).standardizedFileURL.path
-            if !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
-                return ap
-            }
-        }
-        let doc = (values["pixelmator_doc_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !doc.isEmpty {
-            let ap = URL(fileURLWithPath: doc).standardizedFileURL.path
-            if FileManager.default.isReadableFile(atPath: ap),
-               !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
-                return ap
-            }
-        }
-        return nil
+        ImageGenInfillLibrarySource.resolveCanonicalReference(
+            extraCandidates: infillDialogLibrarySourceCandidates(),
+            values: values,
+            tempRoot: tempRoot
+        )
     }
 
     private func prepareInfillSubmitExports(submitValues: inout [String: Any]) throws -> [String: Any]? {
@@ -1395,9 +1393,12 @@ struct ImageGenUnifiedDialog: View {
                 out["source_image_path"] = path
                 out["source_image_paths"] = [path]
                 let tempRoot = appState.config.temporaryFilesDirectory.path
-                if selectedFunction == "infill",
-                   let canonical = infillCanonicalSourcePathForSubmit(values: out, tempRoot: tempRoot) {
-                    out["_canonical_source_image_paths"] = [canonical]
+                if selectedFunction == "infill" {
+                    if let canonical = infillCanonicalSourcePathForSubmit(values: out, tempRoot: tempRoot) {
+                        out["_canonical_source_image_paths"] = [canonical]
+                    } else {
+                        out.removeValue(forKey: "_canonical_source_image_paths")
+                    }
                 } else {
                     out["_canonical_source_image_paths"] = [path]
                 }
@@ -1472,6 +1473,14 @@ struct ImageGenUnifiedDialog: View {
                     return
                 }
                 submitValues.merge(exportMeta) { _, new in new }
+                let tempRoot = appState.config.temporaryFilesDirectory.path
+                if let canonical = ImageGenInfillLibrarySource.resolveCanonicalReference(
+                    extraCandidates: infillDialogLibrarySourceCandidates(),
+                    values: submitValues,
+                    tempRoot: tempRoot
+                ) {
+                    submitValues["_canonical_source_image_paths"] = [canonical]
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 return

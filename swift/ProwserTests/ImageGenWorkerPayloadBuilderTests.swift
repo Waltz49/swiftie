@@ -269,6 +269,86 @@ final class ImageGenWorkerPayloadBuilderTests: XCTestCase {
     }
 
     @MainActor
+    func testInfillLibraryCanonicalRejectsTempPixelmatorPaths() throws {
+        let fm = FileManager.default
+        let profile = fm.temporaryDirectory.appendingPathComponent("infill-lib-\(UUID().uuidString)")
+        try fm.createDirectory(at: profile, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: profile) }
+        let tempRoot = profile.appendingPathComponent("temp", isDirectory: true)
+        try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        let pixelmatorDir = tempRoot.appendingPathComponent("pixelmator", isDirectory: true)
+        try fm.createDirectory(at: pixelmatorDir, withIntermediateDirectories: true)
+        let library = profile.appendingPathComponent("photo.jpg").path
+        let work = pixelmatorDir.appendingPathComponent("base.webp").path
+        XCTAssertTrue(fm.createFile(atPath: library, contents: Data([0xFF, 0xD8, 0xFF])))
+        XCTAssertTrue(fm.createFile(atPath: work, contents: Data([0x89, 0x50, 0x4E, 0x47])))
+
+        let resolved = ImageGenInfillLibrarySource.resolveCanonicalReference(
+            extraCandidates: [library],
+            values: [
+                "source_image_path": work,
+                "source_image_paths": [work],
+                "_canonical_source_image_paths": [work],
+                "pixelmator_doc_path": work,
+            ],
+            tempRoot: tempRoot.path
+        )
+        XCTAssertEqual(resolved, library)
+
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_fill_infill") else {
+            XCTFail("missing infill plugin")
+            return
+        }
+        let values: [String: Any] = [
+            "source_image_path": work,
+            "_canonical_source_image_paths": [library],
+            "pixelmator_base_path": work,
+            "pixelmator_mask_path": work,
+        ]
+        let paths = JobCardThumbnailPaths.paths(
+            pluginID: plugin.pluginID,
+            values: values,
+            tempRoot: tempRoot.path
+        )
+        XCTAssertEqual(paths, [library])
+    }
+
+    @MainActor
+    func testJobCardThumbsPreferCanonicalOverPixelmatorWorkFile() throws {
+        let fm = FileManager.default
+        let profile = fm.temporaryDirectory.appendingPathComponent("jobcard-\(UUID().uuidString)")
+        try fm.createDirectory(at: profile, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: profile) }
+        let tempRoot = profile.appendingPathComponent("temp", isDirectory: true)
+        try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        let pixelmatorDir = tempRoot.appendingPathComponent("pixelmator", isDirectory: true)
+        try fm.createDirectory(at: pixelmatorDir, withIntermediateDirectories: true)
+
+        let original = profile.appendingPathComponent("photo.jpg").path
+        let work = pixelmatorDir.appendingPathComponent("infill-base.png").path
+        XCTAssertTrue(fm.createFile(atPath: original, contents: Data([0xFF, 0xD8, 0xFF])))
+        XCTAssertTrue(fm.createFile(atPath: work, contents: Data([0x89, 0x50, 0x4E, 0x47])))
+
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_fill_infill") else {
+            XCTFail("missing infill plugin")
+            return
+        }
+        let values: [String: Any] = [
+            "source_image_path": work,
+            "source_image_paths": [work],
+            "_canonical_source_image_paths": [original],
+            "pixelmator_doc_path": work,
+            "pixelmator_base_path": work,
+        ]
+        let paths = JobCardThumbnailPaths.paths(
+            pluginID: plugin.pluginID,
+            values: values,
+            tempRoot: tempRoot.path
+        )
+        XCTAssertEqual(paths, [original])
+    }
+
+    @MainActor
     func testReplaceSubmitHonorsNSNumberCustomSize() async throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("klein-replace-\(UUID().uuidString)")

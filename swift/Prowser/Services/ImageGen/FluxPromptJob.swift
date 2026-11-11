@@ -186,9 +186,27 @@ enum FluxPromptJob {
         values: [String: Any],
         config: AppConfig
     ) -> [String] {
+        let tempRoot = config.temporaryFilesDirectory.path
+        if let canonical = values["_canonical_source_image_paths"] as? [String] {
+            let paths = canonical
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .filter { !ImageGenInfillPathSemantics.isWorkingTempPath($0, tempRoot: tempRoot) }
+            let normalized = normalizedExistingImagePaths(paths)
+            if !normalized.isEmpty { return normalized }
+        }
         switch function {
-        case "edit", "expand", "infill":
+        case "edit", "expand":
             return normalizedExistingImagePaths(ImageGenExifReferences.resolveSourceImagePaths(values))
+        case "infill":
+            var paths = ImageGenExifReferences.resolveSourceImagePaths(values)
+            if paths.isEmpty {
+                for key in ["pixelmator_base_path", "pixelmator_doc_path"] {
+                    let raw = (values[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !raw.isEmpty { paths.append(raw) }
+                }
+            }
+            return normalizedExistingImagePaths(paths)
         case "create":
             if ImageGenPersistence.passImageToAI(config: config) {
                 return fluxPromptAIReferenceImagePaths(values)

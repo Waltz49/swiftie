@@ -160,22 +160,7 @@ enum ImageGenWorkerPayloadBuilder {
     }
 
     private static func infillCanonicalSourcePath(from values: [String: Any], tempRoot: String) -> String? {
-        for raw in ImageGenExifReferences.resolveSourceImagePaths(values) {
-            let ap = URL(fileURLWithPath: raw).standardizedFileURL.path
-            if FileManager.default.isReadableFile(atPath: ap),
-               !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
-                return ap
-            }
-        }
-        let doc = (values["pixelmator_doc_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !doc.isEmpty {
-            let ap = URL(fileURLWithPath: doc).standardizedFileURL.path
-            if FileManager.default.isReadableFile(atPath: ap),
-               !ImageGenInfillPathSemantics.isWorkingTempPath(ap, tempRoot: tempRoot) {
-                return ap
-            }
-        }
-        return nil
+        ImageGenInfillLibrarySource.resolveCanonicalReference(values: values, tempRoot: tempRoot)
     }
 
     private static func applyMfluxLoraStub(_ merged: inout [String: Any]) {

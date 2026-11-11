@@ -422,7 +422,11 @@ final class ImageGenController {
             steps: steps
         )
         job.jobNumber = ImageGenJobNumber.allocate(config: config)
-        job.thumbnailPaths = JobCardThumbnailPaths.paths(pluginID: pluginID, values: submitValues)
+        job.thumbnailPaths = JobCardThumbnailPaths.paths(
+            pluginID: pluginID,
+            values: submitValues,
+            tempRoot: jobCardTempRoot
+        )
         job.referencesInvalid = JobCardThumbnailPaths.referencesInvalid(pluginID: pluginID, values: submitValues)
         if queueAtHead {
             queue.jobs.insert(job, at: 0)
@@ -741,9 +745,7 @@ final class ImageGenController {
             loraLabel: loraLabel
         )
         activeStatusView = built.statusView
-        let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
-        activeThumbnailPaths = cardPaths
-        activeJobCardThumbnailPathsCache = cardPaths
+        applyActiveJobCardThumbnailPaths(builtPaths: built.thumbnailPaths)
     }
 
     func moveJob(before beforeJobID: String?, jobID: String) {
@@ -807,7 +809,8 @@ final class ImageGenController {
         queue.jobs[index].errorMessage = ""
         queue.jobs[index].thumbnailPaths = JobCardThumbnailPaths.paths(
             pluginID: pluginID,
-            values: submitValues
+            values: submitValues,
+            tempRoot: jobCardTempRoot
         )
         queue.jobs[index].referencesInvalid = JobCardThumbnailPaths.referencesInvalid(
             pluginID: pluginID,
@@ -1813,9 +1816,6 @@ final class ImageGenController {
         taskStatusHTML = progressMessage
         persistStepState()
         startLiveStatusTimer()
-        await refreshActiveJobStatusView()
-        rebuildActiveStripViewLocally()
-        bumpStripUI()
 
         let displayPrompt = (stepPendingDoc?["display"] as? [String: Any])?["full_prompt"] as? String ?? ""
         let statusViewPrompt = JobStepQueue.promptFromStatusView(activeStatusView)
@@ -1826,6 +1826,10 @@ final class ImageGenController {
             statusViewPrompt: statusViewPrompt
         )
         pendingValues = values
+        await refreshActiveJobStatusView()
+        rebuildActiveStripViewLocally()
+        bumpStripUI()
+
         if JobStepQueue.stepNeedsAI(step) {
             await runJobAIStage(values: values)
             return
@@ -1842,15 +1846,18 @@ final class ImageGenController {
 
     private func runJobAIStage(values: [String: Any]) async {
         guard await ensureFluxPromptTasksReadyForJobAI() else {
-            handleStepFailure(
+            failJobAIStage(
                 "LM Studio is not available for AI prompt refinement.\n\n"
                     + "Open LM Studio, load a text model, and enable the local API server."
             )
             return
         }
-        guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] else {
-            handleStepFailure("Could not prepare AI prompt refinement for the job.")
+        guard values[JobStepQueue.fluxPromptAIJobKey] is [String: Any] else {
+            failJobAIStage("Could not prepare AI prompt refinement for the job.")
             return
+        }
+        if fluxPromptTasks.isBusy {
+            fluxPromptTasks.cancel()
         }
         jobAIStageActive = true
         startJobAIProgressTracking()
@@ -1868,26 +1875,44 @@ final class ImageGenController {
         }
         refreshJobAIStageStatusView(forceStripStructurePublish: true)
         do {
-            let refined = try await startFluxPromptJob(meta: meta, values: values)
+            let refined = try await startFluxPromptJob(values: values)
             clearJobAIStageFluxCallbacks()
+            fluxPromptTasks.onFluxPromptReady = nil
             launchRefinedPrompt = refined.trimmingCharacters(in: .whitespacesAndNewlines)
             jobAIStageActive = false
+            resetActiveJobProgressTracking()
             await launchGeneration(values: values)
         } catch {
             clearJobAIStageFluxCallbacks()
-            jobAIStageActive = false
+            fluxPromptTasks.onFluxPromptReady = nil
             let message = error.localizedDescription
             if message == "Cancelled" {
-                if suppressTaskFailureUI || queuePersistSuppressed { return }
-                if shouldContinueAfterCopyAbort() {
-                    continueAfterAbortedStepSync()
-                    return
-                }
-                finishCancelledBatchIfNeeded()
+                failJobAIStage(message, cancelled: true)
                 return
             }
-            handleStepFailure(message)
+            failJobAIStage(message)
         }
+    }
+
+    /// Port of ``ImageGenController._fail_job_ai_stage`` (reset strip/card progress + end or continue batch).
+    private func failJobAIStage(_ message: String, cancelled: Bool = false) {
+        jobAIStageActive = false
+        resetActiveJobProgressTracking()
+        clearJobAIStageFluxCallbacks()
+        fluxPromptTasks.onFluxPromptReady = nil
+        if cancelled {
+            if suppressTaskFailureUI || queuePersistSuppressed { return }
+            if shouldContinueAfterCopyAbort() {
+                continueAfterAbortedStepSync()
+                return
+            }
+            finishCancelledBatchIfNeeded()
+            return
+        }
+        Task { await refreshActiveJobStatusView() }
+        rebuildActiveStripViewLocally()
+        bumpStripUI()
+        handleStepFailure(message)
     }
 
     private func clearJobAIStageFluxCallbacks() {
@@ -1895,31 +1920,63 @@ final class ImageGenController {
         fluxPromptTasks.onFluxPromptChunk = nil
     }
 
-    private func startFluxPromptJob(meta: [String: Any], values: [String: Any]) async throws -> String {
-        let systemPrompt = meta["system_prompt"] as? String ?? ""
-        let userPrompt = meta["user_prompt"] as? String ?? values["prompt"] as? String ?? ""
-        var imagePaths = (meta["image_paths"] as? [String]) ?? []
-        if !imagePaths.isEmpty, !ImageGenJobValuesSnapshot.jobValuesSnapshotted(values) {
+    private func resolvedFluxPromptJobImagePaths(values: [String: Any], meta: [String: Any]) -> [String] {
+        let fromJob = FluxPromptJob.resolveRefineImagePathsForJob(
+            function: activeFunction,
+            values: values,
+            config: config
+        )
+        let fromMeta = FluxPromptJob.normalizedExistingImagePaths(
+            (meta["image_paths"] as? [String]) ?? []
+        )
+            .filter { !ImageGenInfillPathSemantics.isWorkingTempPath($0, tempRoot: jobCardTempRoot) }
+        if ImageGenJobValuesSnapshot.jobValuesSnapshotted(values) {
+            return fromJob.isEmpty ? fromMeta : fromJob
+        }
+        if !fromJob.isEmpty { return fromJob }
+        if !fromMeta.isEmpty {
             let refreshed = ImageGenExifReferences.resolveSourceImagePaths(values)
                 .filter { FileManager.default.isReadableFile(atPath: $0) }
-            if !refreshed.isEmpty {
-                imagePaths = refreshed
-            }
+            if !refreshed.isEmpty { return refreshed }
+            return fromMeta
         }
+        return fromJob
+    }
+
+    private func startFluxPromptJob(values: [String: Any]) async throws -> String {
+        guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] else {
+            throw ImageGenError.pipelineFailed("Could not prepare AI prompt refinement for the job.")
+        }
+        let systemPrompt = meta["system_prompt"] as? String ?? ""
+        let userPrompt = meta["user_prompt"] as? String ?? values["prompt"] as? String ?? ""
+        let imagePaths = resolvedFluxPromptJobImagePaths(values: values, meta: meta)
         return try await withCheckedThrowingContinuation { continuation in
             var resumed = false
+            var lastReadyText = ""
             fluxPromptTasks.onFluxPromptReady = { text in
+                lastReadyText = text
                 guard !resumed else { return }
                 resumed = true
                 continuation.resume(returning: text)
             }
-            fluxPromptTasks.onJobFinished = { kind, success, error in
+            fluxPromptTasks.onJobFinished = { [self] kind, success, error in
                 guard kind == "flux_prompt", !resumed else { return }
+                resumed = true
                 if success {
-                    // Refined text is delivered via onFluxPromptReady (Python ``flux_prompt_ready``).
+                    let text = lastReadyText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if text.isEmpty {
+                        continuation.resume(
+                            throwing: ImageGenError.pipelineFailed(
+                                fluxPromptTasks.lastError.isEmpty
+                                    ? "AI prompt job finished without a response."
+                                    : fluxPromptTasks.lastError
+                            )
+                        )
+                    } else {
+                        continuation.resume(returning: text)
+                    }
                     return
                 }
-                resumed = true
                 if error == "Cancelled" {
                     continuation.resume(throwing: ImageGenError.pipelineFailed("Cancelled"))
                 } else {
@@ -3119,7 +3176,11 @@ final class ImageGenController {
         doc["steps_done"] = copiesDone
         var display = doc["display"] as? [String: Any] ?? [:]
         display["full_prompt"] = FluxPromptJob.effectiveJobPromptForTooltip(templateValues)
-        let thumbs = JobCardThumbnailPaths.paths(pluginID: activePluginID, values: templateValues)
+        let thumbs = JobCardThumbnailPaths.paths(
+            pluginID: activePluginID,
+            values: templateValues,
+            tempRoot: jobCardTempRoot
+        )
         if !thumbs.isEmpty {
             display["thumbnail_paths"] = thumbs
             let cardPaths = cardThumbnailPaths(thumbs)
@@ -3466,6 +3527,7 @@ final class ImageGenController {
             estimateSeconds: timing.estimate
         )
         activeStatusView = built.statusView
+        applyActiveJobCardThumbnailPaths(builtPaths: built.thumbnailPaths)
         rebuildActiveStripViewLocally()
         let preferLive = !forceStripStructurePublish
         publishActiveStrip(preferLiveFields: preferLive)
@@ -3503,6 +3565,7 @@ final class ImageGenController {
     }
 
     private func updateLiveStepProgress(step: Int, stepTotal: Any?) {
+        guard !jobAIStageActive else { return }
         let total = intFromAny(stepTotal) ?? liveStepTotal
         let previousStep = liveStep
         if step > previousStep {
@@ -3615,10 +3678,60 @@ final class ImageGenController {
 
     /// Port of ``ImageGenController._active_job_card_thumbnail_paths``.
     private func activeJobCardThumbnailPaths() -> [String] {
-        if !activeJobCardThumbnailPathsCache.isEmpty {
-            return activeJobCardThumbnailPathsCache
+        let cached = cardThumbnailPaths(activeJobCardThumbnailPathsCache)
+        if !cached.isEmpty { return cached }
+        if activeJobID != nil, let plugin = ImageGenPluginCatalog.plugin(pluginID: activePluginID) {
+            let paths = cardThumbnailPaths(
+                JobCardThumbnailPaths.paths(
+                    pluginID: plugin.pluginID,
+                    values: valuesForActiveJobCardPaths(),
+                    tempRoot: jobCardTempRoot
+                )
+            )
+            if !paths.isEmpty { return paths }
         }
         return cardThumbnailPaths(activeThumbnailPaths)
+    }
+
+    /// Step/worker values may drop ``_canonical_source_image_paths`` while the queued job still has it.
+    private func valuesForActiveJobCardPaths() -> [String: Any] {
+        var values = pendingValues
+        let pendingCanonical = values["_canonical_source_image_paths"] as? [String]
+        if pendingCanonical?.isEmpty != false,
+           let jobID = activeJobID,
+           let job = queue.jobs.first(where: { $0.jobID == jobID }),
+           let stored = job.values["_canonical_source_image_paths"] as? [String],
+           !stored.isEmpty {
+            values["_canonical_source_image_paths"] = stored
+        }
+        return values
+    }
+
+    private func applyActiveJobCardThumbnailPaths(builtPaths: [String]) {
+        let fresh = cardThumbnailPaths(builtPaths)
+        if !fresh.isEmpty {
+            activeThumbnailPaths = fresh
+            activeJobCardThumbnailPathsCache = fresh
+            return
+        }
+        if activeJobID != nil, let plugin = ImageGenPluginCatalog.plugin(pluginID: activePluginID) {
+            let computed = cardThumbnailPaths(
+                JobCardThumbnailPaths.paths(
+                    pluginID: plugin.pluginID,
+                    values: valuesForActiveJobCardPaths(),
+                    tempRoot: jobCardTempRoot
+                )
+            )
+            if !computed.isEmpty {
+                activeThumbnailPaths = computed
+                activeJobCardThumbnailPathsCache = computed
+                return
+            }
+        }
+        let preserved = cardThumbnailPaths(activeThumbnailPaths)
+        if !preserved.isEmpty {
+            activeJobCardThumbnailPathsCache = preserved
+        }
     }
 
     private func cardThumbnailPaths(_ paths: [String]) -> [String] {
@@ -3808,7 +3921,11 @@ final class ImageGenController {
         if let steps = stepPendingDoc?["steps"] as? [[String: Any]] {
             queue.jobs[index].steps = steps
         }
-        let thumbs = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
+        let thumbs = JobCardThumbnailPaths.paths(
+            pluginID: pluginID,
+            values: values,
+            tempRoot: jobCardTempRoot
+        )
         queue.jobs[index].thumbnailPaths = thumbs
         queue.jobs[index].statusView = nil
         queue.jobs[index].referencesInvalid = JobCardThumbnailPaths.referencesInvalid(
@@ -3823,9 +3940,7 @@ final class ImageGenController {
         guard activeJobID == job.jobID else { return }
         if jobAIStageActive { return }
         activeStatusView = job.statusView
-        let paths = cardThumbnailPaths(job.thumbnailPaths)
-        activeThumbnailPaths = paths
-        activeJobCardThumbnailPathsCache = paths
+        applyActiveJobCardThumbnailPaths(builtPaths: job.thumbnailPaths)
     }
 
     private func applyQueuedJobErrorBanner(at index: Int) {
@@ -3862,9 +3977,7 @@ final class ImageGenController {
             loraLabel: loraLabel
         )
         activeStatusView = built.statusView
-        let cardPaths = cardThumbnailPaths(built.thumbnailPaths)
-        activeThumbnailPaths = cardPaths
-        activeJobCardThumbnailPathsCache = cardPaths
+        applyActiveJobCardThumbnailPaths(builtPaths: built.thumbnailPaths)
         if isProcessing || cooldownSecondsRemaining > 0 {
             activeStripView.progressTooltipText = activeStripProgressTooltipText()
             publishActiveStrip(preferLiveFields: true)
@@ -3904,8 +4017,13 @@ final class ImageGenController {
             elapsedSeconds: elapsedSeconds,
             estimateSeconds: estimateSeconds,
             loraLabel: loraLabel,
-            settings: config.rawSettings()
+            settings: config.rawSettings(),
+            tempRoot: config.temporaryFilesDirectory.path
         )
+    }
+
+    private var jobCardTempRoot: String {
+        config.temporaryFilesDirectory.path
     }
 
     private func resolvedLoraStatusLabel(pluginID: String, values: [String: Any]) async -> String? {

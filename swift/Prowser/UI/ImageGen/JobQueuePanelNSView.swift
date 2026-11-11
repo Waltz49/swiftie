@@ -1463,6 +1463,11 @@ final class JobCardNSView: NSView {
         )
         let statusView: QueueJobStatusView
         guard let resolved = resolvedCardStatusView(for: row) else {
+            syncReferenceThumbsIfNeeded(
+                row: row,
+                scrollWidth: scrollWidth,
+                colors: colors
+            )
             updateJobNumberDisplay(row: row)
             updateChrome(selected: selected, running: row.isActive)
             return
@@ -1647,6 +1652,30 @@ final class JobCardNSView: NSView {
     private func resolvedCardStatusView(for row: QueueRowSnapshot) -> QueueJobStatusView? {
         guard let view = row.statusView, !view.isEmpty else { return nil }
         return view
+    }
+
+    private func syncReferenceThumbsIfNeeded(
+        row: QueueRowSnapshot,
+        scrollWidth: CGFloat,
+        colors: ThemeColors
+    ) {
+        let refs = row.thumbnailPaths
+        let useInline = resolveInlineRefs(
+            scrollWidth: scrollWidth,
+            paths: refs,
+            referencesInvalid: row.referencesInvalid
+        )
+        guard refs != lastThumbnailPaths
+            || row.referencesInvalid != lastReferencesInvalid
+            || useInline != lastInlineRefs else { return }
+        refsView.configure(paths: refs, referencesInvalid: row.referencesInvalid, colors: colors)
+        lastThumbnailPaths = refs
+        lastReferencesInvalid = row.referencesInvalid
+        lastInlineRefs = useInline
+        let contentWidth = Self.infoContentWidth(viewportWidth: scrollWidth)
+        layoutRefs(contentWidth: contentWidth, inline: useInline)
+        lastHasBelowRefs = !useInline && refsView.cellCount > 0
+        syncCardHeight(inlineRefs: useInline, hasBelowRefs: lastHasBelowRefs)
     }
 
     private func updateJobNumberDisplay(row: QueueRowSnapshot) {

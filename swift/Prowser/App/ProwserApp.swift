@@ -173,6 +173,8 @@ final class DirectoryLoadCoordinator {
         let normalizedTarget = FileDataModel.normalizePath(targetFile) ?? targetFile
         // Pin the opened file before the directory scan so browse does not flash image 0.
         appState.fileData.setCurrentImagePath(normalizedTarget)
+        appState.fileData.setDisplayedImages([normalizedTarget])
+        appState.fileData.setCurrentIndex(0)
 
         let directory = URL(fileURLWithPath: targetFile).deletingLastPathComponent().path
         loadDirectory(directory, saveHistory: false, pinnedImagePath: normalizedTarget)
@@ -413,14 +415,21 @@ final class DirectoryLoadCoordinator {
     private static func resolveActiveImageAfterDirectoryLoad(
         images: [String],
         pinnedPath: String?,
-        currentPath: String?
+        currentPath: String?,
+        directory: String
     ) -> String? {
+        if let pinned = pinnedPath.flatMap({ FileDataModel.normalizePath($0) }),
+           FileManager.default.fileExists(atPath: pinned),
+           FileDataModel.pathIsInDirectory(file: pinned, directory: directory) {
+            return pinned
+        }
         if images.isEmpty { return nil }
         for candidate in [pinnedPath, currentPath] {
             guard let candidate,
-                  let normalized = FileDataModel.normalizePath(candidate),
-                  images.contains(normalized) else { continue }
-            return normalized
+                  let normalized = FileDataModel.normalizePath(candidate) else { continue }
+            if let match = images.first(where: { FileDataModel.pathsReferToSameFile($0, normalized) }) {
+                return FileDataModel.normalizePath(match) ?? match
+            }
         }
         return images.first
     }
@@ -468,7 +477,8 @@ final class DirectoryLoadCoordinator {
         let resolvedActive = Self.resolveActiveImageAfterDirectoryLoad(
             images: appState.fileData.getDisplayedImages(),
             pinnedPath: pinnedPath,
-            currentPath: appState.fileData.currentImagePath
+            currentPath: appState.fileData.currentImagePath,
+            directory: path
         )
         appState.fileData.setCurrentImagePath(resolvedActive)
         DisplayedImagesSync.ensureActiveImageListed(

@@ -29,9 +29,14 @@ enum QueueJobStatusBuilder {
         elapsedSeconds: Double? = nil,
         estimateSeconds: Double? = nil,
         loraLabel: String? = nil,
-        settings: [String: Any] = [:]
+        settings: [String: Any] = [:],
+        tempRoot: String? = nil
     ) -> QueueJobStatusBuildResult {
-        let thumbPaths = JobCardThumbnailPaths.paths(pluginID: pluginID, values: values)
+        let thumbPaths = JobCardThumbnailPaths.paths(
+            pluginID: pluginID,
+            values: values,
+            tempRoot: tempRoot
+        )
         let refsInvalid = JobCardThumbnailPaths.referencesInvalid(pluginID: pluginID, values: values)
 
         if pluginUnavailable || ImageGenPluginCatalog.plugin(pluginID: pluginID) == nil {
