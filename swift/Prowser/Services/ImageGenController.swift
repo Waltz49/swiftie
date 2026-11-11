@@ -4242,6 +4242,9 @@ final class ImageGenController {
         queueAdvanceSuppressed = false
         exitQueuePersisted = false
         queuePersistSuppressed = false
+        if holdJobQueue {
+            setHoldJobQueue(false)
+        }
         refreshDeferredQuitDialog()
         resumeDeferredQuitQueueAdvance()
     }
@@ -4297,7 +4300,15 @@ final class ImageGenController {
     private func deferredQuitPipelineIdle() -> Bool {
         if jobAIStageActive { return false }
         if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy { return false }
-        return !hasPendingWork()
+        if cooldownSecondsRemaining > 0 { return false }
+        if isRunning() { return false }
+        if let activeJobID, !activeJobID.isEmpty, !activeJobHeld() {
+            return false
+        }
+        if jobIDNextInLine() != nil, !holdJobQueue {
+            return false
+        }
+        return true
     }
 
     private func deferredQuitHasMoreWorkAfterCurrent() -> Bool {
