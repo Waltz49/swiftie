@@ -315,13 +315,133 @@ extension AppState {
         }
     }
 
+    /// ⌘\\ — restore persisted jobs height, or autosize once and commit as saved until the user drags.
+    @discardableResult
+    func handleCommandBackslashJobsPaneHeight() -> Bool {
+        guard BundleCapabilities.imageGenUIEnabled else { return false }
+        guard jobsDisplayMode == .pane else { return false }
+        // #region agent log
+        DebugAgentLog.write(
+            hypothesisId: "F",
+            location: "AppState+ImageGen.handleCommandBackslashJobsPaneHeight",
+            message: "cmd_backslash_invoked",
+            data: [
+                "mode": jobsQueueSizeMode.rawValue,
+                "splitter2": rightSidebarSplit.sizes[2],
+                "dedicated": jobsPaneAllMultijobSavedHeight() ?? -1,
+                "established": JobsQueueSizePersistence.loadAllMultijobHeightEstablished(config: config),
+                "locked": jobsPaneUserHeldAllMultijobHeight(),
+            ]
+        )
+        // #endregion
+        ensureJobsSurfaceVisible()
+        if restoreEstablishedAllMultijobHeightIfPossible() {
+            return true
+        }
+        if jobsPaneAllMultijobHeightScenario() {
+            establishJobsPaneAllMultijobHeightViaAutosize()
+            return true
+        }
+        setJobsPaneUserAllMultijobHeightLocked(false)
+        jobsSurfaceExactSnapPasses = 4
+        applyJobsQueueSizeMode(jobsQueueSizeMode, forceRefit: true)
+        return true
+    }
+
+    /// Pin / ⌘\\ restore when user committed a saved ALL height (drag or first ⌘\\ autosize).
+    func jobsPaneSavedHeightPinActive() -> Bool {
+        guard jobsDisplayMode == .pane else { return false }
+        guard jobsQueueSizeMode == .all else { return false }
+        guard !shouldShrinkWrapJobsClient() else { return false }
+        guard !rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) else { return false }
+        guard JobsQueueSizePersistence.loadAllMultijobHeightEstablished(config: config) else { return false }
+        guard jobsPaneAllMultijobSavedHeight() != nil else { return false }
+        return jobsPaneUserSplitterSized
+            || JobsQueueSizePersistence.loadUserAllMultijobHeightLocked(config: config)
+    }
+
+    @discardableResult
+    private func restoreEstablishedAllMultijobHeightIfPossible() -> Bool {
+        guard !shouldShrinkWrapJobsClient() else { return false }
+        guard !rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) else { return false }
+        guard JobsQueueSizePersistence.loadAllMultijobHeightEstablished(config: config) else { return false }
+        guard let target = jobsPaneAllMultijobSavedHeight() else { return false }
+        let modeBefore = jobsQueueSizeMode
+        let sizeBefore = rightSidebarSplit.sizes[2]
+        if jobsQueueSizeMode != .all {
+            applyJobsQueueSizeMode(
+                .all,
+                forceRefit: false,
+                retainUserHeightEnteringAll: false,
+                preserveAllMultijobSavedHeight: true
+            )
+        }
+        // #region agent log
+        DebugAgentLog.write(
+            hypothesisId: "E",
+            location: "AppState+ImageGen.restoreEstablishedAllMultijobHeightIfPossible",
+            message: "cmd_backslash_restore_path",
+            data: [
+                "modeBefore": modeBefore.rawValue,
+                "modeAfter": jobsQueueSizeMode.rawValue,
+                "targetDedicated": target,
+                "splitterBeforeSwitch": sizeBefore,
+                "splitterAfterSwitch": rightSidebarSplit.sizes[2],
+            ]
+        )
+        // #endregion
+        setJobsPaneUserAllMultijobHeightLocked(true)
+        rightSidebarSplit.restoreJobsPaneToSavedAllMultijobHeight(appState: self, height: target)
+        sidebarLayoutRevision += 1
+        return true
+    }
+
+    func jobsPaneAllMultijobHeightScenario() -> Bool {
+        guard jobsQueueSizeMode == .all else { return false }
+        guard visibleJobsQueueRowCount() > 1 else { return false }
+        guard !shouldShrinkWrapJobsClient() else { return false }
+        return !rightSidebarSplit.jobsIsSoleVisiblePane(appState: self)
+    }
+
+    func markJobsPaneAllMultijobHeightEstablished() {
+        JobsQueueSizePersistence.saveAllMultijobHeightEstablished(true, config: config)
+    }
+
+    func commitJobsPaneAllMultijobSavedHeight(_ height: CGFloat) {
+        JobsQueueSizePersistence.saveAllMultijobSavedHeight(height, config: config)
+        markJobsPaneAllMultijobHeightEstablished()
+    }
+
+    func jobsPaneAllMultijobSavedHeight() -> CGFloat? {
+        if let dedicated = JobsQueueSizePersistence.loadAllMultijobSavedHeight(config: config) {
+            return dedicated
+        }
+        guard JobsQueueSizePersistence.loadAllMultijobHeightEstablished(config: config) else { return nil }
+        let legacy = rightSidebarSplit.savedSizes[2]
+        guard legacy > SidebarPaneLayout.headerHeight else { return nil }
+        JobsQueueSizePersistence.saveAllMultijobSavedHeight(legacy, config: config)
+        return legacy
+    }
+
+    private func establishJobsPaneAllMultijobHeightViaAutosize() {
+        setJobsPaneUserAllMultijobHeightLocked(false)
+        rightSidebarSplit.ensureJobsPaneFitsContent(appState: self, forceRefit: true)
+        commitJobsPaneAllMultijobSavedHeight(rightSidebarSplit.sizes[2])
+        setJobsPaneUserAllMultijobHeightLocked(true)
+    }
+
     @discardableResult
     func setJobsQueueSizeMode(_ mode: JobsQueueSizeMode, requireActive: Bool = false) -> Bool {
         guard BundleCapabilities.imageGenUIEnabled else { return false }
         if requireActive, !imageGen.isProcessing, imageGen.queue.jobs.isEmpty { return false }
         ensureJobsSurfaceVisible()
-        jobsSurfaceExactSnapPasses = 4
-        applyJobsQueueSizeMode(mode, forceRefit: true)
+        // ⌥\ ALL: keep persisted splitter height; titlebar double-click uses ``cycleJobsPaneSize`` instead.
+        if mode == .all {
+            applyJobsQueueSizeMode(mode, forceRefit: false, retainUserHeightEnteringAll: true)
+        } else {
+            jobsSurfaceExactSnapPasses = 4
+            applyJobsQueueSizeMode(mode, forceRefit: true)
+        }
         return true
     }
 
@@ -338,17 +458,32 @@ extension AppState {
         }
     }
 
-    func applyJobsQueueSizeMode(_ mode: JobsQueueSizeMode, forceRefit: Bool) {
+    func applyJobsQueueSizeMode(
+        _ mode: JobsQueueSizeMode,
+        forceRefit: Bool,
+        retainUserHeightEnteringAll: Bool = false,
+        preserveAllMultijobSavedHeight: Bool = false
+    ) {
         var mode = mode
         var forceRefit = forceRefit
+        var retainUserHeightEnteringAll = retainUserHeightEnteringAll
+        var preserveAllMultijobSavedHeight = preserveAllMultijobSavedHeight
         if rightSidebarSplit.jobsIsSoleVisiblePane(appState: self) {
             mode = .all
             forceRefit = true
+            retainUserHeightEnteringAll = false
+            preserveAllMultijobSavedHeight = false
         }
         if jobsQueueSizeMode == mode, !forceRefit { return }
         let wasStrip = jobsQueueSizeMode == .strip
         if jobsQueueSizeMode != mode {
-            jobsPaneUserSplitterSized = false
+            if preserveAllMultijobSavedHeight {
+                // ⌘\\ restoring ALL height after ONE/STRIP — keep established + dedicated height.
+            } else if retainUserHeightEnteringAll, mode == .all {
+                setJobsPaneUserAllMultijobHeightLocked(true)
+            } else {
+                setJobsPaneUserAllMultijobHeightLocked(false)
+            }
             // The card-stack measurement belongs to the previous mode (ALL stack vs ONE first
             // card); size from the fallback estimate until the new panel reports.
             measuredJobsCardStackHeight = 0
@@ -365,7 +500,29 @@ extension AppState {
     }
 
     func cycleJobsQueueSizeMode() {
+        setJobsPaneUserAllMultijobHeightLocked(false)
         applyJobsQueueSizeMode(jobsQueueSizeMode.next(), forceRefit: true)
+    }
+
+    func setJobsPaneUserAllMultijobHeightLocked(_ locked: Bool) {
+        jobsPaneUserSplitterSized = locked
+        JobsQueueSizePersistence.saveUserAllMultijobHeightLocked(locked, config: config)
+    }
+
+    /// Port of Python ``_saved_jobs_pane_size_mode`` + persisted ALL height lock.
+    func restoreJobsQueueSizeModeFromConfig() {
+        guard BundleCapabilities.imageGenUIEnabled else { return }
+        var mode = JobsQueueSizePersistence.load(config: config)
+        if mode == .all, config.bool(forKey: "jobs_pane_compact", default: false) {
+            mode = .strip
+        }
+        jobsQueueSizeMode = mode
+    }
+
+    func restoreJobsPaneUserAllMultijobHeightLockFromConfig() {
+        guard jobsQueueSizeMode == .all else { return }
+        guard JobsQueueSizePersistence.loadUserAllMultijobHeightLocked(config: config) else { return }
+        jobsPaneUserSplitterSized = true
     }
 
     func bumpImageGenUI() {

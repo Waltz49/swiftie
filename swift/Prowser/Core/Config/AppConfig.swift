@@ -890,6 +890,9 @@ final class AppConfig {
             "imagegen": [
                 "job_queue_size_mode": "all",
                 "job_queue_always_on_top": false,
+                "jobs_pane_user_all_multijob_height_locked": false,
+                "jobs_pane_all_multijob_height_established": false,
+                "jobs_pane_all_multijob_saved_height": 0,
                 "show_progressive_images": false,
                 "hold_job_queue": false,
             ],

@@ -290,7 +290,28 @@ final class KeyboardHandlerController {
             return true
         }
 
-        // ⌥[ compact, ⌥] one job, ⌥\ all jobs (Python parity); ⌘[⌘]⌘\ are not bound — use ⌥ only.
+        // ⌘\ — restore saved jobs pane height (ALL multijob), or autosize once and persist.
+        if hasCommand, !hasOption, !hasShift, !hasControl {
+            let isBackslashKey = event.keyCode == 42
+                || event.charactersIgnoringModifiers == "\\"
+                || event.charactersIgnoringModifiers == "|"
+            if isBackslashKey, BundleCapabilities.imageGenUIEnabled {
+                // #region agent log
+                DebugAgentLog.write(
+                    hypothesisId: "H",
+                    location: "KeyboardHandlerController.handleKeyDown",
+                    message: "cmd_backslash_key_matched",
+                    data: [
+                        "keyCode": event.keyCode,
+                        "chars": event.charactersIgnoringModifiers ?? "",
+                    ]
+                )
+                // #endregion
+                return appState.handleCommandBackslashJobsPaneHeight()
+            }
+        }
+
+        // ⌥[ compact, ⌥] one job, ⌥\ all jobs (Python parity); ⌘[ and ⌘] are not bound.
         if !hasShift, !hasControl, hasOption, !hasCommand,
            let jobsMode = jobsQueueSizeShortcutMode(event) {
             return appState.setJobsQueueSizeMode(

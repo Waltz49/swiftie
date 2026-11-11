@@ -148,13 +148,68 @@ final class SidebarPaneSplitModel {
         let vis = visibility(appState: appState)
         let exp = expanded(appState: appState)
         let headerHeights = (0..<3).map { headerHeight(for: $0, appState: appState) }
-        return SidebarPaneLayout.scaledSizes(
+        var scaled = SidebarPaneLayout.scaledSizes(
             saved: savedSizes,
             visibility: vis,
             expanded: zip(vis, exp).map { shown, expanded in shown && expanded },
             totalHeight: max(totalHeight, 1),
             headerHeights: headerHeights
         )
+        if side == .right, appState.jobsPaneSavedHeightPinActive(),
+           let pinned = appState.jobsPaneAllMultijobSavedHeight() {
+            let jobsFloor = headerHeights[2]
+            let jobsPinned = max(pinned, jobsFloor)
+            let jobsBeforeScale = scaled[2]
+            let delta = jobsPinned - jobsBeforeScale
+            scaled[2] = jobsPinned
+            if abs(delta) > 0.5, vis.indices.contains(1), vis[1], exp[1] {
+                let infoFloor = headerHeights[1]
+                scaled[1] = max(infoFloor, scaled[1] - delta)
+            } else if abs(delta) > 0.5, vis.indices.contains(0), vis[0], exp[0] {
+                let shortcutsFloor = headerHeights[0]
+                scaled[0] = max(shortcutsFloor, scaled[0] - delta)
+            }
+            let sum = scaled.reduce(0, +)
+            let drift = totalHeight - sum
+            if abs(drift) > 0.5, vis.indices.contains(1), vis[1], exp[1] {
+                let infoFloor = headerHeights[1]
+                scaled[1] = max(infoFloor, scaled[1] + drift)
+            }
+            // #region agent log
+            DebugAgentLog.write(
+                hypothesisId: "F",
+                location: "SidebarPaneSplitModel.layoutSizes",
+                message: "pinned_jobs_height_in_relayout",
+                data: [
+                    "pinned": jobsPinned,
+                    "scaledJobsBeforeDelta": jobsBeforeScale,
+                    "scaledJobsAfter": scaled[2],
+                    "totalHeight": totalHeight,
+                    "sumAfter": scaled.reduce(0, +),
+                ]
+            )
+            // #endregion
+        } else if side == .right,
+                  JobsQueueSizePersistence.loadAllMultijobHeightEstablished(config: appState.config),
+                  let pinned = appState.jobsPaneAllMultijobSavedHeight(),
+                  abs(scaled[2] - pinned) > 1 {
+            // #region agent log
+            DebugAgentLog.write(
+                hypothesisId: "G",
+                location: "SidebarPaneSplitModel.layoutSizes",
+                message: "pin_skipped_relayout_drift",
+                data: [
+                    "scaledJobs2": scaled[2],
+                    "dedicatedPinned": pinned,
+                    "pinActive": appState.jobsPaneSavedHeightPinActive(),
+                    "splitterSized": appState.jobsPaneUserSplitterSized,
+                    "locked": JobsQueueSizePersistence.loadUserAllMultijobHeightLocked(config: appState.config),
+                    "mode": appState.jobsQueueSizeMode.rawValue,
+                ]
+            )
+            // #endregion
+        }
+        return scaled
     }
 
     func applySizes(_ newSizes: [CGFloat], appState: AppState, persist: Bool) {
@@ -172,6 +227,9 @@ final class SidebarPaneSplitModel {
         let exp = expanded(appState: appState)
         var saved = savedSizes
         for index in 0..<3 where vis[index] && exp[index] && sizes[index] > 0 {
+            if side == .right, index == 2, skipPersistingJobsPaneHeight(appState: appState) {
+                continue
+            }
             saved[index] = sizes[index]
         }
         config.saveSplitterSizes(persistenceKey, sizes: saved)
@@ -322,6 +380,28 @@ final class SidebarPaneSplitModel {
         fitTargets.removeAll()
         if side == .right, paneIndex == 2, !jobsIsSoleVisiblePane(appState: appState) {
             appState.jobsPaneUserSplitterSized = true
+            if appState.jobsQueueSizeMode == .all {
+                appState.commitJobsPaneAllMultijobSavedHeight(sizes[2])
+                appState.setJobsPaneUserAllMultijobHeightLocked(true)
+                // #region agent log
+                DebugAgentLog.write(
+                    hypothesisId: "A-B",
+                    location: "SidebarPaneSplitModel.endPaneResizeDrag",
+                    message: "drag_commit_all_height",
+                    data: [
+                        "splitterSizes2": sizes[2],
+                        "savedSizes2": savedSizes[2],
+                        "dedicatedSaved": appState.jobsPaneAllMultijobSavedHeight() ?? -1,
+                        "layoutHeaderJobs": headerHeight(for: 2, appState: appState),
+                        "jobsToolbarVisible": appState.jobsToolbarVisible,
+                        "jobsMiniChrome": appState.jobsPaneMiniChromeActive,
+                        "jobsTargetPaneHeight": appState.jobsPaneTargetPaneHeight(),
+                        "jobsLiveContentHeight": appState.jobsPaneLiveContentHeight(),
+                        "mode": appState.jobsQueueSizeMode.rawValue,
+                    ]
+                )
+                // #endregion
+            }
         }
         if side == .right, paneIndex == 2,
            appState.jobsQueueSizeMode == .all,
@@ -375,7 +455,7 @@ final class SidebarPaneSplitModel {
 
     func cycleJobsPaneSize(appState: AppState) {
         guard side == .right, appState.jobsDisplayMode == .pane else { return }
-        appState.jobsPaneUserSplitterSized = false
+        appState.setJobsPaneUserAllMultijobHeightLocked(false)
         if !paneExpanded(configKey: "jobs_visible", default: true) {
             setPaneExpanded(true, configKey: "jobs_visible")
         }
@@ -421,6 +501,64 @@ final class SidebarPaneSplitModel {
         )
         if appState.jobsQueueSizeMode == .one {
             appState.jobsQueuePanelSync?()
+        }
+    }
+
+    /// Restore jobs pane to the dedicated ALL-multijob saved height (⌘\\).
+    func restoreJobsPaneToSavedAllMultijobHeight(appState: AppState, height: CGFloat) {
+        guard side == .right, appState.jobsDisplayMode == .pane else { return }
+        guard paneExpanded(configKey: "jobs_visible", default: true) else { return }
+        guard height > SidebarPaneLayout.headerHeight else { return }
+        let before = sizes[2]
+        // #region agent log
+        DebugAgentLog.write(
+            hypothesisId: "A-C-E",
+            location: "SidebarPaneSplitModel.restoreJobsPaneToSavedAllMultijobHeight",
+            message: "restore_before_resize",
+            data: [
+                "targetHeight": height,
+                "splitterSizes2Before": before,
+                "savedSizes2": savedSizes[2],
+                "dedicatedConfig": appState.jobsPaneAllMultijobSavedHeight() ?? -1,
+                "layoutHeaderJobs": headerHeight(for: 2, appState: appState),
+                "jobsToolbarVisible": appState.jobsToolbarVisible,
+                "jobsMiniChrome": appState.jobsPaneMiniChromeActive,
+                "jobsTargetPaneHeight": appState.jobsPaneTargetPaneHeight(),
+                "jobsLiveContentHeight": appState.jobsPaneLiveContentHeight(),
+                "mode": appState.jobsQueueSizeMode.rawValue,
+            ]
+        )
+        // #endregion
+        appState.beginJobsPaneGeometryAdjustment()
+        defer { appState.endJobsPaneGeometryAdjustment() }
+        resizePaneToHeight(
+            paneIndex: 2,
+            targetHeight: height,
+            appState: appState,
+            applyJobsAutoHeightCap: false
+        )
+        // #region agent log
+        DebugAgentLog.write(
+            hypothesisId: "D",
+            location: "SidebarPaneSplitModel.restoreJobsPaneToSavedAllMultijobHeight",
+            message: "restore_after_resize",
+            data: [
+                "targetHeight": height,
+                "splitterSizes2After": sizes[2],
+                "deltaFromTarget": sizes[2] - height,
+            ]
+        )
+        // #endregion
+    }
+
+    /// ONE/STRIP refits must not overwrite the ALL-multijob height in ``shortcuts_splitter_sizes``.
+    private func skipPersistingJobsPaneHeight(appState: AppState) -> Bool {
+        guard side == .right, appState.jobsDisplayMode == .pane else { return false }
+        switch appState.jobsQueueSizeMode {
+        case .one, .strip:
+            return true
+        case .all:
+            return false
         }
     }
 

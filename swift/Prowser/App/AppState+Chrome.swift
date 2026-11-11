@@ -104,6 +104,8 @@ extension AppState {
         let imagegen = config.rawSettings()["imagegen"] as? [String: Any] ?? [:]
         jobsPanelAlwaysOnTop = imagegen["job_queue_always_on_top"] as? Bool ?? false
         imageGen.reloadToolbarSettings(from: imagegen)
+        restoreJobsQueueSizeModeFromConfig()
+        restoreJobsPaneUserAllMultijobHeightLockFromConfig()
     }
 
     func reloadSidebarWidthsFromConfig() {

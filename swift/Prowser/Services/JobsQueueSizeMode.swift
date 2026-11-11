@@ -105,12 +105,59 @@ enum JobsQueueSizePersistence {
     static func save(_ mode: JobsQueueSizeMode, config: AppConfig) {
         config.setImageGenValue("job_queue_size_mode", value: mode.rawValue)
     }
+
+    /// Persisted across sessions: user height in ALL multijob is frozen until mode re-entry via titlebar double-click.
+    static func loadUserAllMultijobHeightLocked(config: AppConfig) -> Bool {
+        config.imageGenBool("jobs_pane_user_all_multijob_height_locked", default: false)
+    }
+
+    static func saveUserAllMultijobHeightLocked(_ locked: Bool, config: AppConfig) {
+        config.setImageGenValue("jobs_pane_user_all_multijob_height_locked", value: locked)
+    }
+
+    /// User-committed ALL multijob height (drag or ⌘\\ autosize); ⌘\\ restores ``shortcuts_splitter_sizes`` jobs slice.
+    static func loadAllMultijobHeightEstablished(config: AppConfig) -> Bool {
+        config.imageGenBool("jobs_pane_all_multijob_height_established", default: false)
+    }
+
+    static func saveAllMultijobHeightEstablished(_ established: Bool, config: AppConfig) {
+        config.setImageGenValue("jobs_pane_all_multijob_height_established", value: established)
+    }
+
+    static func loadAllMultijobSavedHeight(config: AppConfig) -> CGFloat? {
+        let imagegen = config.rawSettings()["imagegen"] as? [String: Any]
+        let raw = imagegen?["jobs_pane_all_multijob_saved_height"]
+        let value: Double?
+        if let d = raw as? Double {
+            value = d
+        } else if let f = raw as? CGFloat {
+            value = Double(f)
+        } else if let i = raw as? Int {
+            value = Double(i)
+        } else {
+            value = nil
+        }
+        guard let value, value > 0 else { return nil }
+        return CGFloat(value)
+    }
+
+    static func saveAllMultijobSavedHeight(_ height: CGFloat, config: AppConfig) {
+        guard height > 0 else { return }
+        config.setImageGenValue("jobs_pane_all_multijob_saved_height", value: Double(height))
+    }
 }
 
 extension AppConfig {
     func imageGenString(_ key: String, default defaultValue: String = "") -> String {
         let imagegen = rawSettings()["imagegen"] as? [String: Any]
         return imagegen?[key] as? String ?? defaultValue
+    }
+
+    func imageGenBool(_ key: String, default defaultValue: Bool = false) -> Bool {
+        let imagegen = rawSettings()["imagegen"] as? [String: Any]
+        if let value = imagegen?[key] as? Bool { return value }
+        if let value = imagegen?[key] as? Int { return value != 0 }
+        return defaultValue
     }
 
     func setImageGenValue(_ key: String, value: Any) {
