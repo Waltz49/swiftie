@@ -105,6 +105,7 @@ enum ChatRejectedPhraseStreamRetry {
     @MainActor
     static func runWithRejectionRetry(
         config: AppConfig,
+        logLabel: String = "chat",
         onChunk: @escaping @MainActor (String) -> Void,
         onRestarted: (@MainActor () -> Void)? = nil,
         streamOnce: @escaping @MainActor (
@@ -122,7 +123,7 @@ enum ChatRejectedPhraseStreamRetry {
                 if let matched = ChatRejectedResponsePhrasesStore.firstMatchingPhrase(in: accumulated, config: config) {
                     if attempt < maxAttempts {
                         print(
-                            "[chat] rejected phrase \(matched.debugDescription) in "
+                            "[\(logLabel)] rejected phrase \(matched.debugDescription) in "
                                 + "attempt \(attempt)/\(maxAttempts), restarting"
                         )
                         onRestarted?()

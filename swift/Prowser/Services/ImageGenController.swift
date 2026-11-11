@@ -1018,6 +1018,7 @@ final class ImageGenController {
         stopScheduledCooldown()
         if jobAIStageActive {
             fluxPromptTasks.cancel()
+            clearJobAIStageFluxCallbacks()
             jobAIStageActive = false
         }
         modelTasks.cancel(terminateWorker: true)
@@ -1847,27 +1848,33 @@ final class ImageGenController {
             )
             return
         }
-        jobAIStageActive = true
-        startJobAIProgressTracking()
-        rebuildActiveStripViewLocally()
-        publishActiveStrip(preferLiveFields: true)
-        progressMessage = "Refining prompt…"
-        taskStatusHTML = progressMessage
-        bumpQueueRevision()
-        fluxPromptTasks.onFluxPromptChunk = { [weak self] chunk in
-            self?.handleFluxPromptChunkForJobAI(chunk)
-        }
         guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] else {
-            jobAIStageActive = false
             handleStepFailure("Could not prepare AI prompt refinement for the job.")
             return
         }
+        jobAIStageActive = true
+        startJobAIProgressTracking()
+        progressMessage = "Refining prompt…"
+        taskStatusHTML = progressMessage
+        fluxPromptTasks.onFluxPromptChunk = { [weak self] chunk in
+            self?.handleFluxPromptChunkForJobAI(chunk)
+        }
+        fluxPromptTasks.onFluxPromptRejectionRestarted = { [weak self] in
+            guard let self else { return }
+            self.startJobAIProgressTracking()
+            self.progressMessage = "Refining prompt…"
+            self.taskStatusHTML = self.progressMessage
+            self.refreshJobAIStageStatusView(forceStripStructurePublish: true)
+        }
+        refreshJobAIStageStatusView(forceStripStructurePublish: true)
         do {
             let refined = try await startFluxPromptJob(meta: meta, values: values)
+            clearJobAIStageFluxCallbacks()
             launchRefinedPrompt = refined.trimmingCharacters(in: .whitespacesAndNewlines)
             jobAIStageActive = false
             await launchGeneration(values: values)
         } catch {
+            clearJobAIStageFluxCallbacks()
             jobAIStageActive = false
             let message = error.localizedDescription
             if message == "Cancelled" {
@@ -1881,6 +1888,11 @@ final class ImageGenController {
             }
             handleStepFailure(message)
         }
+    }
+
+    private func clearJobAIStageFluxCallbacks() {
+        fluxPromptTasks.onFluxPromptRejectionRestarted = nil
+        fluxPromptTasks.onFluxPromptChunk = nil
     }
 
     private func startFluxPromptJob(meta: [String: Any], values: [String: Any]) async throws -> String {
@@ -3432,8 +3444,38 @@ final class ImageGenController {
             liveStep = AIRefineProgress.displayStep(step: rawStep)
         }
         _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
+        refreshJobAIStageStatusView()
+    }
+
+    /// Port of ``ImageGenController._refresh_job_ai_stage_status_html``; job card shows AI rows + strip gets ``AI:`` progress.
+    private func refreshJobAIStageStatusView(forceStripStructurePublish: Bool = false) {
+        guard jobAIStageActive, activeJobID != nil else { return }
+        let timing = currentTimingForDisplay()
+        let step: Int? = liveStepTotal > 0 ? liveStep : nil
+        let stepTotal: Int? = liveStepTotal > 0 ? liveStepTotal : nil
+        let built = buildQueueStatusView(
+            pluginID: activePluginID,
+            function: activeFunction,
+            values: pendingValues,
+            copiesTotal: copiesTotal,
+            running: isProcessing,
+            aiStageActive: true,
+            step: step,
+            stepTotal: stepTotal,
+            elapsedSeconds: timing.elapsed,
+            estimateSeconds: timing.estimate
+        )
+        activeStatusView = built.statusView
         rebuildActiveStripViewLocally()
-        publishActiveStrip(preferLiveFields: true)
+        let preferLive = !forceStripStructurePublish
+        publishActiveStrip(preferLiveFields: preferLive)
+        if dialogBuildPauseCount == 0 {
+            queueRevision += 1
+        }
+        // Job card needs a pane bump when the strip used in-place live sinks only.
+        if preferLive, stripPublishKey() == lastStripPublishKey {
+            onQueueChanged?()
+        }
     }
 
     private func beginGenerationProgressTracking(values: [String: Any]) async {
@@ -3839,6 +3881,7 @@ final class ImageGenController {
         running: Bool = false,
         omitLiveStepsRow: Bool = false,
         withAI: Bool = false,
+        aiStageActive: Bool = false,
         step: Int? = nil,
         stepTotal: Int? = nil,
         elapsedSeconds: Double? = nil,
@@ -3855,6 +3898,7 @@ final class ImageGenController {
             running: running,
             omitLiveStepsRow: omitLiveStepsRow,
             withAI: withAI,
+            aiStageActive: aiStageActive,
             step: step,
             stepTotal: stepTotal,
             elapsedSeconds: elapsedSeconds,
@@ -4545,6 +4589,7 @@ final class ImageGenController {
         cooldownSecondsRemaining = 0
         if jobAIStageActive {
             fluxPromptTasks.cancel()
+            clearJobAIStageFluxCallbacks()
             jobAIStageActive = false
         }
         modelTasks.shutdown()
@@ -4569,6 +4614,9 @@ final class ImageGenController {
         activeJobCardThumbnailPathsCache = []
         stepRunning = nil
         stepPendingDoc = nil
+        if jobAIStageActive {
+            clearJobAIStageFluxCallbacks()
+        }
         jobAIStageActive = false
         copyBatchActive = false
         copiesTotal = 0
@@ -4747,6 +4795,9 @@ final class ImageGenController {
         }
         if !force, !stripDisplayNeedsRefresh() {
             return
+        }
+        if jobAIStageActive {
+            _ = snapshotLiveTiming(inCooldown: cooldownSecondsRemaining > 0)
         }
         rebuildActiveStripViewLocally(includeQueueJobsRow: includeQueueJobsRow)
         markStripDisplayRefreshed()

@@ -27,7 +27,7 @@ final class LmStudioCaptionService {
     private static let logTag = "imagegen_plugins.lmstudio_caption"
 
     /// Return `false` to stop reading the LM Studio SSE stream (e.g. chat rejected-phrase retry).
-    private typealias StreamChunkHandler = @MainActor (String) -> Bool
+    typealias StreamChunkHandler = @MainActor (String) -> Bool
 
     private func continuingStreamChunks(
         _ handler: @escaping @MainActor (String) -> Void
@@ -156,6 +156,23 @@ final class LmStudioCaptionService {
         config: AppConfig,
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> String {
+        try await streamChatCompletion(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+            imagePaths: imagePaths,
+            config: config,
+            onChunk: continuingStreamChunks(onChunk)
+        )
+    }
+
+    /// Same as ``streamChatCompletion``; return `false` from ``onChunk`` to stop reading the LM Studio stream early.
+    func streamChatCompletion(
+        systemPrompt: String,
+        userPrompt: String,
+        imagePaths: [String],
+        config: AppConfig,
+        onChunk: @escaping StreamChunkHandler
+    ) async throws -> String {
         guard let base = apiBaseURL(host: captionHost(config: config)) else {
             throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
         }
@@ -184,7 +201,6 @@ final class LmStudioCaptionService {
             config: config
         )
 
-        let chunkHandler = continuingStreamChunks(onChunk)
         if uniquePaths.isEmpty {
             return try await streamTextChatRequest(
                 baseURL: base,
@@ -193,7 +209,7 @@ final class LmStudioCaptionService {
                 userPrompt: user,
                 temperature: settings.temperature,
                 config: config,
-                onChunk: chunkHandler
+                onChunk: onChunk
             )
         }
 
@@ -210,7 +226,7 @@ final class LmStudioCaptionService {
                         temperature: settings.temperature,
                         imageURL: imageURL,
                         config: config,
-                        onChunk: chunkHandler
+                        onChunk: onChunk
                     )
                 } catch CaptionError.runtime(let message) {
                     if impliesVisionRequired(message) {

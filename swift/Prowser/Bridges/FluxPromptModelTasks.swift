@@ -17,6 +17,8 @@ final class FluxPromptModelTasks {
     var onFluxPromptChunk: ((String) -> Void)?
     var onFluxPromptReady: ((String) -> Void)?
     var onJobFinished: ((String, Bool, String) -> Void)?
+    /// Fired when a forbidden LM Studio phrase triggered a job-AI stream restart (reset progress strip).
+    var onFluxPromptRejectionRestarted: (() -> Void)?
 
     func bind(config: AppConfig) {
         self.config = config
@@ -133,11 +135,14 @@ final class FluxPromptModelTasks {
         isBusy = true
         lastError = ""
 
-        service.streamRefinement(
+        service.streamJobRefinement(
             systemPrompt: system,
             userPrompt: userText,
             imagePaths: paths,
             config: config,
+            onRejectionRestarted: { [weak self] in
+                self?.onFluxPromptRejectionRestarted?()
+            },
             onChunk: { [weak self] chunk in
                 self?.onFluxPromptChunk?(chunk)
             },

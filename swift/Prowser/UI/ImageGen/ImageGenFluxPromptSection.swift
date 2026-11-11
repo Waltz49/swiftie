@@ -180,7 +180,6 @@ struct ImageGenFluxPromptSection: View {
     }
 
     private func syncContextFromValues() {
-        FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
         let override = fluxContext.systemPromptOverride.trimmingCharacters(in: .whitespacesAndNewlines)
         if !override.isEmpty {
             systemPrompt = override

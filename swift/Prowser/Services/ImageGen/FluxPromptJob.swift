@@ -170,7 +170,7 @@ enum FluxPromptJob {
         context: ImageGenFluxPromptSubmitContext
     ) {
         guard JobStepQueue.hasFluxPromptAIJob(values) else {
-            context.jobCheckbox = false
+            // Leave `jobCheckbox` as loaded from `flux_prompt_job_with_generate` for normal dialog opens.
             return
         }
         if let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any],
