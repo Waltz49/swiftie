@@ -250,6 +250,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var visibleThumbnailLoadGeneration: UInt64 = 0
     /// True while the user is scrolling; off-screen batch loads are paused.
     private var backgroundLoadingSuspended = false
+    /// Avoid repeated ``suspendBackgroundThumbnailLoading()`` / session bumps during one scroll gesture.
+    private var scrollViewportLoadSuspended = false
     var wrapAround = true
 
     private struct LayoutSnapshot: Equatable {
@@ -609,23 +611,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         syncTopCoverScrollbarReserveIfNeeded()
     }
 
-    /// Called when the user scrolls; prioritize viewport thumbnails over off-screen batches.
+    /// Called when the scroll viewport moves (`NSClipView` bounds). Debounced like Python ``on_scroll_changed``.
     func noteVisibleRectChanged() {
-        suspendBackgroundThumbnailLoading()
-        loadVisibleThumbnails(scheduleBackground: false)
-        scheduleBackgroundThumbnailLoadingAfterScrollSettles()
-    }
-
-    private func scheduleBackgroundThumbnailLoadingAfterScrollSettles() {
-        visibleLoadDebounceWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.handleScrollSettledThumbnailLoad()
+        if !scrollViewportLoadSuspended {
+            suspendBackgroundThumbnailLoading()
+            scrollViewportLoadSuspended = true
         }
-        visibleLoadDebounceWorkItem = work
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Double(TimingConstants.thumbnailScrollLoadDebounceMs) / 1000.0,
-            execute: work
-        )
+        scheduleLoadVisibleThumbnails(debounced: true, allowBackgroundSweep: true)
     }
 
     /// Reload grid columns when the scroll view size changes (sidebar hide/show, window resize).
@@ -785,6 +777,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private func invalidateThumbnailLoadingSession() {
         backgroundLoadSession += 1
         backgroundLoadingSuspended = false
+        scrollViewportLoadSuspended = false
         loadingPaths.removeAll()
         lastVisiblePathsForReprioritize = []
         cancelPendingBackgroundBatches()
@@ -986,7 +979,6 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     override func scrollWheel(with event: NSEvent) {
         superview?.scrollWheel(with: event)
-        noteVisibleRectChanged()
     }
 
     override func viewDidMoveToWindow() {
@@ -1793,8 +1785,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
     }
 
-    /// After scroll quiesces: load viewport thumbs, then resume off-screen batches.
+    /// After scroll quiesces: hydrate from disk/memory cache, load viewport thumbs, resume off-screen batches.
     private func handleScrollSettledThumbnailLoad() {
+        scrollViewportLoadSuspended = false
+        hydrateVisibleThumbnailsFromCacheIfNeeded()
         loadVisibleThumbnails(scheduleBackground: false)
         backgroundLoadingSuspended = false
         resumeBackgroundThumbnailLoadingForCurrentViewport()
