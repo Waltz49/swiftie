@@ -747,11 +747,9 @@ extension AppState {
         if imageGen.quitGateAllowsImmediateTerminate() {
             return true
         }
-        let stripHost = NSHostingController(
-            rootView: ActiveJobStripView().environment(self)
-        )
-        stripHost.view.frame = NSRect(x: 0, y: 0, width: 360, height: 80)
         imageGen.prepareQuitConfirmationStrip()
+        let (stripAccessory, teardownStripLiveUpdates) = ActiveJobStripModalAccessory.make(appState: self)
+        defer { teardownStripLiveUpdates() }
 
         let parentWindow = BrowserWindowIdentity.resolveMainBrowserWindow()
         let choice = StyledMessageDialog.present(
@@ -765,7 +763,7 @@ extension AppState {
             ],
             defaultButtonIndex: 0,
             escapeButtonIndex: 0,
-            accessoryView: stripHost.view,
+            accessoryView: stripAccessory,
             parentWindow: parentWindow
         )
         switch choice {

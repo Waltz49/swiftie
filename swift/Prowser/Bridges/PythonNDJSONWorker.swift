@@ -325,12 +325,14 @@ actor PythonNDJSONWorker {
     }
 
     /// Progress arrives on the stdout reader task; UI updates must run on the main actor.
+    /// Use the main GCD queue (not ``Task`` @MainActor) so generation progress still paints during
+    /// ``NSApp/runModal(for:)`` styled dialogs (quit confirm with live strip).
     private nonisolated static func deliverProgress(
         _ message: [String: Any],
         handler: ProgressHandler?
     ) {
         guard let handler else { return }
-        Task { @MainActor in
+        DispatchQueue.main.async {
             handler(message)
         }
     }

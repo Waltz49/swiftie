@@ -537,18 +537,18 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ActiveJobStripNSView {
         let view = ActiveJobStripNSView()
-        wireStripActions(on: view, appState: appState)
+        wireActiveJobStripActions(on: view, appState: appState)
         installCallbacks(on: view, context: context)
         return view
     }
 
     func updateNSView(_ nsView: ActiveJobStripNSView, context: Context) {
         installCallbacks(on: nsView, context: context)
-        wireStripActions(on: nsView, appState: appState)
+        wireActiveJobStripActions(on: nsView, appState: appState)
         // Read the controller so a deferred SwiftUI pass cannot paint a stale bar
         // over an in-place progress tick.
         nsView.update(stripView: appState.imageGen.activeStripView, colors: appState.theme.colors)
-        applySeriesControlState(to: nsView, appState: appState)
+        applyActiveJobStripSeriesControlState(to: nsView, appState: appState)
     }
 
     static func dismantleNSView(_ nsView: ActiveJobStripNSView, coordinator: Coordinator) {
@@ -562,39 +562,10 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
     }
 
     @MainActor
-    private func wireStripActions(on nsView: ActiveJobStripNSView, appState: AppState) {
-        nsView.onCancel = { appState.confirmCancelGeneration() }
-        nsView.onEdit = { appState.editActiveQueueJob() }
-        nsView.onProgressOptionOpen = { appState.editActiveQueueJob() }
-        nsView.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
-        nsView.onAddSeries = { delta, option in
-            guard let jobID = appState.imageGen.activeJobID else { return }
-            if option {
-                appState.imageGen.setSeriesContinuous(forJobID: jobID)
-            } else {
-                appState.imageGen.addSeriesCycle(forJobID: jobID, delta: delta)
-            }
-        }
-        nsView.onSubtractSeries = { removeAll in
-            guard let jobID = appState.imageGen.activeJobID else { return }
-            appState.imageGen.subtractSeriesRemaining(forJobID: jobID, removeAll: removeAll)
-        }
-    }
-
-    @MainActor
-    private func applySeriesControlState(to nsView: ActiveJobStripNSView, appState: AppState) {
-        guard let jobID = appState.imageGen.activeJobID else {
-            nsView.updateSeriesControls(canAdd: false, canSubtract: false)
-            return
-        }
-        let state = appState.imageGen.actionBarState(for: jobID)
-        nsView.updateSeriesControls(canAdd: state.canAddSeries, canSubtract: state.canSubtractSeries)
-    }
-
-    @MainActor
     private func installCallbacks(on nsView: ActiveJobStripNSView, context: Context) {
         context.coordinator.appState = appState
         context.coordinator.syncStripMiniDoubleClickMonitor(hostingView: nsView)
+        wireActiveJobStripActions(on: nsView, appState: appState)
         nsView.onContentHeightChanged = { [weak nsView] in
             guard let nsView else { return }
             reportMeasuredHeight(nsView: nsView, appState: appState)
@@ -608,15 +579,7 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         let id = ObjectIdentifier(nsView)
         context.coordinator.sinkID = id
         context.coordinator.controller = appState.imageGen
-        appState.imageGen.setStripLiveSink(id) { [weak nsView, weak appState] strip in
-            guard let nsView, let appState else { return }
-            let before = nsView.cachedContentHeight
-            nsView.update(stripView: strip, colors: appState.theme.colors)
-            applySeriesControlState(to: nsView, appState: appState)
-            guard abs(nsView.cachedContentHeight - before) > 1 else { return }
-            let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: strip)
-            appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, estimated, 28))
-        }
+        registerActiveJobStripLiveSink(on: nsView, sinkID: id, appState: appState, measureIntoJobsPane: true)
     }
 
     @MainActor
@@ -685,5 +648,91 @@ struct ActiveJobStripNSViewRepresentable: NSViewRepresentable {
         nsView.refreshCachedContentHeight(forWidth: width)
         let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: appState.imageGen.activeStripView)
         appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, estimated, 28))
+    }
+}
+
+// MARK: - Shared strip wiring (SwiftUI pane and modal dialog accessories)
+
+@MainActor
+func wireActiveJobStripActions(on nsView: ActiveJobStripNSView, appState: AppState) {
+    nsView.onCancel = { appState.confirmCancelGeneration() }
+    nsView.onEdit = { appState.editActiveQueueJob() }
+    nsView.onProgressOptionOpen = { appState.editActiveQueueJob() }
+    nsView.onSkipCooldown = { appState.imageGen.skipCopyCooldown() }
+    nsView.onAddSeries = { delta, option in
+        guard let jobID = appState.imageGen.activeJobID else { return }
+        if option {
+            appState.imageGen.setSeriesContinuous(forJobID: jobID)
+        } else {
+            appState.imageGen.addSeriesCycle(forJobID: jobID, delta: delta)
+        }
+    }
+    nsView.onSubtractSeries = { removeAll in
+        guard let jobID = appState.imageGen.activeJobID else { return }
+        appState.imageGen.subtractSeriesRemaining(forJobID: jobID, removeAll: removeAll)
+    }
+}
+
+@MainActor
+func applyActiveJobStripSeriesControlState(to nsView: ActiveJobStripNSView, appState: AppState) {
+    guard let jobID = appState.imageGen.activeJobID else {
+        nsView.updateSeriesControls(canAdd: false, canSubtract: false)
+        return
+    }
+    let state = appState.imageGen.actionBarState(for: jobID)
+    nsView.updateSeriesControls(canAdd: state.canAddSeries, canSubtract: state.canSubtractSeries)
+}
+
+@MainActor
+func registerActiveJobStripLiveSink(
+    on nsView: ActiveJobStripNSView,
+    sinkID: ObjectIdentifier,
+    appState: AppState,
+    measureIntoJobsPane: Bool
+) {
+    appState.imageGen.setStripLiveSink(sinkID) { [weak nsView, weak appState] strip in
+        guard let nsView, let appState else { return }
+        let before = nsView.cachedContentHeight
+        nsView.update(stripView: strip, colors: appState.theme.colors)
+        applyActiveJobStripSeriesControlState(to: nsView, appState: appState)
+        guard measureIntoJobsPane else { return }
+        guard abs(nsView.cachedContentHeight - before) > 1 else { return }
+        let estimated = JobQueuePaneMetrics.estimatedActiveStripHeight(for: strip)
+        appState.updateMeasuredActiveJobStripHeight(max(nsView.cachedContentHeight, estimated, 28))
+    }
+}
+
+/// AppKit strip for modal dialogs: ``NSApp.runModal`` does not drive SwiftUI-hosted accessories, so register
+/// the live sink before the dialog blocks the run loop (Python ``ActiveJobStripWidget`` in quit ``QMessageBox``).
+@MainActor
+enum ActiveJobStripModalAccessory {
+    static func make(appState: AppState, width: CGFloat = 360) -> (view: NSView, teardown: () -> Void) {
+        let stripNSView = ActiveJobStripNSView()
+        stripNSView.translatesAutoresizingMaskIntoConstraints = false
+        wireActiveJobStripActions(on: stripNSView, appState: appState)
+        let sinkID = ObjectIdentifier(stripNSView)
+        registerActiveJobStripLiveSink(
+            on: stripNSView,
+            sinkID: sinkID,
+            appState: appState,
+            measureIntoJobsPane: false
+        )
+        stripNSView.update(stripView: appState.imageGen.activeStripView, colors: appState.theme.colors)
+        applyActiveJobStripSeriesControlState(to: stripNSView, appState: appState)
+        stripNSView.refreshCachedContentHeight(forWidth: width)
+
+        let wrapper = NSView(frame: NSRect(x: 0, y: 0, width: width, height: max(stripNSView.cachedContentHeight, 28)))
+        wrapper.addSubview(stripNSView)
+        NSLayoutConstraint.activate([
+            stripNSView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            stripNSView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            stripNSView.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            stripNSView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+        ])
+
+        let teardown = {
+            appState.imageGen.setStripLiveSink(sinkID, nil)
+        }
+        return (wrapper, teardown)
     }
 }

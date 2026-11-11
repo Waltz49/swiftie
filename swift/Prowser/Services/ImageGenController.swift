@@ -84,6 +84,8 @@ final class ImageGenController {
     private var lastStripPublishKey = ""
     private var stripLiveSinks: [ObjectIdentifier: @MainActor (ActiveJobStripStatusView) -> Void] = [:]
     private var liveStatusTask: Task<Void, Never>?
+    private var liveStatusTimer: Timer?
+    private let liveStatusTimerTarget = LiveStripStatusTimerTarget()
     private var activeStatusView: QueueJobStatusView?
     private var lastResolvedLoraStatusLabel: String?
     private var quitAfterCurrentWorker = false
@@ -4075,20 +4077,28 @@ final class ImageGenController {
         try await ExifService.writeUserComment(path: outputPath, text: comment)
     }
 
-    private func startLiveStatusTimer() {
-        liveStatusTask?.cancel()
-        liveStatusTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                guard let self, self.isProcessing || self.cooldownSecondsRemaining > 0 else { break }
-                await self.refreshActiveStripView()
-            }
-        }
-    }
-
-    private func stopLiveStatusTimer() {
+    fileprivate func startLiveStatusTimer() {
         liveStatusTask?.cancel()
         liveStatusTask = nil
+        liveStatusTimer?.invalidate()
+        liveStatusTimerTarget.controller = self
+        let timer = Timer(
+            timeInterval: 0.5,
+            target: liveStatusTimerTarget,
+            selector: #selector(LiveStripStatusTimerTarget.tick(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        liveStatusTimer = timer
+    }
+
+    fileprivate func stopLiveStatusTimer() {
+        liveStatusTask?.cancel()
+        liveStatusTask = nil
+        liveStatusTimer?.invalidate()
+        liveStatusTimer = nil
+        liveStatusTimerTarget.controller = nil
     }
 
     // MARK: - Quit / shutdown
@@ -4223,10 +4233,8 @@ final class ImageGenController {
         deferredQuitWaitAllJobs = false
         queueAdvanceSuppressed = true
         persistJobQueueForExit()
-        Task { @MainActor in
-            presentDeferredQuitDialogIfNeeded()
-            tryCompleteDeferredQuitAfterCurrentCopy()
-        }
+        presentDeferredQuitDialogIfNeeded()
+        tryCompleteDeferredQuitAfterCurrentCopy()
     }
 
     private func setDeferredQuitWaitAllJobs() {
@@ -4719,7 +4727,7 @@ final class ImageGenController {
         }
     }
 
-    func refreshActiveStripView(includeQueueJobsRow: Bool = false, force: Bool = false) async {
+    func refreshActiveStripDisplay(includeQueueJobsRow: Bool = false, force: Bool = false) {
         guard isEnabled, isProcessing || cooldownSecondsRemaining > 0 else {
             activeStripView = ActiveJobStripStatusView()
             lastCooldownUISecond = nil
@@ -4734,11 +4742,35 @@ final class ImageGenController {
         publishActiveStrip(preferLiveFields: true)
     }
 
+    func refreshActiveStripView(includeQueueJobsRow: Bool = false, force: Bool = false) async {
+        refreshActiveStripDisplay(includeQueueJobsRow: includeQueueJobsRow, force: force)
+    }
+
     private func ensureHeldJobsVisibleInQueuePanel() {
         if !config.bool(forKey: "jobs_show_held_jobs", default: true) {
             config.updateSetting("jobs_show_held_jobs", value: true)
         }
         ensureHeldJobsVisibleInPanel?()
+    }
+}
+
+/// Fires on ``RunLoop.Mode.common`` so elapsed/cooldown ticks continue during modal styled dialogs.
+@MainActor
+private final class LiveStripStatusTimerTarget: NSObject {
+    weak var controller: ImageGenController?
+
+    @objc nonisolated func tick(_ timer: Timer) {
+        MainActor.assumeIsolated {
+            guard let controller else {
+                timer.invalidate()
+                return
+            }
+            guard controller.isProcessing || controller.cooldownSecondsRemaining > 0 else {
+                controller.stopLiveStatusTimer()
+                return
+            }
+            controller.refreshActiveStripDisplay()
+        }
     }
 }
 

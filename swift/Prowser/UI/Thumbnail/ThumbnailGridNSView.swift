@@ -250,7 +250,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var visibleThumbnailLoadGeneration: UInt64 = 0
     /// True while the user is scrolling; off-screen batch loads are paused.
     private var backgroundLoadingSuspended = false
-    /// Avoid repeated ``suspendBackgroundThumbnailLoading()`` / session bumps during one scroll gesture.
+    /// Debounced scroll cycle started; independent of ``backgroundLoadingSuspended`` (immediate ``scheduleLoadVisibleThumbnails(debounced: false)`` clears the latter).
     private var scrollViewportLoadSuspended = false
     var wrapAround = true
 
@@ -1777,6 +1777,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             )
         } else {
             visibleLoadDebounceWorkItem?.cancel()
+            scrollViewportLoadSuspended = false
             backgroundLoadingSuspended = false
             loadVisibleThumbnails(
                 scheduleBackground: allowBackgroundSweep,
@@ -1788,10 +1789,12 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     /// After scroll quiesces: hydrate from disk/memory cache, load viewport thumbs, resume off-screen batches.
     private func handleScrollSettledThumbnailLoad() {
         scrollViewportLoadSuspended = false
-        hydrateVisibleThumbnailsFromCacheIfNeeded()
-        loadVisibleThumbnails(scheduleBackground: false)
-        backgroundLoadingSuspended = false
-        resumeBackgroundThumbnailLoadingForCurrentViewport()
+        Task { @MainActor in
+            await self.hydrateVisibleThumbnailsFromCache()
+            self.loadVisibleThumbnails(scheduleBackground: false)
+            self.backgroundLoadingSuspended = false
+            self.resumeBackgroundThumbnailLoadingForCurrentViewport()
+        }
     }
 
     private func resumeBackgroundThumbnailLoadingForCurrentViewport() {
@@ -1824,6 +1827,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     /// Fill view-layer pixmaps from disk/memory cache for the viewport (Python reuse loaded pixmap).
     private func hydrateVisibleThumbnailsFromCacheIfNeeded() {
+        Task { @MainActor in
+            await hydrateVisibleThumbnailsFromCache()
+        }
+    }
+
+    @MainActor
+    private func hydrateVisibleThumbnailsFromCache() async {
         guard thumbnailLoadingActive, let appState, let scrollView = enclosingScrollView else { return }
         let visible = visibleThumbnailIndices(in: scrollView.documentVisibleRect)
         guard !visible.isEmpty else { return }
@@ -1835,19 +1845,17 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
         guard !pathsToHydrate.isEmpty else { return }
         let cache = appState.thumbnailCache
-        Task { @MainActor in
-            for path in pathsToHydrate {
-                guard self.imagePaths.contains(path), self.thumbnails[path] == nil else { continue }
-                guard let cgImage = await cache.cachedThumbnail(for: path, size: pixelSize) else { continue }
-                let image = NSImage(
-                    cgImage: cgImage,
-                    size: NSSize(width: cgImage.width, height: cgImage.height)
-                )
-                self.thumbnails[path] = image
-                self.ensureImageDimensionsCached(for: path)
-                if let paintIndex = self.imagePaths.firstIndex(of: path) {
-                    self.setNeedsDisplay(self.thumbnailRect(for: paintIndex))
-                }
+        for path in pathsToHydrate {
+            guard imagePaths.contains(path), thumbnails[path] == nil else { continue }
+            guard let cgImage = await cache.cachedThumbnail(for: path, size: pixelSize) else { continue }
+            let image = NSImage(
+                cgImage: cgImage,
+                size: NSSize(width: cgImage.width, height: cgImage.height)
+            )
+            thumbnails[path] = image
+            ensureImageDimensionsCached(for: path)
+            if let paintIndex = imagePaths.firstIndex(of: path) {
+                setNeedsDisplay(thumbnailRect(for: paintIndex))
             }
         }
     }

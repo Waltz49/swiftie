@@ -436,7 +436,17 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
         if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
             panel.makeFirstResponder(firstResponder)
         }
-        NSApp.runModal(for: panel)
+        // ``runModal(for:)`` blocks default-run-loop sources; use a modal session so timers in
+        // ``RunLoop.Mode.common`` (live job progress) keep firing.
+        let session = NSApp.beginModalSession(for: panel)
+        defer { NSApp.endModalSession(session) }
+        while selectedIndex == nil {
+            let response = NSApp.runModalSession(session)
+            if response != .continue || selectedIndex != nil {
+                break
+            }
+            _ = RunLoop.current.run(mode: .common, before: Date(timeIntervalSinceNow: 0.05))
+        }
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {

@@ -30,8 +30,21 @@ enum StepwiseProgressName {
 
 /// Watches MFLUX stepwise PNG output (port of `mflux_stepwise_progress.py`).
 @MainActor
+private final class StepwiseProgressPollTarget: NSObject {
+    weak var watcher: StepwiseProgressWatcher?
+
+    @objc nonisolated func tick(_ timer: Timer) {
+        MainActor.assumeIsolated {
+            watcher?.pollStepwiseProgress()
+        }
+    }
+}
+
+@MainActor
 final class StepwiseProgressWatcher {
     private var task: Task<Void, Never>?
+    private var pollTimer: Timer?
+    private let pollTarget = StepwiseProgressPollTarget()
     private let stepwiseDir: String
     private let progressiveOutputPath: String?
     private let expectedSteps: Int
@@ -52,15 +65,28 @@ final class StepwiseProgressWatcher {
 
     func start() {
         stop()
-        task = Task { [weak self] in
-            guard let self else { return }
-            await self.pollLoop()
-        }
+        pollTarget.watcher = self
+        let timer = Timer(
+            timeInterval: 0.1,
+            target: pollTarget,
+            selector: #selector(StepwiseProgressPollTarget.tick(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     func stop() {
         task?.cancel()
         task = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
+        pollTarget.watcher = nil
+    }
+
+    fileprivate func pollStepwiseProgress() {
+        _ = collectStepwiseProgress()
     }
 
     /// Drain late step PNGs after the CLI exits (port of ``flush_stepwise_to_output`` idle passes).
@@ -85,13 +111,6 @@ final class StepwiseProgressWatcher {
               let progressiveOutputPath,
               !progressiveOutputPath.isEmpty else { return }
         onProgress(stepProgressPayload(path: progressiveOutputPath, step: expectedSteps, total: expectedSteps))
-    }
-
-    private func pollLoop() async {
-        while !Task.isCancelled {
-            _ = collectStepwiseProgress()
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
     }
 
     @discardableResult

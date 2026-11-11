@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchCompleted = false
     private var pendingOpenFlush: DispatchWorkItem?
     private var menuBarDedupObserver: NSObjectProtocol?
+    private var menuBarDedupInProgress = false
+    private var menuBarDedupPending = false
+    private var menuBarDedupWorkItem: DispatchWorkItem?
+    private var lastMenuBarDedupFromWillUpdate: CFAbsoluteTime = 0
     private var chatToggleShortcutMonitor: Any?
     private var cooperativeTerminationSignals: CooperativeTerminationSignals?
     private var signalTerminateInFlight = false
@@ -78,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillUpdate(_ notification: Notification) {
         guard isPrimary else { return }
+        // SwiftUI can refresh the menu bar often during modals and live progress; do not dedup every frame.
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastMenuBarDedupFromWillUpdate > 0.5 else { return }
+        lastMenuBarDedupFromWillUpdate = now
         scheduleMenuBarDeduplication()
     }
 
@@ -267,19 +275,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] note in
             MainActor.assumeIsolated {
                 guard self?.isPrimary == true else { return }
+                guard let self, !self.menuBarDedupInProgress else { return }
                 guard let menu = note.object as? NSMenu, menu === NSApp.mainMenu else { return }
-                self?.scheduleMenuBarDeduplication()
+                self.scheduleMenuBarDeduplication()
             }
         }
     }
 
     private func scheduleMenuBarDeduplication() {
-        DispatchQueue.main.async { [weak self] in
-            MenuBarTitles.removeDuplicateStandardMenus()
-            MenuBarTitles.placeFilterMenuAfterSearch()
-            MenuBarTitles.placeImageMenuBeforeTools()
-            self?.rewireStandardAboutMenuItems()
+        if menuBarDedupInProgress {
+            menuBarDedupPending = true
+            return
         }
+        menuBarDedupWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.performMenuBarDeduplication()
+        }
+        menuBarDedupWorkItem = work
+        DispatchQueue.main.async(execute: work)
+    }
+
+    private func performMenuBarDeduplication() {
+        guard isPrimary else { return }
+        guard !menuBarDedupInProgress else {
+            menuBarDedupPending = true
+            return
+        }
+        menuBarDedupInProgress = true
+        menuBarDedupPending = false
+        defer {
+            menuBarDedupInProgress = false
+            if menuBarDedupPending {
+                menuBarDedupPending = false
+                scheduleMenuBarDeduplication()
+            }
+        }
+        MenuBarTitles.removeDuplicateStandardMenus()
+        MenuBarTitles.placeFilterMenuAfterSearch()
+        MenuBarTitles.placeImageMenuBeforeTools()
+        rewireStandardAboutMenuItems()
     }
 
     /// Route Application-menu About to our custom dialog instead of `orderFrontStandardAboutPanel`.
