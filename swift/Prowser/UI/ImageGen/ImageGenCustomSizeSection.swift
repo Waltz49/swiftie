@@ -17,13 +17,38 @@ struct ImageGenCustomSizeSection: View {
     var compactSliderTracks: Bool = false
     var onValuesChanged: (() -> Void)?
 
-    @State private var isExpanded = false
+    @State private var isExpanded: Bool
     @State private var aspectLock = false
     @State private var aspectRatio: Double = 1.0
     @State private var aspectLockPrevW: Int?
     @State private var aspectLockPrevH: Int?
     @State private var aspectLockUpdating = false
     @State private var settingsObserver: UUID?
+
+    init(
+        values: Binding<[String: Any]>,
+        widthSpec: [String: Any],
+        heightSpec: [String: Any],
+        pipelineID: String,
+        pluginMaxDimension: Int,
+        function: String,
+        sourcePath: String?,
+        usesOptionalCustomSize: Bool = false,
+        compactSliderTracks: Bool = false,
+        onValuesChanged: (() -> Void)? = nil
+    ) {
+        _values = values
+        self.widthSpec = widthSpec
+        self.heightSpec = heightSpec
+        self.pipelineID = pipelineID
+        self.pluginMaxDimension = pluginMaxDimension
+        self.function = function
+        self.sourcePath = sourcePath
+        self.usesOptionalCustomSize = usesOptionalCustomSize
+        self.compactSliderTracks = compactSliderTracks
+        self.onValuesChanged = onValuesChanged
+        _isExpanded = State(initialValue: usesOptionalCustomSize ? false : true)
+    }
 
     var body: some View {
         ImageGenCollapsibleSection(

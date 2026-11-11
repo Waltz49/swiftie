@@ -342,18 +342,51 @@ enum ImageGenPersistence {
         mutateImagegen(config: config) { $0["flux_prompt_job_with_generate"] = enabled }
     }
 
+    /// Python ``load_flux_prompt_system_prompt_settings`` keys (with Swift legacy fallbacks).
     static func fluxSystemPromptText(config: AppConfig) -> String {
-        imagegenBlock(config: config)["flux_prompt_system_prompt"] as? String ?? ""
+        let imagegen = imagegenBlock(config: config)
+        if let text = imagegen["flux_prompt_system_prompt_text"] as? String { return text }
+        return imagegen["flux_prompt_system_prompt"] as? String ?? ""
+    }
+
+    /// AI Prompt Enhancement section disclosure (Python ``flux_prompt_system_prompt_visible``).
+    static func fluxSystemPromptSectionVisible(config: AppConfig) -> Bool {
+        let imagegen = imagegenBlock(config: config)
+        if let visible = imagegen["flux_prompt_system_prompt_visible"] as? Bool { return visible }
+        return imagegen["flux_prompt_system_prompt_expanded"] as? Bool ?? false
+    }
+
+    /// Inner system-prompt editor disclosure (Python ``flux_prompt_system_prompt_editor_expanded``).
+    static func fluxSystemPromptEditorExpanded(config: AppConfig) -> Bool {
+        imagegenBlock(config: config)["flux_prompt_system_prompt_editor_expanded"] as? Bool ?? true
     }
 
     static func fluxSystemPromptExpanded(config: AppConfig) -> Bool {
-        imagegenBlock(config: config)["flux_prompt_system_prompt_expanded"] as? Bool ?? false
+        fluxSystemPromptSectionVisible(config: config)
     }
 
     static func saveFluxSystemPrompt(text: String, expanded: Bool, config: AppConfig) {
+        saveFluxSystemPromptSettings(
+            text: text,
+            sectionVisible: expanded,
+            editorExpanded: fluxSystemPromptEditorExpanded(config: config),
+            config: config
+        )
+    }
+
+    static func saveFluxSystemPromptSettings(
+        text: String,
+        sectionVisible: Bool,
+        editorExpanded: Bool,
+        config: AppConfig
+    ) {
         mutateImagegen(config: config) {
+            $0["flux_prompt_system_prompt_text"] = text
+            $0["flux_prompt_system_prompt_visible"] = sectionVisible
+            $0["flux_prompt_system_prompt_editor_expanded"] = editorExpanded
+            // Legacy Swift-only keys (older builds / migration).
             $0["flux_prompt_system_prompt"] = text
-            $0["flux_prompt_system_prompt_expanded"] = expanded
+            $0["flux_prompt_system_prompt_expanded"] = sectionVisible
         }
     }
 

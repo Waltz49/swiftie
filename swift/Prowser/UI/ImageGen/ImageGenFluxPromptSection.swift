@@ -73,6 +73,9 @@ struct ImageGenFluxPromptSection: View {
             .onChange(of: fluxContext.sectionExpanded) { _, _ in
                 persistSectionState()
             }
+            .onChange(of: systemPromptExpanded) { _, _ in
+                persistSectionState()
+            }
             .onChange(of: function) { _, newFunction in
                 fluxContext.taskKind = newFunction
             }
@@ -170,7 +173,8 @@ struct ImageGenFluxPromptSection: View {
     private func loadSettings() {
         systemPrompt = ImageGenPersistence.fluxSystemPromptText(config: appState.config)
         fluxContext.systemPromptOverride = systemPrompt
-        fluxContext.sectionExpanded = ImageGenPersistence.fluxSystemPromptExpanded(config: appState.config)
+        fluxContext.sectionExpanded = ImageGenPersistence.fluxSystemPromptSectionVisible(config: appState.config)
+        systemPromptExpanded = ImageGenPersistence.fluxSystemPromptEditorExpanded(config: appState.config)
         fluxContext.passImage = ImageGenPersistence.passImageToAI(config: appState.config)
         fluxContext.jobCheckbox = ImageGenPersistence.fluxPromptJobWithGenerate(config: appState.config)
         fluxContext.taskKind = function
@@ -187,9 +191,10 @@ struct ImageGenFluxPromptSection: View {
     }
 
     private func persistSectionState() {
-        ImageGenPersistence.saveFluxSystemPrompt(
+        ImageGenPersistence.saveFluxSystemPromptSettings(
             text: systemPrompt,
-            expanded: fluxContext.sectionExpanded,
+            sectionVisible: fluxContext.sectionExpanded,
+            editorExpanded: systemPromptExpanded,
             config: appState.config
         )
     }
