@@ -35,6 +35,23 @@ enum ImageGenExifPluginFields {
         return intValue(values[key])
     }
 
+    /// Job status / hover tooltip quant digits (Python ``quantize_status_value``).
+    static func quantizeStatusLabel(plugin: ImageGenPluginDescriptor, values: [String: Any]) -> String? {
+        guard reportsQuantization(plugin: plugin) else { return nil }
+        let key = plugin.quantizeStatusKey
+        let raw = values[key]
+        if key == "mlx_tier" {
+            let tier = (raw as? String ?? "q4").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch tier {
+            case "q4": return "4"
+            case "q8": return "8"
+            case "bf16": return "16"
+            default: return tier.isEmpty ? nil : tier
+            }
+        }
+        return intValue(raw).map { "\($0)" }
+    }
+
     private static func loadFieldKeysByPluginID() -> [String: Set<String>] {
         guard let url = ProwserResourceBundle.url(forResource: "ImageGenPluginCatalogSnapshot", withExtension: "json"),
               let data = try? Data(contentsOf: url),

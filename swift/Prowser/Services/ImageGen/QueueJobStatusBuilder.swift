@@ -350,19 +350,7 @@ enum QueueJobStatusBuilder {
     }
 
     private static func quantizeStatusValue(plugin: ImageGenPluginDescriptor, values: [String: Any]) -> String? {
-        guard plugin.reportsQuantization else { return nil }
-        let key = plugin.quantizeStatusKey
-        let raw = values[key]
-        if key == "mlx_tier" {
-            let tier = (raw as? String ?? "q4").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            switch tier {
-            case "q4": return "4"
-            case "q8": return "8"
-            case "bf16": return "16"
-            default: return tier.isEmpty ? nil : tier
-            }
-        }
-        return intValue(raw).map { "\($0)" }
+        ImageGenExifPluginFields.quantizeStatusLabel(plugin: plugin, values: values)
     }
 
     private static func loraLabelForStatus(plugin: ImageGenPluginDescriptor, values: [String: Any]) -> String {

@@ -38,7 +38,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     var onToggleTextRefinement: ((String, Bool) -> Void)?
     var onJobNumberClick: ((String) -> Void)?
     var actionBarStateProvider: ((String) -> JobQueueActionBarState)?
-    var jobCardHoverPromptResolver: ((QueueRowSnapshot) -> String)?
+    var jobCardHoverTooltipResolver: ((QueueRowSnapshot, String?) -> String)?
     var onActionBarEmbedded: ((CGFloat) -> Void)?
 
     var themeColors: ThemeColors = .dark
@@ -426,11 +426,11 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         }
         card.onOpenReferences = { [weak self] paths in self?.onOpenReferences?(paths) }
         card.onJobNumberClick = { [weak self] in self?.onJobNumberClick?(row.jobID) }
-        card.hoverFullPromptProvider = { [weak self, weak card] in
+        card.hoverTooltipTextProvider = { [weak self, weak card] displayedPrompt in
             guard let self, let card else { return "" }
             let jobID = card.boundJobID
             guard let row = self.rows.first(where: { $0.jobID == jobID }) else { return "" }
-            return self.jobCardHoverPromptResolver?(row) ?? row.fullPrompt
+            return self.jobCardHoverTooltipResolver?(row, displayedPrompt) ?? ""
         }
     }
 
@@ -1180,7 +1180,7 @@ final class JobCardNSView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
     var onOpenReferences: (([String]) -> Void)?
     var onJobNumberClick: (() -> Void)?
-    var hoverFullPromptProvider: (() -> String)?
+    var hoverTooltipTextProvider: ((String?) -> String)?
 
     private let backgroundView = NSView()
     private let contentView = NSView()
@@ -1815,11 +1815,7 @@ final class JobCardNSView: NSView {
     }
 
     private var promptTooltipText: String {
-        let full = hoverFullPromptProvider?() ?? storedFullPrompt
-        return JobPromptTooltipText.make(
-            fullPrompt: full,
-            displayedPrompt: statusWidget.displayedPromptText()
-        )
+        hoverTooltipTextProvider?(statusWidget.displayedPromptText()) ?? ""
     }
 
     private func syncStoredFullPrompt(_ fullPrompt: String) {
@@ -2063,8 +2059,8 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         panel.paneContextMenuKind = compactForFloating ? .jobs(floating: true) : .jobs(floating: false)
         panel.paneContextMenuAppState = appState
         panel.applyTheme(appState.theme.colors)
-        panel.jobCardHoverPromptResolver = { row in
-            appState.imageGen.jobCardHoverFullPrompt(for: row)
+        panel.jobCardHoverTooltipResolver = { row, displayedPrompt in
+            appState.imageGen.jobCardHoverTooltip(for: row, displayedPrompt: displayedPrompt)
         }
         panel.onReorder = { jobID, beforeID in
             appState.imageGen.moveJob(before: beforeID, jobID: jobID)

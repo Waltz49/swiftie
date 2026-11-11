@@ -172,4 +172,51 @@ final class ImageGenPromptTextEncodingTests: XCTestCase {
         XCTAssertTrue(out.contains("日本語"))
         XCTAssertTrue(ImageGenPromptTextEncoding.preservesUTF8RoundTrip(out))
     }
+
+    func testJobGenerationTooltipIncludesQuantAfterSize() {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_schnell_mflux") else {
+            XCTFail("missing flux_schnell_mflux plugin")
+            return
+        }
+        let values: [String: Any] = [
+            "width": 512,
+            "height": 768,
+            "steps": 20,
+            "mflux_quantize": 4,
+            "prompt": "a cat",
+        ]
+        let tip = JobGenerationTooltipText.make(
+            plugin: plugin,
+            values: values,
+            fullPrompt: "a cat",
+            displayedPrompt: "a cat"
+        )
+        XCTAssertTrue(tip.contains("512x768"))
+        XCTAssertTrue(tip.contains("Steps:20"), "steps before quant in header: \(tip)")
+        XCTAssertTrue(tip.contains("Q:4"), "quant should follow steps in header: \(tip)")
+        XCTAssertFalse(tip.contains("a cat"), "prompt hidden when it matches card display")
+    }
+
+    func testJobGenerationTooltipShowsTruncatedPromptOnly() {
+        guard let plugin = ImageGenPluginCatalog.plugin(pluginID: "flux_schnell_mflux") else {
+            XCTFail("missing flux_schnell_mflux plugin")
+            return
+        }
+        let values: [String: Any] = [
+            "width": 512,
+            "height": 512,
+            "steps": 12,
+            "mflux_quantize": 8,
+        ]
+        let full = "long prompt text shown only in tooltip"
+        let tip = JobGenerationTooltipText.make(
+            plugin: plugin,
+            values: values,
+            fullPrompt: full,
+            displayedPrompt: "long prompt…"
+        )
+        XCTAssertTrue(tip.contains(full))
+        XCTAssertTrue(tip.contains("Steps:12"))
+        XCTAssertTrue(tip.contains("Q:8"))
+    }
 }

@@ -3247,9 +3247,30 @@ final class ImageGenController {
         return JobGenerationTooltipText.make(
             plugin: plugin,
             values: values,
-            finalPrompt: resolvedActiveWorkerPrompt(values: values),
+            fullPrompt: resolvedActiveWorkerPrompt(values: values),
             loraLabel: lastResolvedLoraStatusLabel
         )
+    }
+
+    func jobCardHoverTooltip(for row: QueueRowSnapshot, displayedPrompt: String?) -> String {
+        let plugin = ImageGenPluginCatalog.plugin(pluginID: row.pluginID)
+        let values = jobCardHoverValues(for: row)
+        let fullPrompt = jobCardHoverFullPrompt(for: row)
+        let loraLabel = row.isActive ? lastResolvedLoraStatusLabel : nil
+        return JobGenerationTooltipText.make(
+            plugin: plugin,
+            values: values,
+            fullPrompt: fullPrompt,
+            displayedPrompt: displayedPrompt,
+            loraLabel: loraLabel
+        )
+    }
+
+    private func jobCardHoverValues(for row: QueueRowSnapshot) -> [String: Any] {
+        if row.isActive {
+            return copyCycleValues.isEmpty ? pendingValues : copyCycleExifValues
+        }
+        return queuedJob(byID: row.jobID)?.values ?? [:]
     }
 
     private func resolvedActiveWorkerPrompt(values: [String: Any]) -> String {

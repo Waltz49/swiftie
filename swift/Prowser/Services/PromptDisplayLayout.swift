@@ -175,35 +175,18 @@ enum JobCardHoverFullPrompt {
     }
 }
 
-/// Hover tooltip text for job queue cards (`model_task_status_info.full_prompt_tooltip_text`).
-enum JobPromptTooltipText {
-    static func make(fullPrompt: String, displayedPrompt: String?) -> String {
-        let full = fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if full.isEmpty { return "" }
-        if let displayedPrompt {
-            let shown = normalizePromptForDisplay(displayedPrompt)
-            if shown == full || shown.isEmpty { return "" }
-            return full
-        }
-        return full
-    }
-
-    static func normalizePromptForDisplay(_ text: String) -> String {
-        text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-    }
-}
-
-/// Multi-line hover text for active-job progress bars (model, LoRAs, worker prompt).
+/// Shared hover tooltip for job cards and active-job progress bars (model, size, steps, quant, LoRAs, prompt).
 enum JobGenerationTooltipText {
+    private static let headerFieldSeparator = " "
+    private static let quantPrefix = "Q:"
+    private static let stepsPrefix = "Steps:"
+
     static func make(
         plugin: ImageGenPluginDescriptor?,
         values: [String: Any],
-        finalPrompt: String,
-        loraLabel: String?,
+        fullPrompt: String,
+        displayedPrompt: String? = nil,
+        loraLabel: String? = nil,
         loraCatalogLC: [String: Any] = [:]
     ) -> String {
         var lines: [String] = []
@@ -219,8 +202,16 @@ enum JobGenerationTooltipText {
                width > 0, height > 0 {
                 headerParts.append("\(width)x\(height)")
             }
+            if let steps = intValue(values["steps"]), steps > 0 {
+                headerParts.append("\(stepsPrefix)\(steps)")
+            }
+            if let quant = ImageGenExifPluginFields.quantizeStatusLabel(plugin: plugin, values: values)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !quant.isEmpty {
+                headerParts.append("\(quantPrefix)\(quant)")
+            }
             if !headerParts.isEmpty {
-                lines.append(headerParts.joined(separator: "   "))
+                lines.append(headerParts.joined(separator: headerFieldSeparator))
             }
         }
         lines.append(contentsOf: loraTooltipLines(
@@ -230,14 +221,29 @@ enum JobGenerationTooltipText {
             loraCatalogLC: loraCatalogLC,
             resolvedLabel: loraLabel
         ))
-        let prompt = finalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty {
+        let prompt = fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var includePrompt = !prompt.isEmpty
+        if includePrompt, let displayedPrompt {
+            let shown = normalizePromptForDisplay(displayedPrompt)
+            if shown == prompt || shown.isEmpty {
+                includePrompt = false
+            }
+        }
+        if includePrompt {
             if !lines.isEmpty {
                 lines.append("")
             }
             lines.append(prompt)
         }
-        return lines.joined(separator: "\n")
+        return lines.isEmpty ? "" : lines.joined(separator: "\n")
+    }
+
+    static func normalizePromptForDisplay(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private static func loraTooltipLines(
