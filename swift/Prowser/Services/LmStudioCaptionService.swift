@@ -160,9 +160,8 @@ final class LmStudioCaptionService {
             throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
         }
         let settings = captionSettings(config: config)
-        var system = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let system = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var user = userPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        system = AIPromptExitService.applyTextAIExit(system, config: config)
         user = AIPromptExitService.applyTextAIExit(user, config: config)
 
         let normalizedPaths = imagePaths
@@ -242,8 +241,7 @@ final class LmStudioCaptionService {
             throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
         }
         let settings = captionSettings(config: config)
-        var filteredSystem = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        filteredSystem = AIPromptExitService.applyTextAIExit(filteredSystem, config: config)
+        let filteredSystem = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelID = try await resolveModelID(baseURL: base, config: config)
 
         let apiMessages = try await buildChatAPIMessages(
@@ -290,7 +288,7 @@ final class LmStudioCaptionService {
         var text = ChatSelectionImageTrigger.stripTrigger(raw)
         text = ChatImageGenTrigger.stripImageGenCommands(text)
         text = PrefixPostfixStore.applyRules(text, forImages: false, config: config)
-        return AIPromptExitService.applyTextAIExit(text, config: config)
+        return text
     }
 
     private func buildChatAPIMessages(
@@ -649,14 +647,13 @@ final class LmStudioCaptionService {
         }
         let settings = captionSettings(config: config)
         let wordCount = settings.maxWords
-        var systemPrompt = settings.systemPrompt.replacingOccurrences(of: "{CAPTION_WORD_COUNT}", with: "\(wordCount)")
+        let systemPrompt = settings.systemPrompt.replacingOccurrences(of: "{CAPTION_WORD_COUNT}", with: "\(wordCount)")
         var userPrompt: String
         if let override = userPromptOverride?.trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty {
             userPrompt = override
         } else {
             userPrompt = settings.userPrompt.replacingOccurrences(of: "{CAPTION_WORD_COUNT}", with: "\(wordCount)")
         }
-        systemPrompt = AIPromptExitService.applyTextAIExit(systemPrompt, config: config)
         userPrompt = AIPromptExitService.applyTextAIExit(userPrompt, config: config)
 
         let modelID = try await resolveModelID(baseURL: base, config: config)
