@@ -32,9 +32,7 @@ final class FileDataModel {
                 if currentIndex != oldIndex {
                     eventBridge?.currentIndexChanged(currentIndex)
                 }
-                if let currentImagePath {
-                    eventBridge?.currentImageChanged(currentImagePath)
-                }
+                // Active file unchanged — omit `currentImageChanged` (Python `display_image` only on real changes).
             }
             return
         }
@@ -43,6 +41,7 @@ final class FileDataModel {
         guard normalized != displayedImages else { return }
 
         let oldIndex = currentIndex
+        let priorPath = currentImagePath
         displayedImages = normalized
 
         if displayedImages.isEmpty {
@@ -61,22 +60,37 @@ final class FileDataModel {
                 eventBridge?.currentIndexChanged(currentIndex)
             }
             if let currentImagePath {
-                eventBridge?.currentImageChanged(currentImagePath)
+                let pathChanged = priorPath.map { !Self.pathsReferToSameFile($0, currentImagePath) } ?? true
+                if pathChanged {
+                    eventBridge?.currentImageChanged(currentImagePath)
+                }
+            } else if priorPath != nil {
+                eventBridge?.currentImageChanged(nil)
             }
         }
     }
 
     func setCurrentImagePath(_ path: String?) {
         guard let path else {
+            guard currentImagePath != nil else { return }
             currentImagePath = nil
             eventBridge?.currentImageChanged(nil)
             return
         }
         guard let normalized = Self.normalizePath(path) else { return }
+        if let existing = currentImagePath, Self.pathsReferToSameFile(existing, normalized) {
+            if let index = Self.indexOfPath(normalized, in: displayedImages), index != currentIndex {
+                currentIndex = index
+                eventBridge?.currentIndexChanged(index)
+            }
+            return
+        }
         currentImagePath = normalized
         if let index = Self.indexOfPath(normalized, in: displayedImages) {
-            currentIndex = index
-            eventBridge?.currentIndexChanged(index)
+            if index != currentIndex {
+                currentIndex = index
+                eventBridge?.currentIndexChanged(index)
+            }
         }
         eventBridge?.currentImageChanged(normalized)
     }
@@ -98,10 +112,18 @@ final class FileDataModel {
             return
         }
         let clamped = max(0, min(index, displayedImages.count - 1))
+        let newPath = displayedImages[clamped]
+        let oldIndex = currentIndex
+        let priorPath = currentImagePath
         currentIndex = clamped
-        currentImagePath = displayedImages[clamped]
-        eventBridge?.currentIndexChanged(clamped)
-        eventBridge?.currentImageChanged(currentImagePath)
+        currentImagePath = newPath
+        if oldIndex != clamped {
+            eventBridge?.currentIndexChanged(clamped)
+        }
+        let pathChanged = priorPath.map { !Self.pathsReferToSameFile($0, newPath) } ?? true
+        if pathChanged {
+            eventBridge?.currentImageChanged(currentImagePath)
+        }
     }
 
     func setCurrentDirectory(_ path: String) {

@@ -31,7 +31,7 @@ final class BrowseImageHistoryController {
     func touch(_ path: String) {
         guard let normalized = FileDataModel.normalizePath(path),
               Self.isExistingImageFile(normalized) else { return }
-        if let index = history.firstIndex(of: normalized) {
+        if let index = history.firstIndex(where: { FileDataModel.pathsReferToSameFile($0, normalized) }) {
             history.remove(at: index)
         }
         history.insert(normalized, at: 0)
@@ -73,7 +73,8 @@ final class BrowseImageHistoryController {
         debounceTask = Task { @MainActor in
             defer {
                 if sequence == self.debounceSequence {
-                    if self.pendingPath == normalized {
+                    if let pending = self.pendingPath,
+                       FileDataModel.pathsReferToSameFile(pending, normalized) {
                         self.pendingPath = nil
                     }
                     self.debounceTask = nil
