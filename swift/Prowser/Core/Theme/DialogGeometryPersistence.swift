@@ -44,6 +44,7 @@ enum DialogGeometryKey {
     static let viewPrintLog = "view_print_log_dialog_geometry"
     static let exifAPIStructure = "exif_api_structure_dialog_geometry"
     static let imageGenCreateSheet = "imagegen_create_sheet_geometry"
+    static let moveToDirectory = "move_to_directory_dialog_geometry"
 
     /// Every settings key that stores a persisted auxiliary window frame (`[x,y,w,h]` or `[w,h]`), including values nested under `imagegen`.
     static let allPersistedWindowFrameKeyStrings: [String] = [
@@ -85,6 +86,7 @@ enum DialogGeometryKey {
         viewPrintLog,
         exifAPIStructure,
         imageGenCreateSheet,
+        moveToDirectory,
     ]
 }
 

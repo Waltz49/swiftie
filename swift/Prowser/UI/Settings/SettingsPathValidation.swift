@@ -237,11 +237,11 @@ enum SettingsPathValidation {
         return .invalid(tooltip: "Path does not exist: \(fullPath)")
     }
 
-    static func validateDirectoryPath(_ path: String) -> SettingsPathValidationState {
-        directoryValidationState(path)
+    static func validateDirectoryPath(_ path: String, allowMissing: Bool = false) -> SettingsPathValidationState {
+        directoryValidationState(path, allowMissing: allowMissing)
     }
 
-    private static func directoryValidationState(_ path: String) -> SettingsPathValidationState {
+    private static func directoryValidationState(_ path: String, allowMissing: Bool = false) -> SettingsPathValidationState {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return .empty }
 
@@ -255,6 +255,17 @@ enum SettingsPathValidation {
 
         if fm.fileExists(atPath: fullPath) {
             return .invalid(tooltip: "Path exists but is not a directory:\n\(fullPath)")
+        }
+        if allowMissing {
+            let parent = (fullPath as NSString).deletingLastPathComponent
+            var parentIsDir: ObjCBool = false
+            if fm.fileExists(atPath: parent, isDirectory: &parentIsDir), parentIsDir.boolValue {
+                if fm.isWritableFile(atPath: parent) {
+                    return .valid(tooltip: "New directory will be created:\n\(fullPath)")
+                }
+                return .invalid(tooltip: "Parent directory is not writable:\n\(parent)")
+            }
+            return .invalid(tooltip: "Parent directory does not exist:\n\(parent)")
         }
         return .invalid(tooltip: "Path does not exist: \(fullPath)")
     }

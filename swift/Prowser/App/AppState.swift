@@ -173,6 +173,7 @@ final class AppState {
             || showImageGenCreateSheet
             || isAboutDialogVisible
             || showMoveWorkFilesSheet
+            || showMoveToDirectorySheet
     }
     var editUserCommentText = ""
     var editUserCommentOriginalText = ""
@@ -240,6 +241,7 @@ final class AppState {
     weak var mainWindowTreeTabStop: MainWindowTabFocusStopView?
     weak var mainWindowCanvasTabStop: MainWindowTabFocusStopView?
     var showMoveWorkFilesSheet = false
+    var showMoveToDirectorySheet = false
     var leftSidebarWidth: CGFloat = 300
     var rightSidebarWidth: CGFloat = 300
     var sidebarLayoutRevision = 0
@@ -560,6 +562,21 @@ final class AppState {
         }
         fileOpsTargetPaths = resolved
         showResizeSheet = true
+    }
+
+    func presentMoveToDirectorySheet(paths: [String]? = nil) {
+        let resolved = resolvedFileOpsPaths(paths).filter { path in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+            return !isDir.boolValue
+        }
+        guard !resolved.isEmpty else {
+            status.show("No files selected")
+            return
+        }
+        fileOpsTargetPaths = resolved
+        showMoveToDirectorySheet = true
+        syncAuxiliaryDialogs()
     }
 
     private func resolvedFileOpsPaths(_ paths: [String]?) -> [String] {
@@ -1753,6 +1770,7 @@ final class AppState {
         static let exifBatchConfirmation = "exifBatchConfirmation"
         static let filter = "filter"
         static let moveWorkFiles = "moveWorkFiles"
+        static let moveToDirectory = "moveToDirectory"
         static let similaritySearch = "similaritySearch"
         static let clipSearch = "clipSearch"
         static let personSearch = "personSearch"
@@ -1893,6 +1911,17 @@ final class AppState {
             onClose: { [weak self] in self?.showMoveWorkFilesSheet = false }
         ) {
             MoveWorkFilesSheet()
+        }
+        syncDialog(
+            id: DialogID.moveToDirectory,
+            show: showMoveToDirectorySheet,
+            title: "Move to Directory",
+            defaultSize: NSSize(width: 480, height: 240),
+            minSize: NSSize(width: 420, height: 200),
+            focusTextOnShow: true,
+            onClose: { [weak self] in self?.showMoveToDirectorySheet = false }
+        ) {
+            MoveToDirectorySheet()
         }
         syncDialog(
             id: DialogID.similaritySearch,

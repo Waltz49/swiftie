@@ -658,7 +658,7 @@ final class FileOperationsService {
         if !outcome.failedFilenames.isEmpty {
             showTransferFailedAlert(
                 copyOnly: copyOnly,
-                failedCount: outcome.failedFilenames.count,
+                failedFilenames: outcome.failedFilenames,
                 targetDirectory: targetDirectory
             )
         }
@@ -803,6 +803,75 @@ final class FileOperationsService {
             copyOnly: shouldCopy,
             targetDirectory: lastDrop
         )
+    }
+
+    /// Result of Move to Directory sheet action (keeps sheet open on preparation failure or zero moves).
+    enum MoveToDirectorySheetResult {
+        case preparationFailed(message: String)
+        case finished(shouldDismissSheet: Bool)
+    }
+
+    func moveSelectedToDirectory(
+        paths: [String],
+        targetPath: String,
+        allowCreateDirectory: Bool
+    ) -> MoveToDirectorySheetResult {
+        guard let appState else { return .preparationFailed(message: "Application not ready") }
+
+        let files = transferableFilePaths(from: paths)
+        guard !files.isEmpty else {
+            return .preparationFailed(message: "No files selected")
+        }
+
+        let expanded = SettingsPathValidation.expandedPath(targetPath)
+        guard !expanded.isEmpty else {
+            return .preparationFailed(message: "Enter a directory path")
+        }
+
+        let validation = SettingsPathValidation.validateDirectoryPath(targetPath, allowMissing: allowCreateDirectory)
+        guard case .valid = validation else {
+            return .preparationFailed(message: "Invalid directory path")
+        }
+
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        if fm.fileExists(atPath: expanded, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else {
+                return .preparationFailed(message: "Path exists but is not a directory")
+            }
+        } else if allowCreateDirectory {
+            do {
+                try fm.createDirectory(atPath: expanded, withIntermediateDirectories: true)
+            } catch {
+                return .preparationFailed(message: "Could not create directory: \(error.localizedDescription)")
+            }
+        } else {
+            return .preparationFailed(message: "Directory does not exist")
+        }
+
+        let parentWindow = BrowserWindowIdentity.resolveMainBrowserWindow()
+        let outcome = transferFiles(
+            paths: files,
+            to: expanded,
+            copyOnly: false,
+            refreshWhenDone: true,
+            parentWindow: parentWindow
+        )
+
+        if outcome.successCount > 0 {
+            appState.lastDropLocation = expanded
+            appState.refreshMenuState()
+        }
+
+        reportBatchTransferOutcome(
+            outcome,
+            copyOnly: false,
+            targetDirectory: expanded,
+            failedFilenames: outcome.failedFilenames
+        )
+
+        let shouldDismiss = outcome.successCount > 0
+        return .finished(shouldDismissSheet: shouldDismiss)
     }
 
     func copyPathsToClipboard(_ paths: [String]) {
@@ -1279,14 +1348,16 @@ final class FileOperationsService {
     private func reportBatchTransferOutcome(
         _ outcome: FileBatchTransferOutcome,
         copyOnly: Bool,
-        targetDirectory: String
+        targetDirectory: String,
+        failedFilenames: [String]? = nil
     ) {
         guard let appState else { return }
 
-        if !outcome.failedFilenames.isEmpty {
+        let names = failedFilenames ?? outcome.failedFilenames
+        if !names.isEmpty {
             showTransferFailedAlert(
                 copyOnly: copyOnly,
-                failedCount: outcome.failedFilenames.count,
+                failedFilenames: names,
                 targetDirectory: targetDirectory
             )
         }
@@ -1323,21 +1394,26 @@ final class FileOperationsService {
         }
     }
 
-    private func showTransferFailedAlert(copyOnly: Bool, failedCount: Int, targetDirectory: String) {
+    private func showTransferFailedAlert(copyOnly: Bool, failedFilenames: [String], targetDirectory: String) {
         let op = copyOnly ? "copy" : "move"
         let title = copyOnly ? "Copy Failed" : "Move Failed"
-        let message: String
+        let failedCount = failedFilenames.count
+        var message: String
         if failedCount == 1 {
             message = """
-            Failed to \(op) file.
+            Failed to \(op) file '\(failedFilenames[0])'.
 
             Destination: \(targetDirectory)
 
             Please check file permissions and try again.
             """
         } else {
+            let preview = failedFilenames.prefix(10).joined(separator: "\n")
+            let suffix = failedCount > 10 ? "\n... and \(failedCount - 10) more" : ""
             message = """
-            Failed to \(op) \(failedCount) files.
+            Failed to \(op) \(failedCount) files:
+
+            \(preview)\(suffix)
 
             Destination: \(targetDirectory)
 

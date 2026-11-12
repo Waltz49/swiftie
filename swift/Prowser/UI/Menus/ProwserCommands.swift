@@ -839,6 +839,12 @@ private struct MoveDestinationsMenuContent: View {
     @Bindable var appState: AppState
 
     var body: some View {
+        Button("Move to Directory…") {
+            Task { @MainActor in
+                appState.presentMoveToDirectorySheet()
+            }
+        }
+        Divider()
         if appState.menuRefresh.destinationsMenuVisible {
             ForEach(1...9, id: \.self) { slot in
                 DestinationMenuButton(appState: appState, slot: slot)
