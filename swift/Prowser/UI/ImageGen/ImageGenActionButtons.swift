@@ -22,7 +22,19 @@ struct ImageGenPromptActionButtons: View {
 
     @Environment(AppState.self) private var appState
 
+    private static let addPrefixPostfixKey = "imagegen_add_chat_prefix_postfix"
+    private static let usePromptFilterExitsKey = "use_prompt_filter_exits"
+
     var body: some View {
+        let _ = appState.config.settingsEditRevision
+        let prefixPostfixEnabled = appState.config.bool(
+            forKey: Self.addPrefixPostfixKey,
+            default: true
+        )
+        let promptFilterExitsEnabled = appState.config.bool(
+            forKey: Self.usePromptFilterExitsKey,
+            default: false
+        )
         HStack(spacing: 6) {
             AppAssetIconButton(
                 normalName: "copy",
@@ -37,6 +49,22 @@ struct ImageGenPromptActionButtons: View {
                 size: ImageGenChrome.fieldButtonSize,
                 tooltip: "Read prompt aloud",
                 action: speakText
+            )
+            AppAssetIconButton(
+                normalName: "prefix",
+                hoverName: "prefix_hover",
+                size: ImageGenChrome.fieldButtonSize,
+                showsActiveIcon: prefixPostfixEnabled,
+                tooltip: "Prefix and Postfix text…",
+                action: { appState.chat.openPrefixPostfixLibrary() }
+            )
+            AppAssetIconButton(
+                normalName: "pfilter",
+                hoverName: "pfilter_hover",
+                size: ImageGenChrome.fieldButtonSize,
+                showsActiveIcon: promptFilterExitsEnabled,
+                tooltip: "Use prompt filter exits",
+                action: { appState.chat.openExitScripts() }
             )
             if includeFavorite {
                 AppAssetIconButton(

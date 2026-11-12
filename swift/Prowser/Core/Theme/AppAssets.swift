@@ -39,6 +39,8 @@ struct AppAssetIconButton: View {
     var iconSize: CGFloat? = nil
     /// Checked / pressed toolbar state (e.g. chat copy-images toggle).
     var isSelected: Bool = false
+    /// When true, shows the hover asset while idle (setting enabled / active feature).
+    var showsActiveIcon: Bool = false
     var tooltip: String = ""
     /// When `false`, the graphic tooltip uses ``graphicTooltipIcon`` (e.g. a source image preview) instead of the button asset.
     var graphicTooltipUsesButtonAsset: Bool = true
@@ -61,8 +63,9 @@ struct AppAssetIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            let imageName = isHovered ? hoverName : normalName
-            let ext = fileExtension(forHover: isHovered)
+            let useHoverAsset = isHovered || showsActiveIcon
+            let imageName = useHoverAsset ? hoverName : normalName
+            let ext = fileExtension(forHover: useHoverAsset)
             if let image = AppAssets.image(name: imageName, fileExtension: ext) {
                 image
                     .resizable()
