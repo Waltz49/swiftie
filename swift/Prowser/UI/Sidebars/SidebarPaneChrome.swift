@@ -161,6 +161,8 @@ struct SidebarPaneSection<Content: View>: View {
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
     /// When false (e.g. Mini ⌥[ Mode), the titlebar is omitted while expanded; collapsed panes still show the bar so the pane can be expanded again.
     var showsTitlebar: Bool = true
+    /// When true, content stays mounted at zero size while collapsed (file tree T toggle).
+    var keepContentMountedWhenCollapsed: Bool = false
     @ViewBuilder let content: () -> Content
 
     private var isJobsPaneContext: Bool {
@@ -169,7 +171,12 @@ struct SidebarPaneSection<Content: View>: View {
     }
 
     private var titlebarVisible: Bool {
-        showsTitlebar || !isExpanded
+        if keepContentMountedWhenCollapsed, !isExpanded { return false }
+        return showsTitlebar || !isExpanded
+    }
+
+    private var contentMounted: Bool {
+        isExpanded || keepContentMountedWhenCollapsed
     }
 
     var body: some View {
@@ -192,28 +199,33 @@ struct SidebarPaneSection<Content: View>: View {
                 )
             }
 
-            if isExpanded {
+            if contentMounted {
                 content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .modifier(SidebarPaneOverflowClip(enabled: !isJobsPaneContext))
+                    .frame(maxWidth: .infinity, maxHeight: isExpanded ? .infinity : 0, alignment: .top)
+                    .clipped()
+                    .allowsHitTesting(isExpanded)
+                    .accessibilityHidden(!isExpanded)
+                    .modifier(SidebarPaneOverflowClip(enabled: !isJobsPaneContext && isExpanded))
                     .background(appState.theme.colors.sidebarBackground)
                     .overlay(alignment: .leading) {
-                        if !omitLeftBorder {
+                        if isExpanded, !omitLeftBorder {
                             Rectangle()
                                 .fill(appState.theme.colors.sidebarHeaderBorder)
                                 .frame(width: 1)
                         }
                     }
                     .overlay(alignment: .trailing) {
-                        Rectangle()
-                            .fill(appState.theme.colors.sidebarHeaderBorder)
-                            .frame(width: 1)
+                        if isExpanded {
+                            Rectangle()
+                                .fill(appState.theme.colors.sidebarHeaderBorder)
+                                .frame(width: 1)
+                        }
                     }
             }
         }
         .frame(
             maxWidth: .infinity,
-            maxHeight: isExpanded ? .infinity : nil,
+            maxHeight: isExpanded ? .infinity : (keepContentMountedWhenCollapsed ? 0 : nil),
             alignment: .top
         )
     }

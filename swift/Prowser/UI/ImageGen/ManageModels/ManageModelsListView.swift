@@ -43,6 +43,7 @@ struct ManageModelsListView: View {
         .padding(16)
         .frame(minWidth: 480, minHeight: 360)
         .themeDialogStyle()
+        .onExitCommand(perform: onClose)
     }
 }
 

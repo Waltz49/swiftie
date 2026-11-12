@@ -84,8 +84,13 @@ final class SidebarPaneSplitModel {
         return SidebarPaneLayout.paneMinHeight(headerHeight: header, headerOnly: headerOnly)
     }
 
-    /// Which left panes are shown in the stacked layout (matches Python `_display_pane_visibility`).
+    /// Which left panes receive splitter height (matches Python `_display_pane_visibility`).
     static func leftDisplayPaneVisibility(appState: AppState) -> [Bool] {
+        leftLayoutPaneVisibility(appState: appState)
+    }
+
+    /// Splitter layout: pane open in settings (T / preview toggle).
+    static func leftLayoutPaneVisibility(appState: AppState) -> [Bool] {
         let chatEnabled = BundleCapabilities.chatUIEnabled
         let chatVisible = chatEnabled
             && appState.config.bool(forKey: "chat_visible", default: false)
@@ -97,6 +102,24 @@ final class SidebarPaneSplitModel {
         }
         return [
             appState.config.bool(forKey: "file_tree_visible", default: true),
+            appState.config.bool(forKey: "preview_visible", default: true),
+            false,
+        ]
+    }
+
+    /// SwiftUI mount: file tree stays in the hierarchy when toggled off (zero-height slot).
+    static func leftMountedPaneVisibility(appState: AppState) -> [Bool] {
+        let chatEnabled = BundleCapabilities.chatUIEnabled
+        let chatVisible = chatEnabled
+            && appState.config.bool(forKey: "chat_visible", default: false)
+        if chatVisible {
+            return [false, false, true]
+        }
+        if appState.fileData.currentViewMode == .browse {
+            return [false, false, false]
+        }
+        return [
+            true,
             appState.config.bool(forKey: "preview_visible", default: true),
             false,
         ]

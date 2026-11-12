@@ -50,6 +50,7 @@ struct ManageModelsDetailView: View {
         .padding(16)
         .frame(minWidth: 440, minHeight: installed ? 220 : 420)
         .themeDialogStyle()
+        .onExitCommand(perform: onClose)
         .onAppear { refreshScript() }
         .onChange(of: hfToken) { _, _ in refreshScript() }
     }

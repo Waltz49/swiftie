@@ -14,6 +14,8 @@ struct SidebarPaneDescriptor {
     var isJobsPane: Bool = false
     var showsFlyoutButton: Bool = false
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
+    /// Keep pane content in the hierarchy at zero size when collapsed (file tree T toggle).
+    var keepContentMountedWhenCollapsed: Bool = false
     /// Measured at double-click time (Python `_needed_pane_height`), not during body evaluation.
     var preferredFitContentHeight: () -> CGFloat = { 120 }
 }
@@ -30,25 +32,43 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let displayed = descriptors.filter { descriptor in
+            let stacked = descriptors.filter { descriptor in
                 guard descriptor.isDisplayed else { return false }
+                if descriptor.keepContentMountedWhenCollapsed { return true }
                 return model.paneExpanded(
                     configKey: descriptor.expandedConfigKey,
                     default: descriptor.defaultExpanded
                 )
             }
+            let layoutStacked = stacked.filter { descriptor in
+                model.paneExpanded(
+                    configKey: descriptor.expandedConfigKey,
+                    default: descriptor.defaultExpanded
+                ) || !descriptor.keepContentMountedWhenCollapsed
+            }
 
             VStack(spacing: 0) {
-                ForEach(Array(displayed.enumerated()), id: \.element.index) { position, descriptor in
+                ForEach(Array(stacked.enumerated()), id: \.element.index) { position, descriptor in
                     paneBlock(
                         descriptor: descriptor,
                         height: model.sizes[descriptor.index]
                     )
-                    if position < displayed.count - 1 {
-                        splitterHandle(
-                            upperPaneIndex: descriptor.index,
-                            lowerPaneIndex: displayed[position + 1].index
+                    if position < stacked.count - 1 {
+                        let currentH = effectivePaneBlockHeight(
+                            descriptor: descriptor,
+                            allocatedHeight: model.sizes[descriptor.index]
                         )
+                        let lower = stacked[position + 1]
+                        let lowerH = effectivePaneBlockHeight(
+                            descriptor: lower,
+                            allocatedHeight: model.sizes[lower.index]
+                        )
+                        if currentH > 0, lowerH > 0 {
+                            splitterHandle(
+                                upperPaneIndex: descriptor.index,
+                                lowerPaneIndex: lower.index
+                            )
+                        }
                     }
                 }
             }
@@ -59,22 +79,22 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .onAppear {
-                relayout(totalHeight: geometry.size.height, displayed: displayed)
+                relayout(totalHeight: geometry.size.height, displayed: layoutStacked)
             }
             .onChange(of: geometry.size.height) { _, newHeight in
-                relayout(totalHeight: newHeight, displayed: displayed)
+                relayout(totalHeight: newHeight, displayed: layoutStacked)
             }
             .onChange(of: appState.sidebarLayoutRevision) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayed: displayed)
+                relayout(totalHeight: geometry.size.height, displayed: layoutStacked)
             }
             .onChange(of: appState.jobsDisplayMode) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayed: displayed)
+                relayout(totalHeight: geometry.size.height, displayed: layoutStacked)
             }
             .onChange(of: appState.jobsQueueSizeMode) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayed: displayed)
+                relayout(totalHeight: geometry.size.height, displayed: layoutStacked)
             }
             .onChange(of: appState.jobsPaneMiniOptionBracketMode) { _, _ in
-                relayout(totalHeight: geometry.size.height, displayed: displayed)
+                relayout(totalHeight: geometry.size.height, displayed: layoutStacked)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -95,8 +115,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             configKey: descriptor.expandedConfigKey,
             default: descriptor.defaultExpanded
         )
-        let headerFloor = paneHeaderFloor(descriptor: descriptor)
-        let paneHeight = max(height, headerFloor)
+        let paneHeight = effectivePaneBlockHeight(descriptor: descriptor, allocatedHeight: height)
 
         let section = SidebarPaneSection(
             title: descriptor.title,
@@ -114,7 +133,8 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             showsFlyoutButton: descriptor.showsFlyoutButton,
             onFlyout: descriptor.showsFlyoutButton ? { appState.showJobsPanel() } : nil,
             contextMenuKind: descriptor.contextMenuKind,
-            showsTitlebar: !(descriptor.isJobsPane && appState.jobsPaneMiniChromeActive)
+            showsTitlebar: !(descriptor.isJobsPane && appState.jobsPaneMiniChromeActive),
+            keepContentMountedWhenCollapsed: descriptor.keepContentMountedWhenCollapsed
         ) {
             SidebarPaneBody(kind: descriptor.contextMenuKind) {
                 paneContent(for: descriptor.index)
@@ -163,6 +183,18 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
                 NSCursor.pop()
             }
         }
+    }
+
+    private func effectivePaneBlockHeight(descriptor: SidebarPaneDescriptor, allocatedHeight: CGFloat) -> CGFloat {
+        let expanded = model.paneExpanded(
+            configKey: descriptor.expandedConfigKey,
+            default: descriptor.defaultExpanded
+        )
+        if descriptor.keepContentMountedWhenCollapsed, !expanded {
+            return 0
+        }
+        let headerFloor = paneHeaderFloor(descriptor: descriptor)
+        return max(allocatedHeight, headerFloor)
     }
 
     private func paneHeaderFloor(descriptor: SidebarPaneDescriptor) -> CGFloat {

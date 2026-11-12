@@ -29,6 +29,12 @@ enum FileTreeKeyboard {
         }
 
         if hasCommand, !hasShift, !hasOption, !hasControl,
+           event.charactersIgnoringModifiers?.lowercased() == "r" {
+            coordinator.refreshFilesystemPresentation()
+            return true
+        }
+
+        if hasCommand, !hasShift, !hasOption, !hasControl,
            event.charactersIgnoringModifiers?.lowercased() == "c",
            let path = coordinator.selectedTreeRowPath() {
             appState.fileOperations.copyPathsToClipboard([path])

@@ -217,6 +217,12 @@ final class AppState {
     var fileTreeCollapseUIToken = 0
     var fileTreeExpandToken = 0
     var fileTreeReloadToken = 0
+    /// Session-only expanded directory paths (standardized); survives file-tree pane unmount.
+    @ObservationIgnored
+    var fileTreeExpandedDirectoryPaths: Set<String> = []
+    /// Scroll origin to restore after pane unmount or filesystem refresh when possible.
+    @ObservationIgnored
+    var fileTreeSavedScrollOrigin: NSPoint?
     /// Next `fileTreeReloadToken` bump should keep expanded rows (settings OK with tree-related changes).
     var fileTreeReloadPreservesExpansion = false
     /// Next reload should re-filter visible branches only (toolbar filter / pattern), not rebuild roots.

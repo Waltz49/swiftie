@@ -55,16 +55,19 @@ struct FileTreeView: NSViewRepresentable {
         appState.fileTreeOutlineView = outline
         context.coordinator.startObservingSettings()
         if !context.coordinator.hasLoadedRoots {
-            context.coordinator.reloadRoots()
+            let preserve = !appState.fileTreeExpandedDirectoryPaths.isEmpty
+            context.coordinator.reloadRoots(preserveExpansion: preserve)
         } else {
             context.coordinator.syncOutlineAfterReattach()
         }
+        context.coordinator.restoreSavedScrollPosition()
         MainWindowKeyViewLoop.sync(appState: appState)
         context.coordinator.focusTreeIfRequested()
         return tabStop
     }
 
     static func dismantleNSView(_ tabStop: NSView, coordinator: Coordinator) {
+        coordinator.persistPresentationStateBeforeDismantle()
         if coordinator.outlineView === coordinator.appState.fileTreeOutlineView {
             coordinator.appState.fileTreeOutlineView = nil
         }
@@ -126,7 +129,6 @@ struct FileTreeView: NSViewRepresentable {
         private var lastThemeID: String?
         private var pendingSingleClick: DispatchWorkItem?
         private var pendingHighlightSync: DispatchWorkItem?
-        private var expandedDirectoryPaths: Set<String> = []
         fileprivate var userIsNavigatingTree = false
         private var treeExpandInProgress = false
         private var expandGeneration = 0
@@ -137,9 +139,13 @@ struct FileTreeView: NSViewRepresentable {
         /// After inline directory rename, keep tree on that folder until the user navigates the tree.
         private var pinnedDirectoryAfterRename: String?
         private var treePaneContentVisible = true
-        private var frozenScrollOrigin: NSPoint?
 
         var hasLoadedRoots: Bool { !roots.isEmpty }
+
+        private var expandedDirectoryPaths: Set<String> {
+            get { appState.fileTreeExpandedDirectoryPaths }
+            set { appState.fileTreeExpandedDirectoryPaths = newValue }
+        }
 
         init(appState: AppState) {
             self.appState = appState
@@ -165,6 +171,14 @@ struct FileTreeView: NSViewRepresentable {
             guard pinnedDirectoryAfterRename == nil else { return }
             guard !appState.isFileTreeHighlightSyncSuspended else { return }
             guard appState.fileTreeSyncActiveImageToken != lastSyncActiveImageToken else { return }
+            let imagePath = appState.fileData.currentImagePath
+            let directory = directoryToHighlightForTreeSync()
+            if appState.fileTreeSavedScrollOrigin != nil,
+               treeHighlightAlreadySynced(imagePath: imagePath, directory: directory) {
+                lastSyncActiveImageToken = appState.fileTreeSyncActiveImageToken
+                restoreSavedScrollPosition()
+                return
+            }
             lastSyncActiveImageToken = appState.fileTreeSyncActiveImageToken
             lastSyncedDirectory = nil
             lastSyncedImagePath = nil
@@ -729,6 +743,10 @@ struct FileTreeView: NSViewRepresentable {
             bag.subscribe(.directoryLoaded) { [weak self] _ in
                 self?.syncAfterDirectoryLoaded()
             }
+            bag.subscribe(.filesChangedOnDisk) { [weak self] event in
+                guard let self, case .string(let directory) = event.payload else { return }
+                self.refreshFilesystemBranch(affectedDirectory: directory)
+            }
         }
 
         /// New folder listing — clear skip flags so launch/CLI restore always highlights the tree once.
@@ -822,13 +840,112 @@ struct FileTreeView: NSViewRepresentable {
 
         private func removeExpandedPath(_ path: String) {
             let prefix = path + "/"
-            expandedDirectoryPaths = expandedDirectoryPaths.filter { expanded in
-                expanded != path && !expanded.hasPrefix(prefix)
-            }
+            expandedDirectoryPaths = FileTreePresentationState.expandedPaths(
+                afterCollapsing: path,
+                in: expandedDirectoryPaths
+            )
             if let last = lastExpandedHighlightDirectory,
                last == path || last.hasPrefix(prefix) {
                 lastExpandedHighlightDirectory = nil
             }
+        }
+
+        func persistPresentationStateBeforeDismantle() {
+            publishExpandedPathsForDiscovery()
+            captureScrollOriginIntoAppState()
+        }
+
+        func captureScrollOriginIntoAppState() {
+            guard let outlineView, let scrollView = outlineView.enclosingScrollView else { return }
+            appState.fileTreeSavedScrollOrigin = scrollView.documentVisibleRect.origin
+        }
+
+        func restoreSavedScrollPosition() {
+            guard let origin = appState.fileTreeSavedScrollOrigin else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let outlineView = self.outlineView,
+                      let scrollView = outlineView.enclosingScrollView else { return }
+                scrollView.layoutSubtreeIfNeeded()
+                outlineView.layoutSubtreeIfNeeded()
+                scrollView.contentView.scroll(to: origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+
+        /// Reload visible expanded branches from disk; prune dead expansion paths; keep selection and scroll.
+        func refreshFilesystemPresentation() {
+            guard let outlineView else { return }
+            captureScrollOriginIntoAppState()
+            let selectedItem = outlineView.selectedRow >= 0
+                ? outlineView.item(atRow: outlineView.selectedRow)
+                : nil
+
+            expandedDirectoryPaths = FileTreePresentationState.pruneMissingExpandedPaths(expandedDirectoryPaths)
+            publishExpandedPathsForDiscovery()
+
+            var pathsToRefresh = Set(expandedDirectoryPaths.flatMap { ancestorPaths(of: $0) })
+            for root in roots {
+                pathsToRefresh.insert(standardizedPath(root.path))
+            }
+            var nodesToReload: [FileTreeNode] = []
+            for path in pathsToRefresh.sorted(by: { $0.count < $1.count }) {
+                guard let node = findNodeByPath(path) else { continue }
+                node.reloadChildren(appState: appState, rootPaths: rootPaths)
+                guard outlineView.row(forItem: node) >= 0 else { continue }
+                nodesToReload.append(node)
+            }
+            if !nodesToReload.isEmpty {
+                outlineView.beginUpdates()
+                for node in nodesToReload {
+                    outlineView.reloadItem(node, reloadChildren: true)
+                }
+                outlineView.endUpdates()
+            }
+            restoreTrackedExpansion(outlineView: outlineView)
+            if let selectedItem {
+                let row = outlineView.row(forItem: selectedItem)
+                if row >= 0 {
+                    outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                } else {
+                    syncSelectionIfNeeded()
+                }
+            }
+            restoreSavedScrollPosition()
+        }
+
+        func refreshFilesystemBranch(affectedDirectory: String) {
+            guard let outlineView else { return }
+            captureScrollOriginIntoAppState()
+            let norm = standardizedPath(affectedDirectory)
+            expandedDirectoryPaths = FileTreePresentationState.pruneMissingExpandedPaths(expandedDirectoryPaths)
+            publishExpandedPathsForDiscovery()
+
+            let pathsToRefresh = Set(ancestorPaths(of: norm))
+            var nodesToReload: [FileTreeNode] = []
+            for path in pathsToRefresh.sorted(by: { $0.count < $1.count }) {
+                guard let node = findNodeByPath(path) else { continue }
+                node.reloadChildren(appState: appState, rootPaths: rootPaths)
+                guard outlineView.row(forItem: node) >= 0 else { continue }
+                nodesToReload.append(node)
+            }
+            if !nodesToReload.isEmpty {
+                let selectedItem = outlineView.selectedRow >= 0
+                    ? outlineView.item(atRow: outlineView.selectedRow)
+                    : nil
+                outlineView.beginUpdates()
+                for node in nodesToReload {
+                    outlineView.reloadItem(node, reloadChildren: true)
+                }
+                outlineView.endUpdates()
+                if let selectedItem {
+                    let row = outlineView.row(forItem: selectedItem)
+                    if row >= 0 {
+                        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                    }
+                }
+            }
+            restoreTrackedExpansion(outlineView: outlineView)
+            restoreSavedScrollPosition()
         }
 
         func syncOutlineAfterReattach() {
@@ -840,6 +957,8 @@ struct FileTreeView: NSViewRepresentable {
             let directory = directoryToHighlightForTreeSync()
             if !treeHighlightAlreadySynced(imagePath: imagePath, directory: directory) {
                 syncSelection(retryCount: 0, force: false, scrollSelectionIntoView: true)
+            } else {
+                restoreSavedScrollPosition()
             }
         }
 
@@ -852,22 +971,13 @@ struct FileTreeView: NSViewRepresentable {
             }
 
             if treePaneContentVisible, !visible {
-                frozenScrollOrigin = scrollView.documentVisibleRect.origin
+                appState.fileTreeSavedScrollOrigin = scrollView.documentVisibleRect.origin
             } else if !treePaneContentVisible, visible {
                 let imagePath = appState.fileData.currentImagePath
                 let directory = directoryToHighlightForTreeSync()
-                if treeHighlightAlreadySynced(imagePath: imagePath, directory: directory),
-                   let origin = frozenScrollOrigin {
-                    let originToRestore = origin
-                    DispatchQueue.main.async { [weak self, weak scrollView] in
-                        guard let self, let scrollView, let outlineView = self.outlineView else { return }
-                        scrollView.layoutSubtreeIfNeeded()
-                        outlineView.layoutSubtreeIfNeeded()
-                        scrollView.contentView.scroll(to: originToRestore)
-                        scrollView.reflectScrolledClipView(scrollView.contentView)
-                    }
+                if treeHighlightAlreadySynced(imagePath: imagePath, directory: directory) {
+                    restoreSavedScrollPosition()
                 }
-                frozenScrollOrigin = nil
             }
             treePaneContentVisible = visible
         }
@@ -891,7 +1001,13 @@ struct FileTreeView: NSViewRepresentable {
                 publishExpandedPathsForDiscovery()
                 outlineView.reloadData()
                 restoreTrackedExpansion(outlineView: outlineView)
-                syncSelection(retryCount: 0, force: true)
+                let preserveScroll = appState.fileTreeSavedScrollOrigin != nil
+                syncSelection(
+                    retryCount: 0,
+                    force: true,
+                    scrollSelectionIntoView: !preserveScroll
+                )
+                restoreSavedScrollPosition()
             } else {
                 expandedDirectoryPaths.removeAll()
                 publishExpandedPathsForDiscovery()

@@ -4,16 +4,17 @@ struct LeftSidebarView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let displayVis = SidebarPaneSplitModel.leftDisplayPaneVisibility(appState: appState)
+        let mountedVis = SidebarPaneSplitModel.leftMountedPaneVisibility(appState: appState)
         let descriptors = [
             SidebarPaneDescriptor(
                 index: 0,
                 title: "File Tree",
                 expandedConfigKey: "file_tree_visible",
                 defaultExpanded: true,
-                isDisplayed: displayVis[0],
+                isDisplayed: mountedVis[0],
                 omitLeftBorder: true,
                 contextMenuKind: .fileTree,
+                keepContentMountedWhenCollapsed: true,
                 preferredFitContentHeight: { 180 }
             ),
             SidebarPaneDescriptor(
@@ -21,7 +22,7 @@ struct LeftSidebarView: View {
                 title: "Preview",
                 expandedConfigKey: "preview_visible",
                 defaultExpanded: true,
-                isDisplayed: displayVis[1],
+                isDisplayed: mountedVis[1],
                 omitLeftBorder: true,
                 allowsTitlebarDrag: true,
                 preferredFitContentHeight: { appState.previewPanePreferredContentHeight() }
@@ -31,7 +32,7 @@ struct LeftSidebarView: View {
                 title: "",
                 expandedConfigKey: "chat_visible",
                 defaultExpanded: false,
-                isDisplayed: displayVis[2],
+                isDisplayed: mountedVis[2],
                 omitLeftBorder: true,
                 contextMenuKind: .chat,
                 preferredFitContentHeight: { appState.chat.preferredSidebarContentHeight() }
