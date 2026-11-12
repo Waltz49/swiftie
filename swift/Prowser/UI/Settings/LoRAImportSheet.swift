@@ -57,7 +57,7 @@ struct LoRAImportSheet: View {
                 LabeledContent("Safetensors origin") {
                     HStack(spacing: 6) {
                         TextField("Download URL", text: $safetensorsOrigin)
-                        LoRAImportCopyButton(text: safetensorsOrigin) { appState.copyTextToClipboard($0) }
+                        LoRAImportCopyButton(text: safetensorsOrigin)
                     }
                 }
                 LabeledContent("Web page") {
@@ -100,6 +100,7 @@ struct LoRAImportSheet: View {
             guard case .add = mode else { return }
             Task { await validatePath() }
         }
+        .background(CopyFeedbackWindowInstaller())
         .sheet(isPresented: $showFindSheet) {
             LoRAFindSheet(modelKey: modelKey) { choice in
                 sourcePath = choice.path
@@ -125,7 +126,7 @@ struct LoRAImportSheet: View {
                 Text("Reference prompt")
                     .font(.headline)
                 Spacer()
-                LoRAImportCopyButton(text: referencePrompt) { appState.copyTextToClipboard($0) }
+                LoRAImportCopyButton(text: referencePrompt)
             }
             Text("Used for compatibility test images for this LoRA.")
                 .font(.caption)

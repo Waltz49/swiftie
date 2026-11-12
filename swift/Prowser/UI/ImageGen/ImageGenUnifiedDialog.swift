@@ -224,6 +224,9 @@ struct ImageGenUnifiedDialog: View {
             _ = handleSourceNavKeyboard(delta: delta)
         }
         .background {
+            CopyFeedbackWindowInstaller()
+        }
+        .background {
             SceneWindowLifecycleBridge(windowIdentifier: Self.windowIdentifier) {
                 performClose()
             }

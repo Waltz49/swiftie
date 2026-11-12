@@ -16,17 +16,20 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
     func show(appState: AppState) {
         self.appState = appState
         if let settingsWindow {
+            installCopyFeedbackOverlay(on: settingsWindow, appState: appState)
             startSettingsSessionIfNeeded(appState)
             installInputIsolation(on: settingsWindow)
             bringSettingsToFront(settingsWindow)
             return
         }
 
-        let view = SettingsWindowView { [weak self] outcome in
-            self?.closeFromView(outcome)
+        let view = DialogCopyFeedbackRoot {
+            SettingsWindowView { [weak self] outcome in
+                self?.closeFromView(outcome)
+            }
+            .environment(\.themeColors, appState.theme.colors)
         }
         .environment(appState)
-        .environment(\.themeColors, appState.theme.colors)
 
         let host = NSHostingController(rootView: view)
         let window = AuxiliaryDialogWindow(contentViewController: host)
@@ -49,6 +52,7 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
         )
 
         settingsWindow = window
+        installCopyFeedbackOverlay(on: window, appState: appState)
         startSettingsSessionIfNeeded(appState)
         installInputIsolation(on: window)
         bringSettingsToFront(window)

@@ -233,11 +233,10 @@ final class LoraMapWindowController: NSObject, NSWindowDelegate {
         }
 
         let host = NSHostingController(
-            rootView: ZStack {
+            rootView: DialogCopyFeedbackRoot {
                 LoraMapView(onClose: { [weak self] in
                     self?.window?.close()
                 })
-                CopyFeedbackOverlay()
             }
             .environment(appState)
         )

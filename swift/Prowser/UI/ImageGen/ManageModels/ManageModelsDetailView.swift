@@ -158,8 +158,7 @@ struct ManageModelsDetailView: View {
             hfToken: resolvedToken.isEmpty ? nil : resolvedToken,
             forceDownload: false
         )
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        appState.copyTextToClipboard(text)
     }
 
     @MainActor

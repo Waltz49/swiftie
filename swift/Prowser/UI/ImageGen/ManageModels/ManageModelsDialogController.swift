@@ -38,18 +38,20 @@ final class ManageModelsDialogController: NSObject, NSWindowDelegate {
     }
 
     private func listRootView(appState: AppState) -> some View {
-        ManageModelsListView(
-            entries: ImageGenModelDownloadCatalog.buildCatalog(),
-            installed: { ImageGenHFModelLocality.modelIsInstalled(entry: $0) },
-            onSelect: { [weak self] entry in
-                self?.openDetail(entry: entry, appState: appState)
-            },
-            onClose: { [weak self] in
-                self?.listWindow?.close()
-            }
-        )
+        DialogCopyFeedbackRoot { [self] in
+            ManageModelsListView(
+                entries: ImageGenModelDownloadCatalog.buildCatalog(),
+                installed: { ImageGenHFModelLocality.modelIsInstalled(entry: $0) },
+                onSelect: { [weak self] entry in
+                    self?.openDetail(entry: entry, appState: appState)
+                },
+                onClose: { [weak self] in
+                    self?.listWindow?.close()
+                }
+            )
+            .id(listRefresh)
+        }
         .environment(appState)
-        .id(listRefresh)
     }
 
     private func reloadList() {
@@ -64,16 +66,18 @@ final class ManageModelsDialogController: NSObject, NSWindowDelegate {
             detailWindow?.close()
         }
         let installed = ImageGenHFModelLocality.modelIsInstalled(entry: entry)
-        let view = ManageModelsDetailView(
-            entry: entry,
-            installed: installed,
-            onClose: { [weak self] in
-                self?.detailWindow?.close()
-            },
-            onCatalogChanged: { [weak self] in
-                self?.reloadList()
-            }
-        )
+        let view = DialogCopyFeedbackRoot {
+            ManageModelsDetailView(
+                entry: entry,
+                installed: installed,
+                onClose: { [weak self] in
+                    self?.detailWindow?.close()
+                },
+                onCatalogChanged: { [weak self] in
+                    self?.reloadList()
+                }
+            )
+        }
         .environment(appState)
 
         let host = NSHostingController(rootView: view)

@@ -202,7 +202,7 @@ struct ImageGenerationSettingsSection: View {
 
     private func installImagegenVenv() {
         persistImagegenVenvPath()
-        let dialog = ImageGenVenvInstallOutputDialogController.beginNewSession()
+        let dialog = ImageGenVenvInstallOutputDialogController.beginNewSession(appState: appState)
         let venvPath = appState.config.imagegenVenvURL().path
         dialog.append("Installing imagegen dependencies into:\n\(venvPath)\n\n")
         venvInstallInProgress = true

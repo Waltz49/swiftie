@@ -34,8 +34,10 @@ struct ProwserApp: App {
 
         Window("Image Generation", id: "imagegen-unified") {
             OptionalAppStateWindow(appState: appDelegate.appState) { appState in
-                ImageGenUnifiedDialog()
-                    .environment(appState)
+                DialogCopyFeedbackRoot {
+                    ImageGenUnifiedDialog()
+                }
+                .environment(appState)
             }
         }
         .defaultSize(width: 720, height: 560)

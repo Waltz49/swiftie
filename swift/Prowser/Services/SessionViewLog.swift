@@ -165,6 +165,13 @@ enum SessionViewLog {
         clear(logFileURL: logFileURL(config: config))
     }
 
+    /// Full session log text for clipboard export (same source as Save).
+    static func fullText(logFileURL url: URL) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
     /// Read appended bytes since `offset`; updates `offset` to the new file length.
     static func readChunk(logFileURL url: URL, offset: inout UInt64) -> String {
         lock.lock()

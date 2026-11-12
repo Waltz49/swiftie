@@ -116,6 +116,8 @@ final class ExifAPIStructureDialogController: NSObject, NSWindowDelegate {
             escapeButton: closeButton
         )
 
+        installCopyFeedbackOverlay(on: panel, appState: appState)
+
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -168,10 +170,8 @@ final class ExifAPIStructureDialogController: NSObject, NSWindowDelegate {
     }
 
     @objc private func copyJSON() {
-        guard let text = textView?.string, !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        appState?.status.show("EXIF API JSON copied")
+        guard let appState, let text = textView?.string, !text.isEmpty else { return }
+        appState.copyTextToClipboard(text, hostWindow: panel)
     }
 
     @objc private func wrapToggled() {

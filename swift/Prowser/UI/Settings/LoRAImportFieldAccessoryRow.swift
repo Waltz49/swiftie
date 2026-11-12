@@ -3,16 +3,9 @@ import SwiftUI
 @MainActor
 struct LoRAImportCopyButton: View {
     let text: String
-    let copy: (String) -> Void
 
     var body: some View {
-        AppAssetIconButton(
-            normalName: "copy",
-            hoverName: "copy_hover",
-            size: ImageGenChrome.fieldButtonSize,
-            tooltip: "Copy to clipboard",
-            action: { copy(text) }
-        )
+        ClipboardCopyIconButton(text: text, size: ImageGenChrome.fieldButtonSize)
     }
 }
 

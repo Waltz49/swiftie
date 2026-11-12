@@ -121,17 +121,19 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         applyWrap(wrapCheckbox.state == .on)
         self.wrapCheckbox = wrapCheckbox
 
+        let copyButton = FocusableDialogButton(title: "Copy", target: self, action: #selector(copyLog))
+        copyButton.toolTip = "Copy log to clipboard"
         let clearButton = FocusableDialogButton(title: "Clear", target: self, action: #selector(clearLog))
         let saveButton = FocusableDialogButton(title: "Save", target: self, action: #selector(saveLog))
         let closeButton = FocusableDialogButton(title: "Close", target: self, action: #selector(closeClicked))
         closeButton.keyEquivalent = "\r"
 
-        let buttonRow = NSStackView(views: [wrapCheckbox, NSView(), clearButton, saveButton, closeButton])
+        let buttonRow = NSStackView(views: [wrapCheckbox, NSView(), copyButton, clearButton, saveButton, closeButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
         buttonRow.alignment = .centerY
         buttonRow.setViews([wrapCheckbox], in: .leading)
-        buttonRow.setViews([clearButton, saveButton, closeButton], in: .trailing)
+        buttonRow.setViews([copyButton, clearButton, saveButton, closeButton], in: .trailing)
         if let spacer = buttonRow.views.first(where: { $0 !== wrapCheckbox && !($0 is NSButton) }) {
             spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         }
@@ -151,6 +153,7 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
             defer: false
         )
         panel.title = "View Log"
+        panel.identifier = NSUserInterfaceItemIdentifier("prowser.viewLog")
         panel.subtitle = ProwserTempFiles.displayPath(appState.sessionViewLogURL.path)
         panel.isFloatingPanel = true
         panel.level = .floating
@@ -160,6 +163,7 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
         panel.contentView = content
         panel.delegate = self
         self.panel = panel
+        installCopyFeedbackOverlay(on: panel, appState: appState)
 
         DialogGeometryPersistence.apply(
             to: panel,
@@ -171,7 +175,7 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
 
         keyboardMonitor = AppKitDialogKeyboardNavigation.install(
             on: panel,
-            buttonsLeftToRight: [clearButton, saveButton, closeButton],
+            buttonsLeftToRight: [copyButton, clearButton, saveButton, closeButton],
             escapeButton: closeButton
         )
 
@@ -284,6 +288,16 @@ final class ViewLogDialogController: NSObject, NSWindowDelegate {
                 height: CGFloat.greatestFiniteMagnitude
             )
         }
+    }
+
+    @objc private func copyLog() {
+        guard let appState, let logPanel = panel else { return }
+        let url = appState.sessionViewLogURL
+        let fileText = SessionViewLog.fullText(logFileURL: url)
+        let viewText = textView?.textStorage?.string ?? textView?.string ?? ""
+        let text = !fileText.isEmpty ? fileText : viewText
+        guard !text.isEmpty else { return }
+        appState.copyTextToClipboard(text, hostWindow: logPanel)
     }
 
     @objc private func clearLog() {

@@ -36,12 +36,10 @@ struct ImageGenPromptActionButtons: View {
             default: false
         )
         HStack(spacing: 6) {
-            AppAssetIconButton(
-                normalName: "copy",
-                hoverName: "copy_hover",
+            ClipboardCopyIconButton(
+                text: text,
                 size: ImageGenChrome.fieldButtonSize,
-                tooltip: "Copy to clipboard",
-                action: copyText
+                action: { appState.copyImageGenPromptToClipboard(text) }
             )
             AppAssetIconButton(
                 normalName: "bullhorn",
@@ -93,16 +91,6 @@ struct ImageGenPromptActionButtons: View {
                 action: resetToDefault
             )
         }
-    }
-
-    private func copyText() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        if let utf8 = ImageGenPromptTextEncoding.utf8Data(from: text) {
-            pasteboard.setData(utf8, forType: NSPasteboard.PasteboardType("public.utf8-plain-text"))
-        }
-        appState.status.show("Copied to clipboard.")
     }
 
     private func speakText() {

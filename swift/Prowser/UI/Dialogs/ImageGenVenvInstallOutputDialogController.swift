@@ -9,19 +9,22 @@ final class ImageGenVenvInstallOutputDialogController: NSObject, NSWindowDelegat
 
     private static var activeInstance: ImageGenVenvInstallOutputDialogController?
 
+    private weak var appState: AppState?
     private var panel: NSPanel?
     private var textView: NSTextView?
     private var copyStatusLabel: NSTextField?
     private var keyboardMonitor: Any?
 
     /// Opens or reuses the panel and clears text for a new install session.
-    static func beginNewSession() -> ImageGenVenvInstallOutputDialogController {
+    static func beginNewSession(appState: AppState) -> ImageGenVenvInstallOutputDialogController {
         if let existing = activeInstance, existing.panel != nil {
+            existing.appState = appState
             existing.clearText()
             existing.raise()
             return existing
         }
         let controller = ImageGenVenvInstallOutputDialogController()
+        controller.appState = appState
         activeInstance = controller
         controller.present()
         return controller
@@ -126,6 +129,9 @@ final class ImageGenVenvInstallOutputDialogController: NSObject, NSWindowDelegat
         panel.contentView = content
         panel.delegate = self
         self.panel = panel
+        if let appState {
+            installCopyFeedbackOverlay(on: panel, appState: appState)
+        }
 
         keyboardMonitor = AppKitDialogKeyboardNavigation.install(
             on: panel,
@@ -174,10 +180,15 @@ final class ImageGenVenvInstallOutputDialogController: NSObject, NSWindowDelegat
             setCopyStatus(success: false, empty: true)
             return
         }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        let ok = pb.setString(text, forType: .string)
-        setCopyStatus(success: ok, empty: false)
+        if let appState {
+            appState.copyTextToClipboard(text, hostWindow: panel)
+            copyStatusLabel?.stringValue = ""
+        } else {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            let ok = pb.setString(text, forType: .string)
+            setCopyStatus(success: ok, empty: false)
+        }
     }
 
     private func setCopyStatus(success: Bool, empty: Bool) {
@@ -187,10 +198,7 @@ final class ImageGenVenvInstallOutputDialogController: NSObject, NSWindowDelegat
             copyStatusLabel.textColor = .secondaryLabelColor
             return
         }
-        if success {
-            copyStatusLabel.stringValue = "Copied."
-            copyStatusLabel.textColor = .systemGreen
-        } else {
+        if !success {
             copyStatusLabel.stringValue = "Copy failed."
             copyStatusLabel.textColor = .systemRed
         }

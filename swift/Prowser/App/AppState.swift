@@ -576,7 +576,7 @@ final class AppState {
                 status.show("No user comment to copy")
                 return
             }
-            copyTextToClipboard(text)
+            copyTextToClipboard(text, hostWindow: copyFeedbackHostWindow())
         }
     }
 
@@ -597,7 +597,7 @@ final class AppState {
                 status.show("No prompt text to copy")
                 return
             }
-            copyTextToClipboard(clipboard)
+            copyTextToClipboard(clipboard, hostWindow: copyFeedbackHostWindow())
         }
     }
 

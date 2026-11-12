@@ -510,7 +510,7 @@ struct EditExifUserCommentSheet: View {
 
     private func copyComment(full: Bool) {
         let text = ExifService.userCommentTextForClipboard(appState.editUserCommentText, copyFull: full)
-        appState.copyTextToClipboard(text)
+        appState.copyTextToClipboard(text, hostWindow: appState.copyFeedbackHostWindow())
     }
 
     private func readAloud() {

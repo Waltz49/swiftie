@@ -25,12 +25,10 @@ struct ChatUserPromptLibrarySheet: View {
                 HStack(spacing: 6) {
                     Text("Select a favorite to use:")
                         .font(.subheadline)
-                    AppAssetIconButton(
-                        normalName: "copy",
-                        hoverName: "copy_hover",
+                    ClipboardCopyIconButton(
+                        text: "",
                         size: ImageGenChrome.fieldButtonSize,
                         iconSize: ImageGenChrome.fieldResetIconSize,
-                        tooltip: "Copy to clipboard",
                         action: copyPreview
                     )
                     Spacer(minLength: 0)
@@ -199,10 +197,11 @@ struct ChatUserPromptLibrarySheet: View {
     }
 
     private func copyPreview() {
+        let host = appState.copyFeedbackHostWindow()
         if previewReadOnly {
-            appState.copyTextToClipboard("")
+            appState.copyTextToClipboard("", hostWindow: host)
         } else {
-            appState.copyTextToClipboard(previewText)
+            appState.copyTextToClipboard(previewText, hostWindow: host)
         }
     }
 

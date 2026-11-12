@@ -72,9 +72,8 @@ final class AuxiliaryDialogController: NSObject, NSWindowDelegate {
         let closeHost: () -> Void = { [weak self] in
             self?.close(id)
         }
-        let root = ZStack {
+        let root = DialogCopyFeedbackRoot {
             content
-            CopyFeedbackOverlay()
         }
             .environment(appState)
             .environment(\.themeColors, appState.theme.colors)
@@ -92,6 +91,7 @@ final class AuxiliaryDialogController: NSObject, NSWindowDelegate {
         window.delegate = self
 
         sessions[id] = Session(window: window, onClose: onClose)
+        installCopyFeedbackOverlay(on: window, appState: appState)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
