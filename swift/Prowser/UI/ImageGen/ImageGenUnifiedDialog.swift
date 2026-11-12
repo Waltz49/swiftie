@@ -1262,15 +1262,6 @@ struct ImageGenUnifiedDialog: View {
             .compactMap { $0 }
     }
 
-    /// Original library path for EXIF/thumbnails — not Pixelmator/MFLUX temp exports.
-    private func infillCanonicalSourcePathForSubmit(values: [String: Any], tempRoot: String) -> String? {
-        ImageGenInfillLibrarySource.resolveCanonicalReference(
-            extraCandidates: infillDialogLibrarySourceCandidates(),
-            values: values,
-            tempRoot: tempRoot
-        )
-    }
-
     private func prepareInfillSubmitExports(submitValues: inout [String: Any]) throws -> [String: Any]? {
         guard let canvas = infillCanvasHolder.canvas, canvas.hasPaintMask(), let mask = canvas.maskCGImage() else {
             StyledMessageDialog.showWarning(
@@ -1392,15 +1383,10 @@ struct ImageGenUnifiedDialog: View {
             if let path = resolvedSubmitSourcePath(for: selectedFunction) {
                 out["source_image_path"] = path
                 out["source_image_paths"] = [path]
-                let tempRoot = appState.config.temporaryFilesDirectory.path
-                if selectedFunction == "infill" {
-                    if let canonical = infillCanonicalSourcePathForSubmit(values: out, tempRoot: tempRoot) {
-                        out["_canonical_source_image_paths"] = [canonical]
-                    } else {
-                        out.removeValue(forKey: "_canonical_source_image_paths")
-                    }
-                } else {
+                if selectedFunction == "expand" {
                     out["_canonical_source_image_paths"] = [path]
+                } else {
+                    out.removeValue(forKey: "_canonical_source_image_paths")
                 }
             }
         case "edit":

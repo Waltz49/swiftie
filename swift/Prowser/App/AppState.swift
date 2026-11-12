@@ -190,6 +190,8 @@ final class AppState {
     var specificFilesActive = false
     /// Set when File → Exit / ⌘Q already passed ``confirmQuitIfRunning`` so `applicationShouldTerminate` does not prompt twice.
     private var quitConfirmedViaClose = false
+    /// Non-modal quit confirmation is visible or starting (coalesce ⌘Q / ``applicationShouldTerminate``).
+    var quitConfirmationDialogInFlight = false
 
     func shouldSkipQuitPromptBecauseAlreadyConfirmed() -> Bool {
         quitConfirmedViaClose
@@ -1715,6 +1717,10 @@ final class AppState {
         if !confirmQuitIfRunning() {
             return
         }
+        performConfirmedApplicationQuit()
+    }
+
+    func performConfirmedApplicationQuit() {
         quitConfirmedViaClose = true
         WindowFullscreen.noteMainWindowClosing()
         if let window = BrowserWindowIdentity.resolveMainBrowserWindow() {

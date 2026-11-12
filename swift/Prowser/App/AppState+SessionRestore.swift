@@ -43,6 +43,7 @@ extension AppState {
                 if deferThumbnailWork {
                     pendingBrowseExitThumbnailScroll = true
                 } else {
+                    DirectoryRefreshService.reconcileThumbnailGridAfterBrowseExit(appState: self)
                     finalizeThumbnailHighlightAfterBrowseExit(preferredPath: browseExitPath)
                     scheduleScrollThumbnailGridToActiveImageAfterLayout()
                 }
@@ -73,6 +74,13 @@ extension AppState {
         browseReturnThumbnailState = nil
     }
 
+    /// Keep stashed thumbnail context aligned with browse-time deletes (custom sort, reference graph, etc.).
+    func syncBrowseReturnStashFromDisplayedImages() {
+        guard fileData.currentViewMode == .browse, var stashed = browseReturnThumbnailState else { return }
+        stashed.displayedImages = fileData.displayedImages
+        browseReturnThumbnailState = stashed
+    }
+
     func displayedImagesMatchCurrentDirectory() -> Bool {
         DisplayedImagesSync.displayedImagesMatchCurrentDirectory(
             fileData: fileData,
@@ -98,6 +106,7 @@ extension AppState {
             guard self.fileData.currentViewMode == .thumbnail else { return }
             if self.pendingBrowseExitThumbnailScroll {
                 self.pendingBrowseExitThumbnailScroll = false
+                DirectoryRefreshService.reconcileThumbnailGridAfterBrowseExit(appState: self)
                 self.finalizeThumbnailHighlightAfterBrowseExit(
                     preferredPath: self.fileData.currentImagePath
                 )
@@ -182,7 +191,11 @@ extension AppState {
             fileData.setCurrentDirectory(directory)
         }
         setSpecificFilesActive(stashed.specificFilesActive)
-        fileData.setDisplayedImages(stashed.displayedImages)
+        var restoredImages = stashed.displayedImages
+        if !isFormattedListMode() {
+            restoredImages = restoredImages.filter { FileManager.default.fileExists(atPath: $0) }
+        }
+        fileData.setDisplayedImages(restoredImages)
         let restoredPath = Self.resolveActiveImagePathAfterBrowseRestore(
             preferred: pathAtBrowseExit,
             fallback: stashed.currentImagePath,
@@ -194,7 +207,6 @@ extension AppState {
         config.updateSetting("thumbnail_cell_size", value: stashed.thumbnailCellSize)
         config.updateSetting("manual_thumbnail_size", value: stashed.manualThumbnailSize)
         config.applySettingsChange(emit: eventBus)
-        finalizeThumbnailHighlightAfterBrowseExit(preferredPath: restoredPath ?? pathAtBrowseExit)
     }
 
     /// Pick the active file by path after restoring a stashed thumbnail list. Never uses list indices.

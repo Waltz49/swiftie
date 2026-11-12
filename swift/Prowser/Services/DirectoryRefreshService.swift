@@ -274,14 +274,15 @@ enum DirectoryRefreshService {
                 removed: removed,
                 activePath: activePath
             )
-            return
+        } else {
+            removeDisplayedFiles(
+                appState: appState,
+                removed: removed,
+                displayed: displayed,
+                activePath: activePath
+            )
         }
-        removeDisplayedFiles(
-            appState: appState,
-            removed: removed,
-            displayed: displayed,
-            activePath: activePath
-        )
+        appState.syncBrowseReturnStashFromDisplayedImages()
     }
 
     private static func advanceActiveAfterDeletion(
@@ -426,6 +427,25 @@ enum DirectoryRefreshService {
         let displayed = appState.fileData.displayedImages
         guard let grid = appState.thumbnailGridHost, grid.imagePaths != displayed else { return }
         grid.reconcileDisplayedPathsIfNeeded(displayed)
+    }
+
+    /// After browse exit, drop trashed paths from the model and sync grid paths (Python ``close_browse_view_action``).
+    static func reconcileThumbnailGridAfterBrowseExit(appState: AppState) {
+        guard appState.fileData.currentViewMode == .thumbnail else { return }
+        if !appState.isFormattedListMode() {
+            let displayed = appState.fileData.displayedImages
+            let removed = Set(displayed.filter { !FileManager.default.fileExists(atPath: $0) })
+            if !removed.isEmpty {
+                applyRemovedFiles(
+                    appState: appState,
+                    removed: removed,
+                    displayed: displayed,
+                    activePath: appState.fileData.currentImagePath
+                )
+            }
+        }
+        reconcileThumbnailGridListing(appState: appState)
+        appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
     }
 
     static func invalidateThumbnails(

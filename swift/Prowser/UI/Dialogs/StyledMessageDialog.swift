@@ -42,7 +42,9 @@ enum StyledMessageDialog {
         escapeButtonIndex: Int? = nil,
         accessoryView: NSView? = nil,
         initialFirstResponder: NSView? = nil,
-        parentWindow: NSWindow? = nil
+        parentWindow: NSWindow? = nil,
+        shouldAutoDismiss: (() -> Bool)? = nil,
+        onModalSessionTick: (() -> Void)? = nil
     ) -> Int? {
         let specs = buttons.isEmpty ? [Button("OK")] : buttons
         let leftToRight = visualLeftToRightOrder(specs)
@@ -74,8 +76,72 @@ enum StyledMessageDialog {
             }
         }
 
-        controller.runModal(parentWindow: parentWindow)
+        controller.runModal(
+            parentWindow: parentWindow,
+            shouldAutoDismiss: shouldAutoDismiss,
+            onModalSessionTick: onModalSessionTick,
+            autoDismissButtonIndex: escapeVisualIndex
+        )
         return controller.selectedIndex
+    }
+
+    /// Key-window panel without ``runModalSession`` — normal event sources keep running (quit + live job strip).
+    static func presentNonModal(
+        title: String,
+        message: String,
+        secondaryMessage: String? = nil,
+        style: NSAlert.Style = .informational,
+        icon: IconKind? = nil,
+        buttons: [Button] = [Button("OK")],
+        defaultButtonIndex: Int? = nil,
+        escapeButtonIndex: Int? = nil,
+        accessoryView: NSView? = nil,
+        initialFirstResponder: NSView? = nil,
+        parentWindow: NSWindow? = nil,
+        shouldAutoDismiss: (() -> Bool)? = nil,
+        onLiveUpdateTick: (() -> Void)? = nil
+    ) async -> Int? {
+        let specs = buttons.isEmpty ? [Button("OK")] : buttons
+        let leftToRight = visualLeftToRightOrder(specs)
+        let defaultVisualIndex = defaultButtonIndex ?? defaultVisualIndexForButtons(specs)
+        let escapeVisualIndex = escapeButtonIndex ?? escapeVisualIndexForButtons(specs)
+        let iconKind = icon ?? iconKind(for: style)
+
+        let controller = StyledMessagePanelController(
+            title: title,
+            message: message,
+            secondaryMessage: secondaryMessage,
+            icon: iconKind,
+            buttons: leftToRight,
+            defaultButtonIndex: defaultVisualIndex,
+            escapeButtonIndex: escapeVisualIndex,
+            accessoryView: accessoryView,
+            initialFirstResponder: initialFirstResponder
+        )
+
+        let monitor = AppKitDialogKeyboardNavigation.install(
+            on: controller.panel,
+            buttonsLeftToRight: controller.buttonsLeftToRight,
+            escapeButton: controller.escapeButton,
+            hasTextAccessory: accessoryView != nil
+        )
+
+        return await withCheckedContinuation { continuation in
+            var resumed = false
+            controller.presentNonModal(
+                parentWindow: parentWindow,
+                shouldAutoDismiss: shouldAutoDismiss,
+                onLiveUpdateTick: onLiveUpdateTick,
+                autoDismissButtonIndex: escapeVisualIndex
+            ) {
+                if let monitor {
+                    NSEvent.removeMonitor(monitor)
+                }
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: controller.selectedIndex)
+            }
+        }
     }
 
     static func showWarning(title: String, message: String) {
@@ -256,6 +322,11 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     let escapeButton: NSButton?
     var selectedIndex: Int?
     private weak var sheetParent: NSWindow?
+    private var liveUpdateTimer: Timer?
+    private var onDismiss: (() -> Void)?
+    private var shouldAutoDismissWhileVisible: (() -> Bool)?
+    private var onLiveUpdateTick: (() -> Void)?
+    private var storedAutoDismissButtonIndex: Int?
 
     init(
         title: String,
@@ -420,7 +491,12 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    func runModal(parentWindow: NSWindow? = nil) {
+    func runModal(
+        parentWindow: NSWindow? = nil,
+        shouldAutoDismiss: (() -> Bool)? = nil,
+        onModalSessionTick: (() -> Void)? = nil,
+        autoDismissButtonIndex: Int? = nil
+    ) {
         panel.center()
         NSApp.activate(ignoringOtherApps: true)
         if let parentWindow = Self.effectiveSheetParent(for: parentWindow) {
@@ -436,17 +512,96 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
         if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
             panel.makeFirstResponder(firstResponder)
         }
-        // ``runModal(for:)`` blocks default-run-loop sources; use a modal session so timers in
-        // ``RunLoop.Mode.common`` (live job progress) keep firing.
+        // ``runModal(for:)`` blocks default-run-loop sources; pump default + common so
+        // ``DispatchQueue.main`` progress and ``RunLoop.Mode.common`` live-status timers run.
         let session = NSApp.beginModalSession(for: panel)
         defer { NSApp.endModalSession(session) }
+
+        func applyAutoDismissIfNeeded() -> Bool {
+            guard shouldAutoDismiss?() == true else { return false }
+            if let index = autoDismissButtonIndex, index >= 0, index < buttonsLeftToRight.count {
+                selectedIndex = index
+            } else if let escapeButton {
+                selectedIndex = escapeButton.tag
+            }
+            close()
+            return true
+        }
+
+        func pumpRunLoopSources(until deadline: Date) {
+            while selectedIndex == nil, Date() < deadline {
+                onModalSessionTick?()
+                if applyAutoDismissIfNeeded() { return }
+                _ = RunLoop.current.run(mode: .default, before: deadline)
+                if selectedIndex != nil { return }
+                if applyAutoDismissIfNeeded() { return }
+                _ = RunLoop.current.run(mode: .common, before: deadline)
+            }
+        }
+
         while selectedIndex == nil {
+            onModalSessionTick?()
+            if applyAutoDismissIfNeeded() { break }
             let response = NSApp.runModalSession(session)
             if response != .continue || selectedIndex != nil {
                 break
             }
-            _ = RunLoop.current.run(mode: .common, before: Date(timeIntervalSinceNow: 0.05))
+            pumpRunLoopSources(until: Date(timeIntervalSinceNow: 0.05))
         }
+    }
+
+    func presentNonModal(
+        parentWindow: NSWindow? = nil,
+        shouldAutoDismiss: (() -> Bool)? = nil,
+        onLiveUpdateTick: (() -> Void)? = nil,
+        autoDismissButtonIndex: Int? = nil,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.onDismiss = onDismiss
+        shouldAutoDismissWhileVisible = shouldAutoDismiss
+        self.onLiveUpdateTick = onLiveUpdateTick
+        storedAutoDismissButtonIndex = autoDismissButtonIndex
+
+        showPanel(parentWindow: parentWindow)
+
+        liveUpdateTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleNonModalLiveTick()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        liveUpdateTimer = timer
+        handleNonModalLiveTick()
+    }
+
+    private func showPanel(parentWindow: NSWindow?) {
+        panel.center()
+        NSApp.activate(ignoringOtherApps: true)
+        if let parentWindow = Self.effectiveSheetParent(for: parentWindow) {
+            sheetParent = parentWindow
+            parentWindow.makeKeyAndOrderFront(nil)
+            parentWindow.beginSheet(panel) { [weak self] _ in
+                self?.sheetParent = nil
+            }
+        } else {
+            panel.makeKeyAndOrderFront(nil)
+            panel.orderFrontRegardless()
+        }
+        if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
+            panel.makeFirstResponder(firstResponder)
+        }
+    }
+
+    private func handleNonModalLiveTick() {
+        onLiveUpdateTick?()
+        guard shouldAutoDismissWhileVisible?() == true else { return }
+        if let index = storedAutoDismissButtonIndex, index >= 0, index < buttonsLeftToRight.count {
+            selectedIndex = index
+        } else if let escapeButton {
+            selectedIndex = escapeButton.tag
+        }
+        close()
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
@@ -455,6 +610,11 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     }
 
     private func close() {
+        liveUpdateTimer?.invalidate()
+        liveUpdateTimer = nil
+        shouldAutoDismissWhileVisible = nil
+        onLiveUpdateTick = nil
+        storedAutoDismissButtonIndex = nil
         panel.delegate = nil
         if let sheetParent {
             sheetParent.endSheet(panel)
@@ -466,6 +626,9 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             NSApp.stopModal()
         }
         BrowserWindowIdentity.restoreBrowserKeyAfterAuxiliaryDialog()
+        let dismiss = onDismiss
+        onDismiss = nil
+        dismiss?()
     }
 
     /// Use a sheet only when the explicit parent is already frontmost; otherwise a sheet would sit

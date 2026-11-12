@@ -20,11 +20,8 @@ enum JobCardThumbnailPaths {
             append(raw)
         }
 
-        if usesUserLibrarySourceReferences(plugin: plugin) {
-            for src in ImageGenExifReferences.resolveSourceImagePaths(values) {
-                append(src)
-            }
-        } else if ImageGenPipelineModeMetadata.jobUsesSourceImage(pipelineID: plugin.pipelineID, values: values) {
+        if plugin.function == "infill"
+            || ImageGenPipelineModeMetadata.jobUsesSourceImage(pipelineID: plugin.pipelineID, values: values) {
             for src in ImageGenExifReferences.resolveSourceImagePaths(values) {
                 append(src)
             }
@@ -34,37 +31,13 @@ enum JobCardThumbnailPaths {
             append(src)
         }
 
-        if paths.isEmpty, plugin.function == "infill",
-           let library = resolveInfillLibraryReference(values: values, tempRoot: tempRoot) {
+        if paths.isEmpty,
+           plugin.function == "infill",
+           let tempRoot, !tempRoot.isEmpty,
+           let library = ImageGenInfillLibrarySource.resolveCanonicalReference(values: values, tempRoot: tempRoot) {
             append(library)
         }
         return paths
-    }
-
-    private static func usesUserLibrarySourceReferences(plugin: ImageGenPluginDescriptor) -> Bool {
-        switch plugin.function {
-        case "edit", "expand", "infill":
-            return true
-        default:
-            return false
-        }
-    }
-
-    /// Original photo for infill when only Pixelmator/work paths remain in ``source_image_*``.
-    private static func resolveInfillLibraryReference(values: [String: Any], tempRoot: String?) -> String? {
-        for raw in values["_canonical_source_image_paths"] as? [String] ?? [] {
-            guard let path = existingFilePath(raw), !isExcludedWorkPath(path, tempRoot: tempRoot) else { continue }
-            return path
-        }
-        for raw in ImageGenExifReferences.resolveSourceImagePaths(values) {
-            guard let path = existingFilePath(raw), !isExcludedWorkPath(path, tempRoot: tempRoot) else { continue }
-            return path
-        }
-        let doc = (values["pixelmator_doc_path"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !doc.isEmpty, let path = existingFilePath(doc), !isExcludedWorkPath(path, tempRoot: tempRoot) {
-            return path
-        }
-        return nil
     }
 
     /// Python ``_valid_preview_paths`` (job card thumbnail clicks).

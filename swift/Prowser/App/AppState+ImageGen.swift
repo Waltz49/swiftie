@@ -904,12 +904,22 @@ extension AppState {
         if imageGen.quitGateAllowsImmediateTerminate() {
             return true
         }
+        if quitConfirmationDialogInFlight {
+            return false
+        }
+        quitConfirmationDialogInFlight = true
+        Task { await runQuitConfirmationDialog() }
+        return false
+    }
+
+    private func runQuitConfirmationDialog() async {
+        defer { quitConfirmationDialogInFlight = false }
         imageGen.prepareQuitConfirmationStrip()
         let (stripAccessory, teardownStripLiveUpdates) = ActiveJobStripModalAccessory.make(appState: self)
         defer { teardownStripLiveUpdates() }
 
         let parentWindow = BrowserWindowIdentity.resolveMainBrowserWindow()
-        let choice = StyledMessageDialog.present(
+        let choice = await StyledMessageDialog.presentNonModal(
             title: "AI task running",
             message: "Image generation or an AI caption is in progress.\nQuit anyway?",
             style: .warning,
@@ -921,18 +931,19 @@ extension AppState {
             defaultButtonIndex: 0,
             escapeButtonIndex: 0,
             accessoryView: stripAccessory,
-            parentWindow: parentWindow
+            parentWindow: parentWindow,
+            shouldAutoDismiss: { [imageGen] in !imageGen.quitInterruptsActiveWorker() },
+            onLiveUpdateTick: { [imageGen] in imageGen.refreshQuitConfirmationStripLive() }
         )
         switch choice {
         case 1:
             imageGen.prepareForShutdown()
-            return true
+            performConfirmedApplicationQuit()
         case 2:
             imageGen.setDeferredQuitAppState(self)
             imageGen.beginQuitAfterCurrentWorker()
-            return false
         default:
-            return false
+            break
         }
     }
 

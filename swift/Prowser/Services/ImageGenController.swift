@@ -445,8 +445,8 @@ final class ImageGenController {
         }
         persistQueue()
         bumpQueueRevision()
-        if !isProcessing && !holdJobQueue {
-            await startNextQueuedJobIfIdle()
+        if !isProcessing, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed {
+            processNextIfIdle()
         }
     }
 
@@ -4288,6 +4288,16 @@ final class ImageGenController {
             activeStripView = ActiveJobStripStatusView()
         }
         publishActiveStrip(preferLiveFields: true)
+    }
+
+    /// Quit confirmation accessory: live steps/elapsed while the worker runs; clear when quit no longer blocks.
+    func refreshQuitConfirmationStripLive() {
+        if quitInterruptsActiveWorker() {
+            refreshActiveStripDisplay()
+        } else {
+            activeStripView = ActiveJobStripStatusView()
+            publishActiveStrip(preferLiveFields: true)
+        }
     }
 
     func resetTerminateQuitConfirmation() {

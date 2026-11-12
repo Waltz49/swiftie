@@ -11,7 +11,7 @@ from pathlib import Path
 from prowser_temp_files import ensure_temporary_files_directory
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 from imagegen_plugins.hf_model_ids import (
     FLUX1_DEV,
@@ -259,6 +259,8 @@ class LoraCheckResult:
     probe_effect_threshold_lines: List[str] = field(default_factory=list)
     probe_effect_outcome_lines: List[str] = field(default_factory=list)
     probe_cnn_environment_lines: List[str] = field(default_factory=list)
+    # LoRA catalog IDs probed in this run (Create-menu saves may only touch these).
+    probed_lora_ids: Tuple[str, ...] = ()
 
     @property
     def deleted_ids(self) -> List[str]:
@@ -2452,22 +2454,6 @@ def _probe_lora_on_model_impl(
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
 
 
-def _prune_enabled_to_saved_probe_support(
-    by_model_enabled: Dict[str, List[str]],
-    *,
-    model_support: Dict[str, List[str]],
-    cross_family_models: Dict[str, List[str]],
-) -> None:
-    """Drop Create-menu enables that no longer have a same-host probe pass."""
-    for mk in list(by_model_enabled.keys()):
-        kept = [
-            str(lid)
-            for lid in by_model_enabled.get(mk, [])
-            if mk in model_support.get(str(lid), ())
-        ]
-        by_model_enabled[mk] = kept
-
-
 def _init_lora_probe_states(
     plan: List[LoraProbePlanItem],
     *,
@@ -2602,6 +2588,33 @@ def _sync_probe_history_slice(
             result.probe_history[key] = slice_
 
 
+def _merge_create_menu_state_for_persist(
+    *,
+    by_model_enabled: Dict[str, List[str]],
+    by_model_hidden: Dict[str, List[str]],
+    settings: Optional[Dict[str, Any]],
+    probed_lora_ids: FrozenSet[str],
+) -> None:
+    """Only LoRAs in this run may change Create-menu toggles; others stay as saved on disk."""
+    if not probed_lora_ids:
+        return
+    for mk in list(by_model_enabled.keys()):
+        st = model_state(settings, mk)
+        disk_enabled = {str(x) for x in (st.get("enabled_ids") or [])}
+        mem_enabled = {str(x) for x in by_model_enabled.get(mk, [])}
+        by_model_enabled[mk] = sorted(
+            (disk_enabled - probed_lora_ids) | (mem_enabled & probed_lora_ids)
+        )
+        disk_deleted = {
+            str(x)
+            for x in (st.get("deleted_ids") or st.get("hidden_ids") or [])
+        }
+        mem_deleted = {str(x) for x in by_model_hidden.get(mk, [])}
+        by_model_hidden[mk] = sorted(
+            (disk_deleted - probed_lora_ids) | (mem_deleted & probed_lora_ids)
+        )
+
+
 def _persist_lora_probe_progress(
     state: _LoraProbeState,
     *,
@@ -2634,11 +2647,6 @@ def _persist_lora_probe_progress(
             result.cross_family_models[lora_id] = cross
             ms_slice = {lora_id: same_host}
             cf_slice = {lora_id: cross}
-            _prune_enabled_to_saved_probe_support(
-                by_model_enabled,
-                model_support=model_support,
-                cross_family_models=result.cross_family_models,
-            )
 
     hist_slice: Dict[str, Any] = {}
     for key in (state.history_key, lora_id):
@@ -2646,17 +2654,13 @@ def _persist_lora_probe_progress(
         if key_s and key_s in result.probe_history:
             hist_slice[key_s] = result.probe_history[key_s]
 
-    by_model: Dict[str, Dict[str, List[str]]] = {}
-    for mk in dict.fromkeys(model_keys):
-        by_model[mk] = {
-            "enabled_ids": list(by_model_enabled.get(mk, [])),
-            "deleted_ids": list(by_model_hidden.get(mk, [])),
-        }
+    # Create-menu enables are persisted once in apply_lora_check_result (run end /
+    # cancel). Mid-run saves only probe outcomes so unrelated LoRAs stay enabled.
 
     persist_lora_check_catalog_slice(
         model_support=ms_slice,
         cross_family_models=cf_slice,
-        by_model=by_model or None,
+        by_model=None,
         probe_history=hist_slice or None,
     )
 
@@ -2971,7 +2975,11 @@ def _finalize_lora_probe_state(
             registered_lora_id = ""
             state.download_finalize_done = True
 
-    if registered_lora_id and registered_lora_id != _PENDING_DOWNLOAD_LORA_ID:
+    if (
+        registered_lora_id
+        and registered_lora_id != _PENDING_DOWNLOAD_LORA_ID
+        and state.models_completed
+    ):
         entry_for_cross = get_lora_entry(registered_lora_id, settings) or state.entry
         if entry_for_cross is None:
             model_support[registered_lora_id] = []
@@ -3500,20 +3508,56 @@ def run_lora_compatibility_check(
         )
     stats.loras_done = len(lora_states)
 
-    _prune_enabled_to_saved_probe_support(
-        by_model_enabled,
-        model_support=model_support,
-        cross_family_models=result.cross_family_models,
+    active_states = [s for s in lora_states if s.models_completed]
+    probed_lora_ids = frozenset(
+        str(s.lora_id)
+        for s in active_states
+        if str(s.lora_id or "").strip() and s.lora_id != _PENDING_DOWNLOAD_LORA_ID
+    )
+    result.probed_lora_ids = tuple(sorted(probed_lora_ids))
+    active_lora_ids = set(probed_lora_ids)
+    probed_model_keys = frozenset(
+        str(mk) for s in active_states for mk in s.models_completed if str(mk)
     )
 
-    result.model_support = model_support
-    result.by_model = {
-        mk: {
-            "enabled_ids": list(by_model_enabled.get(mk, [])),
-            "deleted_ids": list(by_model_hidden.get(mk, [])),
-        }
-        for mk in by_model_enabled
+    active_hist_keys: Set[str] = set()
+    for s in active_states:
+        if s.history_key:
+            active_hist_keys.add(str(s.history_key))
+        if s.lora_id and s.lora_id != _PENDING_DOWNLOAD_LORA_ID:
+            active_hist_keys.add(str(s.lora_id))
+
+    result.model_support = {
+        str(lid): list(models)
+        for lid, models in model_support.items()
+        if str(lid) in active_lora_ids
     }
+    result.cross_family_models = {
+        str(lid): list(models)
+        for lid, models in result.cross_family_models.items()
+        if str(lid) in active_lora_ids
+    }
+    result.probe_history = {
+        str(key): slice_
+        for key, slice_ in result.probe_history.items()
+        if str(key) in active_hist_keys
+    }
+
+    if not result.cancelled:
+        _merge_create_menu_state_for_persist(
+            by_model_enabled=by_model_enabled,
+            by_model_hidden=by_model_hidden,
+            settings=settings,
+            probed_lora_ids=probed_lora_ids,
+        )
+        result.by_model = {
+            mk: {
+                "enabled_ids": list(by_model_enabled.get(mk, [])),
+                "deleted_ids": list(by_model_hidden.get(mk, [])),
+            }
+            for mk in by_model_enabled
+            if mk in probed_model_keys
+        }
     result.stats = stats
     result.elapsed_seconds = time.monotonic() - run_started
     result.probe_effect_outcome_lines = build_probe_effect_outcome_lines(stats)

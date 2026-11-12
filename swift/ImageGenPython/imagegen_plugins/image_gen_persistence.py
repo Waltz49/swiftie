@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from config import get_config
 
@@ -656,6 +656,29 @@ def _json_safe_dict(values: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _merge_test_loras_create_menu_ids(
+    prev_ids: List[str],
+    incoming_ids: List[str],
+    probed_lora_ids: frozenset[str],
+) -> List[str]:
+    """Keep on-disk Create-menu ids except for LoRAs in this Test LoRAs run."""
+    prev = [str(x) for x in prev_ids]
+    inc = [str(x) for x in incoming_ids]
+    out: List[str] = []
+    seen: set[str] = set()
+    for lid in prev:
+        if lid in probed_lora_ids:
+            continue
+        if lid not in seen:
+            seen.add(lid)
+            out.append(lid)
+    for lid in inc:
+        if lid in probed_lora_ids and lid not in seen:
+            seen.add(lid)
+            out.append(lid)
+    return out
+
+
 def save_lora_catalog_state(
     *,
     host_id: Optional[str] = None,
@@ -668,6 +691,7 @@ def save_lora_catalog_state(
     model_support: Optional[dict] = None,
     cross_family_models: Optional[dict] = None,
     probe_history: Optional[dict] = None,
+    probed_lora_ids: Optional[Iterable[str]] = None,
 ) -> None:
     from imagegen_plugins.lora_catalog import merged_lora_catalog
     from imagegen_plugins.lora_catalog_settings import (
@@ -683,6 +707,11 @@ def save_lora_catalog_state(
 
     removed = deleted_ids if deleted_ids is not None else hidden_ids
     _empty = {"enabled_ids": [], DELETED_IDS_KEY: []}
+    probed_loras = (
+        frozenset(str(x).strip() for x in probed_lora_ids if str(x).strip())
+        if probed_lora_ids is not None
+        else None
+    )
 
     def mutate(imagegen: dict) -> None:
         lc = dict(_imagegen_lora_catalog(imagegen))
@@ -776,24 +805,60 @@ def save_lora_catalog_state(
                     continue
                 prev = dict(bm.get(mid) or _empty)
                 if "enabled_ids" in slice_:
-                    prev["enabled_ids"] = [
+                    incoming_enabled = [
                         str(x)
                         for x in slice_["enabled_ids"]
-                    if str(x) in catalog
-                    and entry_matches_lora_model(
-                        catalog[str(x)], mid, model_support=ms
-                    )
+                        if str(x) in catalog
+                        and entry_matches_lora_model(
+                            catalog[str(x)], mid, model_support=ms
+                        )
                     ]
+                    if probed_loras:
+                        prev_enabled = [
+                            str(x)
+                            for x in (prev.get("enabled_ids") or [])
+                            if str(x) in catalog
+                            and entry_matches_lora_model(
+                                catalog[str(x)], mid, model_support=ms
+                            )
+                        ]
+                        prev["enabled_ids"] = _merge_test_loras_create_menu_ids(
+                            prev_enabled,
+                            incoming_enabled,
+                            probed_loras,
+                        )
+                    else:
+                        prev["enabled_ids"] = incoming_enabled
                 if DELETED_IDS_KEY in slice_ or "hidden_ids" in slice_:
                     raw_deleted = slice_.get(DELETED_IDS_KEY, slice_.get("hidden_ids"))
-                    prev[DELETED_IDS_KEY] = [
+                    incoming_deleted = [
                         str(x)
                         for x in (raw_deleted or [])
-                    if str(x) in catalog
-                    and entry_matches_lora_model(
-                        catalog[str(x)], mid, model_support=ms
-                    )
+                        if str(x) in catalog
+                        and entry_matches_lora_model(
+                            catalog[str(x)], mid, model_support=ms
+                        )
                     ]
+                    if probed_loras:
+                        prev_deleted = [
+                            str(x)
+                            for x in (
+                                prev.get(DELETED_IDS_KEY)
+                                or prev.get("hidden_ids")
+                                or []
+                            )
+                            if str(x) in catalog
+                            and entry_matches_lora_model(
+                                catalog[str(x)], mid, model_support=ms
+                            )
+                        ]
+                        prev[DELETED_IDS_KEY] = _merge_test_loras_create_menu_ids(
+                            prev_deleted,
+                            incoming_deleted,
+                            probed_loras,
+                        )
+                    else:
+                        prev[DELETED_IDS_KEY] = incoming_deleted
                 bm[mid] = prev
             lc["by_model"] = bm
 

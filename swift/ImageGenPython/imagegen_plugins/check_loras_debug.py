@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO, lora_model_display_name
 from imagegen_plugins.lora_compatibility_checker import (
@@ -198,6 +198,7 @@ def persist_lora_check_catalog_slice(
     cross_family_models: Optional[Dict[str, List[str]]] = None,
     by_model: Optional[Dict[str, Dict[str, list]]] = None,
     probe_history: Optional[Dict[str, Dict[str, Any]]] = None,
+    probed_lora_ids: Optional[Iterable[str]] = None,
 ) -> None:
     """Merge one incremental Test LoRAs slice into ``lora_catalog.json``."""
     if not (
@@ -214,6 +215,7 @@ def persist_lora_check_catalog_slice(
         cross_family_models=cross_family_models,
         by_model=by_model,
         probe_history=probe_history,
+        probed_lora_ids=probed_lora_ids,
     )
 
 
@@ -231,8 +233,9 @@ def apply_lora_check_result(result: LoraCheckResult) -> List[str]:
         persist_lora_check_catalog_slice(
             model_support=result.model_support or None,
             cross_family_models=result.cross_family_models or None,
-            by_model=result.by_model or None,
+            by_model=None if result.cancelled else (result.by_model or None),
             probe_history=result.probe_history or None,
+            probed_lora_ids=result.probed_lora_ids or None,
         )
     settings_after = get_config().load_settings()
     report_paths: List[str] = []
