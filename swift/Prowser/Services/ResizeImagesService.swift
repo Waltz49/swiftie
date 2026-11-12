@@ -1,8 +1,6 @@
-import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
-import UniformTypeIdentifiers
 
 /// Image resize port of `browser_window/managers/resize_images.py`.
 @MainActor
@@ -143,7 +141,7 @@ enum ResizeImagesService {
         return (tw, th)
     }
 
-    static func computeTargetSize(
+    private static func computeTargetSize(
         origW: Int,
         origH: Int,
         dialogW: Int,
@@ -179,12 +177,13 @@ enum ResizeImagesService {
         }
 
         let ext = (path as NSString).pathExtension.lowercased()
-        guard let saveFormat = extensionSaveFormat(ext) else {
+        guard ImageReencodeMetadata.saveFormatName(for: ext) != nil else {
             return ResizeFileResult(success: false, error: ResizeError.unsupportedType.localizedDescription, wroteFile: false, outputPath: nil)
         }
+        guard let opened = RasterImagePipeline.open(path: path) else {
+            return ResizeFileResult(success: false, error: ResizeError.loadFailed.localizedDescription, wroteFile: false, outputPath: nil)
+        }
 
-        let userComment = ExifService.userComment(path: path)
-        let sourceURL = URL(fileURLWithPath: path)
         var origAtime: Date?
         var origMtime: Date?
         if request.preserveDates {
@@ -193,17 +192,12 @@ enum ResizeImagesService {
             origMtime = attrs?[.modificationDate] as? Date
         }
 
-        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-              let uti = CGImageSourceGetType(source) else {
+        let sourceSize = opened.displayedSize(ignoreExifRotation: request.ignoreExifRotation)
+        let ow = sourceSize.width
+        let oh = sourceSize.height
+        guard ow > 0, oh > 0 else {
             return ResizeFileResult(success: false, error: ResizeError.loadFailed.localizedDescription, wroteFile: false, outputPath: nil)
         }
-
-        guard let image = loadOrientedImage(from: source, ignoreExifRotation: request.ignoreExifRotation) else {
-            return ResizeFileResult(success: false, error: ResizeError.loadFailed.localizedDescription, wroteFile: false, outputPath: nil)
-        }
-
-        let ow = image.width
-        let oh = image.height
         let (tw, th): (Int, Int)
         if request.usePercentScale {
             let pct = max(percentScaleMin, min(percentScaleMax, request.percentScale))
@@ -224,18 +218,11 @@ enum ResizeImagesService {
             return ResizeFileResult(success: true, error: nil, wroteFile: false, outputPath: nil)
         }
 
-        let properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
-        let preserveTransparency = ["PNG", "GIF", "WEBP", "TIFF"].contains(saveFormat)
-        guard let resized = resizeImage(
-            image,
-            width: tw,
-            height: th,
-            preserveTransparency: preserveTransparency,
-            method: request.resampleMethod
-        ) else {
-            return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
-        }
-
+        let rawTarget = opened.rawOutputSize(
+            displayedWidth: tw,
+            displayedHeight: th,
+            ignoreExifRotation: request.ignoreExifRotation
+        )
         let finalPath = request.deleteOriginal ? path : uniqueOutputPath(for: path)
         let finalURL = URL(fileURLWithPath: finalPath)
         let outDir = finalURL.deletingLastPathComponent()
@@ -243,46 +230,33 @@ enum ResizeImagesService {
             .appendingPathComponent(".resize_\(UUID().uuidString)")
             .appendingPathExtension((path as NSString).pathExtension)
 
-        if saveFormat == "WEBP" {
-            do {
-                try WebPImageWriter.write(
-                    image: resized,
-                    to: tempURL,
-                    sourcePathForMetadata: path,
-                    lossless: preserveTransparency && resizedHasAlpha(resized)
-                )
-            } catch {
-                try? FileManager.default.removeItem(at: tempURL)
-                return ResizeFileResult(
-                    success: false,
-                    error: error.localizedDescription,
-                    wroteFile: false,
-                    outputPath: nil
-                )
-            }
-        } else {
-            guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else {
-                return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
-            }
-
-            var destProperties = properties
-            if var exif = destProperties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-                if let userComment, !userComment.isEmpty {
-                    exif[kCGImagePropertyExifUserComment] = userComment
-                }
-                destProperties[kCGImagePropertyExifDictionary] = exif
-            } else if let userComment, !userComment.isEmpty, ExifService.canWriteExif(path: path) {
-                destProperties[kCGImagePropertyExifDictionary] = [
-                    kCGImagePropertyExifUserComment: userComment,
-                ]
-            }
-
-            let saveProps = destinationProperties(for: saveFormat, base: destProperties)
-            CGImageDestinationAddImage(destination, resized, saveProps as CFDictionary)
-            guard CGImageDestinationFinalize(destination) else {
-                try? FileManager.default.removeItem(at: tempURL)
-                return ResizeFileResult(success: false, error: ResizeError.saveFailed.localizedDescription, wroteFile: false, outputPath: nil)
-            }
+        do {
+            let decoded = try RasterImagePipeline.decode(opened)
+            let supportsAlpha = ["PNG", "GIF", "WEBP", "TIFF"].contains(opened.saveFormat)
+            let preserveAlpha = supportsAlpha && opened.hasAlpha
+            let needsRGBABytes = preserveAlpha || opened.saveFormat == "WEBP"
+            let resized = try RasterImagePipeline.render(
+                image: decoded,
+                width: rawTarget.width,
+                height: rawTarget.height,
+                interpolationQuality: request.resampleMethod.interpolationQuality,
+                useAlphaChannel: needsRGBABytes,
+                colorSpace: RasterImagePipeline.outputColorSpace(for: decoded, opened: opened),
+                background: preserveAlpha
+                    ? CGColor(red: 0, green: 0, blue: 0, alpha: 0)
+                    : CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+            )
+            try RasterImagePipeline.write(
+                image: resized,
+                opened: opened,
+                to: tempURL,
+                rawWidth: rawTarget.width,
+                rawHeight: rawTarget.height
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return ResizeFileResult(success: false, error: message, wroteFile: false, outputPath: nil)
         }
 
         do {
@@ -318,17 +292,12 @@ enum ResizeImagesService {
         var errors: [String] = []
         var stoppedEarly = false
         let total = paths.count
+        defer { progress?.close() }
 
         for (index, path) in paths.enumerated() {
-            if progress?.cancelRequested == true {
+            if let progress, progress.cancelRequested {
                 stoppedEarly = true
                 break
-            }
-            progress?.update(value: index, label: "Resizing \(index + 1) of \(total)")
-
-            if PrsortIO.isFileLocked(path) {
-                errors.append("\((path as NSString).lastPathComponent): file is locked")
-                continue
             }
 
             let result = resizeFile(path: path, request: request)
@@ -340,10 +309,18 @@ enum ResizeImagesService {
                 errors.append("\(name): \(result.error ?? "resize failed")")
             }
 
-            progress?.update(value: index + 1)
+            if let progress {
+                progress.serviceBatchIteration(
+                    value: index + 1,
+                    label: "Resizing \(min(index + 1, total)) of \(total)",
+                    pumpDeadline: 0.002
+                )
+                if progress.cancelRequested {
+                    stoppedEarly = true
+                    break
+                }
+            }
         }
-
-        progress?.close()
         return BatchResult(
             resizedCount: resizedCount,
             outputPaths: outputPaths,
@@ -353,37 +330,6 @@ enum ResizeImagesService {
     }
 
     // MARK: - Private helpers
-
-    private static func extensionSaveFormat(_ ext: String) -> String? {
-        switch ext {
-        case "jpg", "jpeg": return "JPEG"
-        case "png": return "PNG"
-        case "gif": return "GIF"
-        case "bmp": return "BMP"
-        case "webp": return "WEBP"
-        case "tiff", "tif": return "TIFF"
-        default: return nil
-        }
-    }
-
-    private static func destinationProperties(for format: String, base: [CFString: Any]) -> [CFString: Any] {
-        var props = base
-        switch format {
-        case "JPEG":
-            props[kCGImageDestinationLossyCompressionQuality] = 0.95
-        case "PNG":
-            props[kCGImagePropertyPNGCompressionFilter] = 6
-        case "WEBP":
-            if let alpha = base[kCGImagePropertyHasAlpha] as? Bool, alpha {
-                props[kCGImageDestinationLossyCompressionQuality] = 1.0
-            } else {
-                props[kCGImageDestinationLossyCompressionQuality] = 0.95
-            }
-        default:
-            break
-        }
-        return props
-    }
 
     private static func uniqueOutputPath(for path: String) -> String {
         let directory = (path as NSString).deletingLastPathComponent
@@ -402,110 +348,4 @@ enum ResizeImagesService {
         return (directory as NSString).appendingPathComponent("\(name)-copy\(suffixExt)")
     }
 
-    private static func loadOrientedImage(from source: CGImageSource, ignoreExifRotation: Bool) -> CGImage? {
-        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        if ignoreExifRotation {
-            return image
-        }
-        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
-        guard let orientation = props[kCGImagePropertyOrientation] as? Int, orientation != 1 else {
-            return image
-        }
-        return applyOrientation(image, orientation: orientation) ?? image
-    }
-
-    private static func applyOrientation(_ image: CGImage, orientation: Int) -> CGImage? {
-        let width = image.width
-        let height = image.height
-        var transform = CGAffineTransform.identity
-        var drawWidth = width
-        var drawHeight = height
-
-        switch orientation {
-        case 2:
-            transform = transform.translatedBy(x: CGFloat(width), y: 0).scaledBy(x: -1, y: 1)
-        case 3:
-            transform = transform.translatedBy(x: CGFloat(width), y: CGFloat(height)).rotated(by: .pi)
-        case 4:
-            transform = transform.translatedBy(x: 0, y: CGFloat(height)).scaledBy(x: 1, y: -1)
-        case 5:
-            transform = transform.translatedBy(x: CGFloat(height), y: 0).rotated(by: .pi / 2).scaledBy(x: -1, y: 1)
-            drawWidth = height
-            drawHeight = width
-        case 6:
-            transform = transform.translatedBy(x: 0, y: 0).rotated(by: .pi / 2)
-            drawWidth = height
-            drawHeight = width
-        case 7:
-            transform = transform.translatedBy(x: CGFloat(height), y: CGFloat(width)).rotated(by: -.pi / 2).scaledBy(x: -1, y: 1)
-            drawWidth = height
-            drawHeight = width
-        case 8:
-            transform = transform.translatedBy(x: 0, y: CGFloat(width)).rotated(by: -.pi / 2)
-            drawWidth = height
-            drawHeight = width
-        default:
-            return image
-        }
-
-        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: drawWidth,
-            height: drawHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return image }
-
-        context.concatenate(transform)
-        let drawRect: CGRect
-        if orientation >= 5 && orientation <= 8 {
-            drawRect = CGRect(x: 0, y: 0, width: height, height: width)
-        } else {
-            drawRect = CGRect(x: 0, y: 0, width: width, height: height)
-        }
-        context.draw(image, in: drawRect)
-        return context.makeImage()
-    }
-
-    private static func resizedHasAlpha(_ image: CGImage) -> Bool {
-        switch image.alphaInfo {
-        case .none, .noneSkipFirst, .noneSkipLast:
-            return false
-        default:
-            return true
-        }
-    }
-
-    private static func resizeImage(
-        _ image: CGImage,
-        width: Int,
-        height: Int,
-        preserveTransparency: Bool,
-        method: ResampleMethod
-    ) -> CGImage? {
-        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        let alphaInfo: CGImageAlphaInfo = preserveTransparency ? .premultipliedLast : .noneSkipLast
-        let bitmapInfo = alphaInfo.rawValue
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else { return nil }
-
-        if !preserveTransparency {
-            context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        }
-
-        context.interpolationQuality = method.interpolationQuality
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage()
-    }
 }

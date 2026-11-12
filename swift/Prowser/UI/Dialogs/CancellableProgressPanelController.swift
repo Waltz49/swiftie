@@ -363,6 +363,28 @@ final class CancellableProgressPanelController {
         }
     }
 
+    /// Synchronous progress + short run-loop pump for `@MainActor` batch loops that never `await`.
+    /// `update(value:label:)` schedules async work that will not run until the loop yields.
+    func serviceBatchIteration(value: Int, label: String, pumpDeadline: TimeInterval = 0.012) {
+        updateOnMain(value: value, label: label)
+        flushPendingProgressOnMain()
+        refresh()
+        pumpModalRunLoop(until: Date().addingTimeInterval(pumpDeadline))
+    }
+
+    /// Hide without `close()` so a nested modal dialog can take focus (screen-size copy downsize warning).
+    func hideForNestedModal() {
+        guard !isClosed else { return }
+        panel.orderOut(nil)
+    }
+
+    func restoreAfterNestedModal() {
+        guard !isClosed else { return }
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(cancelButton)
+        refresh()
+    }
+
     func close() {
         guard !isClosed else { return }
         if pendingProgressValue != nil || pendingProgressLabel != nil || pendingBucketValue != nil {
@@ -677,6 +699,15 @@ final class CancellableProgressPanelController {
 
     private func refresh() {
         refreshOnMain()
+    }
+
+    private func pumpModalRunLoop(until deadline: Date) {
+        while Date() < deadline {
+            if cancelRequested { return }
+            _ = RunLoop.current.run(mode: .eventTracking, before: deadline)
+            if cancelRequested { return }
+            _ = RunLoop.current.run(mode: .default, before: deadline)
+        }
     }
 
     private final class CancelFlag: @unchecked Sendable {

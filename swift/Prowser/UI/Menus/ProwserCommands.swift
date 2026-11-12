@@ -408,21 +408,14 @@ struct ProwserCommands: Commands {
                     Button("Create Screen Size Copy (Last Used)") {
                         Task { @MainActor in appState.createScreenSizeCopy() }
                     }
+                    .keyboardShortcut("u", modifiers: [.command, .shift])
 
                     Divider()
 
-                    Button("Fit (Contain)") {
-                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .contain) }
-                    }
-                    Button("Fill (Cover)") {
-                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .cover) }
-                    }
-                    Button("Fit to Width") {
-                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .width) }
-                    }
-                    Button("Fit to Height") {
-                        Task { @MainActor in appState.createScreenSizeCopy(fitMethod: .height) }
-                    }
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .contain, title: "Fit (Contain)")
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .cover, title: "Fill (Cover)")
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .width, title: "Fit to Width")
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .height, title: "Fit to Height")
                 }
 
                 Button("Open Home Directory") {
@@ -672,6 +665,30 @@ private struct MapLocationButton: View {
         .keyboardShortcut("g", modifiers: .command)
         .disabled(appState.fileData.currentViewMode != .thumbnail
             && appState.fileData.currentViewMode != .browse)
+    }
+}
+
+private struct ScreenSizeCopyFitMenuButton: View {
+    @Bindable var appState: AppState
+    let method: ScreenSizeCopyService.FitMethod
+    let title: String
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: {
+                _ = appState.menuCommandsRevision
+                return appState.screenCopyMenuFitMethod == method
+            },
+            set: { newValue in
+                if newValue {
+                    Task { @MainActor in
+                        appState.createScreenSizeCopy(fitMethod: method)
+                    }
+                }
+            }
+        )) {
+            Text(title)
+        }
     }
 }
 

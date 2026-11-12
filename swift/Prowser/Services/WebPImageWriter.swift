@@ -6,12 +6,10 @@ import libwebp
 /// WebP encoding via libwebp. macOS ImageIO can decode WebP but cannot create WebP destinations.
 enum WebPImageWriter {
     enum WriteError: LocalizedError {
-        case encodeFailed
         case muxFailed
 
         var errorDescription: String? {
             switch self {
-            case .encodeFailed: return "Failed to encode WebP"
             case .muxFailed: return "Failed to write WebP metadata"
             }
         }
@@ -22,18 +20,19 @@ enum WebPImageWriter {
         to url: URL,
         sourcePathForMetadata: String? = nil,
         metadataExifTiff: Data? = nil,
-        lossless: Bool = false
+        lossless: Bool = false,
+        compressionMethod: Int = 6,
+        inputIsCanonicalRGBA8: Bool = false,
+        atomicWrite: Bool = true
     ) throws {
-        let encoder = WebPEncoder()
-        var config = WebPEncoderConfig.preset(.picture, quality: 95)
-        config.method = 6
-        if lossless {
-            config.lossless = 1
-        }
-
-        // ImageIO/CGImage pixel layout varies (often BGRA); encoding via data provider bytes corrupts output.
-        let raster = canonicalRGBA8Image(from: image)
-        let encoded = try encoder.encode(RGBA: raster, config: config)
+        let raster = inputIsCanonicalRGBA8
+            ? image
+            : canonicalRGBA8Image(from: image)
+        let encoded = try encode(
+            raster,
+            lossless: lossless,
+            compressionMethod: compressionMethod
+        )
 
         var output = encoded
         let exifChunk = metadataExifTiff
@@ -42,10 +41,25 @@ enum WebPImageWriter {
             output = try muxExifChunk(into: encoded, exif: exifChunk)
         }
 
-        try output.write(to: url, options: .atomic)
+        try output.write(to: url, options: atomicWrite ? .atomic : [])
     }
 
-    /// Draw into RGBA8 / premultipliedLast so libwebp `WebPPictureImportRGBA` matches memory layout.
+    private static func encode(
+        _ image: CGImage,
+        lossless: Bool,
+        compressionMethod: Int
+    ) throws -> Data {
+        let encoder = WebPEncoder()
+        var config = WebPEncoderConfig.preset(.picture, quality: 95)
+        config.method = max(0, min(6, compressionMethod))
+        config.threadLevel = 1
+        if lossless {
+            config.lossless = 1
+        }
+        return try encoder.encode(RGBA: image, config: config)
+    }
+
+    /// Normalize arbitrary CGImage channel layouts before passing bytes to `WebPPictureImportRGBA`.
     private static func canonicalRGBA8Image(from image: CGImage) -> CGImage {
         let width = image.width
         let height = image.height

@@ -325,10 +325,9 @@ These work from most views via the menu bar:
 
 - **Cmd+Shift+M** — Quick mass rename (when enabled)
 - **Cmd+Shift+E** — Edit EXIF user comment
+- **Cmd+Shift+U** — Create screen-size copy (last used)
 - **⌃H** — Open home directory
 - **Cmd+Shift+W** — Wallpaper → resize window (last used scaling)
-
-Screen-size copy actions are in **Tools → Create Screen Size Copy…** (no default keyboard shortcut).
 
 ## Notes
 

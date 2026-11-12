@@ -245,6 +245,12 @@ final class AppState {
     var sidebarLayoutRevision = 0
     /// Bumped when command-menu enablement changes so SwiftUI `Commands` re-evaluate `.disabled`.
     var menuCommandsRevision = 0
+    /// Highlighted fit mode in Tools ▸ Create Screen Size Copy (Python `update_screen_copy_menu_checkmarks`).
+    var screenCopyMenuFitMethod: ScreenSizeCopyService.FitMethod {
+        ScreenSizeCopyService.FitMethod(
+            configValue: config.string(forKey: "last_used_screen_copy_fit_method", default: "cover")
+        )
+    }
     /// Bumped when lock markers change so thumbnail padlock overlays repaint.
     var thumbnailLockPaintRevision = 0
     /// Directory scan/sort in flight (Python `_loading_directory_mode`).
@@ -2279,56 +2285,237 @@ final class AppState {
     }
 
     func createScreenSizeCopy(fitMethod: ScreenSizeCopyService.FitMethod? = nil) {
-        let paths = selectedImagePaths()
-        guard !paths.isEmpty else {
-            status.show("No files selected")
+        let selected = selectedImagePaths().filter { FileManager.default.fileExists(atPath: $0) }
+        guard !selected.isEmpty else {
+            StyledMessageDialog.showInformation(
+                title: "Create screen size copy",
+                message: "No image selected. Select an image or ensure one is displayed."
+            )
             return
         }
 
-        let method = fitMethod ?? ScreenSizeCopyService.FitMethod(
-            configValue: config.string(forKey: "last_used_screen_copy_fit_method", default: "cover")
-        )
-        let borders = config.bool(forKey: "screen_copy_borders_on_copy", default: true)
-        let preserveDates = config.bool(forKey: "screen_copy_preserve_dates", default: true)
-        config.updateSetting("last_used_screen_copy_fit_method", value: method.rawValue)
-
-        if paths.count > 1 {
-            guard StyledMessageDialog.showConfirm(
-                title: "Create screen size copy?",
-                message: "Create screen-sized copies for \(paths.count) files?",
-                confirmTitle: "Create"
-            ) else { return }
+        let unsupportedCount = selected.filter { !ScreenSizeCopyService.supportsOutputFormat(path: $0) }.count
+        let filesToProcess = selected.filter { ScreenSizeCopyService.supportsOutputFormat(path: $0) }
+        if filesToProcess.isEmpty {
+            StyledMessageDialog.showWarning(
+                title: "Create screen size copy",
+                message: "The selected file type is not supported for screen size copy.\n\n"
+                    + "Supported types: JPEG, PNG, GIF, BMP, WebP, and TIFF."
+            )
+            return
+        }
+        if unsupportedCount > 0 {
+            let skipWord = RenamePrefixPlanner.fileString(unsupportedCount)
+            status.show("Skipped \(unsupportedCount) unsupported \(skipWord) for screen size copy")
         }
 
-        var created = 0
-        var lastError: String?
-        for path in paths {
+        let initialMethod = fitMethod ?? screenCopyMenuFitMethod
+
+        let defaultBorders = config.bool(forKey: "screen_copy_borders_on_copy", default: true)
+        let ignoreExif = config.ignoreExifRotation
+        let previewNeeding = ScreenSizeCopyService.filesNeedingResize(
+            paths: filesToProcess,
+            bordersOnCopy: defaultBorders,
+            ignoreExifRotation: ignoreExif
+        )
+        if previewNeeding.isEmpty {
+            let word = RenamePrefixPlanner.fileString(filesToProcess.count)
+            StyledMessageDialog.showInformation(
+                title: "Create screen size copy",
+                message: "All \(filesToProcess.count) \(word) already at target size — nothing to do"
+            )
+            return
+        }
+
+        guard let confirmed = ScreenSizeCopyDialogController.presentConfirm(
+            filesToProcess: filesToProcess,
+            initialFitMethod: initialMethod,
+            defaultPreserveDates: config.bool(forKey: "screen_copy_preserve_dates", default: true),
+            defaultDeleteOriginals: config.bool(forKey: "screen_copy_delete_originals", default: false),
+            defaultBordersOnCopy: defaultBorders,
+            ignoreExifRotation: ignoreExif
+        ) else { return }
+
+        config.updateSetting("screen_copy_preserve_dates", value: confirmed.preserveDates)
+        config.updateSetting("screen_copy_delete_originals", value: confirmed.deleteOriginals)
+        config.updateSetting("screen_copy_borders_on_copy", value: confirmed.bordersOnCopy)
+        config.updateSetting("last_used_screen_copy_fit_method", value: confirmed.fitMethod.rawValue)
+        bumpMenuCommandsRevision()
+
+        let filesNeedingResize = ScreenSizeCopyService.filesNeedingResize(
+            paths: filesToProcess,
+            bordersOnCopy: confirmed.bordersOnCopy,
+            ignoreExifRotation: ignoreExif
+        )
+        if filesNeedingResize.isEmpty {
+            let word = RenamePrefixPlanner.fileString(filesToProcess.count)
+            StyledMessageDialog.showInformation(
+                title: "Create screen size copy",
+                message: "All \(filesToProcess.count) \(word) already at target size — nothing to do"
+            )
+            return
+        }
+
+        var progress: CancellableProgressPanelController?
+        if filesNeedingResize.count > 2 {
+            progress = CancellableProgressPanelController(
+                title: "Create screen size copy",
+                labelText: "Creating screen-sized copies…",
+                maximum: filesNeedingResize.count,
+                showsTimeRemainingEstimate: false
+            )
+            progress?.show()
+        }
+        defer { progress?.close() }
+
+        var successPaths: [(original: String, result: String)] = []
+        var errorCount = 0
+        var skippedCount = 0
+        var cancelled = false
+        var downsizeAllDecision: Bool?
+        let fitName = screenCopyFitDisplayName(confirmed.fitMethod)
+
+        let progressTotal = filesNeedingResize.count
+        for (index, imagePath) in filesNeedingResize.enumerated() {
+            if let progress, progress.cancelRequested {
+                cancelled = true
+                break
+            }
+
+            if ScreenSizeCopyService.wouldDownsize(
+                path: imagePath,
+                fitMethod: confirmed.fitMethod,
+                bordersOnCopy: confirmed.bordersOnCopy,
+                ignoreExifRotation: ignoreExif
+            ) {
+                if downsizeAllDecision == false {
+                    skippedCount += 1
+                    continue
+                }
+                if downsizeAllDecision == nil {
+                    progress?.hideForNestedModal()
+                    let ds = ScreenSizeCopyDialogController.presentDownsizeWarning(
+                        imagePath: imagePath,
+                        ignoreExifRotation: ignoreExif
+                    )
+                    progress?.restoreAfterNestedModal()
+                    if ds.applyToAll {
+                        downsizeAllDecision = ds.shouldContinue
+                    }
+                    if !ds.shouldContinue {
+                        skippedCount += 1
+                        continue
+                    }
+                }
+            }
+
             do {
-                _ = try ScreenSizeCopyService.createCopy(
-                    path: path,
-                    fitMethod: method,
-                    bordersOnCopy: borders,
-                    preserveDates: preserveDates,
-                    ignoreExifRotation: config.ignoreExifRotation
+                var resultPath = try ScreenSizeCopyService.createCopy(
+                    path: imagePath,
+                    fitMethod: confirmed.fitMethod,
+                    bordersOnCopy: confirmed.bordersOnCopy,
+                    preserveDates: confirmed.preserveDates,
+                    ignoreExifRotation: ignoreExif
                 )
-                created += 1
+                if confirmed.deleteOriginals {
+                    if let replaced = replaceOriginalWithScreenSizeCopy(original: imagePath, copyPath: resultPath) {
+                        resultPath = replaced
+                    } else {
+                        errorCount += 1
+                        continue
+                    }
+                }
+                successPaths.append((imagePath, resultPath))
             } catch {
-                lastError = error.localizedDescription
+                errorCount += 1
+            }
+
+            if let progress {
+                progress.serviceBatchIteration(
+                    value: index + 1,
+                    label: "Creating \(min(index + 1, progressTotal)) of \(progressTotal)",
+                    pumpDeadline: 0.002
+                )
+                if progress.cancelRequested {
+                    cancelled = true
+                    break
+                }
             }
         }
 
-        if created > 0 {
-            status.show(
-                created == 1
-                    ? "Created screen-sized copy"
-                    : "Created \(created) screen-sized copies"
-            )
+        var pathsToClear = Set<String>()
+        for pair in successPaths {
+            pathsToClear.insert(pair.original)
+            if pair.result != pair.original {
+                pathsToClear.insert(pair.result)
+            }
+        }
+        if !pathsToClear.isEmpty {
+            DirectoryRefreshService.invalidateThumbnails(appState: self, paths: Array(pathsToClear))
+        }
+
+        if !successPaths.isEmpty {
             refreshDirectory()
-        } else {
+        }
+
+        if errorCount > 0 {
             StyledMessageDialog.showWarning(
-                title: "Screen size copy failed",
-                message: lastError ?? "No files were processed."
+                title: "Create screen size copy",
+                message: "\(errorCount) error(s) occurred while creating \(fitName) copies."
             )
+        } else if !successPaths.isEmpty {
+            var parts: [String] = []
+            if successPaths.count == 1 {
+                let name = (successPaths[0].result as NSString).lastPathComponent
+                parts.append("Created \(fitName) copy: \(name)")
+            } else {
+                parts.append("Created \(successPaths.count) \(fitName) copies")
+            }
+            if skippedCount > 0 {
+                parts.append("\(skippedCount) already correct size")
+            }
+            if cancelled {
+                parts.append("cancelled")
+            }
+            status.show(parts.joined(separator: ", "))
+        } else if skippedCount > 0 {
+            let word = RenamePrefixPlanner.fileString(skippedCount)
+            status.show("\(skippedCount) \(word) already correct size — nothing to do")
+        }
+    }
+
+    private func screenCopyFitDisplayName(_ method: ScreenSizeCopyService.FitMethod) -> String {
+        switch method {
+        case .contain: return "Fit"
+        case .cover: return "Fill"
+        case .width: return "Fit to Width"
+        case .height: return "Fit to Height"
+        }
+    }
+
+    private func replaceOriginalWithScreenSizeCopy(original: String, copyPath: String) -> String? {
+        guard FileManager.default.fileExists(atPath: original),
+              FileManager.default.isWritableFile(atPath: original),
+              !RenamePrefixPlanner.isInsidePhotosLibrary(original),
+              !PrsortIO.isFileLocked(original) else {
+            return nil
+        }
+        let originalURL = URL(fileURLWithPath: original)
+        let copyURL = URL(fileURLWithPath: copyPath)
+        var trashURL: NSURL?
+        do {
+            try FileManager.default.trashItem(at: originalURL, resultingItemURL: &trashURL)
+            guard !FileManager.default.fileExists(atPath: original) else {
+                return nil
+            }
+            try FileManager.default.moveItem(at: copyURL, to: originalURL)
+            return original
+        } catch {
+            if !FileManager.default.fileExists(atPath: original),
+               let trashURL {
+                try? FileManager.default.moveItem(at: trashURL as URL, to: originalURL)
+            }
+            return nil
         }
     }
 
