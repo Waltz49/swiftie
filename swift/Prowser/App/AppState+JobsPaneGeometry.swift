@@ -6,7 +6,8 @@ extension AppState {
     /// Coalesce resize requests to one pass after layout (no multi-step grow/shrink loop).
     func scheduleJobsPaneGeometryRefit() {
         let snapping = jobsSurfaceExactSnapPasses > 0
-        guard snapping || jobsDisplayMode == .pane else { return }
+        let fittingFloatingMiniPanel = showFloatingJobsPanel && jobsPaneMiniChromeActive
+        guard snapping || jobsDisplayMode == .pane || fittingFloatingMiniPanel else { return }
         if rightSidebarSplit.userPaneResizeInProgress || isAdjustingJobsPaneGeometry {
             jobsPaneRefitDeferred = true
         }
@@ -34,6 +35,10 @@ extension AppState {
                     self.scheduleJobsPaneGeometryRefit()
                     return
                 }
+            }
+            if self.showFloatingJobsPanel && self.jobsPaneMiniChromeActive {
+                _ = self.resizeFloatingJobsPanelToOptimal()
+                return
             }
             guard self.jobsDisplayMode == .pane else { return }
             let forceRefit = self.jobsPaneGeometryForceRefit
@@ -93,7 +98,7 @@ extension AppState {
 
     @discardableResult
     private func resizeFloatingJobsPanelToOptimal() -> Bool {
-        guard let window = SceneWindowChrome.jobsPanelWindow(), window.isVisible else { return false }
+        guard let window = SceneWindowChrome.jobsPanelWindow() else { return false }
         refreshJobsPaneLiveMeasurements()
         let target = max(floatingJobsPanelContentHeight(), 80)
         let frame = window.frame

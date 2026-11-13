@@ -85,7 +85,7 @@ struct FloatingJobQueuePanelView: View {
             defaultWidth: 320,
             defaultHeight: 420,
             minWidth: 260,
-            minHeight: 220,
+            minHeight: mini ? 80 : 220,
             nestedInImageGen: true,
             windowIdentifier: "jobs-panel",
             windowTitle: "Job Control",

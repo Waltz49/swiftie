@@ -26,7 +26,10 @@ struct ProwserApp: App {
             OptionalAppStateWindow(appState: appDelegate.appState) { appState in
                 FloatingJobQueuePanelView()
                     .environment(appState)
-                    .frame(minWidth: 280, minHeight: 220)
+                    .frame(
+                        minWidth: 280,
+                        minHeight: appState.jobsPaneMiniChromeActive ? 0 : 220
+                    )
             }
         }
         .windowStyle(.hiddenTitleBar)
