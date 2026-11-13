@@ -596,15 +596,18 @@ extension AppState {
     func applyCurrentSort() {
         let current = fileData.currentImagePath
         let options = SortingService.Options.from(config: config)
-        let sorted = DisplayOrderService.applyDisplayOrder(
+        let order = DisplayOrderService.applyDisplayOrderWithContext(
             fileData.displayedImages,
             appState: self
         )
+        let sorted = order.paths
         metadataCache.saveIfNeeded()
         fileData.setDisplayedImages(sorted)
         if options.mode == .duplicates {
-            let pairs = DuplicateHashService.duplicateGroupPairs(sorted)
-            duplicateSections = DuplicateGroupPresentation.duplicateSections(from: pairs)
+            duplicateSections = DuplicateHashService.duplicateSections(
+                forDisplayedPaths: sorted,
+                sortHashGroups: order.duplicateHashGroups
+            )
             exifDateSections = []
         } else if options.mode == .exifDate || options.mode == .exifYear {
             exifDateSections = ExifSectionPresentation.sections(

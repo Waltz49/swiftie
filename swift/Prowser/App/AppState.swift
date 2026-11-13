@@ -1343,9 +1343,11 @@ final class AppState {
         let generation = manualDirectoryRefreshGeneration
         manualDirectoryRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let images = await Task.detached(priority: .userInitiated) {
+            let sortOutput = await Task.detached(priority: .userInitiated) {
                 DirectoryLoadBackgroundWork.scanAndSort(snapshot)
             }.value
+            let images = sortOutput.paths
+            let backgroundDuplicateHashGroups = sortOutput.duplicateHashGroups
             guard !Task.isCancelled, generation == self.manualDirectoryRefreshGeneration else { return }
             guard self.fileData.currentDirectory == dir else { return }
             let currentDisplayed = self.fileData.displayedImages
@@ -1362,11 +1364,25 @@ final class AppState {
                 let displayedSet = Set(currentDisplayed)
                 merged.append(contentsOf: images.filter { !displayedSet.contains($0) })
                 candidateList = merged
+            } else if sortMode == .duplicates {
+                let order = DisplayOrderService.applyDisplayOrderWithContext(
+                    images,
+                    appState: self,
+                    trustPreSortedFromDirectoryLoad: true,
+                    precomputedDuplicateHashGroups: backgroundDuplicateHashGroups
+                )
+                candidateList = order.paths
+                duplicateSections = DuplicateHashService.duplicateSections(
+                    forDisplayedPaths: order.paths,
+                    sortHashGroups: order.duplicateHashGroups
+                )
+                exifDateSections = []
             } else {
                 candidateList = DisplayOrderService.applyDisplayOrder(
                     images,
                     appState: self,
-                    trustPreSortedFromDirectoryLoad: true
+                    trustPreSortedFromDirectoryLoad: true,
+                    precomputedDuplicateHashGroups: backgroundDuplicateHashGroups
                 )
             }
             let hasStalePaths = !self.isFormattedListMode()

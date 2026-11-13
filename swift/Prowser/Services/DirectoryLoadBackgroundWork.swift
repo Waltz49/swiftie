@@ -12,7 +12,12 @@ enum DirectoryLoadBackgroundWork {
         let useExifDate: Bool
     }
 
-    static func scanAndSort(_ snapshot: Snapshot) -> [String] {
+    struct SortOutput: Sendable {
+        var paths: [String]
+        var duplicateHashGroups: DuplicateHashService.HashGroups?
+    }
+
+    static func scanAndSort(_ snapshot: Snapshot) -> SortOutput {
         let scanned = DirectoryScanner.scanDirectory(
             at: snapshot.path,
             extensions: snapshot.extensions,
@@ -21,41 +26,59 @@ enum DirectoryLoadBackgroundWork {
         return sort(scanned, snapshot: snapshot)
     }
 
-    static func sort(_ paths: [String], snapshot: Snapshot) -> [String] {
-        DirectoryBackgroundSorting.sorted(paths, snapshot: snapshot)
+    static func sort(_ paths: [String], snapshot: Snapshot) -> SortOutput {
+        DirectoryBackgroundSorting.sort(paths, snapshot: snapshot)
     }
 }
 
 /// Sort paths without `MetadataCacheService` (background-safe file I/O).
 private enum DirectoryBackgroundSorting {
-    static func sorted(_ paths: [String], snapshot: DirectoryLoadBackgroundWork.Snapshot) -> [String] {
+    static func sort(_ paths: [String], snapshot: DirectoryLoadBackgroundWork.Snapshot) -> DirectoryLoadBackgroundWork.SortOutput {
         let mode = SortMode(rawValue: snapshot.sortModeRaw) ?? .date
         let options = Options(mode: mode, reversed: snapshot.sortReversed, useExifDate: snapshot.useExifDate)
+        let duplicateDescending = sortDescending(mode: .duplicates, reversed: options.reversed)
         switch options.mode {
         case .random:
-            return paths.shuffled()
+            return DirectoryLoadBackgroundWork.SortOutput(paths: paths.shuffled(), duplicateHashGroups: nil)
         case .duplicates:
-            let dupes = DuplicateHashService.duplicateSortedPaths(paths)
-            return sortDescending(mode: .duplicates, reversed: options.reversed)
-                ? dupes.reversed() : dupes
+            let result = DuplicateHashService.duplicateSortResult(
+                filePaths: paths,
+                reversed: duplicateDescending
+            )
+            return DirectoryLoadBackgroundWork.SortOutput(
+                paths: result.sortedPaths,
+                duplicateHashGroups: result.hashGroups
+            )
         case .custom:
-            guard let directory = commonDirectory(for: paths) else { return paths }
-            return PrsortIO.applyCustomOrder(paths: paths, directory: directory)
+            guard let directory = commonDirectory(for: paths) else {
+                return DirectoryLoadBackgroundWork.SortOutput(paths: paths, duplicateHashGroups: nil)
+            }
+            return DirectoryLoadBackgroundWork.SortOutput(
+                paths: PrsortIO.applyCustomOrder(paths: paths, directory: directory),
+                duplicateHashGroups: nil
+            )
         case .size:
-            return sortBySize(paths, reversed: options.reversed)
+            return DirectoryLoadBackgroundWork.SortOutput(
+                paths: sortBySize(paths, reversed: options.reversed),
+                duplicateHashGroups: nil
+            )
         case .comments:
-            return sortByComments(paths, reversed: options.reversed)
+            return DirectoryLoadBackgroundWork.SortOutput(
+                paths: sortByComments(paths, reversed: options.reversed),
+                duplicateHashGroups: nil
+            )
         default:
             let descending = sortDescending(mode: options.mode, reversed: options.reversed)
             let keyed = paths.map {
                 ($0, sortKey(for: $0, mode: options.mode, useExifDate: options.useExifDate))
             }
-            return keyed.sorted { lhs, rhs in
+            let sorted = keyed.sorted { lhs, rhs in
                 if let ordered = comparePrimary(lhs.1, rhs.1, descending: descending) {
                     return ordered
                 }
                 return fileNameComesBefore(lhs.0, rhs.0)
             }.map(\.0)
+            return DirectoryLoadBackgroundWork.SortOutput(paths: sorted, duplicateHashGroups: nil)
         }
     }
 

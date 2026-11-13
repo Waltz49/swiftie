@@ -18,6 +18,51 @@ enum SortingService {
         }
     }
 
+    /// Sorted paths plus duplicate hash groups when `options.mode == .duplicates`.
+    static func sortedWithDuplicateContext(
+        _ paths: [String],
+        options: Options,
+        metadataCache: MetadataCacheService? = nil,
+        commentRanks: [String: Int]? = nil
+    ) -> (paths: [String], duplicateHashGroups: DuplicateHashService.HashGroups?) {
+        let duplicateDescending = sortDescending(mode: .duplicates, reversed: options.reversed)
+        switch options.mode {
+        case .random:
+            return (paths.shuffled(), nil)
+        case .duplicates:
+            let result = DuplicateHashService.duplicateSortResult(
+                filePaths: paths,
+                reversed: duplicateDescending
+            )
+            return (result.sortedPaths, result.hashGroups)
+        case .custom:
+            guard let directory = commonDirectory(for: paths) else { return (paths, nil) }
+            return (PrsortIO.applyCustomOrder(paths: paths, directory: directory), nil)
+        case .size:
+            return (
+                sortBySize(paths, reversed: options.reversed, metadataCache: metadataCache),
+                nil
+            )
+        case .comments:
+            return (
+                sortByComments(paths, reversed: options.reversed, ranks: commentRanks ?? [:]),
+                nil
+            )
+        default:
+            let descending = sortDescending(mode: options.mode, reversed: options.reversed)
+            let keyed = paths.map {
+                ( $0, sortKey(for: $0, mode: options.mode, useExifDate: options.useExifDate, metadataCache: metadataCache) )
+            }
+            let sortedKeys = keyed.sorted { lhs, rhs in
+                if let ordered = comparePrimary(lhs.1, rhs.1, descending: descending) {
+                    return ordered
+                }
+                return fileNameComesBefore(lhs.0, rhs.0)
+            }
+            return (sortedKeys.map(\.0), nil)
+        }
+    }
+
     static func sorted(
         _ paths: [String],
         options: Options,
@@ -28,9 +73,12 @@ enum SortingService {
         case .random:
             return paths.shuffled()
         case .duplicates:
-            let dupes = DuplicateHashService.duplicateSortedPaths(paths)
-            return sortDescending(mode: .duplicates, reversed: options.reversed)
-                ? dupes.reversed() : dupes
+            return sortedWithDuplicateContext(
+                paths,
+                options: options,
+                metadataCache: metadataCache,
+                commentRanks: commentRanks
+            ).paths
         case .custom:
             guard let directory = commonDirectory(for: paths) else { return paths }
             // `.prsort` stores reversal; do not apply `sort_reversed` again.

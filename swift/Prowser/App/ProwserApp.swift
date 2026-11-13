@@ -386,7 +386,7 @@ final class DirectoryLoadCoordinator {
                 )
             }
 
-            let images = await Task.detached(priority: .userInitiated) {
+            let sortOutput = await Task.detached(priority: .userInitiated) {
                 DirectoryLoadBackgroundWork.sort(scanned, snapshot: snapshot)
             }.value
 
@@ -395,7 +395,8 @@ final class DirectoryLoadCoordinator {
             self.finishDirectoryLoad(
                 generation: generation,
                 path: normalized,
-                images: images,
+                images: sortOutput.paths,
+                duplicateHashGroups: sortOutput.duplicateHashGroups,
                 pinnedPath: pin,
                 showLoadingState: showLoadingState,
                 onComplete: onComplete
@@ -454,6 +455,7 @@ final class DirectoryLoadCoordinator {
             generation: generation,
             path: path,
             images: images,
+            duplicateHashGroups: nil,
             pinnedPath: pinnedPath,
             showLoadingState: showLoadingState,
             onComplete: onComplete
@@ -464,6 +466,7 @@ final class DirectoryLoadCoordinator {
         generation: Int,
         path: String,
         images: [String],
+        duplicateHashGroups: DuplicateHashService.HashGroups?,
         pinnedPath: String?,
         showLoadingState: Bool,
         onComplete: (() -> Void)?
@@ -473,12 +476,22 @@ final class DirectoryLoadCoordinator {
         cancelPendingLoadingCanvas()
 
         appState.fileData.setCurrentDirectory(path)
-        let ordered = DisplayOrderService.applyDisplayOrder(
+        let order = DisplayOrderService.applyDisplayOrderWithContext(
             images,
             appState: appState,
-            trustPreSortedFromDirectoryLoad: true
+            trustPreSortedFromDirectoryLoad: true,
+            precomputedDuplicateHashGroups: duplicateHashGroups
         )
+        let ordered = order.paths
         appState.fileData.setDisplayedImages(ordered)
+        let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
+        if sortMode == .duplicates {
+            appState.duplicateSections = DuplicateHashService.duplicateSections(
+                forDisplayedPaths: ordered,
+                sortHashGroups: order.duplicateHashGroups
+            )
+            appState.exifDateSections = []
+        }
         let resolvedActive = Self.resolveActiveImageAfterDirectoryLoad(
             images: appState.fileData.getDisplayedImages(),
             pinnedPath: pinnedPath,

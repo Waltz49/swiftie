@@ -173,15 +173,16 @@ enum DirectoryRefreshService {
         let browseMode = appState.fileData.currentViewMode == .browse
         let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
 
-        let newList: [String]
+        let order: DisplayOrderService.DisplayOrderResult
         if (sortMode == .custom || sortMode == .random), !displayed.isEmpty {
             let displayedFiltered = displayed.filter { diskSet.contains($0) }
             let newFiles = scanned.filter { added.contains($0) }
             let combined = displayedFiltered + newFiles
-            newList = DisplayOrderService.applyDisplayOrder(combined, appState: appState)
+            order = DisplayOrderService.applyDisplayOrderWithContext(combined, appState: appState)
         } else {
-            newList = DisplayOrderService.applyDisplayOrder(scanned, appState: appState)
+            order = DisplayOrderService.applyDisplayOrderWithContext(scanned, appState: appState)
         }
+        let newList = order.paths
 
         if Set(newList) == displayedSet, newList == displayed {
             return
@@ -194,13 +195,18 @@ enum DirectoryRefreshService {
             appState.fileData.setCurrentImagePath(first)
         }
 
+        if sortMode == .duplicates {
+            appState.duplicateSections = DuplicateHashService.duplicateSections(
+                forDisplayedPaths: newList,
+                sortHashGroups: order.duplicateHashGroups
+            )
+            appState.exifDateSections = []
+        }
+
         noteIdleBackgroundScanScopeChanged(appState: appState)
 
         if !browseMode {
             appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
-            if sortMode == .duplicates {
-                appState.applyCurrentSort()
-            }
         }
     }
 
@@ -336,7 +342,14 @@ enum DirectoryRefreshService {
 
         let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
         if sortMode == .duplicates {
-            appState.applyCurrentSort()
+            let displayed = appState.fileData.displayedImages
+            let order = DisplayOrderService.applyDisplayOrderWithContext(displayed, appState: appState)
+            appState.fileData.setDisplayedImages(order.paths)
+            appState.duplicateSections = DuplicateHashService.duplicateSections(
+                forDisplayedPaths: order.paths,
+                sortHashGroups: order.duplicateHashGroups
+            )
+            appState.exifDateSections = []
         }
         noteIdleBackgroundScanScopeChanged(appState: appState)
     }
