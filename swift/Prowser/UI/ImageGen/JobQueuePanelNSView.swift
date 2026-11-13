@@ -23,7 +23,8 @@ private struct JobCardContextMenuState {
 
 @MainActor
 final class JobQueuePanelNSView: NSView, NSDraggingSource {
-    var onReorder: ((String, String?) -> Void)?
+  /// Display insert index (before ``rows[index]``); resolves against a fresh controller snapshot on drop.
+  var onReorder: ((String, Int) -> Bool)?
     var onEdit: ((String) -> Void)?
     var onCancel: ((String, Bool) -> Void)?
     var onMoveToTop: ((String) -> Void)?
@@ -58,6 +59,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     /// When the running job id changes, force a card rebuild (pool reuse can leave stale running chrome).
     private var lastDisplayedActiveJobID: String?
     private var lastSyncedImageGenUIRevision = -1
+    private var lastSyncedRowOrderKey = ""
     private var dragJobID: String?
     private var pendingDropInsertIndex: Int?
     private var reorderApplied = false
@@ -291,10 +293,14 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         let activeJobChanged = activeJobID != lastDisplayedActiveJobID
         lastDisplayedActiveJobID = activeJobID
 
+        let rowOrderKey = rows.map(\.jobID).joined(separator: "\u{1e}")
+        let rowOrderChanged = rowOrderKey != lastSyncedRowOrderKey
+        lastSyncedRowOrderKey = rowOrderKey
+
         preserveScrollPosition {
             if rows.isEmpty {
                 parkAllCards()
-            } else if activeJobChanged || !cardsAlignWithSnapshot(rows) {
+            } else if activeJobChanged || rowOrderChanged || !cardsAlignWithSnapshot(rows) {
                 rebuildRows(
                     rows,
                     scrollWidth: cardScrollWidth,
@@ -525,6 +531,7 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     var displayedRowCount: Int { rows.count }
+    var panelDisplayedJobIDs: [String] { rows.map(\.jobID) }
 
     /// Cards laid out before the panel had real bounds (80px text width): heights are inflated
     /// and must not drive pane sizing; ``layout()`` reflows them once the width is known.
@@ -861,7 +868,8 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard sender.draggingPasteboard.string(forType: jobQueueDragType) != nil else { return false }
-        applyReorder(at: panelPoint(from: sender))
+        // Local drags finish in ``draggingSession(_:endedAt:operation:)``; applying here can
+        // race ``pendingDropInsertIndex`` with an unreliable release point and mark the drop done.
         return true
     }
 
@@ -877,10 +885,14 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             pendingDropInsertIndex = nil
             reorderApplied = false
         }
-        guard !reorderApplied, dragJobID != nil, let window else { return }
+        guard !reorderApplied, dragJobID != nil, let window else {
+            return
+        }
         let panelPoint = convert(window.convertPoint(fromScreen: screenPoint), from: nil)
-        guard scrollView.frame.contains(panelPoint) else { return }
-        applyReorder(at: panelPoint)
+        let inScroll = scrollView.frame.contains(panelPoint)
+        guard inScroll else { return }
+        let docPoint = documentView.convert(panelPoint, from: self)
+        applyReorder(documentPoint: docPoint)
     }
 
     private func panelPoint(from draggingInfo: NSDraggingInfo) -> NSPoint {
@@ -897,12 +909,13 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     /// Display insert index before ``rows[index]`` (or end when index == rows.count).
+    /// Port of Python ``JobQueuePanelWidget._insert_index_at_list_y`` (all cards, midY split).
     private func insertIndex(forPointInDocument point: NSPoint) -> Int {
         stackView.layoutSubtreeIfNeeded()
         let visibleCount = min(cardViews.count, rows.count)
         for index in 0..<visibleCount {
             let frame = cardFrameInDocument(cardViews[index])
-            if point.y < frame.midY {
+            if point.y < frame.minY + frame.height / 2 {
                 return index
             }
         }
@@ -950,18 +963,22 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         applyDropIndicator(insertIndex: insertIndex(forPointInDocument: documentPoint(from: draggingInfo)))
     }
 
-    private func applyReorder(at panelPoint: NSPoint) {
+    /// Port of Python ``_cards_align_with_snapshot`` (job order only).
+    func displayJobOrderMatches(_ controllerRows: [QueueRowSnapshot]) -> Bool {
+        rows.map(\.jobID) == controllerRows.map(\.jobID)
+    }
+
+    /// Port of Python list drop: ``_finish_job_reorder_drop(..., list_host_y)`` recomputes insert from release point.
+    private func applyReorder(documentPoint: NSPoint) {
         guard !reorderApplied, let jobID = dragJobID else { return }
-        let insertIndex = pendingDropInsertIndex ?? insertIndex(
-            forPointInDocument: documentView.convert(panelPoint, from: self)
-        )
-        let beforeID = beforeJobID(forInsertIndex: insertIndex)
-        jobsPaneDebug("drop apply job=\(jobID) index=\(insertIndex) before=\(beforeID ?? "end")")
-        if beforeID == jobID { return }
-        reorderApplied = true
         stopAutoScroll()
         dropLine.isHidden = true
-        onReorder?(jobID, beforeID)
+        let insertIndex = insertIndex(forPointInDocument: documentPoint)
+        jobsPaneDebug("drop apply job=\(jobID) index=\(insertIndex)")
+        let moved = onReorder?(jobID, insertIndex) == true
+        if moved {
+            reorderApplied = true
+        }
     }
 
     private func startAutoScroll() {
@@ -2072,8 +2089,16 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
     @MainActor
     private func syncPanelToController(_ panel: JobQueuePanelNSView) {
         let mode = appState.jobsQueueSizeMode
-        appState.imageGen.prepareQueueRowsForSidebarDisplay()
-        guard mode == .strip || appState.jobsQueueCardDetailsReadyForSizing() else { return }
+        let structureChange = appState.imageGen.lastQueueUIChangeKind == .structure
+        if structureChange
+            || appState.imageGen.lastQueueUIChangeKind != .liveProgress
+            || !appState.jobsQueueCardDetailsReadyForSizing() {
+            appState.imageGen.prepareQueueRowsForSidebarDisplay()
+        }
+        // Row add/remove/reorder must repaint even when the active card is still building status rows.
+        guard mode == .strip
+            || appState.jobsQueueCardDetailsReadyForSizing()
+            || structureChange else { return }
         let rows = appState.jobsQueueRowsForDisplay(mode: mode)
         panel.applyTheme(appState.theme.colors)
         let scrollWidth = resolvedLayoutWidth(proposal: nil, panel: panel)
@@ -2093,8 +2118,20 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         panel.jobCardHoverTooltipResolver = { row, displayedPrompt in
             appState.imageGen.jobCardHoverTooltip(for: row, displayedPrompt: displayedPrompt)
         }
-        panel.onReorder = { jobID, beforeID in
-            appState.imageGen.moveJob(before: beforeID, jobID: jobID)
+        panel.onReorder = { jobID, displayInsertIndex in
+            var controllerRows = appState.filteredQueueSnapshot()
+            if !panel.displayJobOrderMatches(controllerRows) {
+                appState.jobsQueuePanelSync?()
+                controllerRows = appState.filteredQueueSnapshot()
+            }
+            let beforeJobID: String? = displayInsertIndex < controllerRows.count
+                ? controllerRows[displayInsertIndex].jobID
+                : nil
+            let ok = appState.imageGen.moveJob(before: beforeJobID, jobID: jobID)
+            if ok {
+                appState.jobsQueuePanelSync?()
+            }
+            return ok
         }
         panel.onEdit = { jobID in
             appState.openImageGenDialogFromQueueJob(jobID: jobID)

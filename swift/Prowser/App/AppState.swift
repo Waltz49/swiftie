@@ -429,21 +429,29 @@ final class AppState {
                 stepTotal: stepTotal
             )
         }
-        imageGen.onQueueChanged = { [weak self] in
+        imageGen.onQueueChanged = { [weak self] kind in
             guard let self else { return }
-            self.bumpImageGenUI()
-            if self.shouldShrinkWrapJobsClient() {
-                self.measuredJobsCardStackHeight = 0
-                self.jobsQueuePanelIntrinsicHeight = 0
-            }
-            self.jobsQueuePanelSync?()
-            // SwiftUI may replace the representable when the queue changes shape.
-            // Sync again after that replacement has installed its callback.
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+            switch kind {
+            case .liveProgress:
+                return
+            case .statusDetails:
+                self.jobsQueueStatusDetailsRevision += 1
                 self.jobsQueuePanelSync?()
                 guard self.jobsDisplayMode == .pane else { return }
                 self.scheduleJobsPaneLayoutSettleRefresh()
+            case .structure:
+                self.bumpImageGenUI()
+                if self.shouldShrinkWrapJobsClient() {
+                    self.measuredJobsCardStackHeight = 0
+                    self.jobsQueuePanelIntrinsicHeight = 0
+                }
+                self.jobsQueuePanelSync?()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.jobsQueuePanelSync?()
+                    guard self.jobsDisplayMode == .pane else { return }
+                    self.scheduleJobsPaneLayoutSettleRefresh()
+                }
             }
         }
         imageGen.onQueueStatusDetailsReady = { [weak self] in

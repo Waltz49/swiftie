@@ -46,6 +46,10 @@ final class ImageGenController {
     private var liveStepTotal = 0
     private var liveEstimateSeconds: Double?
     private var statusRefreshTask: Task<Void, Never>?
+    private let queuePersistCoalescer = QueuePersistenceCoalescer()
+    /// ``queueSnapshot()`` row count without mapping jobs (updated on queue structure edits).
+    private var cachedQueueSnapshotCount = 0
+    private(set) var lastQueueUIChangeKind: QueueUIChangeKind = .structure
     private var copiesTotal = 0
     private var copiesDone = 0
     private var copyBatchActive = false
@@ -198,7 +202,7 @@ final class ImageGenController {
     /// Called when a progressive step preview is written to disk (debounced by AppState).
     /// Second argument is true when browse should be entered (first preview or final step).
     var onProgressivePreview: ((String, Bool, Int, Int) -> Void)?
-    var onQueueChanged: (() -> Void)?
+    var onQueueChanged: ((QueueUIChangeKind) -> Void)?
     /// Fired after async queue row status views (plugin payload) finish building.
     var onQueueStatusDetailsReady: (() -> Void)?
 
@@ -259,7 +263,6 @@ final class ImageGenController {
     func reloadEnvironment() {
         MfluxToolchain.shared.bind(config: config)
         bumpQueueRevision()
-        onQueueChanged?()
     }
 
     func scheduleStartupQueueRelease(delayMs: Int = 6_000) {
@@ -309,7 +312,8 @@ final class ImageGenController {
             progressiveListSyncOutputPath = ""
             onProgressivePreview?(path, true, liveStep, liveStepTotal)
         }
-        bumpStripUI()
+        lastStripPublishKey = stripPublishKey()
+        notifyQueueUIChange(.structure)
     }
 
     func resetProgressiveBrowseOpened() {
@@ -443,6 +447,7 @@ final class ImageGenController {
             let index = queue.jobs.count - 1
             await refreshQueuedJobStatus(at: index)
         }
+        noteQueueStructureChanged()
         persistQueue()
         bumpQueueRevision()
         if !isProcessing, !holdJobQueue, !startupQueueHold, !queueAdvanceSuppressed {
@@ -620,6 +625,13 @@ final class ImageGenController {
         ) ?? [:]
     }
 
+    private func notifyQueueStatusDetailsRevisionIfNeeded(bumpRevision: Bool) {
+        if bumpRevision, dialogBuildPauseCount == 0 {
+            queueRevision += 1
+        }
+        notifyQueueUIChange(.statusDetails)
+    }
+
     /// Port of ``status_view_for_queue_row`` / ``refresh_queued_job_status`` on the main thread before painting.
     private func refreshQueuedJobStatusSynchronously(at index: Int, bumpRevision: Bool = true) {
         guard queue.jobs.indices.contains(index) else { return }
@@ -634,6 +646,17 @@ final class ImageGenController {
                 copiesTotal: job.copiesTotal,
                 pluginUnavailable: true
             )
+            let fp = QueueJobStatusRefresher.inputsFingerprint(
+                pluginID: job.pluginID,
+                function: job.function,
+                values: job.values,
+                copiesTotal: job.copiesTotal,
+                pluginUnavailable: true,
+                storedFullPrompt: job.fullPrompt,
+                loraLabel: nil,
+                hasFluxAI: false
+            )
+            QueueJobStatusRefresher.recordFingerprint(jobID: jobID, fingerprint: fp)
             applySynchronizedQueuedStatusRefresh(
                 jobID: jobID,
                 job: &job,
@@ -646,6 +669,26 @@ final class ImageGenController {
         let hasFluxAI = job.values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] != nil
         let applyImageExit = !hasFluxAI
         let skipImageExit = !job.fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        let copiesForStatus = max(1, job.copiesTotal)
+        let preLoraLabel = syncLoraStatusLabel(pluginID: job.pluginID, values: job.values)
+        let preFingerprint = QueueJobStatusRefresher.inputsFingerprint(
+            pluginID: job.pluginID,
+            function: job.function,
+            values: job.values,
+            copiesTotal: copiesForStatus,
+            pluginUnavailable: job.pluginUnavailable,
+            storedFullPrompt: job.fullPrompt,
+            loraLabel: preLoraLabel,
+            hasFluxAI: hasFluxAI
+        )
+        if QueueJobStatusRefresher.shouldSkipStatusRebuild(
+            jobID: jobID,
+            fingerprint: preFingerprint,
+            statusView: job.statusView
+        ) {
+            return
+        }
 
         var payload: [String: Any] = [:]
         if skipImageExit {
@@ -682,7 +725,6 @@ final class ImageGenController {
             )
         }
 
-        let copiesForStatus = max(1, job.copiesTotal)
         job.values["copies"] = copiesForStatus
         let loraLabel = syncLoraStatusLabel(pluginID: job.pluginID, values: job.values)
         let built = buildQueueStatusView(
@@ -694,6 +736,17 @@ final class ImageGenController {
             withAI: hasFluxAI,
             loraLabel: loraLabel
         )
+        let postFingerprint = QueueJobStatusRefresher.inputsFingerprint(
+            pluginID: job.pluginID,
+            function: job.function,
+            values: job.values,
+            copiesTotal: copiesForStatus,
+            pluginUnavailable: job.pluginUnavailable,
+            storedFullPrompt: job.fullPrompt,
+            loraLabel: loraLabel,
+            hasFluxAI: hasFluxAI
+        )
+        QueueJobStatusRefresher.recordFingerprint(jobID: jobID, fingerprint: postFingerprint)
         applySynchronizedQueuedStatusRefresh(
             jobID: jobID,
             job: &job,
@@ -748,19 +801,40 @@ final class ImageGenController {
         applyActiveJobCardThumbnailPaths(builtPaths: built.thumbnailPaths)
     }
 
-    func moveJob(before beforeJobID: String?, jobID: String) {
-        let rows = queueSnapshot()
-        guard let fromIndex = rows.firstIndex(where: { $0.jobID == jobID }) else { return }
-        var targetIndex = rows.count
-        if let beforeJobID, let beforeIndex = rows.firstIndex(where: { $0.jobID == beforeJobID }) {
-            targetIndex = beforeIndex
+    @discardableResult
+    func moveJob(before beforeJobID: String?, jobID: String) -> Bool {
+        if let beforeJobID, !beforeJobID.isEmpty, beforeJobID == jobID {
+            return false
         }
-        if fromIndex == targetIndex { return }
+        let rows = queueSnapshot()
+        var targetDisplayRow = rows.count
+        if let beforeJobID, !beforeJobID.isEmpty,
+           let beforeIndex = rows.firstIndex(where: { $0.jobID == beforeJobID }) {
+            targetDisplayRow = beforeIndex
+        }
+        return moveJob(toDisplayRow: targetDisplayRow, jobID: jobID)
+    }
+
+    /// Port of ``move_job_to_display_row`` (display insert index in ``queueSnapshot()`` order).
+    @discardableResult
+    func moveJob(toDisplayRow targetDisplayRow: Int, jobID: String) -> Bool {
+        let trimmedID = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty else { return false }
+        let rows = queueSnapshot()
+        guard !rows.isEmpty else { return false }
+        guard let fromRow = rows.firstIndex(where: { $0.jobID == trimmedID }) else { return false }
+        let targetRow = max(0, min(targetDisplayRow, rows.count))
+        if fromRow == targetRow { return false }
 
         var ids = rows.map(\.jobID)
-        ids.remove(at: fromIndex)
-        let insertAt = targetIndex > fromIndex ? targetIndex - 1 : targetIndex
-        ids.insert(jobID, at: max(0, min(insertAt, ids.count)))
+        ids.remove(at: fromRow)
+        let insertAt: Int
+        if targetRow <= fromRow {
+            insertAt = targetRow
+        } else {
+            insertAt = targetRow - 1
+        }
+        ids.insert(trimmedID, at: max(0, min(insertAt, ids.count)))
 
         var newQueue: [ImageGenQueuedJob] = []
         var newActiveIndex = 0
@@ -775,13 +849,16 @@ final class ImageGenController {
         queue.jobs = newQueue.filter { $0.jobID != activeJobID }
         activeDisplayIndex = newActiveIndex
         queue.activeDisplayIndex = activeDisplayIndex
-        persistQueue()
+        noteQueueStructureChanged()
+        flushPersistQueueNow()
         bumpQueueRevision()
         // Idle pipeline only; an in-flight copy finishes, then the new head runs.
         _ = yieldActiveIfSupersededByReorder()
+        return true
     }
 
     func replaceQueuedJob(jobID: String, pluginID: String, function: String, values: [String: Any]) async throws {
+        QueueJobStatusRefresher.clearFingerprint(jobID: jobID)
         guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return }
         let copies = JobStepQueue.normalizeCopies(values["copies"] ?? 1)
         let priorValues = queue.jobs[index].values
@@ -1009,6 +1086,8 @@ final class ImageGenController {
             return
         }
         queue.jobs.removeAll { $0.jobID == id }
+        QueueJobStatusRefresher.clearFingerprint(jobID: id)
+        noteQueueStructureChanged()
         persistQueue()
         bumpQueueRevision()
     }
@@ -1828,7 +1907,7 @@ final class ImageGenController {
         pendingValues = values
         await refreshActiveJobStatusView()
         rebuildActiveStripViewLocally()
-        bumpStripUI()
+        publishActiveStrip(preferLiveFields: false)
 
         if JobStepQueue.stepNeedsAI(step) {
             await runJobAIStage(values: values)
@@ -1911,7 +1990,7 @@ final class ImageGenController {
         }
         Task { await refreshActiveJobStatusView() }
         rebuildActiveStripViewLocally()
-        bumpStripUI()
+        publishActiveStrip(preferLiveFields: false)
         handleStepFailure(message)
     }
 
@@ -2187,6 +2266,10 @@ final class ImageGenController {
                 let pendingCancel = pendingCancelJobID
                 let activeID = activeJobID
                 if !pendingCancel.isEmpty, let activeID, pendingCancel != activeID {
+                    return
+                }
+                // Port of Python ``_on_generation_finished``: ignore cancel for a prior job after active cleared.
+                if !pendingCancel.isEmpty, activeID == nil, !copyBatchCancelled {
                     return
                 }
                 let outputForRepair = resolvedOutput
@@ -2713,6 +2796,8 @@ final class ImageGenController {
     private func popQueuedJob(jobID: String) -> Bool {
         guard let index = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else { return false }
         queue.jobs.remove(at: index)
+        QueueJobStatusRefresher.clearFingerprint(jobID: jobID)
+        noteQueueStructureChanged()
         persistQueue()
         bumpQueueRevision()
         return true
@@ -3219,14 +3304,25 @@ final class ImageGenController {
         )
     }
 
-    private func persistQueue() {
+    private func schedulePersistQueue() {
         if queuePersistSuppressed { return }
         queue.activeDisplayIndex = activeDisplayIndex
-        JobStepPersistence.saveQueue(queue, config: config)
+        queuePersistCoalescer.schedule(file: queue, config: config)
+    }
+
+    private func flushPersistQueueNow() {
+        if queuePersistSuppressed { return }
+        queue.activeDisplayIndex = activeDisplayIndex
+        queuePersistCoalescer.flushNow(file: queue, config: config)
+    }
+
+    private func persistQueue() {
+        schedulePersistQueue()
     }
 
     private func persistStepState() {
         if queuePersistSuppressed { return }
+        queuePersistCoalescer.cancelPending()
         let docs = JobStepQueue.activeJobStepDocsForPersist(
             jobID: activeJobID ?? "",
             pluginID: activePluginID,
@@ -3251,13 +3347,42 @@ final class ImageGenController {
         if dialogBuildPauseCount == 0 {
             queueRevision += 1
         }
-        bumpStripUI()
+        notifyQueueUIChange(.structure)
     }
 
-    /// Always refresh job-pane / strip SwiftUI (not blocked by dialog build pause).
-    private func bumpStripUI() {
-        lastStripPublishKey = stripPublishKey()
-        onQueueChanged?()
+    private func noteQueueStructureChanged() {
+        cachedQueueSnapshotCount = queue.jobs.count
+    }
+
+    /// Sidebar card paint is gated until status views exist; live strip ticks must retry pane sync until then.
+    private func queuePaneNeedsStatusDetailCatchUp() -> Bool {
+        if activeJobID != nil {
+            if activeStatusView == nil || activeStatusView?.isEmpty == true {
+                return true
+            }
+        }
+        for job in queue.jobs where job.statusView == nil || job.statusView?.isEmpty == true {
+            return true
+        }
+        return false
+    }
+
+    private func notifyQueueUIChange(_ kind: QueueUIChangeKind) {
+        lastQueueUIChangeKind = kind
+        switch kind {
+        case .liveProgress:
+            // Strip sinks run in ``publishActiveStrip`` before this is called.
+            if queuePaneNeedsStatusDetailCatchUp() {
+                lastQueueUIChangeKind = .statusDetails
+                onQueueChanged?(.statusDetails)
+            }
+            return
+        case .statusDetails, .structure:
+            if kind == .structure {
+                lastStripPublishKey = stripPublishKey()
+            }
+            onQueueChanged?(kind)
+        }
     }
 
     /// Progress ticks redraw the bars in place. Show, hide, or a row-structure change
@@ -3269,9 +3394,11 @@ final class ImageGenController {
             for sink in stripLiveSinks.values {
                 sink(strip)
             }
+            notifyQueueUIChange(.liveProgress)
             return
         }
-        bumpStripUI()
+        lastStripPublishKey = key
+        notifyQueueUIChange(.structure)
     }
 
     private func stripPublishKey() -> String {
@@ -3309,7 +3436,7 @@ final class ImageGenController {
             cooldownRemaining: cooldownSecondsRemaining,
             completedSeries: copiesDone,
             totalSeries: copiesTotal > 1 ? copiesTotal : nil,
-            totalQueueJobs: includeQueueJobsRow ? queueSnapshot().count : nil
+            totalQueueJobs: includeQueueJobsRow ? cachedQueueSnapshotCount : nil
         )
         strip.progressTooltipText = activeStripProgressTooltipText()
         activeStripView = strip
@@ -3531,12 +3658,11 @@ final class ImageGenController {
         rebuildActiveStripViewLocally()
         let preferLive = !forceStripStructurePublish
         publishActiveStrip(preferLiveFields: preferLive)
-        if dialogBuildPauseCount == 0 {
+        if !preferLive, dialogBuildPauseCount == 0 {
             queueRevision += 1
         }
-        // Job card needs a pane bump when the strip used in-place live sinks only.
-        if preferLive, stripPublishKey() == lastStripPublishKey {
-            onQueueChanged?()
+        if preferLive {
+            notifyQueueUIChange(.statusDetails)
         }
     }
 
@@ -3787,11 +3913,9 @@ final class ImageGenController {
             await refreshQueuedJobStatus(at: index)
         }
         await refreshActiveJobStatusView()
-        persistQueue()
+        flushPersistQueueNow()
         bumpQueueRevision()
-        await MainActor.run {
-            onQueueStatusDetailsReady?()
-        }
+        onQueueStatusDetailsReady?()
     }
 
     private func queueStatusPreviewOutputPath() -> String {
@@ -3818,21 +3942,50 @@ final class ImageGenController {
             job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
             job.fullPrompt = built.fullPrompt
             job.referencesInvalid = built.referencesInvalid
+            let fp = QueueJobStatusRefresher.inputsFingerprint(
+                pluginID: job.pluginID,
+                function: job.function,
+                values: job.values,
+                copiesTotal: job.copiesTotal,
+                pluginUnavailable: true,
+                storedFullPrompt: job.fullPrompt,
+                loraLabel: nil,
+                hasFluxAI: false
+            )
+            QueueJobStatusRefresher.recordFingerprint(jobID: jobID, fingerprint: fp)
             guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
                 publishQueuedStatusOntoActiveJobIfNeeded(job)
-                bumpQueueRevision()
+                notifyQueueStatusDetailsRevisionIfNeeded(bumpRevision: true)
                 return
             }
             queue.jobs[writeIndex] = job
             applyQueuedJobErrorBanner(at: writeIndex)
             publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
-            bumpQueueRevision()
-            await MainActor.run { onQueueStatusDetailsReady?() }
+            notifyQueueStatusDetailsRevisionIfNeeded(bumpRevision: true)
             return
         }
 
         let hasFluxAI = job.values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] != nil
         let applyImageExit = !hasFluxAI
+        let copiesForStatus = max(1, job.copiesTotal)
+        let preLoraLabel = await resolvedLoraStatusLabel(pluginID: job.pluginID, values: job.values)
+        let preFingerprint = QueueJobStatusRefresher.inputsFingerprint(
+            pluginID: job.pluginID,
+            function: job.function,
+            values: job.values,
+            copiesTotal: copiesForStatus,
+            pluginUnavailable: job.pluginUnavailable,
+            storedFullPrompt: job.fullPrompt,
+            loraLabel: preLoraLabel,
+            hasFluxAI: hasFluxAI
+        )
+        if QueueJobStatusRefresher.shouldSkipStatusRebuild(
+            jobID: jobID,
+            fingerprint: preFingerprint,
+            statusView: job.statusView
+        ) {
+            return
+        }
 
         var payload: [String: Any] = [:]
         do {
@@ -3869,7 +4022,6 @@ final class ImageGenController {
             )
         }
 
-        let copiesForStatus = max(1, job.copiesTotal)
         job.values["copies"] = copiesForStatus
         let loraLabel = await resolvedLoraStatusLabel(pluginID: job.pluginID, values: job.values)
         let built = buildQueueStatusView(
@@ -3884,16 +4036,26 @@ final class ImageGenController {
         job.statusView = built.statusView
         job.thumbnailPaths = cardThumbnailPaths(built.thumbnailPaths)
         job.referencesInvalid = built.referencesInvalid
+        let postFingerprint = QueueJobStatusRefresher.inputsFingerprint(
+            pluginID: job.pluginID,
+            function: job.function,
+            values: job.values,
+            copiesTotal: copiesForStatus,
+            pluginUnavailable: job.pluginUnavailable,
+            storedFullPrompt: job.fullPrompt,
+            loraLabel: loraLabel,
+            hasFluxAI: hasFluxAI
+        )
+        QueueJobStatusRefresher.recordFingerprint(jobID: jobID, fingerprint: postFingerprint)
         guard let writeIndex = queue.jobs.firstIndex(where: { $0.jobID == jobID }) else {
             publishQueuedStatusOntoActiveJobIfNeeded(job)
-            bumpQueueRevision()
+            notifyQueueStatusDetailsRevisionIfNeeded(bumpRevision: true)
             return
         }
         queue.jobs[writeIndex] = job
         applyQueuedJobErrorBanner(at: writeIndex)
         publishQueuedStatusOntoActiveJobIfNeeded(queue.jobs[writeIndex])
-        bumpQueueRevision()
-        await MainActor.run { onQueueStatusDetailsReady?() }
+        notifyQueueStatusDetailsRevisionIfNeeded(bumpRevision: true)
     }
 
     /// Port of ``_sync_active_job_queue_row`` (active job still has a queue row until the worker pops it).
@@ -4362,8 +4524,10 @@ final class ImageGenController {
         deferTryStartQueuedJobTask = nil
         cooldownSecondsRemaining = 0
         queue.jobs.removeAll()
+        QueueJobStatusRefresher.clearAllFingerprints()
         activeJobID = nil
         clearActiveGenerationState()
+        noteQueueStructureChanged()
         bumpQueueRevision()
     }
 
@@ -4413,7 +4577,7 @@ final class ImageGenController {
         deferredQuitWaitAllJobs = true
         queueAdvanceSuppressed = false
         exitQueuePersisted = false
-        queuePersistSuppressed = false
+        setQueuePersistSuppressed(false)
         if holdJobQueue {
             setHoldJobQueue(false)
         }
@@ -4600,7 +4764,18 @@ final class ImageGenController {
             config: config
         )
         exitQueuePersisted = true
-        queuePersistSuppressed = true
+        setQueuePersistSuppressed(true)
+    }
+
+    private func setQueuePersistSuppressed(_ suppressed: Bool) {
+        guard suppressed != queuePersistSuppressed else { return }
+        queuePersistSuppressed = suppressed
+        if suppressed {
+            queuePersistCoalescer.cancelPending()
+            queuePersistCoalescer.incrementSuppress()
+        } else {
+            queuePersistCoalescer.decrementSuppress()
+        }
     }
 
     private func queueWithActiveDisplayIndex() -> ImageGenQueueFile {
@@ -4771,6 +4946,7 @@ final class ImageGenController {
         if (!queue.jobs.isEmpty || hasActive), !holdJobQueue {
             startupQueueHold = true
         }
+        noteQueueStructureChanged()
         bumpQueueRevision()
     }
 
