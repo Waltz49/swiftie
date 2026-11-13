@@ -1985,7 +1985,9 @@ final class JobQueuePanelHostView: NSView {
         let width = panel.layoutViewportWidth()
         let mode = appState.jobsQueueSizeMode
         let panelH = panel.intrinsicPanelBlockHeight(mode: mode, layoutWidth: width)
-        appState.noteJobsQueuePanelMeasurement(panelHeight: panelH)
+        DispatchQueue.main.async { [weak appState] in
+            appState?.noteJobsQueuePanelMeasurement(panelHeight: panelH)
+        }
     }
 
     required init?(coder: NSCoder) {
