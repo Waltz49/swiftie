@@ -65,23 +65,35 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         switch updateKind {
         case .fullReplace:
             invalidateThumbnailLoadingSession()
-            basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
+            extensionsByStem = ThumbnailLayout.rebuildExtensionsByStem(from: paths)
+            basenamesNeedingExtensions = ThumbnailLayout.basenamesNeedingExtensions(from: extensionsByStem)
             pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             ThumbnailFilenameOverlayCache.shared.clear()
             ThumbnailFontMetricsCache.clear()
+            invalidateSectionedOverlayEstimateCache()
         case .reorderOnly:
             pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             layoutDefersBackgroundLoads = true
             if Set(previous) != keeping {
-                basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
+                extensionsByStem = ThumbnailLayout.rebuildExtensionsByStem(from: paths)
+                basenamesNeedingExtensions = ThumbnailLayout.basenamesNeedingExtensions(from: extensionsByStem)
+                invalidateSectionedOverlayEstimateCache()
             }
         case .membershipChanged(let removed):
             pathsOrderFingerprint = ThumbnailLayout.pathsOrderFingerprint(paths)
             if !removed.isEmpty {
                 ThumbnailFilenameOverlayCache.shared.removeEntries(forPaths: removed)
                 invalidateThumbnailLoadingSession()
+                for path in removed {
+                    ThumbnailLayout.mutateExtensionsByStem(for: path, add: false, into: &extensionsByStem)
+                }
             }
-            basenamesNeedingExtensions = ThumbnailLayout.basenamesWithMultipleExtensions(in: paths)
+            let added = keeping.subtracting(Set(previous))
+            for path in added {
+                ThumbnailLayout.mutateExtensionsByStem(for: path, add: true, into: &extensionsByStem)
+            }
+            basenamesNeedingExtensions = ThumbnailLayout.basenamesNeedingExtensions(from: extensionsByStem)
+            invalidateSectionedOverlayEstimateCache()
         }
 
         let forceRelayout: Bool
@@ -90,7 +102,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         } else {
             forceRelayout = false
         }
-        reloadLayoutIfNeeded(force: forceRelayout)
+        requestLayoutReloadIfNeeded(force: forceRelayout)
     }
 
     /// Apply `displayedImages` when the model changed but the grid missed a sync (loading canvas, coalesced refresh).
@@ -110,6 +122,21 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var cachedLockedFilenamesDirectory: String?
     private var lastVisiblePathsForReprioritize: [String] = []
     private var layoutDefersBackgroundLoads = false
+  private var layoutCoalescingDepth = 0
+
+    private struct SectionedOverlayEstimateCache {
+        var pathsFingerprint: UInt64 = 0
+        var showFilename: Bool = false
+        var showImageSize: Bool = false
+        var showExtensions: Bool = true
+        var basenamesNeedingExtensions: Set<String> = []
+        var isDuplicateSectionMode: Bool = false
+        var value: CGFloat = 0
+        var isValid = false
+    }
+
+    private var sectionedOverlayEstimateCache = SectionedOverlayEstimateCache()
+    private static let selectionInvalidationFullGridThreshold = 48
 
     /// When false (browse/list/etc.), visible and background thumbnail requests are not started.
     var thumbnailLoadingActive = true {
@@ -125,27 +152,63 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     var currentIndex: Int = 0 {
-        didSet { needsDisplay = true }
+        didSet {
+            guard oldValue != currentIndex else { return }
+            invalidateSelectionChrome(
+                previousCurrent: oldValue,
+                previousSelected: selectedIndices,
+                previousMultiSelect: multiSelectMode,
+                selectionChanged: false
+            )
+        }
     }
 
     var selectedIndices: Set<Int> = [] {
-        didSet { needsDisplay = true }
+        didSet {
+            guard oldValue != selectedIndices else { return }
+            invalidateSelectionChrome(
+                previousCurrent: currentIndex,
+                previousSelected: oldValue,
+                previousMultiSelect: multiSelectMode,
+                selectionChanged: true
+            )
+        }
     }
 
     var multiSelectMode: Bool = false {
-        didSet { needsDisplay = true }
+        didSet {
+            guard oldValue != multiSelectMode else { return }
+            invalidateSelectionChrome(
+                previousCurrent: currentIndex,
+                previousSelected: selectedIndices,
+                previousMultiSelect: oldValue,
+                selectionChanged: false
+            )
+        }
     }
 
     var showFilenames: Bool = false {
-        didSet { reloadLayoutIfNeeded() }
+        didSet {
+            guard oldValue != showFilenames else { return }
+            invalidateSectionedOverlayEstimateCache()
+            requestLayoutReloadIfNeeded()
+        }
     }
 
     var showImageSize: Bool = false {
-        didSet { reloadLayoutIfNeeded() }
+        didSet {
+            guard oldValue != showImageSize else { return }
+            invalidateSectionedOverlayEstimateCache()
+            requestLayoutReloadIfNeeded()
+        }
     }
 
     var showExtensions: Bool = true {
-        didSet { reloadLayoutIfNeeded() }
+        didSet {
+            guard oldValue != showExtensions else { return }
+            invalidateSectionedOverlayEstimateCache()
+            requestLayoutReloadIfNeeded()
+        }
     }
 
     var overlayBoxColor: NSColor = NSColor.black.withAlphaComponent(0.94)
@@ -173,20 +236,20 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     var specificFilesActive = false
     /// Reference-graph presentation (Python `reference_graph_data`).
     var referenceGraph: ReferenceGraph? {
-        didSet { reloadLayoutIfNeeded() }
+        didSet { requestLayoutReloadIfNeeded() }
     }
     /// Duplicate-group section layout (Python `duplicate_sections` + `is_section_mode`).
     var duplicateSections: [DuplicateGroupPresentation.DuplicateSection] = [] {
-        didSet { reloadLayoutIfNeeded() }
+        didSet { requestLayoutReloadIfNeeded() }
     }
     var exifDateSections: [ExifSectionPresentation.Section] = [] {
-        didSet { reloadLayoutIfNeeded() }
+        didSet { requestLayoutReloadIfNeeded() }
     }
     var isExifSectionMode: Bool = false {
-        didSet { reloadLayoutIfNeeded() }
+        didSet { requestLayoutReloadIfNeeded() }
     }
     var isDuplicateSectionMode: Bool = false {
-        didSet { reloadLayoutIfNeeded() }
+        didSet { requestLayoutReloadIfNeeded() }
     }
     private var canvasLayoutResult: ThumbnailSectionedLayout.Result?
     private var referenceOverlayHeightsByIndex: [Int: CGFloat] = [:]
@@ -236,6 +299,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
     private var imageDimensionCache: [String: String] = [:]
     private var basenamesNeedingExtensions: Set<String> = []
+    private var extensionsByStem: [String: Set<String>] = [:]
     private var thumbnails: [String: NSImage] = [:]
     private var loadingPaths: Set<String> = []
     private var isUpdatingDocumentSize = false
@@ -331,6 +395,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         isLoadingDirectory = true
         imagePaths = []
         pathsOrderFingerprint = 0
+        extensionsByStem = [:]
+        basenamesNeedingExtensions = []
+        invalidateSectionedOverlayEstimateCache()
         clearThumbnails()
         invalidateThumbnailLoadingSession()
         canvasLayoutResult = nil
@@ -345,11 +412,60 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         needsDisplay = true
     }
 
+    /// Apply multiple property updates from the coordinator with a single layout pass.
+    func performCoalescedLayoutUpdates(_ body: () -> Void) {
+        layoutCoalescingDepth += 1
+        body()
+        layoutCoalescingDepth -= 1
+        reloadLayoutIfNeeded()
+    }
+
+    private func requestLayoutReloadIfNeeded(force: Bool = false) {
+        guard layoutCoalescingDepth == 0 else { return }
+        reloadLayoutIfNeeded(force: force)
+    }
+
     func reloadLayoutIfNeeded(force: Bool = false) {
         let snapshot = currentLayoutSnapshot()
         if !force, snapshot == lastLayoutSnapshot { return }
         reloadLayout(scheduleBackgroundLoads: !layoutDefersBackgroundLoads)
         layoutDefersBackgroundLoads = false
+    }
+
+    private func invalidateSectionedOverlayEstimateCache() {
+        sectionedOverlayEstimateCache.isValid = false
+    }
+
+    private func invalidateSelectionChrome(
+        previousCurrent: Int,
+        previousSelected: Set<Int>,
+        previousMultiSelect: Bool,
+        selectionChanged: Bool
+    ) {
+        var indices = Set<Int>()
+        if previousCurrent != currentIndex {
+            indices.insert(previousCurrent)
+            indices.insert(currentIndex)
+        }
+        if selectionChanged {
+            indices.formUnion(previousSelected.symmetricDifference(selectedIndices))
+        }
+        if previousMultiSelect != multiSelectMode {
+            indices.formUnion(selectedIndices)
+            indices.insert(currentIndex)
+            if previousMultiSelect {
+                indices.formUnion(previousSelected)
+            }
+        }
+        indices = indices.filter { $0 >= 0 && $0 < imagePaths.count }
+        guard !indices.isEmpty else { return }
+        if indices.count > Self.selectionInvalidationFullGridThreshold {
+            needsDisplay = true
+            return
+        }
+        for index in indices {
+            setNeedsDisplay(thumbnailRect(for: index))
+        }
     }
 
     /// Waits until visible viewport cells finish loading (used to dismiss CNN/CLIP search progress).
@@ -806,7 +922,30 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
 
     /// Top-to-bottom, then left-to-right (flipped document coordinates).
     private func thumbnailIndicesInVisualOrder(_ indices: [Int]) -> [Int] {
-        indices.sorted { lhs, rhs in
+        if let layout = canvasLayoutResult, !layout.rowLayout.indexToRow.isEmpty {
+            let frames = layout.itemFrames
+            return indices.sorted { lhs, rhs in
+                let lRow = layout.rowLayout.indexToRow[lhs] ?? Int.max
+                let rRow = layout.rowLayout.indexToRow[rhs] ?? Int.max
+                if lRow != rRow {
+                    return lRow < rRow
+                }
+                let lX = frames[lhs]?.minX ?? 0
+                let rX = frames[rhs]?.minX ?? 0
+                return lX < rX
+            }
+        }
+        if isReferenceGraphMode, !referenceNodeFrames.isEmpty {
+            return indices.sorted { lhs, rhs in
+                let left = referenceNodeFrames[lhs] ?? .zero
+                let right = referenceNodeFrames[rhs] ?? .zero
+                if abs(left.minY - right.minY) > 0.5 {
+                    return left.minY < right.minY
+                }
+                return left.minX < right.minX
+            }
+        }
+        return indices.sorted { lhs, rhs in
             let left = cellFrame(for: lhs)
             let right = cellFrame(for: rhs)
             if abs(left.minY - right.minY) > 0.5 {
@@ -1594,6 +1733,27 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     }
 
     private func indexAt(point: NSPoint) -> Int? {
+        if let layout = canvasLayoutResult {
+            let rows = rowIndicesIntersecting(
+                NSRect(x: 0, y: point.y, width: 1, height: 1),
+                rowBounds: layout.rowVerticalBounds
+            )
+            for row in rows {
+                guard let indices = layout.rowLayout.rowToIndices[row] else { continue }
+                for index in indices {
+                    if layout.itemFrames[index]?.contains(point) == true {
+                        return index
+                    }
+                }
+            }
+            return nil
+        }
+        if isReferenceGraphMode, !referenceNodeFrames.isEmpty {
+            for (index, frame) in referenceNodeFrames where frame.contains(point) {
+                return index
+            }
+            return nil
+        }
         for index in 0..<imagePaths.count {
             if cellFrame(for: index).contains(point) {
                 return index
@@ -1896,18 +2056,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             showImageSize: showImageSize
         )
         if sectionedDuplicateFilenames {
-            overlay = max(
-                overlay,
-                ThumbnailSectionedLayout.maxOverlayHeightEstimate(
-                    paths: imagePaths,
-                    showFilename: showFilenames,
-                    showImageSize: showImageSize,
-                    thumbnailSize: ThumbnailLayout.defaultCellSize,
-                    showExtensions: showExtensions,
-                    basenamesNeedingExtensions: basenamesNeedingExtensions,
-                    duplicatePathDisplay: false
-                )
-            )
+            overlay = max(overlay, cachedSectionedMaxOverlayHeightEstimate())
         }
         let optimal = ThumbnailGridLayoutService.calculateOptimalThumbnailSize(
             numImages: imagePaths.count,
@@ -1917,6 +2066,39 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             overlayHeight: overlay
         )
         return CGFloat(optimal)
+    }
+
+    private func cachedSectionedMaxOverlayHeightEstimate() -> CGFloat {
+        let cache = sectionedOverlayEstimateCache
+        if cache.isValid,
+           cache.pathsFingerprint == pathsOrderFingerprint,
+           cache.showFilename == showFilenames,
+           cache.showImageSize == showImageSize,
+           cache.showExtensions == showExtensions,
+           cache.basenamesNeedingExtensions == basenamesNeedingExtensions,
+           cache.isDuplicateSectionMode == isDuplicateSectionMode {
+            return cache.value
+        }
+        let value = ThumbnailSectionedLayout.maxOverlayHeightEstimate(
+            paths: imagePaths,
+            showFilename: showFilenames,
+            showImageSize: showImageSize,
+            thumbnailSize: ThumbnailLayout.defaultCellSize,
+            showExtensions: showExtensions,
+            basenamesNeedingExtensions: basenamesNeedingExtensions,
+            duplicatePathDisplay: false
+        )
+        sectionedOverlayEstimateCache = SectionedOverlayEstimateCache(
+            pathsFingerprint: pathsOrderFingerprint,
+            showFilename: showFilenames,
+            showImageSize: showImageSize,
+            showExtensions: showExtensions,
+            basenamesNeedingExtensions: basenamesNeedingExtensions,
+            isDuplicateSectionMode: isDuplicateSectionMode,
+            value: value,
+            isValid: true
+        )
+        return value
     }
 
     private func currentLayoutSnapshot(viewportWidth: CGFloat? = nil) -> LayoutSnapshot {

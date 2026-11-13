@@ -351,46 +351,48 @@ struct ThumbnailGridView: NSViewRepresentable {
                 lastSyncedIndex = -1
                 gridView.noteLockedFilenamesCacheInvalidated()
             }
-            gridView.currentDirectory = directory
-            gridView.filterPattern = appState.filterSettings.filterPattern
-            gridView.launchRestoreMissingMessage = appState.launchRestoreMissingMessage
-            gridView.isLoadingDirectory = fingerprint.showDirectoryLoadingCanvas
-            gridView.specificFilesActive = appState.specificFilesActive
-            gridView.imageExtensions = appState.config.imageExtensions
-            if directoryChanged || gridView.imagePaths != paths {
-                gridView.pruneThumbnails(keeping: Set(paths))
-                let updateKind: ThumbnailDisplayedPathsUpdateKind
-                if directoryChanged {
-                    updateKind = .fullReplace
-                } else {
-                    updateKind = ThumbnailDisplayedPathsUpdateKind.transition(
-                        from: gridView.imagePaths,
-                        to: paths
-                    )
+            gridView.performCoalescedLayoutUpdates {
+                gridView.currentDirectory = directory
+                gridView.filterPattern = appState.filterSettings.filterPattern
+                gridView.launchRestoreMissingMessage = appState.launchRestoreMissingMessage
+                gridView.isLoadingDirectory = fingerprint.showDirectoryLoadingCanvas
+                gridView.specificFilesActive = appState.specificFilesActive
+                gridView.imageExtensions = appState.config.imageExtensions
+                if directoryChanged || gridView.imagePaths != paths {
+                    gridView.pruneThumbnails(keeping: Set(paths))
+                    let updateKind: ThumbnailDisplayedPathsUpdateKind
+                    if directoryChanged {
+                        updateKind = .fullReplace
+                    } else {
+                        updateKind = ThumbnailDisplayedPathsUpdateKind.transition(
+                            from: gridView.imagePaths,
+                            to: paths
+                        )
+                    }
+                    gridView.applyDisplayedPaths(paths, updateKind: updateKind)
+                    lastSyncedIndex = -1
                 }
-                gridView.applyDisplayedPaths(paths, updateKind: updateKind)
-                lastSyncedIndex = -1
+                gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
+                let duplicateMode = fingerprint.sortMode == SortMode.duplicates.rawValue
+                let exifMode = fingerprint.sortMode == SortMode.exifDate.rawValue
+                    || fingerprint.sortMode == SortMode.exifYear.rawValue
+                gridView.isDuplicateSectionMode = duplicateMode && !fingerprint.duplicateSections.isEmpty
+                gridView.duplicateSections = fingerprint.duplicateSections
+                gridView.isExifSectionMode = exifMode && !fingerprint.exifDateSections.isEmpty
+                gridView.exifDateSections = fingerprint.exifDateSections
+                gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
+                gridView.updateEmptyStateContext()
+                let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
+                applyThumbnailLoadingActive(inThumbnailMode && !fingerprint.showDirectoryLoadingCanvas, gridView: gridView)
+                gridView.wrapAround = fingerprint.wrapAround
+                if !gridView.isInlineRenaming {
+                    gridView.showFilenames = fingerprint.showFilenames
+                }
+                gridView.showImageSize = fingerprint.showImageSize
+                gridView.showExtensions = fingerprint.showExtensions
+                gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
             }
-            gridView.referenceGraph = appState.referenceGraphActive ? appState.referenceGraphData : nil
-            let duplicateMode = fingerprint.sortMode == SortMode.duplicates.rawValue
-            let exifMode = fingerprint.sortMode == SortMode.exifDate.rawValue
-                || fingerprint.sortMode == SortMode.exifYear.rawValue
-            gridView.isDuplicateSectionMode = duplicateMode && !fingerprint.duplicateSections.isEmpty
-            gridView.duplicateSections = fingerprint.duplicateSections
-            gridView.isExifSectionMode = exifMode && !fingerprint.exifDateSections.isEmpty
-            gridView.exifDateSections = fingerprint.exifDateSections
-            gridView.deletedPlaceholderPaths = appState.deletedFilePlaceholders
-            gridView.updateEmptyStateContext()
             let inThumbnailMode = appState.fileData.currentViewMode == .thumbnail
-            applyThumbnailLoadingActive(inThumbnailMode && !fingerprint.showDirectoryLoadingCanvas, gridView: gridView)
-            gridView.wrapAround = fingerprint.wrapAround
-            if !gridView.isInlineRenaming {
-                gridView.showFilenames = fingerprint.showFilenames
-            }
-            gridView.showImageSize = fingerprint.showImageSize
-            gridView.showExtensions = fingerprint.showExtensions
-            gridView.overlayBoxColor = appState.theme.colors.thumbnailFilenameOverlay.nsColor
-            gridView.reloadLayoutIfNeeded()
             if canvasLayoutUsesRowNavigation(gridView) {
                 gridView.publishNavigationLayoutToAppState()
             }
@@ -448,7 +450,6 @@ struct ThumbnailGridView: NSViewRepresentable {
             lastSelectionFingerprint = fingerprint
             gridView.selectedIndices = fingerprint.selectedIndices
             gridView.multiSelectMode = fingerprint.multiSelectMode
-            gridView.needsDisplay = true
         }
 
         private func canvasLayoutUsesRowNavigation(_ gridView: ThumbnailGridNSView) -> Bool {

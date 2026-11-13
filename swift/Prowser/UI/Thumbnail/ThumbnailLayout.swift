@@ -53,25 +53,62 @@ enum ThumbnailLayout {
         return hash
     }
 
-    /// Basenames that appear with more than one extension in the current view (Python `_basenames_needing_extensions`).
-    static func basenamesWithMultipleExtensions(in paths: [String]) -> Set<String> {
+    /// Stem and extension token for a path (basename stem + lowercased extension, empty string if none).
+    static func stemAndExtension(for path: String) -> (stem: String, ext: String) {
+        let filename = (path as NSString).lastPathComponent
+        let stem = ((filename as NSString).deletingPathExtension as NSString).lastPathComponent
+        let ext = (filename as NSString).pathExtension.lowercased()
+        return (stem, ext)
+    }
+
+    static func rebuildExtensionsByStem(from paths: [String]) -> [String: Set<String>] {
         var extensionsByStem: [String: Set<String>] = [:]
         for path in paths {
-            let filename = (path as NSString).lastPathComponent
-            let stem = ((filename as NSString).deletingPathExtension as NSString).lastPathComponent
-            let ext = (filename as NSString).pathExtension.lowercased()
+            mutateExtensionsByStem(for: path, add: true, into: &extensionsByStem)
+        }
+        return extensionsByStem
+    }
+
+    static func mutateExtensionsByStem(
+        for path: String,
+        add: Bool,
+        into extensionsByStem: inout [String: Set<String>]
+    ) {
+        let (stem, ext) = stemAndExtension(for: path)
+        if add {
             if ext.isEmpty {
                 extensionsByStem[stem, default: []].insert("")
             } else {
                 extensionsByStem[stem, default: []].insert(ext)
             }
+        } else {
+            guard var exts = extensionsByStem[stem] else { return }
+            if ext.isEmpty {
+                exts.remove("")
+            } else {
+                exts.remove(ext)
+            }
+            if exts.isEmpty {
+                extensionsByStem.removeValue(forKey: stem)
+            } else {
+                extensionsByStem[stem] = exts
+            }
         }
-        return Set(
+    }
+
+    /// Basenames that appear with more than one extension in the current view (Python `_basenames_needing_extensions`).
+    static func basenamesNeedingExtensions(from extensionsByStem: [String: Set<String>]) -> Set<String> {
+        Set(
             extensionsByStem.filter { pair in
                 let exts = pair.value.filter { !$0.isEmpty }
                 return exts.count > 1
             }.map(\.key)
         )
+    }
+
+    /// Basenames that appear with more than one extension in the current view (Python `_basenames_needing_extensions`).
+    static func basenamesWithMultipleExtensions(in paths: [String]) -> Set<String> {
+        basenamesNeedingExtensions(from: rebuildExtensionsByStem(from: paths))
     }
 
     static func overlayDisplayFilename(
