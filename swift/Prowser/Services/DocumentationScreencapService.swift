@@ -301,28 +301,47 @@ enum DocumentationScreencapService {
             NSApp.activate(ignoringOtherApps: true)
         }
 
+        /// Place captured window at the visual top-left on a transparent canvas (``documentation_screencaps.py``).
         private func finalizeScreencap(source: CGImage) -> CGImage? {
             let w = DocumentationScreencapService.canvasWidth
             let h = DocumentationScreencapService.canvasHeight
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-            guard let context = CGContext(
-                data: nil,
-                width: w,
-                height: h,
-                bitsPerComponent: 8,
+            guard let canvas = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: w,
+                pixelsHigh: h,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
                 bytesPerRow: 0,
-                space: colorSpace,
-                bitmapInfo: bitmapInfo.rawValue
+                bitsPerPixel: 0
             ) else {
                 return nil
             }
-            context.clear(CGRect(x: 0, y: 0, width: w, height: h))
-            context.draw(
-                source,
-                in: CGRect(x: 0, y: 0, width: source.width, height: source.height)
+            canvas.size = NSSize(width: w, height: h)
+            NSGraphicsContext.saveGraphicsState()
+            guard let graphics = NSGraphicsContext(bitmapImageRep: canvas) else { return nil }
+            NSGraphicsContext.current = graphics
+            let cg = graphics.cgContext
+            cg.clear(CGRect(x: 0, y: 0, width: w, height: h))
+
+            let srcW = CGFloat(source.width)
+            let srcH = CGFloat(source.height)
+            let scale = min(1, CGFloat(w) / srcW, CGFloat(h) / srcH)
+            let drawW = srcW * scale
+            let drawH = srcH * scale
+            let snapshot = NSImage(cgImage: source, size: NSSize(width: srcW, height: srcH))
+            snapshot.draw(
+                in: NSRect(x: 0, y: CGFloat(h) - drawH, width: drawW, height: drawH),
+                from: NSRect(x: 0, y: 0, width: srcW, height: srcH),
+                operation: .copy,
+                fraction: 1
             )
-            return context.makeImage()
+            NSGraphicsContext.restoreGraphicsState()
+
+            var rect = CGRect(x: 0, y: 0, width: w, height: h)
+            return canvas.cgImage(forProposedRect: &rect, context: nil, hints: nil)
         }
     }
 }
@@ -357,11 +376,11 @@ private enum PreferencesWindowCapture {
         return (window.contentView?.bounds.width ?? 0) > 10
     }
 
-    /// SwiftUI host first (fast); title-bar frame only if needed.
+    /// Title bar + client area (`NSThemeFrame`); content-only fallback.
     private static func captureViewCandidates(_ window: NSWindow) -> [NSView] {
         guard let content = window.contentView else { return [] }
         if let frameRoot = content.superview {
-            return [content, frameRoot]
+            return [frameRoot, content]
         }
         return [content]
     }
