@@ -6,8 +6,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSize, QEvent
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtCore import QObject, Qt, QSize, QEvent
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -178,6 +178,32 @@ def refresh_settings_list_combo(
     )
 
 
+class _MacToggleLabelClickFilter(QObject):
+    def __init__(self, toggle: "MacToggleSwitch") -> None:
+        super().__init__(toggle)
+        self._toggle = toggle
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        del watched
+        if event.type() != QEvent.Type.MouseButtonRelease:
+            return False
+        if not isinstance(event, QMouseEvent):
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        if self._toggle.isEnabled():
+            self._toggle.click()
+        return True
+
+
+def wire_mac_toggle_label_click(label: QLabel, toggle: "MacToggleSwitch") -> None:
+    """Clicking ``label`` toggles ``toggle`` (macOS Settings–style rows)."""
+    label.setCursor(Qt.CursorShape.PointingHandCursor)
+    filt = _MacToggleLabelClickFilter(toggle)
+    label.installEventFilter(filt)
+    setattr(label, "_mac_toggle_label_click_filter", filt)
+
+
 class MacToggleSwitch(QCheckBox):
     """macOS-style on/off switch (no text; pair with a separate label)."""
 
@@ -282,6 +308,7 @@ class MacPreferenceToggleRow(QWidget):
         if tooltip:
             title_label.setToolTip(tooltip)
             self.toggle.setToolTip(tooltip)
+        wire_mac_toggle_label_click(title_label, self.toggle)
         text_col.addWidget(title_label)
 
         if subtitle:
@@ -329,6 +356,7 @@ class MacPreferenceGearToggleRow(QWidget):
         if tooltip:
             title_label.setToolTip(tooltip)
             self.toggle.setToolTip(tooltip)
+        wire_mac_toggle_label_click(title_label, self.toggle)
         title_row.addWidget(title_label, 0, Qt.AlignTop)
 
         gear_button = SettingsGearButton(self, tooltip=gear_tooltip or tooltip)
@@ -384,6 +412,7 @@ class MacPreferenceCompactToggleRow(QWidget):
         if tooltip:
             title_label.setToolTip(tooltip)
             self.toggle.setToolTip(tooltip)
+        wire_mac_toggle_label_click(title_label, self.toggle)
         layout.addWidget(title_label, 1, Qt.AlignVCenter)
         layout.addWidget(self.toggle, 0, Qt.AlignRight | Qt.AlignVCenter)
 

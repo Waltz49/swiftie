@@ -138,10 +138,7 @@ def _should_add_prefix(text: str, entry: PrefixPostfixEntry) -> bool:
 def _should_add_postfix(text: str, entry: PrefixPostfixEntry) -> bool:
     if not entry.is_postfix or not entry.text:
         return False
-    count = _normalized_item_count(text, entry.text)
-    if entry.is_prefix:
-        return count < 2
-    return count < 1
+    return _normalized_item_count(text, entry.text) < 1
 
 
 def apply_prefix_postfix_rules(text: str, *, for_images: bool) -> str:

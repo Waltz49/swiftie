@@ -133,10 +133,6 @@ enum PrefixPostfixStore {
 
     private static func shouldAddPostfix(text: String, entry: PrefixPostfixEntry) -> Bool {
         guard entry.isPostfix, !entry.text.isEmpty else { return false }
-        let count = normalizedItemCount(haystack: text, item: entry.text)
-        if entry.isPrefix {
-            return count < 2
-        }
-        return count < 1
+        return normalizedItemCount(haystack: text, item: entry.text) < 1
     }
 }

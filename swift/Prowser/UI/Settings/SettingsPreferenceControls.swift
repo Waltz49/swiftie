@@ -52,6 +52,30 @@ struct SettingsPreferenceSwitch: View {
     }
 }
 
+/// Title beside a preference switch; click toggles the bound value.
+struct SettingsPreferenceSwitchTitle: View {
+    let title: String
+    var font: Font = .system(size: 13)
+    var color: Color = SettingsDialogChrome.rowTitle
+    var lineLimit: Int? = nil
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Text(title)
+                .font(font)
+                .foregroundStyle(color)
+                .lineLimit(lineLimit)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Rows (port of MacPreferenceToggleRow / FormRow / CompactToggleRow)
 
 struct SettingsPreferenceSubsectionHeader: View {
@@ -95,9 +119,7 @@ struct SettingsPreferenceToggleRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(SettingsDialogChrome.rowTitle)
+                SettingsPreferenceSwitchTitle(title: title, isOn: $isOn)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
@@ -200,11 +222,14 @@ struct SettingsPreferenceCompactToggleRow: View {
 
     var body: some View {
         HStack(spacing: SettingsPreferenceCompactToggleMetrics.labelSwitchSpacing) {
-            Text(title)
-                .font(.system(size: SettingsPreferenceCompactToggleMetrics.fontSize))
-                .foregroundStyle(titleColor)
-                .lineLimit(1)
-                .frame(maxWidth: expandLabel ? .infinity : nil, alignment: .leading)
+            SettingsPreferenceSwitchTitle(
+                title: title,
+                font: .system(size: SettingsPreferenceCompactToggleMetrics.fontSize),
+                color: titleColor,
+                lineLimit: 1,
+                isOn: $isOn
+            )
+            .frame(maxWidth: expandLabel ? .infinity : nil, alignment: .leading)
             SettingsPreferenceSwitch(isOn: $isOn)
         }
         .padding(.horizontal, SettingsPreferenceCompactToggleMetrics.horizontalPadding / 2)

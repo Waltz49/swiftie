@@ -9,12 +9,15 @@ from typing import Any, Callable, Optional
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QHBoxLayout,
+    QLabel,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+from settings.widgets.macos_preferences import MacToggleSwitch, wire_mac_toggle_label_click
 
 from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_BELOW_PROMPT_SPACING,
@@ -174,6 +177,11 @@ _FLUX_PROMPT_UNDO_BUTTON_LABEL = (
     f"{_FLUX_PROMPT_UNDO_LABEL} {SHIFT_SYMBOL}{OPTION_SYMBOL}{ENTER_SYMBOL}"
 )
 _FLUX_PROMPT_PRIMARY_BTN_WIDTH = 88
+_FLUX_PROMPT_JOB_TOGGLE_LABEL = "Job: Include AI Prompt Refinement in jobs"
+_FLUX_PROMPT_JOB_TOGGLE_TOOLTIP = (
+    "When checked, Generate runs AI prompt refinement as the first stage "
+    "of the image job (queued or immediate)."
+)
 
 
 def apply_flux_prompt_primary_button_width(button: QPushButton) -> None:
@@ -227,6 +235,7 @@ class ImageGenFluxPromptAi:
         self._undo_btn: Optional[QPushButton] = None
         self._pass_image_cb: Optional[QCheckBox] = None
         self._job_cb: Optional[QCheckBox] = None
+        self._job_cb_row: Optional[QWidget] = None
         self._toolbar: Optional[QWidget] = None
         self._connected = False
         self._streaming_started = False
@@ -281,19 +290,32 @@ class ImageGenFluxPromptAi:
         configure_flux_prompt_toolbar_checkbox(self._pass_image_cb)
         owner._pass_image_to_ai_cb = self._pass_image_cb
 
-        self._job_cb = QCheckBox(
-            "Job: Include AI Prompt Refinement in jobs", self._dialog
-        )
+        self._job_cb_row = QWidget(self._dialog)
+        job_row_layout = QHBoxLayout(self._job_cb_row)
+        job_row_layout.setContentsMargins(0, 0, 0, 0)
+        job_row_layout.setSpacing(8)
+        self._job_cb = MacToggleSwitch(self._job_cb_row)
         self._job_cb.setObjectName("flux_prompt_job_cb")
-        self._job_cb.setToolTip(
-            "When checked, Generate runs AI prompt refinement as the first stage "
-            "of the image job (queued or immediate)."
+        job_label = QLabel(_FLUX_PROMPT_JOB_TOGGLE_LABEL, self._job_cb_row)
+        job_label.setObjectName("imageGenFieldLabel")
+        self._job_cb.setToolTip(_FLUX_PROMPT_JOB_TOGGLE_TOOLTIP)
+        job_label.setToolTip(_FLUX_PROMPT_JOB_TOGGLE_TOOLTIP)
+        wire_mac_toggle_label_click(job_label, self._job_cb)
+        job_row_layout.addWidget(
+            self._job_cb,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
+        job_row_layout.addWidget(
+            job_label,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        job_row_layout.addStretch(1)
         self._job_cb.setChecked(load_flux_prompt_job_with_generate())
         self._job_cb.toggled.connect(
             lambda checked, o=owner: self._on_job_toggled(o, checked)
         )
-        configure_flux_prompt_toolbar_checkbox(self._job_cb)
 
         self._undo_btn = QPushButton(_FLUX_PROMPT_UNDO_BUTTON_LABEL, self._dialog)
         self._undo_btn.setObjectName("flux_prompt_undo_ai_btn")
@@ -356,7 +378,8 @@ class ImageGenFluxPromptAi:
 
         if not self._ensure_ai_widgets(owner, image_noun=image_noun):
             return None
-        return wrap_image_gen_prompt_subsection(self._job_cb, self._dialog)
+        host = self._job_cb_row if self._job_cb_row is not None else self._job_cb
+        return wrap_image_gen_prompt_subsection(host, self._dialog)
 
     def ai_controls_mounted(self) -> bool:
         """True when the flux prompt AI toolbar was created."""

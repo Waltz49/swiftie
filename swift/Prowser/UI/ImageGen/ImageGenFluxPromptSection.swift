@@ -94,19 +94,22 @@ struct ImageGenFluxPromptSection: View {
     private var fluxPromptJobHeaderToggle: some View {
         HStack(spacing: 8) {
             SettingsPreferenceSwitch(isOn: $fluxContext.jobCheckbox)
-                .onChange(of: fluxContext.jobCheckbox) { _, enabled in
-                    ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
-                    values["flux_prompt_job_with_generate"] = enabled
-                    onValuesChanged?()
-                }
-            Text("Job: Include AI Prompt Refinement in jobs")
-                .font(.caption)
-                .foregroundStyle(.primary)
+            SettingsPreferenceSwitchTitle(
+                title: "Job: Include AI Prompt Refinement in jobs",
+                font: .caption,
+                color: .primary,
+                isOn: $fluxContext.jobCheckbox
+            )
         }
         .help(
             "When enabled, Generate runs AI prompt refinement as the first stage "
                 + "of the image job (queued or immediate)."
         )
+        .onChange(of: fluxContext.jobCheckbox) { _, enabled in
+            ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
+            values["flux_prompt_job_with_generate"] = enabled
+            onValuesChanged?()
+        }
     }
 
     private var genPromptDisabled: Bool {

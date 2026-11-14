@@ -23,8 +23,8 @@ private struct JobCardContextMenuState {
 
 @MainActor
 final class JobQueuePanelNSView: NSView, NSDraggingSource {
-  /// Display insert index (before ``rows[index]``); resolves against a fresh controller snapshot on drop.
-  var onReorder: ((String, Int) -> Bool)?
+    /// Display insert index (before ``rows[index]``); resolved against a fresh controller snapshot on drop.
+    var onReorder: ((String, Int) -> Bool)?
     var onEdit: ((String) -> Void)?
     var onCancel: ((String, Bool) -> Void)?
     var onMoveToTop: ((String) -> Void)?
@@ -61,7 +61,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     private var lastSyncedImageGenUIRevision = -1
     private var lastSyncedRowOrderKey = ""
     private var dragJobID: String?
-    private var pendingDropInsertIndex: Int?
     private var reorderApplied = false
     private var autoScrollTimer: Timer?
     private var lastConfiguredScrollWidth: CGFloat = 0
@@ -531,7 +530,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     var displayedRowCount: Int { rows.count }
-    var panelDisplayedJobIDs: [String] { rows.map(\.jobID) }
 
     /// Cards laid out before the panel had real bounds (80px text width): heights are inflated
     /// and must not drive pane sizing; ``layout()`` reflows them once the width is known.
@@ -837,7 +835,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         }
         dragJobID = jobID
         reorderApplied = false
-        pendingDropInsertIndex = nil
         let item = NSPasteboardItem()
         item.setString(jobID, forType: jobQueueDragType)
         let preview = card.compactDragSnapshot()
@@ -863,13 +860,11 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     override func draggingExited(_ sender: NSDraggingInfo?) {
         dropLine.isHidden = true
         // Keep auto-scroll running until the drag session ends (pointer may be in pane titlebar).
-        // Keep pendingDropInsertIndex. AppKit sends exited immediately before the drop.
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard sender.draggingPasteboard.string(forType: jobQueueDragType) != nil else { return false }
-        // Local drags finish in ``draggingSession(_:endedAt:operation:)``; applying here can
-        // race ``pendingDropInsertIndex`` with an unreliable release point and mark the drop done.
+        // Local drags finish in ``draggingSession(_:endedAt:operation:)`` (reliable release point).
         return true
     }
 
@@ -882,7 +877,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         dropLine.isHidden = true
         defer {
             dragJobID = nil
-            pendingDropInsertIndex = nil
             reorderApplied = false
         }
         guard !reorderApplied, dragJobID != nil, let window else {
@@ -893,10 +887,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
         guard inScroll else { return }
         let docPoint = documentView.convert(panelPoint, from: self)
         applyReorder(documentPoint: docPoint)
-    }
-
-    private func panelPoint(from draggingInfo: NSDraggingInfo) -> NSPoint {
-        convert(draggingInfo.draggingLocation, from: nil)
     }
 
     /// Pointer in the flipped document (y grows downward, matching the card list).
@@ -920,11 +910,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
             }
         }
         return visibleCount
-    }
-
-    private func beforeJobID(forInsertIndex insertIndex: Int) -> String? {
-        guard insertIndex < rows.count else { return nil }
-        return rows[insertIndex].jobID
     }
 
     private func dropLineFrame(forInsertIndex insertIndex: Int) -> NSRect {
@@ -951,7 +936,6 @@ final class JobQueuePanelNSView: NSView, NSDraggingSource {
     }
 
     private func applyDropIndicator(insertIndex: Int) {
-        pendingDropInsertIndex = insertIndex
         dropLine.isHidden = false
         dropLine.layer?.backgroundColor = NSColor(themeColors.jobQueueSelectionBorder).cgColor
         dropLine.frame = dropLineFrame(forInsertIndex: insertIndex)
