@@ -6,8 +6,6 @@ import Foundation
 @MainActor
 enum DocumentationScreencapService {
     private static let outputDirectoryPath = "/tmp/screencaps"
-    private static let canvasWidth = 1642
-    private static let canvasHeight = 1300
 
     private static var activeRunner: Runner?
 
@@ -199,15 +197,14 @@ enum DocumentationScreencapService {
                 return
             }
 
-            if let source = PreferencesWindowCapture.capture(window: window, appState: appState),
-               let final = finalizeScreencap(source: source) {
+            if let source = PreferencesWindowCapture.capture(window: window, appState: appState) {
                 let outURL = URL(fileURLWithPath: DocumentationScreencapService.outputDirectoryPath)
                     .appendingPathComponent(filename)
                 let name = filename
                 let writeTask = Task.detached(priority: .userInitiated) {
                     do {
                         try WebPImageWriter.write(
-                            image: final,
+                            image: source,
                             to: outURL,
                             compressionMethod: 2,
                             atomicWrite: true
@@ -299,49 +296,6 @@ enum DocumentationScreencapService {
                 scanFilterPattern: "*"
             )
             NSApp.activate(ignoringOtherApps: true)
-        }
-
-        /// Place captured window at the visual top-left on a transparent canvas (``documentation_screencaps.py``).
-        private func finalizeScreencap(source: CGImage) -> CGImage? {
-            let w = DocumentationScreencapService.canvasWidth
-            let h = DocumentationScreencapService.canvasHeight
-            guard let canvas = NSBitmapImageRep(
-                bitmapDataPlanes: nil,
-                pixelsWide: w,
-                pixelsHigh: h,
-                bitsPerSample: 8,
-                samplesPerPixel: 4,
-                hasAlpha: true,
-                isPlanar: false,
-                colorSpaceName: .deviceRGB,
-                bytesPerRow: 0,
-                bitsPerPixel: 0
-            ) else {
-                return nil
-            }
-            canvas.size = NSSize(width: w, height: h)
-            NSGraphicsContext.saveGraphicsState()
-            guard let graphics = NSGraphicsContext(bitmapImageRep: canvas) else { return nil }
-            NSGraphicsContext.current = graphics
-            let cg = graphics.cgContext
-            cg.clear(CGRect(x: 0, y: 0, width: w, height: h))
-
-            let srcW = CGFloat(source.width)
-            let srcH = CGFloat(source.height)
-            let scale = min(1, CGFloat(w) / srcW, CGFloat(h) / srcH)
-            let drawW = srcW * scale
-            let drawH = srcH * scale
-            let snapshot = NSImage(cgImage: source, size: NSSize(width: srcW, height: srcH))
-            snapshot.draw(
-                in: NSRect(x: 0, y: CGFloat(h) - drawH, width: drawW, height: drawH),
-                from: NSRect(x: 0, y: 0, width: srcW, height: srcH),
-                operation: .copy,
-                fraction: 1
-            )
-            NSGraphicsContext.restoreGraphicsState()
-
-            var rect = CGRect(x: 0, y: 0, width: w, height: h)
-            return canvas.cgImage(forProposedRect: &rect, context: nil, hints: nil)
         }
     }
 }
