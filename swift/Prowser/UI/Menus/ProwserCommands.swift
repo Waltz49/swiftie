@@ -475,8 +475,10 @@ struct ProwserCommands: Commands {
                         Task { @MainActor in appState.resetPersistedWindowGeometriesToDefaults() }
                     }
 
-                    Button("Enable Compatible LoRAs") {
-                        Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
+                    if BundleCapabilities.imageGenUIEnabled {
+                        Button("Enable Compatible LoRAs") {
+                            Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
+                        }
                     }
 
                     Button("Toggle Debug Mode") {

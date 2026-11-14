@@ -37,3 +37,4 @@ profile.stats
 venv_model_export/bin/activate
 TBD.txt
 swift/Scripts/lora_registry_backup.sh
+prowser.php
