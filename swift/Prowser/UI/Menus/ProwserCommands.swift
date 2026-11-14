@@ -461,6 +461,10 @@ struct ProwserCommands: Commands {
                         Task { @MainActor in appState.openExifAPIStructureDebug() }
                     }
 
+                    Button("Documentation screencaps") {
+                        Task { @MainActor in appState.runDocumentationScreencaps() }
+                    }
+
                     Divider()
 
                     Button("Print Cache Status") {

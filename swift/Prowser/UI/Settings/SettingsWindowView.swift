@@ -97,6 +97,10 @@ struct SettingsWindowView: View {
             ThemeColorPanelController.shared.closeIfOpen()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserOpenSettingsTab)) { notification in
+            if notification.userInfo?["clearTabFilter"] as? Bool == true {
+                tabSearchQuery = ""
+                applySidebarTabFilter()
+            }
             if let raw = notification.userInfo?["tab"] as? String,
                let tab = SettingsTab(rawValue: raw) {
                 selectedTab = tab

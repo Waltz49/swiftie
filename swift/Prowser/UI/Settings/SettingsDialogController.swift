@@ -13,6 +13,33 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
         return settingsWindow.isVisible
     }
 
+    /// Settings window for Tools → Debug → Documentation screencaps.
+    var preferencesWindowForCapture: NSWindow? {
+        settingsWindow
+    }
+
+    /// Hide preferences and discard the settings draft (automated captures must not commit edits).
+    func dismissPreferencesWithoutApplying() {
+        guard let appState else {
+            settingsWindow?.orderOut(nil)
+            return
+        }
+        ThemeColorPanelController.shared.cancelIfOpen()
+        if appState.config.isSettingsSessionActive {
+            appState.theme.cancelSettingsSession()
+            appState.refreshImageRecognitionForCurrentSettings()
+            appState.eventBus.emit(.settingsChanged)
+        }
+        settingsWindow?.orderOut(nil)
+    }
+
+    /// Raise an already-open preferences window without reinstalling event monitors (doc screencaps).
+    func bringToFrontForDocumentationCapture(appState: AppState) {
+        self.appState = appState
+        guard let settingsWindow else { return }
+        bringSettingsToFront(settingsWindow)
+    }
+
     func show(appState: AppState) {
         self.appState = appState
         if let settingsWindow {

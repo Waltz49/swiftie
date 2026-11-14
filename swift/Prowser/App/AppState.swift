@@ -997,6 +997,11 @@ final class AppState {
         }
     }
 
+    /// Tools ▸ Debug ▸ Documentation screencaps — WebP shots of each settings tab for prowser.php.
+    func runDocumentationScreencaps() {
+        DocumentationScreencapService.run(appState: self, settingsDialog: settingsDialog)
+    }
+
     /// Tools ▸ Debug ▸ Reset window geometries — clears saved frames for auxiliary dialogs and panels.
     func resetPersistedWindowGeometriesToDefaults() {
         let confirm = NSAlert()
@@ -1611,6 +1616,22 @@ final class AppState {
     }
 
     var pendingLoraSettingsModelKey: String?
+
+    /// Switch the open preferences window to ``tab`` (no monitor reinstall); for documentation screencaps.
+    func selectSettingsTabForDocumentation(_ tab: SettingsTab, clearTabFilter: Bool = false) {
+        requestedSettingsTab = tab
+        var info: [String: Any] = ["tab": tab.rawValue]
+        if clearTabFilter {
+            info["clearTabFilter"] = true
+        }
+        NotificationCenter.default.post(
+            name: .prowserOpenSettingsTab,
+            object: nil,
+            userInfo: info
+        )
+        settingsOpenRequestToken += 1
+        settingsDialog.bringToFrontForDocumentationCapture(appState: self)
+    }
 
     func openSettingsWindow(tab explicitTab: SettingsTab? = nil, userInfo: [String: Any] = [:]) {
         let tab = SettingsTab.resolvedOpenTab(explicit: explicitTab ?? defaultSettingsTabForCurrentView())
