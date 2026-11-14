@@ -1128,6 +1128,10 @@ struct ImageGenUnifiedDialog: View {
         }
         FluxPromptJob.restoreFluxPromptAIJobIntoEditor(values: &values, context: fluxContext)
         FluxPromptJob.syncJobCheckboxFromValues(values: values, context: fluxContext)
+        fluxContext.sectionExpanded = ImageGenPersistence.fluxPromptSectionExpandedOnDialogOpen(
+            jobAIInBatch: fluxContext.jobCheckbox,
+            config: appState.config
+        )
         fluxRefineCoordinator.clearRefineUndoState()
     }
 

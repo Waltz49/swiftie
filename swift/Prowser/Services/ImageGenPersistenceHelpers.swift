@@ -356,6 +356,12 @@ enum ImageGenPersistence {
         return imagegen["flux_prompt_system_prompt_expanded"] as? Bool ?? false
     }
 
+    /// Unified dialog open: collapsed when Job AI is off; else last saved disclosure.
+    static func fluxPromptSectionExpandedOnDialogOpen(jobAIInBatch: Bool, config: AppConfig) -> Bool {
+        guard jobAIInBatch else { return false }
+        return fluxSystemPromptSectionVisible(config: config)
+    }
+
     /// Inner system-prompt editor disclosure (Python ``flux_prompt_system_prompt_editor_expanded``).
     static func fluxSystemPromptEditorExpanded(config: AppConfig) -> Bool {
         imagegenBlock(config: config)["flux_prompt_system_prompt_editor_expanded"] as? Bool ?? true

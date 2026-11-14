@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from PySide6.QtCore import QTimer
 from imagegen_plugins.image_gen_persistence import (
+    load_flux_prompt_job_with_generate,
     load_flux_prompt_system_prompt_settings,
     save_flux_prompt_system_prompt_settings,
 )
@@ -50,7 +51,10 @@ def _load_flux_prompt_system_prompt_into_pane(pane: LmStudioInstructionsPane) ->
     if owner is not None and _owner_deferring_flux_extras(owner):
         pane.set_visible(already_open)
     elif get_lmstudio_ui_available():
-        pane.set_visible(saved_visible or already_open)
+        if load_flux_prompt_job_with_generate():
+            pane.set_visible(saved_visible or already_open)
+        else:
+            pane.set_visible(False)
     else:
         pane.set_visible(already_open)
     pane.set_splitter_sizes(sizes)

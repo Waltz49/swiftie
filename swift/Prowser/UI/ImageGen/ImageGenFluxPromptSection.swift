@@ -176,10 +176,13 @@ struct ImageGenFluxPromptSection: View {
     private func loadSettings() {
         systemPrompt = ImageGenPersistence.fluxSystemPromptText(config: appState.config)
         fluxContext.systemPromptOverride = systemPrompt
-        fluxContext.sectionExpanded = ImageGenPersistence.fluxSystemPromptSectionVisible(config: appState.config)
         systemPromptExpanded = ImageGenPersistence.fluxSystemPromptEditorExpanded(config: appState.config)
         fluxContext.passImage = ImageGenPersistence.passImageToAI(config: appState.config)
         fluxContext.jobCheckbox = ImageGenPersistence.fluxPromptJobWithGenerate(config: appState.config)
+        fluxContext.sectionExpanded = ImageGenPersistence.fluxPromptSectionExpandedOnDialogOpen(
+            jobAIInBatch: fluxContext.jobCheckbox,
+            config: appState.config
+        )
         fluxContext.taskKind = function
         fluxContext.sourcePaths = sourcePaths
         fluxContext.activeBrowsePath = activeBrowsePath
