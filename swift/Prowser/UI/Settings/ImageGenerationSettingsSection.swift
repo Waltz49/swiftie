@@ -4,6 +4,9 @@ import SwiftUI
 @MainActor
 struct ImageGenerationSettingsSection: View {
     @Environment(AppState.self) private var appState
+    @Binding var promptModificationExpanded: Bool
+    @Binding var cooldownTimesExpanded: Bool
+    @Binding var miscellaneousExpanded: Bool
     @Binding var pythonEnvironmentExpanded: Bool
     @State private var imageOutputEnabled = false
     @State private var imageOutputPath = ""
@@ -14,6 +17,152 @@ struct ImageGenerationSettingsSection: View {
     var body: some View {
         let _ = appState.config.settingsEditRevision
         Group {
+            imageCreationDirectorySection()
+
+            CollapsibleSettingsSection(
+                title: "Prompt Modification",
+                stateKey: "imagegen_prompt_modification",
+                isExpanded: $promptModificationExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    gearToggleRow(
+                        title: "Add prefix/postfix strings",
+                        subtitle: "Apply prefix/postfix rules to chat and image prompts.",
+                        key: "imagegen_add_chat_prefix_postfix",
+                        defaultValue: true,
+                        onGear: { appState.chat.openPrefixPostfixLibrary() }
+                    )
+
+                    gearToggleRow(
+                        title: "Use prompt filter exits",
+                        subtitle: "Use exit scripts to modify prompt data before model calls.",
+                        key: "use_prompt_filter_exits",
+                        gearHelp: "Configure text and image prompt exit scripts",
+                        onGear: { appState.chat.openExitScripts() }
+                    )
+
+                    jobCardHoverPromptRow()
+
+                    gearToggleRow(
+                        title: "Use read aloud exit",
+                        subtitle: "External script for speak buttons instead of built-in speech.",
+                        key: ExitScriptUtils.useReadAloudExitKey,
+                        gearHelp: "Configure read aloud exit script",
+                        onGear: { appState.chat.openReadAloudExit() }
+                    )
+
+                    gearToggleRow(
+                        title: "Reject forbidden LM Studio phrases",
+                        subtitle: "Restart chat when the model response contains configured refusal phrases.",
+                        key: ChatRejectedResponsePhrasesStore.settingsEnableKey,
+                        defaultValue: true,
+                        onGear: { appState.chat.openRejectedPhrases() }
+                    )
+                }
+                .padding(.horizontal, 20)
+            }
+
+            CollapsibleSettingsSection(
+                title: "Cooldown times",
+                stateKey: "imagegen_cooldown_times",
+                isExpanded: $cooldownTimesExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    cooldownSlider(
+                        title: "Inter-job cooldown time",
+                        key: "imagegen_job_cooldown_seconds",
+                        defaultValue: ImageGenDimLimits.jobCooldownSecondsDefault
+                    )
+                    cooldownSlider(
+                        title: "Inter copy cooldown",
+                        key: "imagegen_inter_copy_cooldown_seconds",
+                        defaultValue: ImageGenDimLimits.interCopyCooldownSecondsDefault
+                    )
+                }
+                .padding(.horizontal, 20)
+            }
+
+            CollapsibleSettingsSection(
+                title: "Miscellaneous",
+                stateKey: "imagegen_miscellaneous",
+                isExpanded: $miscellaneousExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Max generation dimension")
+                            .preferencesScanRecordsLabel("Max generation dimension")
+                        AppMiniSlider(
+                            value: dimensionSliderBinding,
+                            in: 0...Double(ImageGenDimLimits.sliderMaxIndex),
+                            step: 1
+                        )
+                        Text("\(currentDimension) px")
+                            .monospacedDigit()
+                            .frame(width: 72, alignment: .trailing)
+                    }
+
+                    Toggle("Include triggers in final exif data", isOn: boolBinding("imagegen_include_triggers_in_exif"))
+                        .preferencesScanRecordsLabel("Include triggers in final exif data")
+                    Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))
+                        .preferencesScanRecordsLabel("Unload image Models when queue is held")
+                    if BundleCapabilities.lmStudioUIEnabled {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Toggle(
+                                "Unload LMStudio models before generation",
+                                isOn: boolBinding("imagegen_unload_lmstudio_models_before_generation", default: true)
+                            )
+                            .preferencesScanRecordsLabel("Unload LMStudio models before generation")
+                            Text(
+                                "Frees memory for image models before each generation job. "
+                                    + "LM Studio can reload the saved caption model on next use."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Output format")
+                            .font(.headline)
+                            .preferencesScanRecordsLabel("Output format")
+                        Picker("Output format", selection: stringBinding("imagegen_output_format", default: "png")) {
+                            ForEach(ImageGenDimLimits.outputFormats, id: \.self) { format in
+                                Text(format.uppercased()).tag(format)
+                            }
+                        }
+                        .preferencesScanRecordsLabel("Output format")
+                        .pickerStyle(.radioGroup)
+                        .labelsHidden()
+                        .padding(.leading, 40)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("MFLUX generation backend")
+                            .font(.headline)
+                            .preferencesScanRecordsLabel("MFLUX generation backend")
+                        Picker("MFLUX generation backend", selection: stringBinding("imagegen_execution_backend", default: "optimized")) {
+                            Text("Optimized").tag("optimized")
+                            Text("MFLUX CLI").tag("mflux_cli")
+                        }
+                        .preferencesScanRecordsLabel("MFLUX generation backend")
+                        .pickerStyle(.radioGroup)
+                        .labelsHidden()
+                        .padding(.leading, 40)
+                        Text(
+                            "Optimized runs pipelines in the imagegen venv and reuses loaded models between jobs. "
+                                + "MFLUX CLI starts a separate tool per job (compatibility or debugging)."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Toggle("Low RAM mode", isOn: boolBinding("imagegen_low_ram", default: true))
+                        .preferencesScanRecordsLabel("Low RAM mode")
+                }
+                .padding(.horizontal, 20)
+            }
 
             CollapsibleSettingsSection(
                 title: "Python Environment",
@@ -33,117 +182,7 @@ struct ImageGenerationSettingsSection: View {
                         key: "mflux_venv_path"
                     )
                 }
-            }
-            
-            imageCreationDirectorySection()
-
-            HStack {
-                Text("Max generation dimension")
-                    .preferencesScanRecordsLabel("Max generation dimension")
-                AppMiniSlider(
-                    value: dimensionSliderBinding,
-                    in: 0...Double(ImageGenDimLimits.sliderMaxIndex),
-                    step: 1
-                )
-                Text("\(currentDimension) px")
-                    .monospacedDigit()
-                    .frame(width: 72, alignment: .trailing)
-            }
-
-            gearToggleRow(
-                title: "Add prefix/postfix strings",
-                subtitle: "Apply prefix/postfix rules to chat and image prompts.",
-                key: "imagegen_add_chat_prefix_postfix",
-                defaultValue: true,
-                onGear: { appState.chat.openPrefixPostfixLibrary() }
-            )
-
-            gearToggleRow(
-                title: "Use prompt filter exits",
-                subtitle: "Use exit scripts to modify prompt data before model calls.",
-                key: "use_prompt_filter_exits",
-                gearHelp: "Configure text and image prompt exit scripts",
-                onGear: { appState.chat.openExitScripts() }
-            )
-
-            jobCardHoverPromptRow()
-
-            gearToggleRow(
-                title: "Use read aloud exit",
-                subtitle: "External script for speak buttons instead of built-in speech.",
-                key: ExitScriptUtils.useReadAloudExitKey,
-                gearHelp: "Configure read aloud exit script",
-                onGear: { appState.chat.openReadAloudExit() }
-            )
-
-            gearToggleRow(
-                title: "Reject forbidden LM Studio phrases",
-                subtitle: "Restart chat when the model response contains configured refusal phrases.",
-                key: ChatRejectedResponsePhrasesStore.settingsEnableKey,
-                defaultValue: true,
-                onGear: { appState.chat.openRejectedPhrases() }
-            )
-
-            cooldownSlider(title: "Inter-job cooldown time", key: "imagegen_job_cooldown_seconds", defaultValue: ImageGenDimLimits.jobCooldownSecondsDefault)
-            cooldownSlider(title: "Inter copy cooldown", key: "imagegen_inter_copy_cooldown_seconds", defaultValue: ImageGenDimLimits.interCopyCooldownSecondsDefault)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Output format")
-                    .font(.headline)
-                    .preferencesScanRecordsLabel("Output format")
-                Picker("Output format", selection: stringBinding("imagegen_output_format", default: "png")) {
-                    ForEach(ImageGenDimLimits.outputFormats, id: \.self) { format in
-                        Text(format.uppercased()).tag(format)
-                    }
-                }
-                .preferencesScanRecordsLabel("Output format")
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-                .padding(.leading, 40)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("MFLUX generation backend")
-                    .font(.headline)
-                    .preferencesScanRecordsLabel("MFLUX generation backend")
-                Picker("MFLUX generation backend", selection: stringBinding("imagegen_execution_backend", default: "optimized")) {
-                    Text("Optimized").tag("optimized")
-                    Text("MFLUX CLI").tag("mflux_cli")
-                }
-                .preferencesScanRecordsLabel("MFLUX generation backend")
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-                .padding(.leading, 40)
-                Text(
-                    "Optimized runs pipelines in the imagegen venv and reuses loaded models between jobs. "
-                        + "MFLUX CLI starts a separate tool per job (compatibility or debugging)."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Toggle("Low RAM mode", isOn: boolBinding("imagegen_low_ram", default: true))
-                .preferencesScanRecordsLabel("Low RAM mode")
-            Toggle("Include triggers in final exif data", isOn: boolBinding("imagegen_include_triggers_in_exif"))
-                .preferencesScanRecordsLabel("Include triggers in final exif data")
-            Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))
-                .preferencesScanRecordsLabel("Unload image Models when queue is held")
-            if BundleCapabilities.lmStudioUIEnabled {
-                VStack(alignment: .leading, spacing: 2) {
-                    Toggle(
-                        "Unload LMStudio models before generation",
-                        isOn: boolBinding("imagegen_unload_lmstudio_models_before_generation", default: true)
-                    )
-                    .preferencesScanRecordsLabel("Unload LMStudio models before generation")
-                    Text(
-                        "Frees memory for image models before each generation job. "
-                            + "LM Studio can reload the saved caption model on next use."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
+                .padding(.horizontal, 20)
             }
         }
         .onAppear {
@@ -320,7 +359,6 @@ struct ImageGenerationSettingsSection: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.leading, 20)
         .preferencesScanRecordsLabel("Jobcard hover prompt")
     }
 
