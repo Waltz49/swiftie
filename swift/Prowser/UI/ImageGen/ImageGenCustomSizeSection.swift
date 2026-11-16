@@ -274,6 +274,12 @@ struct ImageGenCustomSizeSection: View {
                     action: applyScreenDims
                 )
                 ImageGenDimHelperIconButton(
+                    normalName: "fit",
+                    hoverName: "fit_hover",
+                    tooltip: ImageGenDimHelperTooltips.screenFit,
+                    action: applyScreenFitDims
+                )
+                ImageGenDimHelperIconButton(
                     normalName: "import_icon",
                     hoverName: "import_icon_hover",
                     tooltip: importSizeTooltip,
@@ -426,13 +432,42 @@ struct ImageGenCustomSizeSection: View {
     }
 
     private func applyScreenDims() {
-        let screen = NSScreen.main?.frame.size ?? NSSize(width: 1024, height: 1024)
-        let sw = Int(screen.width.rounded())
-        let sh = Int(screen.height.rounded())
+        let (sw, sh) = ImageGenDimHelperScreen.pixelSize()
         let aligned = ImageGenDimMath.alignDimsForPipeline(
             pipelineID: pipelineID,
             width: sw,
             height: sh,
+            effectiveMaxSide: effectiveMaxSide,
+            dimStep: dimStep,
+            widthMin: widthMin,
+            heightMin: heightMin
+        )
+        aspectLockUpdating = true
+        values["width"] = aligned.width
+        values["height"] = aligned.height
+        if aspectLock {
+            captureAspectRatio()
+        }
+        aspectLockUpdating = false
+        syncAspectLockPrevDims()
+        onValuesChanged?()
+    }
+
+    private func applyScreenFitDims() {
+        let (sw, sh) = ImageGenDimHelperScreen.pixelSize()
+        let origW = values["width"] as? Int ?? 1024
+        let origH = values["height"] as? Int ?? 1024
+        let (fitW, fitH) = ResizeImagesService.bestFitWithinBounds(
+            origW: origW,
+            origH: origH,
+            boundW: sw,
+            boundH: sh,
+            maxDim: effectiveMaxSide
+        )
+        let aligned = ImageGenDimMath.alignDimsForPipeline(
+            pipelineID: pipelineID,
+            width: fitW,
+            height: fitH,
             effectiveMaxSide: effectiveMaxSide,
             dimStep: dimStep,
             widthMin: widthMin,

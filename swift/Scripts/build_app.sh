@@ -67,6 +67,31 @@ materialize_resource_bundle_symlinks() {
     rm -rf "$bundle/Prowser_Prowser.bundle.packaging_verify_hidden"
 }
 
+# Swift bundles PNG/SVG UI icons from Prowser/Resources/Assets (SPM .process), not repo-root assets/.
+sync_repo_ui_assets() {
+    local repo_assets
+    repo_assets="$(cd "$SWIFT_ROOT/.." && pwd)/assets"
+    local dest="$SWIFT_ROOT/Prowser/Resources/Assets"
+    if [[ ! -d "$repo_assets" ]]; then
+        echo "warning: repo UI assets not found at $repo_assets; skipping sync" >&2
+        return 0
+    fi
+    mkdir -p "$dest"
+    local ext copied=0
+    for ext in png webp svg icns; do
+        local f
+        shopt -s nullglob
+        for f in "$repo_assets"/*."$ext"; do
+            cp -f "$f" "$dest/"
+            copied=$((copied + 1))
+        done
+        shopt -u nullglob
+    done
+    if [[ "$copied" -gt 0 ]]; then
+        echo "Synced $copied UI asset file(s) from $repo_assets → Prowser/Resources/Assets"
+    fi
+}
+
 verify_portable_resource_bundle() {
     local app_path="$1"
     local embedded="$app_path/Contents/Resources/Prowser_Prowser.bundle"
@@ -87,6 +112,8 @@ verify_portable_resource_bundle() {
         applescript_pixelmator_export.applescript
         Prowser.icns
         copy.png
+        pfilter.png
+        fit.png
     )
     for rel in "${required_files[@]}"; do
         if [[ ! -r "$embedded/$rel" ]]; then
@@ -353,6 +380,7 @@ done
 OUTPUT="$(cd "$(dirname "$OUTPUT")" && pwd)/$(basename "$OUTPUT")"
 
 cd "$SWIFT_ROOT"
+sync_repo_ui_assets
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
     ensure_native_dlib
     echo "Building Prowser ($CONFIG)..."
@@ -372,6 +400,7 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     fi
 else
     echo "Skipping build; packaging existing $CONFIG artifacts..."
+    echo "warning: UI asset sync ran, but SPM only re-embeds Resources/Assets on rebuild (omit --skip-build)" >&2
 fi
 
 BUILD_DIR="$(swift build $SWIFT_BUILD_VERBOSE -c "$CONFIG" --product Prowser --show-bin-path)"

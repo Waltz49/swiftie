@@ -148,6 +148,12 @@ struct ResizeImagesSheet: View {
                         action: applyScreenDims
                     )
                     ImageGenDimHelperIconButton(
+                        normalName: "fit",
+                        hoverName: "fit_hover",
+                        tooltip: ImageGenDimHelperTooltips.screenFit,
+                        action: applyScreenFitDims
+                    )
+                    ImageGenDimHelperIconButton(
                         normalName: "import_icon",
                         hoverName: "import_icon_hover",
                         tooltip: resizeImportSizeTooltip,
@@ -344,24 +350,26 @@ struct ResizeImagesSheet: View {
 
     private func applyScreenDims() {
         selectDimensionsMode()
-        let screen = NSScreen.main?.frame.size ?? NSSize(width: 1024, height: 1024)
-        let sw = Int(screen.width.rounded())
-        let sh = Int(screen.height.rounded())
-        if preserveAspect {
-            let (w, h) = ResizeImagesService.bestFitWithinBounds(
-                origW: refWidth,
-                origH: refHeight,
-                boundW: sw,
-                boundH: sh,
-                maxDim: dimSpinMax
-            )
-            let scaleW = refWidth > 0 ? Double(sw) / Double(refWidth) : 1.0
-            let scaleH = refHeight > 0 ? Double(sh) / Double(refHeight) : 1.0
-            anchorIsWidth = scaleW <= scaleH
-            setDimSpins(targetWidth: w, targetHeight: h)
-        } else {
-            setDimSpins(targetWidth: sw, targetHeight: sh)
-        }
+        let (sw, sh) = ImageGenDimHelperScreen.pixelSize()
+        setDimSpins(targetWidth: sw, targetHeight: sh)
+    }
+
+    private func applyScreenFitDims() {
+        selectDimensionsMode()
+        let (sw, sh) = ImageGenDimHelperScreen.pixelSize()
+        let origW = max(1, width)
+        let origH = max(1, height)
+        let (w, h) = ResizeImagesService.bestFitWithinBounds(
+            origW: origW,
+            origH: origH,
+            boundW: sw,
+            boundH: sh,
+            maxDim: dimSpinMax
+        )
+        let scaleW = origW > 0 ? Double(sw) / Double(origW) : 1.0
+        let scaleH = origH > 0 ? Double(sh) / Double(origH) : 1.0
+        anchorIsWidth = scaleW <= scaleH
+        setDimSpins(targetWidth: w, targetHeight: h)
     }
 
     private func applySquareDims() {

@@ -27,6 +27,13 @@ struct ImageGenDimHelperIconButton: View {
     }
 }
 
+enum ImageGenDimHelperScreen {
+    static func pixelSize() -> (width: Int, height: Int) {
+        let screen = NSScreen.main?.frame.size ?? NSSize(width: 1024, height: 1024)
+        return (Int(screen.width.rounded()), Int(screen.height.rounded()))
+    }
+}
+
 enum ImageGenDimHelperTooltips {
     static let importSize =
         "Import size from the\n"
@@ -35,6 +42,11 @@ enum ImageGenDimHelperTooltips {
         "Set size to fit your screen.\n"
         + "Limited by aspect ratio lock and\n"
         + "max size from Settings Dialog."
+    static let screenFit =
+        "Fit to screen:\n"
+        + "Scale to the largest size that fits\n"
+        + "on screen while keeping the current aspect ratio.\n"
+        + "Limited by max size from Settings."
     static let square = "Square:\nMake width and height equal."
     static let reverse = "Reverse:\nSwap width and height."
     static let aspect =

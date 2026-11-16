@@ -178,7 +178,8 @@ final class SidebarPaneSplitModel {
             totalHeight: max(totalHeight, 1),
             headerHeights: headerHeights
         )
-        if side == .right, appState.jobsPaneSavedHeightPinActive(),
+        let jobsPaneInLayout = vis.indices.contains(2) && vis[2] && exp.indices.contains(2) && exp[2]
+        if side == .right, jobsPaneInLayout, appState.jobsPaneSavedHeightPinActive(),
            let pinned = appState.jobsPaneAllMultijobSavedHeight() {
             let jobsFloor = headerHeights[2]
             let jobsPinned = max(pinned, jobsFloor)

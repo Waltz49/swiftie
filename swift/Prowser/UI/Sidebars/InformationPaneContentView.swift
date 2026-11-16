@@ -37,6 +37,7 @@ struct InformationPaneContentView: View {
                 .padding(.vertical, contentPaddingV)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(colors.sidebarBackground)
 
             if let heading = activeJobHeading, !heading.isEmpty {
@@ -44,6 +45,7 @@ struct InformationPaneContentView: View {
                     .zIndex(1)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// Painted above the scroll surface; does not participate in scroll content layout.
@@ -51,10 +53,11 @@ struct InformationPaneContentView: View {
         Text(heading)
             .font(.system(size: sectionHeaderFontSize, weight: .semibold))
             .foregroundStyle(colors.sidebarEmphasizedText)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, contentPaddingH)
             .padding(.trailing, contentPaddingH + scrollCoordinator.verticalScrollbarReserve)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(colors.sidebarBackground)
+            .fixedSize(horizontal: false, vertical: true)
             .allowsHitTesting(false)
     }
 
