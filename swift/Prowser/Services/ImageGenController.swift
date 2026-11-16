@@ -2472,7 +2472,7 @@ final class ImageGenController {
         }
         bumpQueueRevision()
         if !holdJobQueue, !queueAdvanceSuppressed, !startupQueueHold {
-            if !queue.jobs.isEmpty, jobCooldownSeconds() > 0, !skipQueueCooldown {
+            if jobIDNextInLine() != nil, jobCooldownSeconds() > 0, !skipQueueCooldown {
                 scheduleJobCooldownThen { await self.startNextQueuedJobIfIdle() }
             } else {
                 Task { await startNextQueuedJobIfIdle() }
@@ -2732,7 +2732,7 @@ final class ImageGenController {
         }
         bumpQueueRevision()
         if !holdJobQueue, !queueAdvanceSuppressed, !startupQueueHold {
-            if !queue.jobs.isEmpty, jobCooldownSeconds() > 0 {
+            if jobIDNextInLine() != nil, jobCooldownSeconds() > 0 {
                 scheduleJobCooldownThen { await self.startNextQueuedJobIfIdle() }
             } else {
                 Task { await startNextQueuedJobIfIdle() }
