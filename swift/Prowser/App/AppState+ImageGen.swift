@@ -531,7 +531,7 @@ extension AppState {
 
     /// Port of `JobQueuePanelWidget.should_shrink_wrap_client()`.
     func shouldShrinkWrapJobsClient() -> Bool {
-        if imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0 {
+        if imageGen.paneShowsGenerationProgress() {
             return false
         }
         if !imageGen.queue.jobs.isEmpty {

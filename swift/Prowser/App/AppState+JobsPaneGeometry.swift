@@ -140,7 +140,7 @@ extension AppState {
     func jobsPaneFitMeasurementsReady() -> Bool {
         let mode = jobsQueueSizeMode
         let jobCount = visibleJobsQueueRowCount()
-        let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
+        let showsStrip = imageGen.paneShowsGenerationProgress()
 
         if mode == .strip {
             if !showsStrip { return true }
@@ -177,7 +177,7 @@ extension AppState {
         let mode = jobsQueueSizeMode
         let jobCount = visibleJobsQueueRowCount()
         let shrinkWrap = shouldShrinkWrapJobsClient()
-        let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
+        let showsStrip = imageGen.paneShowsGenerationProgress()
         let toolbarShown = jobsQueueActionToolbarShownForSizing()
         let toolbar = toolbarShown ? JobQueuePaneMetrics.toolbarBlockHeight : 0
         let statusBarHeight = effectiveStatusBarHeight
@@ -266,7 +266,7 @@ extension AppState {
         let toolbarShown = jobsQueueActionToolbarShownForSizing() && jobsDisplayMode == .pane
         let toolbar = toolbarShown ? JobQueuePaneMetrics.toolbarBlockHeight : 0
         let padding = JobQueuePaneMetrics.panelPadding * 2
-        let showsStrip = imageGen.isProcessing || imageGen.cooldownSecondsRemaining > 0
+        let showsStrip = imageGen.paneShowsGenerationProgress()
         if showsStrip {
             let stripEstimate = JobQueuePaneMetrics.estimatedActiveStripHeight(for: imageGen.activeStripView)
             let strip = max(measuredActiveJobStripHeight, stripEstimate, 28)

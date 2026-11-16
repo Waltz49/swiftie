@@ -374,13 +374,12 @@ final class ImageGenController {
     /// same elapsed handler the timer would (next copy, or next queued job after a job cooldown).
     func skipCopyCooldown() {
         guard cooldownSecondsRemaining > 0 else { return }
-        cooldownTask?.cancel()
-        cooldownTask = nil
-        cooldownDisplayTask?.cancel()
+        // Port of Python ``_skip_copy_cooldown_deferred``: stop timer first, then elapsed handler.
         let afterJob = cooldownBeforeNextJob
+        stopScheduledCooldown()
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.onCooldownElapsed {
+            await self.onCooldownElapsed(afterJob: afterJob) {
                 if afterJob {
                     await self.startNextQueuedJobIfIdle()
                 } else {
@@ -2922,7 +2921,7 @@ final class ImageGenController {
         cooldownDisplayTask?.cancel()
         cooldownDisplayTask = nil
         cooldownSecondsRemaining = 0
-        cooldownBeforeNextJob = false
+        // Python ``_stop_copy_cooldown_timer`` does not clear ``_cooldown_before_next_job``.
         lastCooldownUISecond = nil
     }
 
@@ -2960,22 +2959,24 @@ final class ImageGenController {
     }
 
     /// Port of Python ``_on_copy_cooldown_elapsed`` (shared by the timer and ``skipCopyCooldown``).
-    private func onCooldownElapsed(_ action: () async -> Void) async {
-        let afterJob = cooldownBeforeNextJob
+    private func onCooldownElapsed(afterJob afterJobOverride: Bool? = nil, _ action: () async -> Void) async {
+        let afterJob = afterJobOverride ?? cooldownBeforeNextJob
         cooldownSecondsRemaining = 0
         cooldownBeforeNextJob = false
         lastCooldownUISecond = nil
         if afterJob {
-            // No active job here: clear the cooldown strip even when the queue stays held.
-            await refreshActiveStripView(force: true)
             if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
+                await refreshActiveStripView(force: true)
                 maybeQuitAfterCurrentWorker()
                 return
             }
             if holdJobQueue || queueAdvanceSuppressed || startupQueueHold {
+                await refreshActiveStripView(force: true)
                 return
             }
             await action()
+            rebuildActiveStripViewLocally()
+            notifyQueueUIChange(.structure)
             return
         }
         if quitAfterCurrentWorker, !deferredQuitWaitAllJobs {
@@ -2987,6 +2988,10 @@ final class ImageGenController {
             finishCopyBatch(cancelled: true)
             return
         }
+        if pendingBatchCopies() <= 0 {
+            finishActiveJob(cancelled: false)
+            return
+        }
         if holdJobQueue {
             if seriesContinues() {
                 _ = demoteActiveRemainingToQueue()
@@ -2996,7 +3001,12 @@ final class ImageGenController {
             scheduleUnloadImageModelForQueueHold()
             return
         }
+        if yieldActiveBatchIfNotNextToRun() {
+            return
+        }
         await action()
+        rebuildActiveStripViewLocally()
+        notifyQueueUIChange(.structure)
     }
 
     /// Port of ``ImageGenController._activate_continuous_series_pending_doc``.
@@ -3418,7 +3428,7 @@ final class ImageGenController {
     }
 
     private func stripPublishKey() -> String {
-        let visible = isProcessing || cooldownSecondsRemaining > 0
+        let visible = paneShowsGenerationProgress()
         return "\(visible)|\(activeStripView.structureKey())"
     }
 
@@ -3437,7 +3447,7 @@ final class ImageGenController {
     }
 
     private func rebuildActiveStripViewLocally(includeQueueJobsRow: Bool = false) {
-        guard isProcessing || cooldownSecondsRemaining > 0 else {
+        guard paneShowsGenerationProgress() else {
             activeStripView = ActiveJobStripStatusView()
             return
         }
@@ -3542,7 +3552,8 @@ final class ImageGenController {
                 self.taskStatusHTML = self.progressMessage
                 Task { await self.beginGenerationProgressTracking(values: self.copyCycleExifValues) }
                 self.rebuildActiveStripViewLocally()
-                self.publishActiveStrip(preferLiveFields: true)
+                self.publishActiveStrip(preferLiveFields: false)
+                self.onQueueChanged?(.structure)
             }
         }
         modelTasks.onProgress = { [weak self] message in
@@ -4448,13 +4459,18 @@ final class ImageGenController {
     }
 
     func isRunning() -> Bool {
-        if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
+        if generationWorkerActive() {
             return true
         }
         if copyBatchActive, !copyBatchCancelled {
             return true
         }
         return isProcessing
+    }
+
+    /// Port of Python ``pane_shows_generation_progress`` (active-job strip visibility).
+    func paneShowsGenerationProgress() -> Bool {
+        isRunning()
     }
 
     /// Port of Python ``ImageGenController._quit_interrupts_active_worker`` (model + foreground workers only).
@@ -4464,7 +4480,7 @@ final class ImageGenController {
 
     /// Python ``ActiveJobStripWidget.refresh(force=True)`` before the quit ``QMessageBox`` runs.
     func prepareQuitConfirmationStrip() {
-        if isProcessing || cooldownSecondsRemaining > 0 || generationWorkerActive() {
+        if paneShowsGenerationProgress() {
             rebuildActiveStripViewLocally()
         } else {
             activeStripView = ActiveJobStripStatusView()
@@ -5113,7 +5129,7 @@ final class ImageGenController {
     }
 
     func refreshActiveStripDisplay(includeQueueJobsRow: Bool = false, force: Bool = false) {
-        guard isEnabled, isProcessing || cooldownSecondsRemaining > 0 else {
+        guard isEnabled, paneShowsGenerationProgress() else {
             activeStripView = ActiveJobStripStatusView()
             lastCooldownUISecond = nil
             publishActiveStrip(preferLiveFields: true)
@@ -5153,7 +5169,7 @@ private final class LiveStripStatusTimerTarget: NSObject {
                 timer.invalidate()
                 return
             }
-            guard controller.isProcessing || controller.cooldownSecondsRemaining > 0 else {
+            guard controller.paneShowsGenerationProgress() else {
                 controller.stopLiveStatusTimer()
                 return
             }

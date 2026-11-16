@@ -35,7 +35,7 @@ struct JobQueuePanelView: View {
                 Text("Image generation requires Python workers and a full build.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if controller.queueSnapshot().isEmpty, !controller.isProcessing {
+            } else if controller.queueSnapshot().isEmpty, !controller.paneShowsGenerationProgress() {
                 emptyQueueView
             } else {
                 queueContent(mode: mode)
@@ -68,7 +68,7 @@ struct JobQueuePanelView: View {
 
     @ViewBuilder
     private var emptyQueueView: some View {
-        if appState.imageGen.isProcessing, appState.jobsQueueSizeMode == .strip {
+        if appState.imageGen.paneShowsGenerationProgress(), appState.jobsQueueSizeMode == .strip {
             ActiveJobStripView()
         } else {
             Text("No jobs in the queue.")
@@ -85,7 +85,7 @@ struct JobQueuePanelView: View {
     }
 
     private func shouldShowActiveStrip(controller: ImageGenController, mode: JobsQueueSizeMode) -> Bool {
-        controller.isProcessing || controller.cooldownSecondsRemaining > 0
+        controller.paneShowsGenerationProgress()
     }
 
     /// Python strip mode: cards hidden; ``queue_hold_compact_message`` only when held and idle.
