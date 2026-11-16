@@ -1209,6 +1209,13 @@ struct ProwserHelpCommands: Commands {
                     }
                 }
 
+                Button("Downloading AI Models…") {
+                    Task { @MainActor in
+                        appState.showDownloadingModelsHelp = true
+                        appState.syncAuxiliaryDialogs()
+                    }
+                }
+
                 Button("Image Search (Native)…") {
                     Task { @MainActor in
                         appState.showImageRecognitionCaveats = true

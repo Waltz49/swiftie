@@ -249,7 +249,7 @@ WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and i
 - [~] Fast create / preset submenu entries (`image_gen_menu.py` — ⇧⌥/ fast-open; per-function submenu partial)
 - [~] Edit / Expand / Infill dialogs (unified shell: icon switcher, source nav, footer Cancel/Close/Replace/Generate)
 - [~] Cancel generation (Image menu + information pane)
-- [~] Download models / LoRAs (Help → Downloading AI Models; Check LoRAs in Debug)
+- [x] Download models / LoRAs help (Help → Downloading AI Models… — HTML toggles, per-model and bulk scripts; Check LoRAs in Debug)
 - [~] Show Job Queue (⌘J floating panel)
 - [~] Job queue in right sidebar pane (AppKit cards + drag reorder)
 - [~] Progressive preview path display (tap opens browse)
@@ -273,6 +273,7 @@ WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and i
 ## Menus — Help
 
 - [~] Keyboard shortcuts (`/` — `KeyboardShortcutsHelpView`)
+- [x] Downloading AI Models… (`DownloadingModelsHelpView` — catalog scripts, bulk all-models footer)
 - [x] About (`AboutDialogController` — icon, version, Python version, build date, background jobs, License/Credits HTML windows)
 
 ## Dynamic menu & shortcut infrastructure

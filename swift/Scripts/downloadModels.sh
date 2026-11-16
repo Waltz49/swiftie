@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Download and install all Hugging Face models and LoRAs listed in
-# Help → Downloading AI Models (see browser_window/dialogs/help_downloading_models.py).
+# Download and install Hugging Face models and LoRAs (dev convenience).
+# Help → Downloading AI Models in the app lists models from the live catalog and offers a
+# models-only bulk script (see Prowser/UI/Help/DownloadingModelsHelpHTML.swift). LoRAs below
+# are not included in that bulk script.
 #
 # Gated FLUX repos require a Hugging Face account, accepting each model license on
 # huggingface.co, and either `hf auth login` or: export HF_TOKEN=<your-token>

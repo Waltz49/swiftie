@@ -128,6 +128,7 @@ final class AppState {
     var pendingAutoExamineFaces = false
     var showKeyboardHelp = false
     var showHiddenGemsHelp = false
+    var showDownloadingModelsHelp = false
     var showImageRecognitionCaveats = false
     var showSimilaritySearchSheet = false
     var showClipSearchSheet = false
@@ -166,6 +167,7 @@ final class AppState {
             || showReferenceGraphSheet
             || showKeyboardHelp
             || showHiddenGemsHelp
+            || showDownloadingModelsHelp
             || showImageRecognitionCaveats
             || showSimilaritySearchSheet
             || showClipSearchSheet
@@ -1853,6 +1855,7 @@ final class AppState {
         static let editExifUserComment = "editExifUserComment"
         static let keyboardHelp = "keyboardHelp"
         static let hiddenGemsHelp = "hiddenGemsHelp"
+        static let downloadingModelsHelp = "downloadingModelsHelp"
         static let convertFormat = "convertFormat"
         static let resizeImages = "resizeImages"
         static let renamePrefix = "renamePrefix"
@@ -1908,6 +1911,16 @@ final class AppState {
             onClose: { [weak self] in self?.showHiddenGemsHelp = false }
         ) {
             HiddenGemsHelpView()
+        }
+        syncDialog(
+            id: DialogID.downloadingModelsHelp,
+            show: showDownloadingModelsHelp,
+            title: "Downloading AI Models",
+            defaultSize: NSSize(width: 920, height: 720),
+            minSize: NSSize(width: 640, height: 480),
+            onClose: { [weak self] in self?.showDownloadingModelsHelp = false }
+        ) {
+            DownloadingModelsHelpView()
         }
         syncDialog(
             id: DialogID.convertFormat,
