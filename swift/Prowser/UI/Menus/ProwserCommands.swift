@@ -479,6 +479,11 @@ struct ProwserCommands: Commands {
                         Button("Enable Compatible LoRAs") {
                             Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
                         }
+
+                        Button("Import Lora Defaults") {
+                            Task { @MainActor in appState.importLoraDefaults() }
+                        }
+                        .disabled(AppAssets.url(name: "lorablob", fileExtension: "") == nil)
                     }
 
                     Button("Toggle Debug Mode") {

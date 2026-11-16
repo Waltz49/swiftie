@@ -4,11 +4,10 @@ enum LoRAUserEntries {
     static func entries(from lc: [String: Any]) -> [String: LoRAEntry] {
         guard let raw = lc[LoRACatalogSettings.userEntriesKey] as? [String: Any] else { return [:] }
         var out: [String: LoRAEntry] = [:]
-        for (lid, value) in raw {
+        for (_, value) in raw {
             guard let dict = value as? [String: Any],
-                  let entry = LoRAEntry.fromDictionary(dict),
-                  LoRAEntry.isUserLoraID(entry.loraID) else { continue }
-            out[lid] = entry
+                  let entry = LoRAEntry.fromDictionary(dict) else { continue }
+            out[entry.loraID] = entry
         }
         return out
     }

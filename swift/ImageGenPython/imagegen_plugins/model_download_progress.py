@@ -105,6 +105,9 @@ def _build_tqdm_class(
             if refresh:
                 self.refresh()
 
+        def set_description_str(self, desc: str, refresh: bool = True) -> None:
+            self.set_description(desc, refresh=refresh)
+
         def set_postfix_str(self, postfix: str, refresh: bool = False) -> None:
             pass
 

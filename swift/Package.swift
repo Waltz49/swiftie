@@ -27,6 +27,10 @@ if hasVendorDlib {
 
 let packageTargets: [Target] = [
     .target(
+        name: "LoRABlobCodec",
+        path: "LoRABlobCodec"
+    ),
+    .target(
         name: "ProwserDlibBridgeCore",
         path: "ProwserDlibBridgeCore",
         publicHeadersPath: "include",
@@ -41,6 +45,7 @@ let packageTargets: [Target] = [
     .executableTarget(
         name: "Prowser",
         dependencies: [
+            "LoRABlobCodec",
             "ProwserDlibBridge",
             .product(name: "WebP", package: "Swift-WebP"),
             .product(name: "libwebp", package: "libwebp-Xcode"),
@@ -77,9 +82,14 @@ let packageTargets: [Target] = [
             .linkedFramework("Accelerate"),
         ]
     ),
+    .executableTarget(
+        name: "PackLoraBlob",
+        dependencies: ["LoRABlobCodec"],
+        path: "Tools/PackLoraBlob"
+    ),
     .testTarget(
         name: "ProwserTests",
-        dependencies: ["Prowser"],
+        dependencies: ["Prowser", "LoRABlobCodec"],
         path: "ProwserTests",
         resources: [
             .copy("Fixtures/ImageGenPayloadGolden"),
@@ -93,6 +103,7 @@ let package = Package(
     products: [
         .executable(name: "Prowser", targets: ["Prowser"]),
         .executable(name: "FaceDetectBench", targets: ["FaceDetectBench"]),
+        .executable(name: "PackLoraBlob", targets: ["PackLoraBlob"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ainame/Swift-WebP.git", from: "0.5.0"),

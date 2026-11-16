@@ -219,6 +219,32 @@ enum StyledMessageDialog {
         return index == 1
     }
 
+    /// Password prompt (secure field).
+    static func presentPasswordInput(
+        title: String,
+        message: String,
+        fieldWidth: CGFloat = 280,
+        confirmTitle: String = "OK",
+        cancelTitle: String = "Cancel"
+    ) -> String? {
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: fieldWidth, height: 24))
+        field.placeholderString = "Password"
+
+        let index = present(
+            title: title,
+            message: message,
+            icon: .question,
+            buttons: [Button(cancelTitle, role: .dismissive), Button(confirmTitle)],
+            defaultButtonIndex: 1,
+            escapeButtonIndex: 0,
+            accessoryView: field,
+            initialFirstResponder: field
+        )
+        guard index == 1 else { return nil }
+        let value = field.stringValue
+        return value.isEmpty ? nil : value
+    }
+
     /// Text-field prompt (rename, prefix entry, etc.).
     static func presentTextInput(
         title: String,

@@ -16,15 +16,9 @@ enum ImageGenVenvInstaller {
             onOutput?(chunk)
         }
         let venv = config.imagegenVenvURL()
-        let python = locateSystemPython()
-        guard let python else {
-            return InstallResult(
-                success: false,
-                message:
-                    "No supported Python found for imagegen. Install Python 3.12 or 3.13 "
-                    + "(Python 3.14 is not supported: Pillow/mflux break on removed stdlib APIs). "
-                    + "Example: brew install python@3.13"
-            )
+        let locate = locateSystemPython()
+        guard let python = locate.executable else {
+            return InstallResult(success: false, message: locate.failureMessage)
         }
         if let existingIssue = unsupportedExistingVenvMessage(venv: venv) {
             return InstallResult(success: false, message: existingIssue)
@@ -96,14 +90,21 @@ enum ImageGenVenvInstaller {
         return combined
     }
 
+    private struct SystemPythonLocate {
+        var executable: String?
+        var failureMessage: String
+    }
+
     /// Python used to create the profile venv (not the venv interpreter itself).
-    private static func locateSystemPython() -> String? {
+    private static func locateSystemPython() -> SystemPythonLocate {
         var candidates: [String] = []
         for minor in [13, 12, 11] {
             let ver = "3.\(minor)"
             candidates += [
                 "/opt/homebrew/bin/python\(ver)",
                 "/usr/local/bin/python\(ver)",
+                "/opt/homebrew/opt/python@\(ver)/bin/python\(ver)",
+                "/usr/local/opt/python@\(ver)/bin/python\(ver)",
             ]
         }
         candidates += [
@@ -113,13 +114,37 @@ enum ImageGenVenvInstaller {
             "/usr/local/bin/python3",
             "/usr/bin/python3",
         ]
+        var tooNew: [(path: String, version: PythonVersion)] = []
+        var tooOld: [(path: String, version: PythonVersion)] = []
         for path in candidates {
             guard FileManager.default.isExecutableFile(atPath: path) else { continue }
-            if let version = pythonVersion(at: path), isSupportedImagegenPython(version) {
-                return path
+            guard let version = pythonVersion(at: path) else { continue }
+            if isSupportedImagegenPython(version) {
+                return SystemPythonLocate(executable: path, failureMessage: "")
+            }
+            if version.major == 3, version.minor >= 14 {
+                tooNew.append((path, version))
+            } else if version.major == 3, version.minor < 11 {
+                tooOld.append((path, version))
             }
         }
-        return nil
+        var message =
+            "No supported Python found for imagegen. Use Python 3.11, 3.12, or 3.13 "
+            + "(not 3.14+: Pillow/mflux break on removed stdlib APIs)."
+        if let newest = tooNew.first {
+            message += """
+
+            Found Python \(newest.version.major).\(newest.version.minor) at \(newest.path), which is too new.
+            On Homebrew, `brew install python` installs 3.14; imagegen needs a versioned formula, e.g.:
+              brew install python@3.13
+            Then run Install dependencies again (look for /opt/homebrew/bin/python3.13).
+            """
+        } else if !tooOld.isEmpty {
+            message += "\n\nFound only Python 3.10 or older. Install Python 3.12 or 3.13 (e.g. brew install python@3.13)."
+        } else {
+            message += "\n\nExample: brew install python@3.13"
+        }
+        return SystemPythonLocate(executable: nil, failureMessage: message)
     }
 
     private struct PythonVersion {

@@ -26,6 +26,36 @@ struct LoRAEntry: Equatable, Sendable {
         loraID.hasPrefix(userIDPrefix)
     }
 
+    /// Port of ``has_recovery_source`` — weights can be fetched without a local file path.
+    static func hasRecoverySource(
+        repoID: String,
+        filename: String,
+        sourcePath: String?,
+        safetensorsOrigin: String?,
+        webPageURL: String?,
+        localPath: String?
+    ) -> Bool {
+        if !(safetensorsOrigin ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        if !(webPageURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        let repo = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let file = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !repo.isEmpty, !file.isEmpty { return true }
+        for raw in [sourcePath, localPath] {
+            let text = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let lower = text.lowercased()
+            if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+                if lower.contains("civitai.com") || lower.contains("civit.red")
+                    || lower.contains("huggingface.co") || lower.contains("hf.co") {
+                    return true
+                }
+            } else if LoRAPathResolver.weightsFileIsValid(URL(fileURLWithPath: (text as NSString).expandingTildeInPath)) {
+                return true
+            }
+        }
+        return false
+    }
+
     func toDictionary() -> [String: Any] {
         var out: [String: Any] = [
             "host_id": hostID,
@@ -66,7 +96,17 @@ struct LoRAEntry: Equatable, Sendable {
         let localPath = (raw["local_path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseHF = (raw["base_hf_model_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !hostID.isEmpty, !baseHF.isEmpty else { return nil }
-        if isUserLoraID(loraID), (localPath ?? "").isEmpty { return nil }
+        if isUserLoraID(loraID), (localPath ?? "").isEmpty {
+            let hasRecovery = hasRecoverySource(
+                repoID: (raw["repo_id"] as? String) ?? "",
+                filename: (raw["filename"] as? String) ?? "",
+                sourcePath: raw["source_path"] as? String,
+                safetensorsOrigin: raw["safetensors_origin"] as? String,
+                webPageURL: raw["web_page_url"] as? String,
+                localPath: localPath
+            )
+            guard hasRecovery else { return nil }
+        }
 
         func double(_ key: String, default: Double) -> Double {
             if let n = raw[key] as? NSNumber { return n.doubleValue }

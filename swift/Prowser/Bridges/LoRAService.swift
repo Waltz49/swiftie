@@ -662,11 +662,9 @@ final class LoRAService {
 
     func install(loraID: String, modelKey: String) async throws {
         _ = modelKey
-        _ = try await opsRequest([
-            "command": "install",
-            "lora_id": loraID,
-        ])
-        catalogStore?.invalidateCache()
+        let store = try store()
+        guard let config else { throw BridgeError.workerMessage("LoRA catalog is not configured.") }
+        try await LoRAInstallService.install(loraID: loraID, store: store, config: config)
     }
 
     func loraRemovalInfo(loraID: String) async throws -> LoRARemovalInfo {

@@ -44,6 +44,10 @@ enum LoRACatalogSettings {
         if out[crossFamilyModelsKey] == nil { out[crossFamilyModelsKey] = [String: Any]() }
         if out[entryOverridesKey] == nil { out[entryOverridesKey] = [String: Any]() }
         out[probeHistoryKey] = normalizeProbeHistory(out[probeHistoryKey])
+        if out[catalogSchemaKey] as? String != diskFirstSchema,
+           !needsLegacyPythonDiskFirstMigration(out) {
+            out[catalogSchemaKey] = diskFirstSchema
+        }
         let after = canonicalJSONData(out)
         let changed = before != after
         return (out, changed)
@@ -145,8 +149,49 @@ enum LoRACatalogSettings {
         return Set(modelState(lc: lc, modelKey: modelKey).deletedIDs)
     }
 
+    /// Python ``migrate_disk_first_catalog_if_needed`` (built-in ID remap). Skip when Swift can stamp schema only.
     static func needsPythonDiskFirstMigration(_ lc: [String: Any]) -> Bool {
-        lc[catalogSchemaKey] as? String != diskFirstSchema
+        guard lc[catalogSchemaKey] as? String != diskFirstSchema else { return false }
+        return needsLegacyPythonDiskFirstMigration(lc)
+    }
+
+    static func needsLegacyPythonDiskFirstMigration(_ lc: [String: Any]) -> Bool {
+        let userIDs = Set(userEntries(from: lc).keys)
+        if let overrides = lc[entryOverridesKey] as? [String: Any] {
+            for key in overrides.keys {
+                let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, !userIDs.contains(id) else { continue }
+                if !LoRAEntry.isUserLoraID(id) {
+                    return true
+                }
+            }
+        }
+        for slice in hostAndModelSlices(in: lc) {
+            for id in slice.enabledIDs + slice.deletedIDs {
+                guard !userIDs.contains(id) else { continue }
+                if !LoRAEntry.isUserLoraID(id) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private static func hostAndModelSlices(in lc: [String: Any]) -> [ModelSlice] {
+        var slices: [ModelSlice] = []
+        for key in [byHostKey, byModelKey] {
+            guard let dict = lc[key] as? [String: Any] else { continue }
+            for (_, raw) in dict {
+                guard let slice = raw as? [String: Any] else { continue }
+                slices.append(
+                    ModelSlice(
+                        enabledIDs: (slice["enabled_ids"] as? [String]) ?? [],
+                        deletedIDs: deletedIDs(from: slice)
+                    )
+                )
+            }
+        }
+        return slices
     }
 
     static func enabledIDList(

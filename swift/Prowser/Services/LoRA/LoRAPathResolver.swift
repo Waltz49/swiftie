@@ -57,6 +57,15 @@ enum LoRAPathResolver {
         return try await downloadFromHub(entry: entry, pythonExecutable: python)
     }
 
+    @MainActor
+    static func downloadFromHub(entry: LoRAEntry, config: AppConfig) async throws -> String {
+        guard !entry.repoID.isEmpty, !entry.filename.isEmpty else {
+            throw LoRAPathError.missingWeights(entry.loraID)
+        }
+        let python = config.imagegenVenvPythonPath()
+        return try await downloadFromHub(entry: entry, pythonExecutable: python)
+    }
+
     private static func downloadFromHub(entry: LoRAEntry, pythonExecutable: String) async throws -> String {
         guard let dest = catalogCachePath(entry: entry) else {
             throw LoRAPathError.missingWeights(entry.loraID)

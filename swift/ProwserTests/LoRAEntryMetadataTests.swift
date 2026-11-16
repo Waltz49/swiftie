@@ -140,6 +140,31 @@ final class LoRAEntryMetadataTests: XCTestCase {
         XCTAssertEqual(LoRASafetensorsMetadata.triggerWord(fromFile: file.path), "my_style")
     }
 
+    func testUserEntryWithoutLocalPathWhenRecoverable() {
+        let raw: [String: Any] = [
+            "host_id": "flux1_t2i",
+            "lora_id": "user_hf_only",
+            "display_name": "HF Only",
+            "repo_id": "mnml-ai/flux-arch-realism-lora",
+            "filename": "flux-arch-realism-lora_v1.safetensors",
+            "scale": 1.0,
+            "best_guess": 1.0,
+            "base_hf_model_id": "black-forest-labs/FLUX.1-dev",
+            "min_steps": 2,
+        ]
+        XCTAssertNotNil(LoRAEntry.fromDictionary(raw))
+        XCTAssertTrue(
+            LoRAEntry.hasRecoverySource(
+                repoID: "mnml-ai/flux-arch-realism-lora",
+                filename: "flux-arch-realism-lora_v1.safetensors",
+                sourcePath: nil,
+                safetensorsOrigin: nil,
+                webPageURL: nil,
+                localPath: nil
+            )
+        )
+    }
+
     func testLegacySourcePathPrefill() {
         let download = LoRALegacyURLPrefill.suggestions(
             fromLegacySourcePath: "https://civitai.com/api/download/models/99"
@@ -149,5 +174,45 @@ final class LoRAEntryMetadataTests: XCTestCase {
             fromLegacySourcePath: "https://civitai.com/models/12"
         )
         XCTAssertEqual(page.webPageURL, "https://civitai.com/models/12")
+    }
+
+    @MainActor
+    func testInstallDirectDownloadVsWebPageOnly() {
+        let api = "https://civitai.com/api/download/models/99"
+        XCTAssertNotNil(
+            LoRAInstallService.directHTTPDownloadURL(sourcePath: nil, safetensorsOrigin: api)
+        )
+        XCTAssertTrue(
+            LoRAInstallService.canDownloadWeights(
+                repoID: "",
+                filename: "",
+                sourcePath: nil,
+                safetensorsOrigin: api,
+                localPath: nil
+            )
+        )
+        let modelPage = "https://civitai.com/models/12"
+        XCTAssertNil(
+            LoRAInstallService.directHTTPDownloadURL(sourcePath: nil, safetensorsOrigin: modelPage)
+        )
+        XCTAssertFalse(
+            LoRAInstallService.canDownloadWeights(
+                repoID: "",
+                filename: "",
+                sourcePath: nil,
+                safetensorsOrigin: modelPage,
+                localPath: nil
+            )
+        )
+        XCTAssertTrue(
+            LoRAEntry.hasRecoverySource(
+                repoID: "",
+                filename: "",
+                sourcePath: nil,
+                safetensorsOrigin: modelPage,
+                webPageURL: modelPage,
+                localPath: nil
+            )
+        )
     }
 }

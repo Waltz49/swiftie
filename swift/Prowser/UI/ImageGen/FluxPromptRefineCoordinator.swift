@@ -236,6 +236,8 @@ final class FluxPromptRefineCoordinator {
         appState.workers.foregroundModelTasks.onFluxPromptChunk = nil
         appState.workers.foregroundModelTasks.onFluxPromptReady = nil
         appState.workers.foregroundModelTasks.onJobFinished = nil
+        // Queued job AI stage owns ``fluxPromptTasks``; dialog teardown must not clear its handlers.
+        guard !appState.imageGen.isJobAIStageActive() else { return }
         appState.workers.fluxPromptTasks.onFluxPromptChunk = nil
         appState.workers.fluxPromptTasks.onFluxPromptReady = nil
         appState.workers.fluxPromptTasks.onJobFinished = nil

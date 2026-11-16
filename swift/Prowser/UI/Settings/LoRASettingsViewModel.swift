@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -266,8 +267,58 @@ final class LoRASettingsViewModel {
         NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
     }
 
-    func install(loraID: String) async {
+    func install(loraID: String, parentWindow: NSWindow?) async {
         guard let bridge else { return }
+        guard let catalogEntry = entries.first(where: { $0.loraID == loraID }) else {
+            errorMessage = "LoRA \(loraID) was not found."
+            return
+        }
+        let recoverable = LoRAEntry.hasRecoverySource(
+            repoID: catalogEntry.repoID,
+            filename: catalogEntry.filename,
+            sourcePath: catalogEntry.sourcePath,
+            safetensorsOrigin: catalogEntry.safetensorsOrigin,
+            webPageURL: catalogEntry.webPageURL,
+            localPath: catalogEntry.localPath.isEmpty ? nil : catalogEntry.localPath
+        )
+        guard recoverable else {
+            errorMessage = LoRAInstallError.noRecoverySource.errorDescription
+            return
+        }
+        let canDownload = LoRAInstallService.canDownloadWeights(
+            repoID: catalogEntry.repoID,
+            filename: catalogEntry.filename,
+            sourcePath: catalogEntry.sourcePath.isEmpty ? nil : catalogEntry.sourcePath,
+            safetensorsOrigin: catalogEntry.safetensorsOrigin.isEmpty ? nil : catalogEntry.safetensorsOrigin,
+            localPath: catalogEntry.localPath.isEmpty ? nil : catalogEntry.localPath
+        )
+        if !canDownload {
+            let page = catalogEntry.webPageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let normalized = LoRAURLValidation.normalizedHTTPURL(page),
+               let url = URL(string: normalized) {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            errorMessage = LoRAInstallError.noRecoverySource.errorDescription
+            return
+        }
+        let source = LoRAInstallService.installSourceDescription(
+            repoID: catalogEntry.repoID,
+            filename: catalogEntry.filename,
+            sourcePath: catalogEntry.sourcePath,
+            safetensorsOrigin: catalogEntry.safetensorsOrigin
+        )
+        let confirm = StyledMessageDialog.showConfirm(
+            title: "Install LoRA",
+            message: "Download weights for «\(catalogEntry.displayName)»?",
+            secondaryMessage: source,
+            confirmTitle: "Download",
+            cancelTitle: "Cancel",
+            defaultCancel: true,
+            parentWindow: parentWindow
+        )
+        guard confirm else { return }
+
         do {
             try await bridge.install(loraID: loraID, modelKey: selectedModelKey)
             await reloadEntries()

@@ -252,6 +252,9 @@ enum ImageGenModelDownloadRunner {
             if refresh:
                 self.refresh()
 
+        def set_description_str(self, desc, refresh=True):
+            self.set_description(desc, refresh=refresh)
+
         def set_postfix_str(self, postfix, refresh=False):
             pass
 

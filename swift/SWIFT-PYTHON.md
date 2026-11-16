@@ -29,6 +29,10 @@ Sync vendored Python from the monorepo when developing:
 ./Scripts/sync_imagegen_python.sh
 ```
 
+### Bundled LoRA defaults (`lorablob`, maintainer)
+
+To ship encrypted LoRA preset metadata in the app bundle, export a filtered `lora_catalog.json` and run `./Scripts/pack_lorablob.sh` (writes `Prowser/Resources/Assets/lorablob`, gitignored). Rebuild with `./Scripts/build_app.sh`. End users merge via **Tools → Debug → Import Lora Defaults**.
+
 `sync_imagegen_python.sh` still copies the full reference tree for parity testing; runtime Swift code only **requires** pipelines, `lora_ops_worker`, `lora_bridge` (imported by ops worker), catalog helpers used by workers, and `workers/ipc_json.py`. A future sync whitelist may trim Qt/chat-only modules.
 
 If the bundle or venv is missing, diffusers/MFLUX Python pipelines and LoRA import/probes are unavailable; the Image menu may still appear when MFLUX CLI is installed.

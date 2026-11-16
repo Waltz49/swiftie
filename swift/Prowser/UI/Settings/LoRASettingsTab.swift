@@ -242,8 +242,30 @@ struct LoRASettingsTab: View {
             Spacer()
             if !entry.installed {
                 Button("Install") {
-                    Task { await viewModel.install(loraID: entry.loraID) }
+                    Task {
+                        await viewModel.install(loraID: entry.loraID, parentWindow: preferencesWindow)
+                    }
                 }
+                .disabled(
+                    !LoRAEntry.hasRecoverySource(
+                        repoID: entry.repoID,
+                        filename: entry.filename,
+                        sourcePath: entry.sourcePath,
+                        safetensorsOrigin: entry.safetensorsOrigin,
+                        webPageURL: entry.webPageURL,
+                        localPath: entry.localPath.isEmpty ? nil : entry.localPath
+                    )
+                )
+                .help(
+                    LoRAEntry.hasRecoverySource(
+                        repoID: entry.repoID,
+                        filename: entry.filename,
+                        sourcePath: entry.sourcePath,
+                        safetensorsOrigin: entry.safetensorsOrigin,
+                        webPageURL: entry.webPageURL,
+                        localPath: entry.localPath.isEmpty ? nil : entry.localPath
+                    ) ? "Download LoRA weights" : "No download link configured"
+                )
             }
             if entry.registered {
                 Button(role: .destructive) {

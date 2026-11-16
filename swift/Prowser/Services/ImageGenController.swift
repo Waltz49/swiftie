@@ -1101,6 +1101,8 @@ final class ImageGenController {
         if jobAIStageActive {
             fluxPromptTasks.cancel()
             clearJobAIStageFluxCallbacks()
+            fluxPromptTasks.onFluxPromptReady = nil
+            fluxPromptTasks.onJobFinished = nil
             jobAIStageActive = false
         }
         modelTasks.cancel(terminateWorker: true)
@@ -1957,6 +1959,7 @@ final class ImageGenController {
             let refined = try await startFluxPromptJob(values: values)
             clearJobAIStageFluxCallbacks()
             fluxPromptTasks.onFluxPromptReady = nil
+            fluxPromptTasks.onJobFinished = nil
             launchRefinedPrompt = refined.trimmingCharacters(in: .whitespacesAndNewlines)
             jobAIStageActive = false
             resetActiveJobProgressTracking()
@@ -1964,6 +1967,7 @@ final class ImageGenController {
         } catch {
             clearJobAIStageFluxCallbacks()
             fluxPromptTasks.onFluxPromptReady = nil
+            fluxPromptTasks.onJobFinished = nil
             let message = error.localizedDescription
             if message == "Cancelled" {
                 failJobAIStage(message, cancelled: true)
@@ -1979,6 +1983,7 @@ final class ImageGenController {
         resetActiveJobProgressTracking()
         clearJobAIStageFluxCallbacks()
         fluxPromptTasks.onFluxPromptReady = nil
+        fluxPromptTasks.onJobFinished = nil
         if cancelled {
             if suppressTaskFailureUI || queuePersistSuppressed { return }
             if shouldContinueAfterCopyAbort() {
@@ -2029,50 +2034,61 @@ final class ImageGenController {
         let systemPrompt = meta["system_prompt"] as? String ?? ""
         let userPrompt = meta["user_prompt"] as? String ?? values["prompt"] as? String ?? ""
         let imagePaths = resolvedFluxPromptJobImagePaths(values: values, meta: meta)
-        return try await withCheckedThrowingContinuation { continuation in
-            var resumed = false
-            var lastReadyText = ""
-            fluxPromptTasks.onFluxPromptReady = { text in
-                lastReadyText = text
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: text)
-            }
-            fluxPromptTasks.onJobFinished = { [self] kind, success, error in
-                guard kind == "flux_prompt", !resumed else { return }
-                resumed = true
-                if success {
-                    let text = lastReadyText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if text.isEmpty {
-                        continuation.resume(
-                            throwing: ImageGenError.pipelineFailed(
-                                fluxPromptTasks.lastError.isEmpty
-                                    ? "AI prompt job finished without a response."
-                                    : fluxPromptTasks.lastError
-                            )
-                        )
-                    } else {
-                        continuation.resume(returning: text)
-                    }
-                    return
-                }
-                if error == "Cancelled" {
-                    continuation.resume(throwing: ImageGenError.pipelineFailed("Cancelled"))
-                } else {
-                    continuation.resume(throwing: ImageGenError.pipelineFailed(error))
-                }
-            }
-            do {
-                _ = try fluxPromptTasks.startFluxPromptJob(
-                    systemPrompt: systemPrompt,
-                    userPrompt: userPrompt,
-                    imagePaths: imagePaths
-                )
-            } catch {
-                if !resumed {
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                var resumed = false
+                var lastReadyText = ""
+                func resumeOnce(with result: Result<String, Error>) {
+                    guard !resumed else { return }
                     resumed = true
-                    continuation.resume(throwing: error)
+                    switch result {
+                    case .success(let text):
+                        continuation.resume(returning: text)
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
                 }
+                fluxPromptTasks.onFluxPromptReady = { text in
+                    lastReadyText = text
+                }
+                fluxPromptTasks.onJobFinished = { [self] kind, success, error in
+                    guard kind == "flux_prompt" else { return }
+                    if success {
+                        let text = lastReadyText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if text.isEmpty {
+                            resumeOnce(
+                                with: .failure(
+                                    ImageGenError.pipelineFailed(
+                                        fluxPromptTasks.lastError.isEmpty
+                                            ? "AI prompt job finished without a response."
+                                            : fluxPromptTasks.lastError
+                                    )
+                                )
+                            )
+                        } else {
+                            resumeOnce(with: .success(text))
+                        }
+                        return
+                    }
+                    if error == "Cancelled" {
+                        resumeOnce(with: .failure(ImageGenError.pipelineFailed("Cancelled")))
+                    } else {
+                        resumeOnce(with: .failure(ImageGenError.pipelineFailed(error)))
+                    }
+                }
+                do {
+                    _ = try fluxPromptTasks.startFluxPromptJob(
+                        systemPrompt: systemPrompt,
+                        userPrompt: userPrompt,
+                        imagePaths: imagePaths
+                    )
+                } catch {
+                    resumeOnce(with: .failure(error))
+                }
+            }
+        } onCancel: { [fluxPromptTasks] in
+            Task { @MainActor in
+                fluxPromptTasks.cancel()
             }
         }
     }
@@ -4427,6 +4443,10 @@ final class ImageGenController {
 
     // MARK: - Quit / shutdown
 
+    func isJobAIStageActive() -> Bool {
+        jobAIStageActive
+    }
+
     func isRunning() -> Bool {
         if modelTasks.isBusy || fluxPromptTasks.isBusy || foregroundTasks.isBusy || jobAIStageActive {
             return true
@@ -4893,6 +4913,8 @@ final class ImageGenController {
         if jobAIStageActive {
             fluxPromptTasks.cancel()
             clearJobAIStageFluxCallbacks()
+            fluxPromptTasks.onFluxPromptReady = nil
+            fluxPromptTasks.onJobFinished = nil
             jobAIStageActive = false
         }
         modelTasks.shutdown()

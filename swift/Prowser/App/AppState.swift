@@ -1051,6 +1051,46 @@ final class AppState {
         }
     }
 
+    func importLoraDefaults() {
+        guard LoRADefaultsImportService.bundledBlobURL() != nil else {
+            StyledMessageDialog.showWarning(
+                title: "Import Lora Defaults",
+                message: "This build does not include a bundled lorablob."
+            )
+            return
+        }
+        let store = LoRACatalogStore(paths: config.profilePaths)
+        while true {
+            guard let password = StyledMessageDialog.presentPasswordInput(
+                title: "Import Lora Defaults",
+                message: "Enter the password for the bundled LoRA defaults."
+            ) else { return }
+
+            do {
+                let result = try LoRADefaultsImportService.run(password: password, store: store)
+                NotificationCenter.default.post(name: .prowserLoraCatalogChanged, object: nil)
+                LoRADefaultsImportSummaryDialogController.show(summary: result.summaryText, appState: self)
+                return
+            } catch LoRADefaultsImportError.invalidPassword {
+                let retry = StyledMessageDialog.showConfirm(
+                    title: "Import Lora Defaults",
+                    message: LoRADefaultsImportError.invalidPassword.errorDescription
+                        ?? "Could not decrypt lorablob with that password.",
+                    confirmTitle: "Retry",
+                    cancelTitle: "Cancel",
+                    defaultCancel: true
+                )
+                if !retry { return }
+            } catch {
+                StyledMessageDialog.showWarning(
+                    title: "Import Lora Defaults",
+                    message: error.localizedDescription
+                )
+                return
+            }
+        }
+    }
+
     func enableCompatibleLorasForAllModels() {
         Task { @MainActor in
             guard workers.lora.isAvailable else {

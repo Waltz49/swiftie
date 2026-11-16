@@ -28,7 +28,12 @@ def _handle_migrate_catalog(cmd: Dict[str, Any]) -> Dict[str, Any]:
 
     lc = load_lora_catalog_file()
     save_lora_catalog_file(lc)
-    return {"ok": True}
+    return {
+        "type": "result",
+        "job_id": cmd.get("job_id", ""),
+        "command": "migrate_catalog",
+        "success": True,
+    }
 
 
 _OPS_HANDLERS = {
