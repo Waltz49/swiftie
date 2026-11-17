@@ -22,6 +22,18 @@ enum ExifEmbeddedTIFFReader {
         userComment(fromTIFF: tiff)
     }
 
+    /// Raw EXIF UserComment bytes (tag 0x9286), matching Python ``get_usercomment_from_path``.
+    static func userCommentPayload(fromImageData data: Data) -> Data? {
+        guard let tiff = tiffFromPNG(data) ?? tiffFromJPEG(data) else {
+            return nil
+        }
+        return userCommentPayload(fromTIFF: tiff)
+    }
+
+    static func userCommentPayload(fromEmbeddedTIFF tiff: Data) -> Data? {
+        userCommentPayload(fromTIFF: tiff)
+    }
+
     private static func tiffFromPNG(_ data: Data) -> Data? {
         guard data.count >= 8, data.prefix(8) == Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) else {
             return nil
@@ -63,6 +75,33 @@ enum ExifEmbeddedTIFFReader {
 
     private static func userComment(fromTIFF tiff: Data) -> String? {
         userCommentParse(fromTIFF: tiff)
+    }
+
+    private static func userCommentPayload(fromTIFF tiff: Data) -> Data? {
+        guard tiff.count >= 8, isValidTIFFHeader(tiff) else { return nil }
+        if let quick = quickUserCommentPayloadFromMinimalPiexifTIFF(tiff), !quick.isEmpty {
+            return quick
+        }
+        let littleEndian = tiff.prefix(2) == Data([0x49, 0x49])
+        guard let ifd0Offset = readUInt32(tiff, 4, littleEndian: littleEndian) else { return nil }
+        let ifd0 = Int(ifd0Offset)
+        guard ifd0 >= 0, ifd0 + 2 <= tiff.count else { return nil }
+        guard let exifIFDOffset = pointerTag(in: tiff, ifdOffset: ifd0, tag: 0x8769, littleEndian: littleEndian)
+        else { return nil }
+        guard exifIFDOffset >= 0, exifIFDOffset + 2 <= tiff.count else { return nil }
+        return undefinedTag(in: tiff, ifdOffset: exifIFDOffset, tag: 0x9286, littleEndian: littleEndian)
+    }
+
+    private static func quickUserCommentPayloadFromMinimalPiexifTIFF(_ tiff: Data) -> Data? {
+        guard tiff.prefix(2) == Data([0x4D, 0x4D]), tiff.count >= 48 else { return nil }
+        guard readUInt16BE(tiff, 26) == 1 else { return nil }
+        guard readUInt16BE(tiff, 28) == 0x9286 else { return nil }
+        guard readUInt16BE(tiff, 30) == 7 else { return nil }
+        let count = readInt32BE(tiff, 32)
+        guard count > 0, count <= tiff.count, count <= maxTagByteCount else { return nil }
+        let valueOffset = readInt32BE(tiff, 36)
+        guard valueOffset >= 0, valueOffset + count <= tiff.count else { return nil }
+        return tiff[valueOffset ..< (valueOffset + count)]
     }
 
     private static func userCommentParse(fromTIFF tiff: Data) -> String? {

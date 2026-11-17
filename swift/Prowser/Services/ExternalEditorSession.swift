@@ -11,7 +11,8 @@ final class ExternalEditorSession {
     private var filePath: String?
     private var originalAccessDate: Date?
     private var originalModDate: Date?
-    private var originalUserComment: String?
+    /// Raw EXIF UserComment bytes (Python ``get_usercomment_from_path``).
+    private var originalUserCommentPayload: Data?
     private var editorAppName = ""
     private weak var appState: AppState?
 
@@ -104,13 +105,13 @@ final class ExternalEditorSession {
             originalModDate = values.contentModificationDate
             originalAccessDate = values.contentAccessDate ?? values.contentModificationDate
         }
-        originalUserComment = ExifService.userComment(path: path)
+        originalUserCommentPayload = ExifService.userCommentRawPayload(path: path)
     }
 
     private func startMonitoring() {
         monitorTask?.cancel()
         let editor = editorAppName
-        monitorTask = Task { [weak self] in
+        monitorTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64((self?.checkIntervalSeconds ?? 2) * 1_000_000_000))
                 guard let self else { return }
@@ -121,8 +122,10 @@ final class ExternalEditorSession {
                       let original = self.originalModDate else {
                     continue
                 }
-                if abs(mod.timeIntervalSince1970 - original.timeIntervalSince1970) > 1.0 {
-                    await self.restoreTimestampsAndComment()
+                let mtimeChanged = abs(mod.timeIntervalSince1970 - original.timeIntervalSince1970) > 1.0
+                let commentStripped = self.shouldRestoreUserComment(path: path)
+                if mtimeChanged || commentStripped {
+                    self.restoreTimestampsAndComment()
                     self.refreshUI(for: path)
                     if let updated = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
                         self.originalModDate = updated
@@ -131,7 +134,7 @@ final class ExternalEditorSession {
                 }
             }
             guard let self else { return }
-            await self.restoreTimestampsAndComment()
+            self.restoreTimestampsAndComment()
             if let path = self.filePath {
                 self.refreshUI(for: path)
             }
@@ -149,15 +152,24 @@ final class ExternalEditorSession {
         filePath = nil
         originalAccessDate = nil
         originalModDate = nil
-        originalUserComment = nil
+        originalUserCommentPayload = nil
         editorAppName = ""
     }
 
-    private func restoreTimestampsAndComment() async {
+    private func shouldRestoreUserComment(path: String) -> Bool {
+        guard let original = originalUserCommentPayload, !original.isEmpty else { return false }
+        guard let current = ExifService.userCommentRawPayload(path: path) else { return true }
+        return current != original
+    }
+
+    private func restoreTimestampsAndComment() {
         guard let path = filePath, FileManager.default.fileExists(atPath: path) else { return }
-        if let comment = originalUserComment, !comment.isEmpty {
+        if let payload = originalUserCommentPayload, !payload.isEmpty {
+            let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+            let mtime = attrs?[.modificationDate] as? Date
+            let atime = attrs?[.creationDate] as? Date
             do {
-                try await ExifService.writeUserComment(path: path, text: comment)
+                try ExifUserCommentRestore.restore(path: path, userCommentPayload: payload, mtime: mtime, atime: atime)
             } catch {
                 NSLog("ExternalEditorSession: user comment restore failed for \(path): \(error)")
             }
@@ -166,16 +178,9 @@ final class ExternalEditorSession {
     }
 
     private func applyOriginalTimestamps(path: String) {
-        var attrs: [FileAttributeKey: Any] = [:]
-        if let mtime = originalModDate {
-            attrs[.modificationDate] = mtime
-        }
-        if let atime = originalAccessDate {
-            attrs[.creationDate] = atime
-        }
-        guard !attrs.isEmpty else { return }
+        guard let mtime = originalModDate else { return }
         do {
-            try FileManager.default.setAttributes(attrs, ofItemAtPath: path)
+            try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: path)
         } catch {
             NSLog("ExternalEditorSession: timestamp restore failed for \(path): \(error)")
         }

@@ -210,6 +210,42 @@ enum ExifService {
         return ExifEmbeddedTIFFReader.userComment(fromFile: path)
     }
 
+    /// Raw UserComment tag bytes for restore (Python ``get_usercomment_from_path``); not TIFF ImageDescription.
+    static func userCommentRawPayload(path: String) -> Data? {
+        let url = URL(fileURLWithPath: path)
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+            if let raw = exif[kCGImagePropertyExifUserComment],
+               let payload = userCommentPayloadFromImageIOValue(raw),
+               !payload.isEmpty {
+                return payload
+            }
+        }
+        if detectedRasterExtension(path: path) == "webp",
+           let fileData = try? Data(contentsOf: url),
+           let tiff = WebPImageWriter.extractExifChunk(from: fileData),
+           let payload = ExifEmbeddedTIFFReader.userCommentPayload(fromEmbeddedTIFF: tiff),
+           !payload.isEmpty {
+            return payload
+        }
+        guard let fileData = try? Data(contentsOf: url),
+              let payload = ExifEmbeddedTIFFReader.userCommentPayload(fromImageData: fileData),
+              !payload.isEmpty else {
+            return nil
+        }
+        return payload
+    }
+
+    private static func userCommentPayloadFromImageIOValue(_ raw: Any) -> Data? {
+        if let data = raw as? Data, !data.isEmpty { return data }
+        if let data = raw as? NSData, data.length > 0 { return Data(referencing: data) }
+        if let string = raw as? String, !string.isEmpty {
+            return encodeUserCommentData(string)
+        }
+        return nil
+    }
+
     /// Single load path for ``ExifCommentData/read(from:)`` (format-specific I/O stays in this type).
     static func canonicalCommentText(path: String) -> String? {
         nonEmptyCommentText(userComment(path: path))

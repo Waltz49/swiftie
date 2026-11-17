@@ -7,15 +7,23 @@ enum ExifUserCommentRestore {
         if text.isEmpty {
             throw ExifService.ExifError.writeFailed
         }
-        if try restoreViaBundledPython(path: path, text: text, mtime: mtime, atime: atime) {
+        try restore(path: path, userCommentPayload: ExifService.encodeUserCommentData(text), mtime: mtime, atime: atime)
+    }
+
+    /// Restore using on-disk UserComment bytes captured before editing (matches Python external editor session).
+    static func restore(path: String, userCommentPayload: Data, mtime: Date?, atime: Date?) throws {
+        if userCommentPayload.isEmpty {
+            throw ExifService.ExifError.writeFailed
+        }
+        if try restoreViaBundledPython(path: path, userCommentPayload: userCommentPayload, mtime: mtime, atime: atime) {
             return
         }
-        try restoreNative(path: path, text: text, mtime: mtime, atime: atime)
+        try restoreNative(path: path, userCommentPayload: userCommentPayload, mtime: mtime, atime: atime)
     }
 
     private static func restoreViaBundledPython(
         path: String,
-        text: String,
+        userCommentPayload: Data,
         mtime: Date?,
         atime: Date?
     ) throws -> Bool {
@@ -32,11 +40,12 @@ enum ExifUserCommentRestore {
         process.arguments = [
             "-c",
             """
+            import base64
             import sys
-            from exif.exif_utils import encode_usercomment, restore_usercomment_to_file
+            from exif.exif_utils import restore_usercomment_to_file
             path = sys.argv[1]
-            text = sys.stdin.buffer.read().decode('utf-8')
-            ok = restore_usercomment_to_file(path, encode_usercomment(text))
+            payload = base64.b64decode(sys.stdin.buffer.read())
+            ok = restore_usercomment_to_file(path, payload)
             sys.exit(0 if ok else 2)
             """,
             path,
@@ -46,9 +55,7 @@ enum ExifUserCommentRestore {
         let stderr = Pipe()
         process.standardError = stderr
         try process.run()
-        if let data = text.data(using: .utf8) {
-            stdin.fileHandleForWriting.write(data)
-        }
+        stdin.fileHandleForWriting.write(userCommentPayload.base64EncodedData())
         try stdin.fileHandleForWriting.close()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return false }
@@ -85,10 +92,9 @@ enum ExifUserCommentRestore {
         }
     }
 
-    private static func restoreNative(path: String, text: String, mtime: Date?, atime: Date?) throws {
+    private static func restoreNative(path: String, userCommentPayload: Data, mtime: Date?, atime: Date?) throws {
         guard ExifService.canWriteExif(path: path) else { throw ExifService.ExifError.unsupportedFormat }
-        let payload = ExifService.encodeUserCommentData(text)
-        let segment = ExifPiexifSegmentBuilder.build(userCommentPayload: payload)
+        let segment = ExifPiexifSegmentBuilder.build(userCommentPayload: userCommentPayload)
         let output = try ExifSegmentInserter.insert(exifSegment: segment, intoFileAt: path)
         let url = URL(fileURLWithPath: path)
         let temp = url.deletingLastPathComponent()
