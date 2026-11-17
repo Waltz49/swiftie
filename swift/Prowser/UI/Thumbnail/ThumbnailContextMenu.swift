@@ -106,7 +106,8 @@ enum ThumbnailContextMenu {
         NSMenuShortcutSupport.apply(display: "⌘E", to: edit)
         edit.target = MenuActions.shared
         edit.representedObject = paths
-        edit.isEnabled = singleOnly || paths.count > 1
+        let editMulti = multiSelect && ImageGenEditorSettings.isPixelmatorProEditor(editorName)
+        edit.isEnabled = singleOnly || editMulti
 
         let exif = menu.addItem(
             withTitle: "Edit EXIF User Comment…",
@@ -116,6 +117,7 @@ enum ThumbnailContextMenu {
         NSMenuShortcutSupport.apply(display: "⇧⌘E", to: exif)
         exif.target = MenuActions.shared
         exif.representedObject = paths
+        exif.isEnabled = singleOnly && (paths.first.map { ExifService.canWriteExif(path: $0) } ?? false)
 
         let convertFormat = menu.addItem(
             withTitle: "Convert Format…",

@@ -1173,7 +1173,9 @@ struct ImageListNSViewRepresentable: NSViewRepresentable {
             let bag = EventBusSubscriptionBag(bus: appState.eventBus)
             eventSubscriptions = bag
             bag.subscribe(.selectionChanged) { [weak self] _ in
-                self?.syncSelectionVisuals()
+                guard let self else { return }
+                self.syncSelectionVisuals()
+                self.appState.refreshMenuState()
             }
             bag.subscribe(.currentImageChanged) { [weak self] _ in
                 self?.syncSelectionVisuals()

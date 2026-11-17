@@ -38,6 +38,11 @@ enum SelectionService {
         appState.selection.emitSelectionChanged(highlightIndex: lastIndex)
     }
 
+    /// File Information pane and comment editors target the active image only, not a multi-select batch.
+    static func informationPaneSingleImageActionsEnabled(appState: AppState) -> Bool {
+        !appState.selection.multiSelectMode && appState.fileData.currentImagePath != nil
+    }
+
     /// Python `SelectionManager.get_selected_files`: ordered selection, falling back to the highlighted image.
     static func selectedFilesOrCurrent(appState: AppState) -> [String] {
         let ordered = orderedSelectedFiles(appState: appState)

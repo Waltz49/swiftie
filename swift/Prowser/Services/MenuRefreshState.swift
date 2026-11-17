@@ -22,6 +22,10 @@ final class MenuRefreshState {
     var undoMenuTitle = "Undo"
     var quickMassRenameMenuVisible = false
     var lockUnlockMenuVisible = false
+    var editExifUserCommentEnabled = false
+    var wallpaperMenuEnabled = false
+    var findReferencesMenuEnabled = false
+    var externalEditorMenuEnabled = true
     private var keyWindowObservers: [NSObjectProtocol] = []
     private var lastDestinationMenuAction: String?
 
@@ -40,6 +44,7 @@ final class MenuRefreshState {
         refreshUndoMenu(appState: appState)
         refreshQuickMassRenameMenu(appState: appState)
         refreshLockUnlockMenu(appState: appState)
+        refreshSelectionSensitiveToolsMenu(appState: appState)
     }
 
     func refreshAll() {
@@ -63,6 +68,21 @@ final class MenuRefreshState {
         refreshUndoMenu(appState: appState)
         refreshQuickMassRenameMenu(appState: appState)
         refreshLockUnlockMenu(appState: appState)
+        refreshSelectionSensitiveToolsMenu(appState: appState)
+    }
+
+    func refreshSelectionSensitiveToolsMenu(appState: AppState) {
+        editExifUserCommentEnabled = appState.canEditExifUserComment
+        let mode = appState.fileData.currentViewMode
+        wallpaperMenuEnabled = (mode == .thumbnail || mode == .browse) && !appState.selection.multiSelectMode
+        findReferencesMenuEnabled = !appState.selection.multiSelectMode
+            && appState.fileData.currentImagePath != nil
+        let editor = appState.config.string(forKey: "image_editor_app", default: "Preview")
+        if appState.selection.multiSelectMode {
+            externalEditorMenuEnabled = ImageGenEditorSettings.isPixelmatorProEditor(editor)
+        } else {
+            externalEditorMenuEnabled = !SelectionService.selectedFilesOrCurrent(appState: appState).isEmpty
+        }
     }
 
     func refreshDeleteExifDate(appState: AppState) {

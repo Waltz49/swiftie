@@ -110,21 +110,28 @@ struct InformationActionBarView: View {
 
     var body: some View {
         let hasComment = appState.informationHasUserComment
+        let singleImage = SelectionService.informationPaneSingleImageActionsEnabled(appState: appState)
         HStack(spacing: 4) {
-            assetActionButton("edit", normal: "comment_icon", hover: "comment_icon_hover", tooltip: "Edit user comment")
+            assetActionButton(
+                "edit",
+                normal: "comment_icon",
+                hover: "comment_icon_hover",
+                tooltip: "Edit user comment",
+                enabled: singleImage && appState.canEditExifUserComment
+            )
             assetActionButton(
                 "copy",
                 normal: "copy",
                 hover: "copy_hover",
                 tooltip: "Copy prompt to clipboard.\n⌥+click to copy full user comment.",
-                enabled: hasComment
+                enabled: singleImage && hasComment
             )
             assetActionButton(
                 "speak",
                 normal: "bullhorn",
                 hover: "bullhorn_hover",
                 tooltip: "Read prompt aloud (click again to stop).\n⌥+click to read the full user comment.",
-                enabled: hasComment,
+                enabled: singleImage && hasComment,
                 highlighted: speakHighlighted
             )
             assetActionButton(
@@ -132,14 +139,14 @@ struct InformationActionBarView: View {
                 normal: "fromText",
                 hover: "fromText_hover",
                 tooltip: "Create image from this prompt",
-                enabled: hasComment && imageGenerationEnabled
+                enabled: singleImage && hasComment && imageGenerationEnabled
             )
             assetActionButton(
                 "editai",
                 normal: "editAI",
                 hover: "editAI_hover",
                 tooltip: "Edit this image with AI",
-                enabled: appState.fileData.currentImagePath != nil && imageGenerationEnabled
+                enabled: singleImage && appState.fileData.currentImagePath != nil && imageGenerationEnabled
             )
             Spacer(minLength: 0)
             assetActionButton(
@@ -147,7 +154,7 @@ struct InformationActionBarView: View {
                 normal: "trash_icon",
                 hover: "trash_icon_hover",
                 tooltip: "Delete user comment",
-                enabled: hasComment
+                enabled: singleImage && hasComment
             )
         }
         .padding(.horizontal, 8)

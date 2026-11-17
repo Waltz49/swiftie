@@ -1741,6 +1741,12 @@ final class AppState {
         return await ExifService.importPromptFromPath(path)
     }
 
+    /// Tools / information pane: edit applies to one file only (Python `update_tools_menu_states` for edit EXIF user comment).
+    var canEditExifUserComment: Bool {
+        guard let path = resolveUserCommentEditPath() else { return false }
+        return ExifService.canWriteExif(path: path)
+    }
+
     func beginEditUserComment() {
         guard let path = resolveUserCommentEditPath() else {
             status.show("No image selected")
@@ -1823,6 +1829,7 @@ final class AppState {
         case .browse:
             return fileData.currentImagePath
         case .thumbnail, .list:
+            if selection.multiSelectMode { return nil }
             let selected = Array(selection.selectedFiles)
             if selected.count == 1 {
                 return selected[0]

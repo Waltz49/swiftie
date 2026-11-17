@@ -169,10 +169,26 @@ enum SidebarPaneContextMenus {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let hasComment = appState.informationHasUserComment
+        let singleImage = SelectionService.informationPaneSingleImageActionsEnabled(appState: appState)
 
-        addAction(menu, title: "Edit User Comment", action: #selector(PaneMenuActions.infoEdit(_:)))
-        addAction(menu, title: "Copy to Clipboard", enabled: hasComment, action: #selector(PaneMenuActions.infoCopy(_:)))
-        addAction(menu, title: "Delete User Comment", enabled: hasComment, action: #selector(PaneMenuActions.infoDelete(_:)))
+        addAction(
+            menu,
+            title: "Edit User Comment",
+            enabled: singleImage && appState.canEditExifUserComment,
+            action: #selector(PaneMenuActions.infoEdit(_:))
+        )
+        addAction(
+            menu,
+            title: "Copy to Clipboard",
+            enabled: singleImage && hasComment,
+            action: #selector(PaneMenuActions.infoCopy(_:))
+        )
+        addAction(
+            menu,
+            title: "Delete User Comment",
+            enabled: singleImage && hasComment,
+            action: #selector(PaneMenuActions.infoDelete(_:))
+        )
         menu.addItem(.separator())
         addCheckable(
             menu,

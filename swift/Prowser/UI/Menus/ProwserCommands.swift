@@ -343,10 +343,7 @@ struct ProwserCommands: Commands {
 
                     Divider()
 
-                    Button("Edit EXIF User Comment…") {
-                        Task { @MainActor in appState.beginEditUserComment() }
-                    }
-                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    EditExifUserCommentMenuButton(appState: appState)
 
                     Button("Delete User Comment from File…") {
                         Task { @MainActor in appState.exifOperations.deleteUserCommentForSelection() }
@@ -354,13 +351,7 @@ struct ProwserCommands: Commands {
 
                     Divider()
 
-                    Button("Find References to This Image…") {
-                        Task { @MainActor in
-                            if let path = appState.fileData.currentImagePath {
-                                appState.findReferences(to: path)
-                            }
-                        }
-                    }
+                    FindReferencesMenuButton(appState: appState)
                 }
 
                 MapLocationButton(appState: appState)
@@ -382,27 +373,7 @@ struct ProwserCommands: Commands {
                     .keyboardShortcut("s", modifiers: [.shift, .control])
                 }
 
-                Menu("Wallpaper") {
-                    Button("Set Wallpaper (Last Used)") {
-                        Task { @MainActor in setWallpaperLastUsed() }
-                    }
-                    .keyboardShortcut("w", modifiers: [.command, .shift])
-
-                    Divider()
-
-                    Button("Fit (Contain)") {
-                        Task { @MainActor in setWallpaper(fitMethod: .contain, persist: true) }
-                    }
-                    Button("Fill (Cover)") {
-                        Task { @MainActor in setWallpaper(fitMethod: .cover, persist: true) }
-                    }
-                    Button("Fit to Width") {
-                        Task { @MainActor in setWallpaper(fitMethod: .width, persist: true) }
-                    }
-                    Button("Fit to Height") {
-                        Task { @MainActor in setWallpaper(fitMethod: .height, persist: true) }
-                    }
-                }
+                WallpaperMenuContents(appState: appState, setWallpaperLastUsed: setWallpaperLastUsed, setWallpaper: setWallpaper)
 
                 Menu("Create Screen Size Copy...") {
                     Button("Create Screen Size Copy (Last Used)") {
@@ -734,6 +705,68 @@ private struct ExternalEditorButton: View {
             appState.fileOperations.openWithExternalEditor()
         }
         .keyboardShortcut("e", modifiers: .command)
+        .disabled(!appState.menuRefresh.externalEditorMenuEnabled)
+    }
+}
+
+@MainActor
+private struct EditExifUserCommentMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Edit EXIF User Comment…") {
+            Task { @MainActor in appState.beginEditUserComment() }
+        }
+        .keyboardShortcut("e", modifiers: [.command, .shift])
+        .disabled(!appState.menuRefresh.editExifUserCommentEnabled)
+    }
+}
+
+@MainActor
+private struct FindReferencesMenuButton: View {
+    @Bindable var appState: AppState
+
+    var body: some View {
+        Button("Find References to This Image…") {
+            Task { @MainActor in
+                if let path = appState.fileData.currentImagePath {
+                    appState.findReferences(to: path)
+                }
+            }
+        }
+        .disabled(!appState.menuRefresh.findReferencesMenuEnabled)
+    }
+}
+
+@MainActor
+private struct WallpaperMenuContents: View {
+    @Bindable var appState: AppState
+    let setWallpaperLastUsed: @MainActor () -> Void
+    let setWallpaper: @MainActor (WallpaperManager.FitMethod, Bool) -> Void
+
+    var body: some View {
+        Menu("Wallpaper") {
+            Button("Set Wallpaper (Last Used)") {
+                Task { @MainActor in setWallpaperLastUsed() }
+            }
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Fit (Contain)") {
+                Task { @MainActor in setWallpaper(.contain, true) }
+            }
+            Button("Fill (Cover)") {
+                Task { @MainActor in setWallpaper(.cover, true) }
+            }
+            Button("Fit to Width") {
+                Task { @MainActor in setWallpaper(.width, true) }
+            }
+            Button("Fit to Height") {
+                Task { @MainActor in setWallpaper(.height, true) }
+            }
+        }
+        .disabled(!appState.menuRefresh.wallpaperMenuEnabled)
     }
 }
 
