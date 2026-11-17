@@ -8,7 +8,7 @@ struct ActiveJobStripView: View {
     var includeQueueJobsRow: Bool = false
 
     var body: some View {
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenQueueChromeRevision
         let controller = appState.imageGen
         let strip = controller.activeStripView
         ActiveJobStripNSViewRepresentable(

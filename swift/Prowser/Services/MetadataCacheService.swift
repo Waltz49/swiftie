@@ -22,6 +22,8 @@ final class MetadataCacheService {
 
     var entryCount: Int { cache.count }
 
+    var persistedCacheFilePath: String { cacheFile.path }
+
     /// Paths with persisted metadata entries (used when scrubbing thumbnail disk cache).
     func allCachedPaths() -> [String] {
         Array(cache.keys)
@@ -171,6 +173,22 @@ final class MetadataCacheService {
             )
         }
         dirty = true
+    }
+
+    /// Copy of persisted fields for background sorting (same mtime validation rules as live reads).
+    func sortingSnapshot() -> MetadataCacheSnapshot {
+        var entries: [String: MetadataCacheSnapshot.Entry] = [:]
+        entries.reserveCapacity(cache.count)
+        for (path, entry) in cache {
+            entries[path] = MetadataCacheSnapshot.Entry(
+                mtime: entry.mtime,
+                size: entry.size,
+                pixelWidth: entry.pixelWidth,
+                pixelHeight: entry.pixelHeight,
+                exifTimestamp: entry.exifTimestamp
+            )
+        }
+        return MetadataCacheSnapshot(entries: entries)
     }
 
     func saveIfNeeded() {

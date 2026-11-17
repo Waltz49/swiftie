@@ -101,24 +101,7 @@ final class LmStudioCaptionService {
         guard let nativeBase = nativeAPIBaseURL(host: host) else {
             return
         }
-        var loadedIDs: [String] = []
-        if let openAIBase = apiBaseURL(host: host) {
-            loadedIDs = (try? await fetchLoadedModelIDs(baseURL: openAIBase, config: config)) ?? []
-        }
-        if loadedIDs.isEmpty {
-            let modelsURL = nativeBase.appending(path: "models")
-            SessionViewLog.logLMStudioCall(
-                method: "GET \(modelsURL.path)",
-                payload: ["url": modelsURL.absoluteString, "reason": "image_gen_unload"],
-                config: config
-            )
-            if let (data, response) = try? await URLSession.shared.data(from: modelsURL),
-               let http = response as? HTTPURLResponse,
-               (200 ..< 300).contains(http.statusCode) {
-                logHTTPResponseData(data, status: http.statusCode, config: config)
-                loadedIDs = parseLoadedNativeModelIDs(from: data)
-            }
-        }
+        let loadedIDs: [String] = (try? await fetchLoadedModelIDs(config: config, logReason: "image_gen_unload")) ?? []
         if loadedIDs.isEmpty {
             if config.bool(forKey: "debug_mode", default: false) {
                 NSLog("[%@] image_gen_unload: no loaded LM Studio instances found", Self.logTag)
@@ -594,61 +577,14 @@ final class LmStudioCaptionService {
     // MARK: - Network
 
     private func networkProbe(config: AppConfig) async -> Bool {
-        let host = captionHost(config: config)
-        guard let base = apiBaseURL(host: host) else { return false }
-        let modelsURL = base.appending(path: "models")
-        SessionViewLog.logLMStudioCall(
-            method: "GET \(modelsURL.path)",
-            payload: ["url": modelsURL.absoluteString],
-            config: config
-        )
         do {
-            let (data, response) = try await URLSession.shared.data(from: modelsURL)
-            guard let http = response as? HTTPURLResponse else {
-                SessionViewLog.logLMStudioError("Probe failed: no HTTP response", config: config)
-                return false
-            }
-            logHTTPResponseData(data, status: http.statusCode, config: config)
-            guard (200 ..< 300).contains(http.statusCode) else {
-                SessionViewLog.logLMStudioError(
-                    "Probe failed: HTTP \(http.statusCode)",
-                    detail: String(data: data, encoding: .utf8),
-                    config: config
-                )
-                return false
-            }
-            let ids = parseModelIDs(from: data)
-            if !ids.isEmpty { return true }
-            if !savedModelKey(config: config).isEmpty { return true }
-            if await probeNativeLoadedModels(host: host, config: config) {
-                return true
-            }
-            return false
+            let loaded = try await fetchLoadedModelIDs(config: config)
+            if !loaded.isEmpty { return true }
         } catch {
             SessionViewLog.logLMStudioError("Probe failed", detail: error.localizedDescription, config: config)
             return false
         }
-    }
-
-    /// Native ``GET /api/v1/models`` — detects loaded instances when OpenAI ``/v1/models`` is empty.
-    private func probeNativeLoadedModels(host: String, config: AppConfig) async -> Bool {
-        guard let nativeBase = nativeAPIBaseURL(host: host) else { return false }
-        let url = nativeBase.appending(path: "models")
-        SessionViewLog.logLMStudioCall(
-            method: "GET \(url.path)",
-            payload: ["url": url.absoluteString],
-            config: config
-        )
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-                return false
-            }
-            logHTTPResponseData(data, status: http.statusCode, config: config)
-            return !parseLoadedNativeModelIDs(from: data).isEmpty
-        } catch {
-            return false
-        }
+        return !savedModelKey(config: config).isEmpty
     }
 
     private func streamCaption(
@@ -893,7 +829,7 @@ final class LmStudioCaptionService {
     }
 
     private func resolveModelID(baseURL: URL, config: AppConfig) async throws -> String {
-        let ids = try await fetchLoadedModelIDs(baseURL: baseURL, config: config)
+        let ids = try await fetchLoadedModelIDs(config: config)
         if let first = ids.first {
             persistLastModelKey(first, config: config)
             return first
@@ -906,7 +842,7 @@ final class LmStudioCaptionService {
             )
         }
         try await reloadSavedCaptionModel(savedKey: saved, config: config)
-        let idsAfterLoad = try await fetchLoadedModelIDs(baseURL: baseURL, config: config)
+        let idsAfterLoad = try await fetchLoadedModelIDs(config: config)
         if let first = idsAfterLoad.first {
             persistLastModelKey(first, config: config)
             return first
@@ -914,28 +850,57 @@ final class LmStudioCaptionService {
         return saved
     }
 
-    private func fetchLoadedModelIDs(baseURL: URL, config: AppConfig) async throws -> [String] {
-        let modelsURL = baseURL.appending(path: "models")
+    /// Loaded LLM instance IDs only (port of Python ``client.llm.list_loaded()``).
+    private func fetchLoadedModelIDs(config: AppConfig, logReason: String? = nil) async throws -> [String] {
+        let host = captionHost(config: config)
+        var lastErrorData: Data?
+        if let nativeBase = nativeAPIBaseURL(host: host) {
+            let modelsURL = nativeBase.appending(path: "models")
+            SessionViewLog.logLMStudioCall(
+                method: "GET \(modelsURL.path)",
+                payload: logPayload(url: modelsURL, reason: logReason),
+                config: config
+            )
+            let (data, response) = try await URLSession.shared.data(from: modelsURL)
+            lastErrorData = data
+            if let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) {
+                logHTTPResponseData(data, status: http.statusCode, config: config)
+                let ids = parseLoadedNativeModelIDs(from: data)
+                if !ids.isEmpty { return ids }
+            }
+        }
+        guard let openAIBase = apiBaseURL(host: host) else {
+            throw CaptionError.runtime("Invalid LM Studio host.\n\nUse a value like localhost:1234")
+        }
+        let modelsURL = openAIBase.appending(path: "models")
         SessionViewLog.logLMStudioCall(
             method: "GET \(modelsURL.path)",
-            payload: ["url": modelsURL.absoluteString],
+            payload: logPayload(url: modelsURL, reason: logReason),
             config: config
         )
         let (data, response) = try await URLSession.shared.data(from: modelsURL)
         guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-            let detail = String(data: data, encoding: .utf8)
+            let detail = String(data: data, encoding: .utf8) ?? String(data: lastErrorData ?? Data(), encoding: .utf8)
             SessionViewLog.logLMStudioError(
-                "Could not contact LMStudio server at \(captionHost(config: config)).",
+                "Could not contact LMStudio server at \(host).",
                 detail: detail,
                 config: config
             )
             throw CaptionError.runtime(
-                "Could not contact LMStudio server at \(captionHost(config: config)).\n\n"
+                "Could not contact LMStudio server at \(host).\n\n"
                     + "Please start LMStudio and enable the local API server."
             )
         }
         logHTTPResponseData(data, status: http.statusCode, config: config)
-        return parseModelIDs(from: data)
+        return parseLoadedNativeModelIDs(from: data)
+    }
+
+    private func logPayload(url: URL, reason: String?) -> [String: Any] {
+        var payload: [String: Any] = ["url": url.absoluteString]
+        if let reason, !reason.isEmpty {
+            payload["reason"] = reason
+        }
+        return payload
     }
 
     /// `POST /api/v1/models/load` — port of Python `client.llm.model(saved_key)`.
@@ -1127,14 +1092,6 @@ final class LmStudioCaptionService {
         }
     }
 
-    private func parseModelIDs(from data: Data) -> [String] {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let models = json["data"] as? [[String: Any]] else {
-            return []
-        }
-        return models.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
-    }
-
     private func parseLoadedNativeModelIDs(from data: Data) -> [String] {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return []
@@ -1166,7 +1123,7 @@ final class LmStudioCaptionService {
                 return ids
             }
         }
-        return parseModelIDs(from: data)
+        return []
     }
 
     /// LM Studio is picky about `image_url.url` — try OpenAI JPEG data URIs, then PNG, then PNG-labeled JPEG (issue #1027).

@@ -16,7 +16,7 @@ struct InformationPaneView: View {
     }
 
     var body: some View {
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenInformationPaneRevision
         Group {
             if appState.fileData.currentImagePath == nil {
                 Text("No image selected")
@@ -142,7 +142,9 @@ struct InformationPaneView: View {
             URL(fileURLWithPath: $0).standardizedFileURL.path
         }
         guard current == normalizedPath else { return }
-        record = await ExifService.loadRecord(for: path, preferPythonDescription: true)
+        record = await Task.detached(priority: .userInitiated) {
+            ExifService.loadRecord(for: path)
+        }.value
         guard !Task.isCancelled,
               appState.fileData.currentImagePath.map({
                   URL(fileURLWithPath: $0).standardizedFileURL.path

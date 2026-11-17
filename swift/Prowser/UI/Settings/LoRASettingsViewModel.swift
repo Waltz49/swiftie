@@ -292,13 +292,18 @@ final class LoRASettingsViewModel {
             safetensorsOrigin: catalogEntry.safetensorsOrigin.isEmpty ? nil : catalogEntry.safetensorsOrigin,
             localPath: catalogEntry.localPath.isEmpty ? nil : catalogEntry.localPath
         )
+        if let pageURL = LoRAInstallService.webPageToOpenInsteadOfInstall(
+            repoID: catalogEntry.repoID,
+            filename: catalogEntry.filename,
+            sourcePath: catalogEntry.sourcePath.isEmpty ? nil : catalogEntry.sourcePath,
+            safetensorsOrigin: catalogEntry.safetensorsOrigin.isEmpty ? nil : catalogEntry.safetensorsOrigin,
+            webPageURL: catalogEntry.webPageURL,
+            canDownload: canDownload
+        ) {
+            NSWorkspace.shared.open(pageURL)
+            return
+        }
         if !canDownload {
-            let page = catalogEntry.webPageURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let normalized = LoRAURLValidation.normalizedHTTPURL(page),
-               let url = URL(string: normalized) {
-                NSWorkspace.shared.open(url)
-                return
-            }
             errorMessage = LoRAInstallError.noRecoverySource.errorDescription
             return
         }

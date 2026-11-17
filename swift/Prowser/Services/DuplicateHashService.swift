@@ -4,6 +4,7 @@ import Foundation
 /// MD5 duplicate grouping. Port of `file_ops/duplicate_hash.py`.
 enum DuplicateHashService {
     static let workerMinPaths = 80
+    private static let parallelHashWorkerCount = 6
 
     struct HashGroups: Sendable {
         var hashToFiles: [String: [String]]
@@ -44,6 +45,25 @@ enum DuplicateHashService {
         #if DEBUG
         buildHashGroupsInvocationCountForTesting += 1
         #endif
+        if filePaths.count >= workerMinPaths {
+            return buildHashGroupsParallel(
+                filePaths: filePaths,
+                shouldCancel: shouldCancel,
+                progress: progress
+            )
+        }
+        return buildHashGroupsSequential(
+            filePaths: filePaths,
+            shouldCancel: shouldCancel,
+            progress: progress
+        )
+    }
+
+    private static func buildHashGroupsSequential(
+        filePaths: [String],
+        shouldCancel: @escaping @Sendable () -> Bool,
+        progress: @escaping @Sendable (Int, Int, String) -> Void
+    ) -> (HashGroups, cancelled: Bool) {
         var hashToFiles: [String: [String]] = [:]
         var fileToHash: [String: String] = [:]
         let total = filePaths.count
@@ -69,6 +89,69 @@ enum DuplicateHashService {
             progress(total, total, "")
         }
         return (HashGroups(hashToFiles: hashToFiles, fileToHash: fileToHash), cancelled)
+    }
+
+    private static func buildHashGroupsParallel(
+        filePaths: [String],
+        shouldCancel: @escaping @Sendable () -> Bool,
+        progress: @escaping @Sendable (Int, Int, String) -> Void
+    ) -> (HashGroups, cancelled: Bool) {
+        let total = filePaths.count
+        let workerCount = min(parallelHashWorkerCount, max(1, total))
+        let chunkSize = (total + workerCount - 1) / workerCount
+        var partials: [HashGroups] = Array(
+            repeating: HashGroups(hashToFiles: [:], fileToHash: [:]),
+            count: workerCount
+        )
+        let cancelFlag = HashCancelFlag(shouldCancel: shouldCancel)
+        let progressLock = NSLock()
+        var completed = 0
+
+        DispatchQueue.concurrentPerform(iterations: workerCount) { worker in
+            let start = worker * chunkSize
+            let end = min(start + chunkSize, total)
+            guard start < end else { return }
+            var localHashToFiles: [String: [String]] = [:]
+            var localFileToHash: [String: String] = [:]
+            for index in start..<end {
+                if cancelFlag.isCancelled() { return }
+                let filePath = filePaths[index]
+                ingestFileHash(path: filePath, into: &localHashToFiles, fileToHash: &localFileToHash)
+                progressLock.lock()
+                completed += 1
+                let done = completed
+                progressLock.unlock()
+                let name = (filePath as NSString).lastPathComponent
+                progress(done - 1, total, "Hashing \(name)... (\(done)/\(total))")
+            }
+            partials[worker] = HashGroups(hashToFiles: localHashToFiles, fileToHash: localFileToHash)
+        }
+
+        let cancelled = cancelFlag.isCancelled()
+        if !cancelled, total > 0 {
+            progress(total, total, "")
+        }
+        return (mergeHashGroups(partials), cancelled)
+    }
+
+    private struct HashCancelFlag: @unchecked Sendable {
+        let shouldCancel: @Sendable () -> Bool
+
+        func isCancelled() -> Bool { shouldCancel() }
+    }
+
+    private static func mergeHashGroups(_ partials: [HashGroups]) -> HashGroups {
+        var hashToFiles: [String: [String]] = [:]
+        var fileToHash: [String: String] = [:]
+        for partial in partials {
+            for (hash, paths) in partial.hashToFiles {
+                hashToFiles[hash, default: []].append(contentsOf: paths)
+            }
+            for (path, hash) in partial.fileToHash where fileToHash[path] == nil {
+                fileToHash[path] = hash
+            }
+        }
+        return HashGroups(hashToFiles: hashToFiles, fileToHash: fileToHash)
     }
 
     /// One MD5 pass over `filePaths`; derive duplicate sort order and hash groups together.

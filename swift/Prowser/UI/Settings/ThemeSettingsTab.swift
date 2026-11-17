@@ -411,7 +411,10 @@ struct ThemeSettingsTab: View {
 
     private func notifyThemeChanged() {
         guard !appState.config.isSettingsSessionActive else { return }
-        appState.eventBus.emit(.settingsChanged)
+        appState.eventBus.emit(
+            .settingsChanged,
+            payload: .settingsCommit(affectsDirectoryListing: false)
+        )
     }
 
     private func deleteCurrentCustomTheme() {

@@ -8,7 +8,8 @@ struct StatusBarView: View {
 
     var body: some View {
         let _ = refreshTrigger
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenQueueChromeRevision
+        let _ = appState.jobsQueueStatusDetailsRevision
         let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
         let sortReversed = appState.config.bool(forKey: "sort_reversed", default: false)
         let displayed = appState.fileData.displayedImages

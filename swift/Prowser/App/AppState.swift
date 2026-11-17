@@ -53,7 +53,10 @@ final class AppState {
     var showImageGenUnifiedDialog = false
     var imageGenDialogReloadToken = 0
     var imageGenDialogApplyToken = 0
-    var imageGenUIRevision = 0
+    /// Queue pane / unified dialog / strip chrome (structure changes).
+    var imageGenQueueChromeRevision = 0
+    /// Information pane active-job heading only.
+    var imageGenInformationPaneRevision = 0
     /// Refreshes the AppKit job queue panel when queue rows change (copies, status, etc.).
     var jobsQueuePanelSync: (@MainActor () -> Void)?
     var imageGenDialogRequest = ImageGenDialogRequest.empty
@@ -438,6 +441,7 @@ final class AppState {
                 return
             case .statusDetails:
                 self.jobsQueueStatusDetailsRevision += 1
+                self.imageGenInformationPaneRevision += 1
                 self.jobsQueuePanelSync?()
                 guard self.jobsDisplayMode == .pane else { return }
                 self.scheduleJobsPaneLayoutSettleRefresh()
@@ -478,7 +482,7 @@ final class AppState {
         }
 
         // Lifetime bus subscriptions (app teardown ends the process).
-        _ = eventBus.subscribe(.settingsChanged) { [weak self] _ in
+        _ = eventBus.subscribe(.settingsChanged) { [weak self] event in
             guard let self else { return }
             self.menuRefresh.refreshAll()
             self.loadSidebarToolbarSettings()
@@ -486,6 +490,14 @@ final class AppState {
             KeyboardInputTracer.installIfNeeded(config: self.config)
             // Do not rescan `currentDirectory` in specific-files / reference levels — same as
             // `openReferenceGraphPresentation` (a full `loadDirectory` clears the aggregate grid).
+            let affectsListing: Bool
+            switch event.payload {
+            case .settingsCommit(let listing):
+                affectsListing = listing
+            default:
+                affectsListing = false
+            }
+            guard affectsListing else { return }
             guard !self.specificFilesActive, !self.referenceGraphActive else { return }
             if let dir = self.fileData.currentDirectory {
                 self.loadDirectory(
@@ -1385,13 +1397,16 @@ final class AppState {
         }
         guard let dir = fileData.currentDirectory else { return }
         let pinnedAtStart = fileData.currentImagePath
+        let metadataCacheFile = config.metadataCacheDirectory
+            .appendingPathComponent("metadata_cache.json").path
         let snapshot = DirectoryLoadBackgroundWork.Snapshot(
             path: dir,
             extensions: config.imageExtensions,
             filterPattern: filterSettings.filterPattern,
             sortModeRaw: config.string(forKey: "sort_mode", default: "date"),
             sortReversed: config.bool(forKey: "sort_reversed", default: false),
-            useExifDate: config.useExifDate
+            useExifDate: config.useExifDate,
+            metadataCacheFilePath: metadataCacheFile
         )
         manualDirectoryRefreshTask?.cancel()
         manualDirectoryRefreshGeneration += 1
@@ -1511,7 +1526,7 @@ final class AppState {
         }
         config.setThumbnailOverlayDisplaySettings(filenameVisible: newFilename, showImageSize: newSize)
         thumbnailOverlayDisplayRevision += 1
-        eventBus.emit(.settingsChanged)
+        eventBus.emit(.settingsChanged, payload: .settingsCommit(affectsDirectoryListing: false))
         let label: String
         switch (newFilename, newSize) {
         case (false, false): label = "Thumbnail overlay: off"

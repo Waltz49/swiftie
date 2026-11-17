@@ -2089,7 +2089,7 @@ struct JobQueuePanelNSViewRepresentable: NSViewRepresentable {
         panel.updateRows(
             rows,
             scrollWidth: scrollWidth,
-            imageGenUIRevision: appState.imageGenUIRevision
+            imageGenUIRevision: appState.imageGenQueueChromeRevision
         )
         panel.syncQueueScrollGeometry()
     }

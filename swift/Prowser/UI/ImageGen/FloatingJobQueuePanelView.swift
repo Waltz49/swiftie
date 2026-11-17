@@ -9,7 +9,7 @@ struct FloatingJobQueuePanelView: View {
     private static let titlebarHeight: CGFloat = 30
 
     var body: some View {
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenQueueChromeRevision
         let colors = appState.theme.colors
         let mini = appState.jobsPaneMiniChromeActive
         ZStack(alignment: .top) {

@@ -15,7 +15,7 @@ struct JobQueuePanelView: View {
     }
 
     var body: some View {
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenQueueChromeRevision
         let _ = appState.measuredJobsCardStackHeight
         let _ = appState.jobsQueuePanelIntrinsicHeight
         let _ = appState.jobsQueuePanelLayoutRevision

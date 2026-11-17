@@ -1,5 +1,4 @@
 import Foundation
-import ImageIO
 
 /// Sorts displayed image paths. Port of `sorting_manager.py` (core modes).
 @MainActor
@@ -25,42 +24,27 @@ enum SortingService {
         metadataCache: MetadataCacheService? = nil,
         commentRanks: [String: Int]? = nil
     ) -> (paths: [String], duplicateHashGroups: DuplicateHashService.HashGroups?) {
-        let duplicateDescending = sortDescending(mode: .duplicates, reversed: options.reversed)
-        switch options.mode {
-        case .random:
-            return (paths.shuffled(), nil)
-        case .duplicates:
-            let result = DuplicateHashService.duplicateSortResult(
-                filePaths: paths,
-                reversed: duplicateDescending
+        let kernelOptions = ImagePathSortingKernel.Options(
+            mode: options.mode,
+            reversed: options.reversed,
+            useExifDate: options.useExifDate
+        )
+        let metadata: MetadataCacheSnapshot = if let metadataCache {
+            MetadataCacheSnapshot.forSorting(
+                diskCacheFilePath: metadataCache.persistedCacheFilePath,
+                liveMemory: metadataCache.sortingSnapshot()
             )
-            return (result.sortedPaths, result.hashGroups)
-        case .custom:
-            guard let directory = commonDirectory(for: paths) else { return (paths, nil) }
-            return (PrsortIO.applyCustomOrder(paths: paths, directory: directory), nil)
-        case .size:
-            return (
-                sortBySize(paths, reversed: options.reversed, metadataCache: metadataCache),
-                nil
-            )
-        case .comments:
-            return (
-                sortByComments(paths, reversed: options.reversed, ranks: commentRanks ?? [:]),
-                nil
-            )
-        default:
-            let descending = sortDescending(mode: options.mode, reversed: options.reversed)
-            let keyed = paths.map {
-                ( $0, sortKey(for: $0, mode: options.mode, useExifDate: options.useExifDate, metadataCache: metadataCache) )
-            }
-            let sortedKeys = keyed.sorted { lhs, rhs in
-                if let ordered = comparePrimary(lhs.1, rhs.1, descending: descending) {
-                    return ordered
-                }
-                return fileNameComesBefore(lhs.0, rhs.0)
-            }
-            return (sortedKeys.map(\.0), nil)
+        } else {
+            MetadataCacheSnapshot(entries: [:])
         }
+        let ranks = resolvedCommentRanks(paths: paths, options: options, commentRanks: commentRanks)
+        let output = ImagePathSortingKernel.sort(
+            paths,
+            options: kernelOptions,
+            metadata: metadata,
+            commentRanks: ranks
+        )
+        return (output.paths, output.duplicateHashGroups)
     }
 
     static func sorted(
@@ -69,224 +53,28 @@ enum SortingService {
         metadataCache: MetadataCacheService? = nil,
         commentRanks: [String: Int]? = nil
     ) -> [String] {
-        switch options.mode {
-        case .random:
-            return paths.shuffled()
-        case .duplicates:
-            return sortedWithDuplicateContext(
-                paths,
-                options: options,
-                metadataCache: metadataCache,
-                commentRanks: commentRanks
-            ).paths
-        case .custom:
-            guard let directory = commonDirectory(for: paths) else { return paths }
-            // `.prsort` stores reversal; do not apply `sort_reversed` again.
-            return PrsortIO.applyCustomOrder(paths: paths, directory: directory)
-        case .size:
-            return sortBySize(paths, reversed: options.reversed, metadataCache: metadataCache)
-        case .comments:
-            return sortByComments(paths, reversed: options.reversed, ranks: commentRanks ?? [:])
-        default:
-            let descending = sortDescending(mode: options.mode, reversed: options.reversed)
-            let keyed = paths.map {
-                ( $0, sortKey(for: $0, mode: options.mode, useExifDate: options.useExifDate, metadataCache: metadataCache) )
-            }
-            let sortedKeys = keyed.sorted { lhs, rhs in
-                if let ordered = comparePrimary(lhs.1, rhs.1, descending: descending) {
-                    return ordered
-                }
-                return fileNameComesBefore(lhs.0, rhs.0)
-            }
-            return sortedKeys.map(\.0)
+        sortedWithDuplicateContext(
+            paths,
+            options: options,
+            metadataCache: metadataCache,
+            commentRanks: commentRanks
+        ).paths
+    }
+
+    private static func resolvedCommentRanks(
+        paths: [String],
+        options: Options,
+        commentRanks: [String: Int]?
+    ) -> [String: Int] {
+        guard options.mode == .comments else { return [:] }
+        if let commentRanks {
+            return commentRanks
         }
-    }
-
-    /// Python `sorting_manager.py` uses `reverse=not is_reversed` for date/size/filesize/exif,
-    /// but `reverse=is_reversed` for name/dimensions/permissions.
-    private static func sortDescending(mode: SortMode, reversed: Bool) -> Bool {
-        switch mode {
-        case .name, .ext, .dimensions, .permissions, .duplicates:
-            return reversed
-        case .comments:
-            return !reversed
-        case .date, .size, .filesize, .exifDate, .exifYear:
-            return !reversed
-        default:
-            return reversed
+        var ranks: [String: Int] = [:]
+        ranks.reserveCapacity(paths.count)
+        for path in paths {
+            ranks[path] = ImageListCommentStatusCache.shared.sortRank(for: path)
         }
-    }
-
-    private static func sortByComments(
-        _ paths: [String],
-        reversed: Bool,
-        ranks: [String: Int]
-    ) -> [String] {
-        let descending = sortDescending(mode: .comments, reversed: reversed)
-        let keyed = paths.map { ($0, ranks[$0] ?? ImageListCommentStatusCache.shared.sortRank(for: $0)) }
-        return keyed.sorted { lhs, rhs in
-            if lhs.1 != rhs.1 {
-                return descending ? lhs.1 > rhs.1 : lhs.1 < rhs.1
-            }
-            return fileNameComesBefore(lhs.0, rhs.0)
-        }.map(\.0)
-    }
-
-    private static func sortBySize(
-        _ paths: [String],
-        reversed: Bool,
-        metadataCache: MetadataCacheService?
-    ) -> [String] {
-        let descending = sortDescending(mode: .size, reversed: reversed)
-        // Python `_sort_by_size` uses `sort(key=...)` so dimensions are read once per file.
-        let keyed = paths.map { path in
-            (path, sizeSortTuple(for: path, reversed: reversed, metadataCache: metadataCache))
-        }
-        return keyed.sorted { lhs, rhs in
-            if lhs.1.area != rhs.1.area {
-                return descending ? lhs.1.area > rhs.1.area : lhs.1.area < rhs.1.area
-            }
-            if lhs.1.widthKey != rhs.1.widthKey {
-                return descending ? lhs.1.widthKey > rhs.1.widthKey : lhs.1.widthKey < rhs.1.widthKey
-            }
-            return fileNameComesBefore(lhs.0, rhs.0)
-        }.map(\.0)
-    }
-
-    private struct SizeSortTuple {
-        var area: Int64
-        var widthKey: Int
-    }
-
-    private static func sizeSortTuple(
-        for path: String,
-        reversed: Bool,
-        metadataCache: MetadataCacheService?
-    ) -> SizeSortTuple {
-        let dims = metadataCache?.pixelSize(path: path) ?? imagePixelSize(path: path)
-        let area = dims.map { Int64($0.width * $0.height) } ?? 0
-        let width = dims?.width ?? 0
-        let widthKey = reversed ? -width : width
-        return SizeSortTuple(area: area, widthKey: widthKey)
-    }
-
-    /// Filename including extension; used as the tie-breaker for every sort mode.
-    private static func fileNameSortKey(_ path: String) -> String {
-        (path as NSString).lastPathComponent.lowercased()
-    }
-
-    private static func fileNameComesBefore(_ lhs: String, _ rhs: String) -> Bool {
-        fileNameSortKey(lhs) < fileNameSortKey(rhs)
-    }
-
-    private static func comparePrimary(_ lhs: SortKey, _ rhs: SortKey, descending: Bool) -> Bool? {
-        switch (lhs, rhs) {
-        case let (.string(a), .string(b)):
-            guard a != b else { return nil }
-            return descending ? a > b : a < b
-        case let (.number(a), .number(b)):
-            guard a != b else { return nil }
-            return descending ? a > b : a < b
-        case let (.size(a), .size(b)):
-            guard a != b else { return nil }
-            return descending ? a > b : a < b
-        default:
-            return nil
-        }
-    }
-
-    private enum SortKey {
-        case string(String)
-        case number(Int)
-        case size(Int64)
-    }
-
-    private static func commonDirectory(for paths: [String]) -> String? {
-        guard let first = paths.first else { return nil }
-        return URL(fileURLWithPath: first).deletingLastPathComponent().path
-    }
-
-    private static func sortKey(
-        for path: String,
-        mode: SortMode,
-        useExifDate: Bool,
-        metadataCache: MetadataCacheService?
-    ) -> SortKey {
-        switch mode {
-        case .name:
-            return .string((path as NSString).lastPathComponent.lowercased())
-        case .ext:
-            return .string((path as NSString).pathExtension.lowercased())
-        case .filesize, .size:
-            if let cache = metadataCache {
-                return .size(cache.fileSize(path: path))
-            }
-            let bytes = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value ?? 0
-            return .size(bytes)
-        case .date:
-            return .number(fileTimestamp(path: path, preferExif: false, metadataCache: metadataCache))
-        case .exifDate, .exifYear:
-            return .number(fileTimestamp(path: path, preferExif: useExifDate, metadataCache: metadataCache))
-        case .dimensions:
-            if let dims = metadataCache?.pixelSize(path: path) ?? imagePixelSize(path: path) {
-                return .size(Int64(dims.width * dims.height))
-            }
-            return .size(0)
-        case .permissions:
-            let perms = (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? 0
-            return .number(perms)
-        default:
-            return .string(path.lowercased())
-        }
-    }
-
-    private static func fileTimestamp(
-        path: String,
-        preferExif: Bool,
-        metadataCache: MetadataCacheService?
-    ) -> Int {
-        if let cache = metadataCache {
-            return cache.fileTimestamp(path: path, preferExif: preferExif)
-        }
-        if preferExif, let exifDate = exifCaptureDate(path: path) {
-            return Int(exifDate.timeIntervalSince1970)
-        }
-        if let mtime = try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date {
-            return Int(mtime.timeIntervalSince1970)
-        }
-        return 0
-    }
-
-    private static func exifCaptureDate(path: String) -> Date? {
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
-            return nil
-        }
-        if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
-           let dateString = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
-            return parseExifDate(dateString)
-        }
-        if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
-           let dateString = tiff[kCGImagePropertyTIFFDateTime] as? String {
-            return parseExifDate(dateString)
-        }
-        return nil
-    }
-
-    private static func parseExifDate(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        return formatter.date(from: value)
-    }
-
-    private static func imagePixelSize(path: String) -> (width: Int, height: Int)? {
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int else {
-            return nil
-        }
-        return (width, height)
+        return ranks
     }
 }

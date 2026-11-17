@@ -4,7 +4,7 @@ struct RightSidebarView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenQueueChromeRevision
         let imageGen = appState.imageGen
         let jobsTitle = "Job Control" + imageGen.jobsPaneTitleSuffix()
         let descriptors = [

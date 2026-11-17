@@ -58,6 +58,8 @@ enum AppEventPayload {
     case strings([String])
     case int(Int)
     case bool(Bool)
+    /// `true` when settings edits affect the current directory listing (scan/sort/filter/extensions).
+    case settingsCommit(affectsDirectoryListing: Bool)
     case thumbnailDirection(ThumbnailNavigateDirection)
     case browseAction(BrowseKeyboardAction)
     case selectionChange(SelectionChange)

@@ -51,6 +51,60 @@ enum LoRAInstallService {
         return false
     }
 
+    /// HTTP URL shown as the install download target (HF resolve, direct download, or stored origin).
+    static func primaryHTTPDownloadURLString(
+        repoID: String,
+        filename: String,
+        sourcePath: String?,
+        safetensorsOrigin: String?
+    ) -> String? {
+        let repo = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let file = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !repo.isEmpty, !file.isEmpty {
+            return "https://huggingface.co/\(repo)/resolve/main/\(file)"
+        }
+        if let direct = directHTTPDownloadURL(sourcePath: sourcePath, safetensorsOrigin: safetensorsOrigin) {
+            return direct
+        }
+        for raw in [safetensorsOrigin, sourcePath] {
+            let text = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.lowercased().hasPrefix("http://") || text.lowercased().hasPrefix("https://") else { continue }
+            if LoRAURLValidation.normalizedHTTPURL(text) != nil { return text }
+        }
+        return nil
+    }
+
+    static func httpURLPathEndsWithSafetensors(_ urlString: String) -> Bool {
+        if let url = URL(string: urlString) {
+            return url.path.lowercased().hasSuffix(".safetensors")
+        }
+        return urlString.lowercased().hasSuffix(".safetensors")
+    }
+
+    /// When Install should open the model page instead of download confirmation or progress.
+    static func webPageToOpenInsteadOfInstall(
+        repoID: String,
+        filename: String,
+        sourcePath: String?,
+        safetensorsOrigin: String?,
+        webPageURL: String,
+        canDownload: Bool
+    ) -> URL? {
+        let page = webPageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalized = LoRAURLValidation.normalizedHTTPURL(page),
+              let url = URL(string: normalized)
+        else { return nil }
+        if !canDownload { return url }
+        guard let fileURL = primaryHTTPDownloadURLString(
+            repoID: repoID,
+            filename: filename,
+            sourcePath: sourcePath,
+            safetensorsOrigin: safetensorsOrigin
+        ) else { return nil }
+        if httpURLPathEndsWithSafetensors(fileURL) { return nil }
+        return url
+    }
+
     /// First HTTP URL that looks like a direct weights download (not a model page).
     static func directHTTPDownloadURL(sourcePath: String?, safetensorsOrigin: String?) -> String? {
         for raw in [safetensorsOrigin, sourcePath] {

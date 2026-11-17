@@ -115,6 +115,43 @@ enum DirectoryRefreshService {
                 return
             }
 
+            let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
+            let hasLockedThumbnails = !PrsortIO.separateLockedUnlocked(displayed).locked.isEmpty
+            if removed.isEmpty, !added.isEmpty, !hasLockedThumbnails,
+               ImagePathSortingKernel.supportsIncrementalMerge(sortMode) {
+                let metadataPath = appState.config.metadataCacheDirectory
+                    .appendingPathComponent("metadata_cache.json").path
+                let options = ImagePathSortingKernel.Options(
+                    mode: sortMode,
+                    reversed: appState.config.bool(forKey: "sort_reversed", default: false),
+                    useExifDate: appState.config.useExifDate
+                )
+                let addedList = Array(added)
+                let displayedCopy = displayed
+                let merged = await Task.detached(priority: .utility) {
+                    let metadata = MetadataCacheSnapshot.load(cacheFilePath: metadataPath)
+                    let union = displayedCopy + addedList
+                    let commentRanks = sortMode == .comments
+                        ? ImagePathSortingKernel.backgroundCommentRanks(for: union)
+                        : [:]
+                    let existing = displayedCopy.filter { diskSet.contains($0) }
+                    return ImagePathSortingKernel.mergeSorted(
+                        existing: existing,
+                        newPaths: addedList,
+                        options: options,
+                        metadata: metadata,
+                        commentRanks: commentRanks
+                    )
+                }.value
+                applyRefreshedDisplayedList(
+                    appState: appState,
+                    newList: merged,
+                    duplicateHashGroups: nil,
+                    preserveCurrent: appState.fileData.currentImagePath
+                )
+                return
+            }
+
             efficientRefreshWithChanges(
                 appState: appState,
                 displayed: displayed,
@@ -170,7 +207,6 @@ enum DirectoryRefreshService {
         let diskSet = Set(scanned)
         let displayedSet = Set(displayed)
         let preserveCurrent = appState.fileData.currentImagePath
-        let browseMode = appState.fileData.currentViewMode == .browse
         let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
 
         let order: DisplayOrderService.DisplayOrderResult
@@ -188,6 +224,26 @@ enum DirectoryRefreshService {
             return
         }
 
+        applyRefreshedDisplayedList(
+            appState: appState,
+            newList: newList,
+            duplicateHashGroups: order.duplicateHashGroups,
+            preserveCurrent: preserveCurrent
+        )
+    }
+
+    private static func applyRefreshedDisplayedList(
+        appState: AppState,
+        newList: [String],
+        duplicateHashGroups: DuplicateHashService.HashGroups?,
+        preserveCurrent: String?
+    ) {
+        let displayed = appState.fileData.displayedImages
+        let displayedSet = Set(displayed)
+        if Set(newList) == displayedSet, newList == displayed {
+            return
+        }
+
         appState.fileData.setDisplayedImages(newList)
         if let preserveCurrent, newList.contains(preserveCurrent) {
             appState.fileData.setCurrentImagePath(preserveCurrent)
@@ -195,17 +251,18 @@ enum DirectoryRefreshService {
             appState.fileData.setCurrentImagePath(first)
         }
 
+        let sortMode = SortMode(rawValue: appState.config.string(forKey: "sort_mode", default: "date")) ?? .date
         if sortMode == .duplicates {
             appState.duplicateSections = DuplicateHashService.duplicateSections(
                 forDisplayedPaths: newList,
-                sortHashGroups: order.duplicateHashGroups
+                sortHashGroups: duplicateHashGroups
             )
             appState.exifDateSections = []
         }
 
         noteIdleBackgroundScanScopeChanged(appState: appState)
 
-        if !browseMode {
+        if appState.fileData.currentViewMode != .browse {
             appState.thumbnailGridHost?.startBackgroundThumbnailLoadingIfNeeded()
         }
     }

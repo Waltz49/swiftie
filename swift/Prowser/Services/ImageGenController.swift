@@ -2,7 +2,7 @@ import Foundation
 import ImageIO
 
 /// Swift port of `imagegen_plugins/image_gen_controller.py`.
-/// UI refresh is driven by ``AppState/imageGenUIRevision`` (not Swift Observation).
+/// UI refresh is driven by ``AppState/imageGenQueueChromeRevision`` (not Swift Observation).
 @MainActor
 final class ImageGenController {
     private let config: AppConfig

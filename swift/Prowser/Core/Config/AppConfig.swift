@@ -430,6 +430,7 @@ final class AppConfig {
             }
             return
         }
+        noteSettingsMutationAffectsDirectoryListing(key)
         mutateSettings { storage in
             if let value {
                 storage[key] = value
@@ -448,6 +449,7 @@ final class AppConfig {
             }
             return
         }
+        noteSettingsMutationAffectsDirectoryListing(key)
         mutateSettings { storage in
             storage[key] = value
         }
@@ -634,6 +636,17 @@ final class AppConfig {
         Self.orderRootDirectoriesForFileTree(rootDirectories())
     }
 
+    private var pendingSettingsEmitAffectsDirectoryListing = false
+
+    /// Settings keys that change directory scan, sort, or displayed membership.
+    static let directoryListingRelatedSettingsKeys: [String] = [
+        "image_extensions",
+        "filter_pattern",
+        "sort_mode",
+        "sort_reversed",
+        "use_exif_date",
+    ]
+
     /// Settings keys that affect file tree roots, filtering, or image discovery (Python `tree_settings_changed` + filters/extensions).
     static let treeRelatedSettingsKeys: [String] = [
         "root_directories",
@@ -652,6 +665,15 @@ final class AppConfig {
     func treeRelatedSettingsChangedInCurrentSession() -> Bool {
         guard let snap = settingsSnapshot, let draft = settingsDraft else { return false }
         for key in Self.treeRelatedSettingsKeys {
+            if !Self.settingsValuesEqual(snap[key], draft[key]) { return true }
+        }
+        return false
+    }
+
+    /// True when any directory-listing value differs between session open and current draft (call before commit).
+    func directoryListingSettingsChangedInCurrentSession() -> Bool {
+        guard let snap = settingsSnapshot, let draft = settingsDraft else { return false }
+        for key in Self.directoryListingRelatedSettingsKeys {
             if !Self.settingsValuesEqual(snap[key], draft[key]) { return true }
         }
         return false
@@ -740,9 +762,16 @@ final class AppConfig {
         "output_of_active_job": true,
     ]
 
-    func applySettingsChange(emit: AppEventBus) {
+    func applySettingsChange(emit: AppEventBus, affectsDirectoryListing: Bool? = nil) {
         guard !isSettingsSessionActive else { return }
-        emit.emit(.settingsChanged)
+        let affectsListing = affectsDirectoryListing ?? pendingSettingsEmitAffectsDirectoryListing
+        pendingSettingsEmitAffectsDirectoryListing = false
+        emit.emit(.settingsChanged, payload: .settingsCommit(affectsDirectoryListing: affectsListing))
+    }
+
+    func noteSettingsMutationAffectsDirectoryListing(_ key: String) {
+        guard Self.directoryListingRelatedSettingsKeys.contains(key) else { return }
+        pendingSettingsEmitAffectsDirectoryListing = true
     }
 
     /// Collapsible section expanded flags for a settings tab (single dictionary read).

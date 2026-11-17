@@ -59,7 +59,7 @@ struct ImageGenUnifiedDialog: View {
     }
 
     var body: some View {
-        let _ = appState.imageGenUIRevision
+        let _ = appState.imageGenQueueChromeRevision
         return VStack(alignment: .leading, spacing: 8) {
             if isLoading {
                 ProgressView("Loading…")
@@ -204,7 +204,7 @@ struct ImageGenUnifiedDialog: View {
         .onChange(of: appState.imageGenDialogApplyToken) { _, _ in
             Task { await applyOpenRequest() }
         }
-        .onChange(of: appState.imageGenUIRevision) { _, _ in
+        .onChange(of: appState.imageGenQueueChromeRevision) { _, _ in
             refreshQueueReplaceChromeFromJobCard()
         }
         .onReceive(NotificationCenter.default.publisher(for: .prowserRaiseImageGenDialog)) { _ in

@@ -176,7 +176,11 @@ struct SettingsWindowView: View {
         }
         appState.refreshImageRecognitionForCurrentSettings()
         NotificationCenter.default.post(name: .prowserSettingsWillCommit, object: nil)
-        appState.eventBus.emit(.settingsChanged)
+        let listingChanged = appState.config.directoryListingSettingsChangedInCurrentSession()
+        appState.eventBus.emit(
+            .settingsChanged,
+            payload: .settingsCommit(affectsDirectoryListing: listingChanged)
+        )
         dismissAction = .committed
         dismissOpenThemeColorPanel(commit: true)
         closeDialog(.committed)
@@ -194,7 +198,10 @@ struct SettingsWindowView: View {
         guard dismissAction != .committed else { return }
         appState.theme.cancelSettingsSession()
         appState.refreshImageRecognitionForCurrentSettings()
-        appState.eventBus.emit(.settingsChanged)
+        appState.eventBus.emit(
+            .settingsChanged,
+            payload: .settingsCommit(affectsDirectoryListing: false)
+        )
     }
 
     @ViewBuilder

@@ -491,7 +491,7 @@ extension AppState {
         jobsQueueSizeMode = mode
         let isStrip = mode == .strip
         if jobsPaneMiniOptionBracketMode, wasStrip != isStrip {
-            imageGenUIRevision += 1
+            imageGenQueueChromeRevision += 1
             sidebarLayoutRevision += 1
         }
         JobsQueueSizePersistence.save(mode, config: config)
@@ -526,7 +526,8 @@ extension AppState {
     }
 
     func bumpImageGenUI() {
-        imageGenUIRevision += 1
+        imageGenQueueChromeRevision += 1
+        imageGenInformationPaneRevision += 1
     }
 
     /// Port of `JobQueuePanelWidget.should_shrink_wrap_client()`.
@@ -965,7 +966,7 @@ extension AppState {
         if enabled {
             applyJobsQueueSizeMode(.strip, forceRefit: true)
         }
-        imageGenUIRevision += 1
+        imageGenQueueChromeRevision += 1
         sidebarLayoutRevision += 1
         syncJobsPaneGeometry()
     }
@@ -975,7 +976,7 @@ extension AppState {
         guard jobsPaneMiniOptionBracketMode else { return }
         guard BundleCapabilities.imageGenUIEnabled else { return }
         applyJobsQueueSizeMode(.strip, forceRefit: true)
-        imageGenUIRevision += 1
+        imageGenQueueChromeRevision += 1
         sidebarLayoutRevision += 1
     }
 

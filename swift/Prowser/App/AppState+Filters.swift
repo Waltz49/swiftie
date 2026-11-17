@@ -4,7 +4,7 @@ extension AppState {
     func setFileTreeFilterMode(_ mode: String) {
         filterSettings.setFilteredTree(mode)
         refreshFileTreeFilter()
-        config.applySettingsChange(emit: eventBus)
+        config.applySettingsChange(emit: eventBus, affectsDirectoryListing: false)
     }
 
     func applyFilenameFilterPattern(_ pattern: String) {
@@ -16,7 +16,7 @@ extension AppState {
         if filterSettings.filterPattern == "*" || !listingSubsetApplied {
             refreshDirectory()
         }
-        config.applySettingsChange(emit: eventBus)
+        config.applySettingsChange(emit: eventBus, affectsDirectoryListing: false)
     }
 
     /// Subset the current listing by the active glob (Python `filter_images_by_pattern`) before the async rescan finishes.

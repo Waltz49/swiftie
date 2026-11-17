@@ -215,4 +215,30 @@ final class LoRAEntryMetadataTests: XCTestCase {
             )
         )
     }
+
+    @MainActor
+    func testInstallOpensWebPageWhenFileURLNotSafetensors() {
+        let api = "https://civitai.com/api/download/models/99"
+        let page = "https://civitai.com/models/12"
+        let openURL = LoRAInstallService.webPageToOpenInsteadOfInstall(
+            repoID: "",
+            filename: "",
+            sourcePath: nil,
+            safetensorsOrigin: api,
+            webPageURL: page,
+            canDownload: true
+        )
+        XCTAssertEqual(openURL?.absoluteString, page)
+        let direct = "https://example.com/weights/lora.safetensors"
+        XCTAssertNil(
+            LoRAInstallService.webPageToOpenInsteadOfInstall(
+                repoID: "",
+                filename: "",
+                sourcePath: nil,
+                safetensorsOrigin: direct,
+                webPageURL: page,
+                canDownload: true
+            )
+        )
+    }
 }

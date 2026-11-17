@@ -323,13 +323,16 @@ final class DirectoryLoadCoordinator {
             pin = nil
         }
 
+        let metadataCacheFile = appState.config.metadataCacheDirectory
+            .appendingPathComponent("metadata_cache.json").path
         let snapshot = DirectoryLoadBackgroundWork.Snapshot(
             path: normalized,
             extensions: appState.config.imageExtensions,
             filterPattern: scanFilterPattern ?? appState.filterSettings.filterPattern,
             sortModeRaw: appState.config.string(forKey: "sort_mode", default: "date"),
             sortReversed: appState.config.bool(forKey: "sort_reversed", default: false),
-            useExifDate: appState.config.useExifDate
+            useExifDate: appState.config.useExifDate,
+            metadataCacheFilePath: metadataCacheFile
         )
 
         let firstSessionThumbnailDirectoryLoad = showLoadingState

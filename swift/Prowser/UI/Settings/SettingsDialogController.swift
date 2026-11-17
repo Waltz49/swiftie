@@ -28,7 +28,10 @@ final class SettingsDialogController: NSObject, NSWindowDelegate {
         if appState.config.isSettingsSessionActive {
             appState.theme.cancelSettingsSession()
             appState.refreshImageRecognitionForCurrentSettings()
-            appState.eventBus.emit(.settingsChanged)
+            appState.eventBus.emit(
+                .settingsChanged,
+                payload: .settingsCommit(affectsDirectoryListing: false)
+            )
         }
         settingsWindow?.orderOut(nil)
     }
