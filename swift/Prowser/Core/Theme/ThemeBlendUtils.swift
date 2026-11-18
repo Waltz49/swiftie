@@ -27,12 +27,17 @@ enum ThemeBlendUtils {
         return (adjustBrightness(c, factor: 1.25), adjustBrightness(c, factor: 1.45))
     }
 
+    /// Focused pane title bar hex: brighten on dark/user themes, darken on light (Qt ``lighter`` / ``darker``).
     static func sidebarHeaderFocusBg(baseHex: String, themeID: String) -> String {
         guard let c = NSColor(hex: baseHex)?.usingColorSpace(.sRGB) else { return baseHex }
+        return focusAdjustedSidebarHeaderNS(c, themeID: themeID).hexString
+    }
+
+    private static func focusAdjustedSidebarHeaderNS(_ color: NSColor, themeID: String) -> NSColor {
         if themeID == "light" {
-            return adjustBrightness(c, factor: 1.0 / 1.30)
+            return adjustBrightnessNS(color, factor: 1.0 / 1.30)
         }
-        return adjustBrightness(c, factor: 1.80)
+        return adjustBrightnessNS(color, factor: 1.80)
     }
 
     static func rgbHex(_ rgb: [Int]) -> String {

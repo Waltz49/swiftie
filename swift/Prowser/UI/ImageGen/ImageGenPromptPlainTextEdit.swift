@@ -132,6 +132,14 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
         private var isEditing = false
         private var streamLastText = ""
         private var wasStreamActive = false
+        /// Suppresses binding/layout feedback while syncing ``textView.string`` from SwiftUI.
+        private var suppressTextDelegateFeedback = 0
+
+        func withSuppressedTextDelegate(_ body: () -> Void) {
+            suppressTextDelegateFeedback += 1
+            defer { suppressTextDelegateFeedback -= 1 }
+            body()
+        }
 
         init(
             text: Binding<String>,
@@ -166,6 +174,7 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            guard suppressTextDelegateFeedback == 0 else { return }
             if textView.hasMarkedText() { return }
             isEditing = true
             let newValue = textView.string
@@ -190,11 +199,13 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             )
             if normalized != textView.string {
                 let selected = textView.selectedRange()
-                ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
-                    normalized,
-                    on: textView,
-                    preservingSelectionFrom: selected
-                )
+                withSuppressedTextDelegate {
+                    ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                        normalized,
+                        on: textView,
+                        preservingSelectionFrom: selected
+                    )
+                }
                 text = normalized
             }
             host?.refreshHeightAndScrollPolicy()
@@ -268,7 +279,9 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
             let preservedY = scrollView.contentView.bounds.origin.y
 
             let range = ImageGenPromptTextEncoding.utf16EndInsertionRange(in: textView.string)
-            textView.insertText(delta, replacementRange: range)
+            withSuppressedTextDelegate {
+                textView.insertText(delta, replacementRange: range)
+            }
             host.refreshHeightAndScrollPolicy()
 
             if userScrolled {
@@ -287,11 +300,13 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         private func preserveSelectionSetString(_ newText: String, on textView: NSTextView) {
             let selected = textView.selectedRange()
-            ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
-                newText,
-                on: textView,
-                preservingSelectionFrom: selected
-            )
+            withSuppressedTextDelegate {
+                ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                    newText,
+                    on: textView,
+                    preservingSelectionFrom: selected
+                )
+            }
         }
     }
 }
@@ -396,6 +411,10 @@ final class ImageGenPromptPlainTextHostView: NSView {
 
     override func layout() {
         super.layout()
+        // Width-only: height still refreshes from textDidChange, applyExternalText, and setFrameSize.
+        let inset = textView.textContainerInset.width * 2
+        let containerWidth = max(1, bounds.width - inset)
+        guard abs(containerWidth - lastLayoutWidth) > 0.5 else { return }
         refreshHeightAndScrollPolicy()
     }
 
@@ -412,11 +431,13 @@ final class ImageGenPromptPlainTextHostView: NSView {
         self.coordinator = coordinator
         self.minLines = minLines
         self.maxLines = maxLines
-        ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
-            text,
-            on: textView,
-            preservingSelectionFrom: NSRange(location: 0, length: 0)
-        )
+        coordinator.withSuppressedTextDelegate {
+            ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                text,
+                on: textView,
+                preservingSelectionFrom: NSRange(location: 0, length: 0)
+            )
+        }
         refreshHeightAndScrollPolicy()
     }
 

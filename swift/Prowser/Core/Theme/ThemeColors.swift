@@ -140,8 +140,6 @@ struct ThemeColors: Equatable {
         )
 
         let splitter = ThemeBlendUtils.splitterHoverPressed(from: borderHex)
-        let headerBgHex = hex("sidebar_header_bg_hex", "#2b2b2b")
-        let headerFocusHex = ThemeBlendUtils.sidebarHeaderFocusBg(baseHex: headerBgHex, themeID: themeID)
 
         let multiselectBgHex = hex("multiselect_background_color_hex", "#ffd700")
         let multiselectBg = Color(hex: multiselectBgHex) ?? .yellow
@@ -168,6 +166,7 @@ struct ThemeColors: Equatable {
             ? (bg: "#fffff0", fg: "#1a1a1a", border: "#a0a0a0")
             : (bg: "#000000", fg: "#ddeeff", border: "#b2b2b8")
         let thumbnailGridBackground = resolvedColor("thumbnail_grid_background_color_hex", "#000000")
+        let sidebarHeaderBackground = resolvedColor("sidebar_header_bg_hex", "#2b2b2b")
 
         return ThemeColors(
             themeID: themeID,
@@ -181,10 +180,15 @@ struct ThemeColors: Equatable {
             sidebarText: resolvedColor("sidebar_text_color_hex", "#b6b6b6"),
             sidebarEmphasizedText: resolvedColor("sidebar_emphasized_text_color_hex", "#ffff00"),
             sidebarMutedText: Color(hex: sidebarMutedHex) ?? .gray,
-            sidebarHeaderBackground: resolvedColor("sidebar_header_bg_hex", "#2b2b2b"),
+            sidebarHeaderBackground: sidebarHeaderBackground,
             sidebarHeaderBorder: Color(hex: borderHex) ?? Color(white: 0.25),
             sidebarHeaderText: resolvedColor("sidebar_text_color_hex", "#b6b6b6"),
-            sidebarHeaderFocusBackground: Color(hex: headerFocusHex) ?? Color(white: 0.17),
+            sidebarHeaderFocusBackground: Color(
+                hex: ThemeBlendUtils.sidebarHeaderFocusBg(
+                    baseHex: sidebarHeaderBackground.nsColor.hexString,
+                    themeID: themeID
+                )
+            ) ?? sidebarHeaderBackground,
             statusBarBackground: resolvedColor("status_bar_background_color_hex", "#000000"),
             statusBarText: resolvedColor("status_bar_text_color_hex", "#b6b6b6"),
             statusBarMutedText: Color(hex: statusMutedHex) ?? .gray,

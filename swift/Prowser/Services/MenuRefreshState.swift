@@ -161,8 +161,10 @@ final class MenuRefreshState {
     private func installKeyWindowObservers() {
         guard keyWindowObservers.isEmpty else { return }
         let center = NotificationCenter.default
+        // Defer past AppKit key-window notifications (sheets, modal exception panel, dialogs)
+        // so @Observable access does not re-enter Observation during becomeKey.
         let refresh: () -> Void = { [weak self] in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.refreshBrowserWindowShortcuts()
             }
         }

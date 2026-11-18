@@ -93,6 +93,7 @@ final class AppState {
     var jobsPaneResizeDebounce: DispatchWorkItem?
     var jobsPaneGeometryForceRefit = false
     /// Coalesces post-queue / post-generation layout passes (port of Qt ``singleShot(0)`` deferred geometry).
+    @ObservationIgnored
     var jobsPaneLayoutSettleToken = 0
     /// Remaining layout passes that should snap the showing jobs surface to the measured height.
     var jobsSurfaceExactSnapPasses = 0

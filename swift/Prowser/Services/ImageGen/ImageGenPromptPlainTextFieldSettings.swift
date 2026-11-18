@@ -21,12 +21,20 @@ enum ImageGenPromptPlainTextFieldSettings {
         on textView: NSTextView,
         preservingSelectionFrom selected: NSRange
     ) {
-        let undo = textView.undoManager
-        undo?.disableUndoRegistration()
-        textView.string = newText
-        undo?.removeAllActions()
-        undo?.enableUndoRegistration()
         let len = ImageGenPromptTextEncoding.utf16Length(of: newText)
+        if textView.string == newText {
+            if selected.location <= len {
+                textView.setSelectedRange(selected)
+            } else {
+                textView.setSelectedRange(NSRange(location: len, length: 0))
+            }
+            return
+        }
+        let priorAllowsUndo = textView.allowsUndo
+        textView.allowsUndo = false
+        textView.string = newText
+        textView.undoManager?.removeAllActions()
+        textView.allowsUndo = priorAllowsUndo
         if selected.location <= len {
             textView.setSelectedRange(selected)
         } else {
