@@ -10,6 +10,46 @@ enum LoRAFindChoicesDiscovery {
         var fromDownloads: Bool
     }
 
+    /// Top-level ``~/Downloads/*.safetensors`` not already in the catalog (settings “Needs setup”).
+    static func downloadsOrphanChoices(registeredPaths: Set<String>) -> [Choice] {
+        var choices: [Choice] = []
+        var seenKeys = Set<String>()
+        var seenNameSize = Set<String>()
+
+        func rememberNameSize(name: String, url: URL) -> Bool {
+            let text = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !text.isEmpty else { return true }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let token = "\(text)\0\(size)"
+            if seenNameSize.contains(token) { return false }
+            seenNameSize.insert(token)
+            return true
+        }
+
+        for url in downloadsSafetensors() {
+            let path = url.standardizedFileURL.path
+            if registeredPaths.contains(path) { continue }
+            let key = "path:\(path)"
+            if seenKeys.contains(key) { continue }
+            let display = LoRAUserEntries.displayName(from: url)
+            if !rememberNameSize(name: display, url: url) { continue }
+            seenKeys.insert(key)
+            choices.append(
+                Choice(
+                    key: key,
+                    displayName: display,
+                    weightsPath: path,
+                    triggerWord: "",
+                    fromDownloads: true
+                )
+            )
+        }
+
+        return choices.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
     static func discover(lc: [String: Any], profilePaths: ProfilePaths) -> [Choice] {
         var choices: [Choice] = []
         var plannedPaths = Set<String>()
@@ -147,7 +187,7 @@ enum LoRAFindChoicesDiscovery {
             .sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
     }
 
-    private static func isTopLevelDownloads(_ url: URL) -> Bool {
+    static func isTopLevelDownloads(_ url: URL) -> Bool {
         let downloads = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Downloads", isDirectory: true)
             .standardizedFileURL
@@ -155,18 +195,6 @@ enum LoRAFindChoicesDiscovery {
     }
 
     private static func registeredWeightPaths(lc: [String: Any]) -> Set<String> {
-        var paths = Set<String>()
-        for entry in LoRACatalog.catalogEntriesSorted(lc: lc) {
-            if let local = entry.localPath, !local.isEmpty {
-                paths.insert(URL(fileURLWithPath: (local as NSString).expandingTildeInPath).standardizedFileURL.path)
-            }
-            if let source = entry.sourcePath, !source.isEmpty {
-                paths.insert(URL(fileURLWithPath: (source as NSString).expandingTildeInPath).standardizedFileURL.path)
-            }
-            if let weights = LoRAPathResolver.localWeightsPath(loraID: entry.loraID, entry: entry) {
-                paths.insert(weights.path)
-            }
-        }
-        return paths
+        LoRAWeightsIdentity.registeredWeightPaths(lc: lc)
     }
 }

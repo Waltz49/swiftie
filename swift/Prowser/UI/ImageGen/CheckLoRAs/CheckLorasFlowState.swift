@@ -15,6 +15,8 @@ final class CheckLorasFlowState {
 
     var optionsPrescan: CheckLorasPrescanResult?
     var results: ResultsPresentation?
+    /// When set, overrides saved Test LoRAs options when the options dialog opens.
+    var seededOptions: CheckLorasOptions?
     /// Probe run starts only after the options window has closed (avoids AppKit progress + dialog overlap).
     var pendingRun: PendingRun?
 

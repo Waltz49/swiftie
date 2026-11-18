@@ -65,6 +65,10 @@ enum CheckLorasProgressFormatter {
             if dl > 0 {
                 lines.append("Downloads scanned: \(dl) · Duplicates removed: \(int(stats["downloads_deduped"]))")
             }
+            let removedAfterImport = int(stats["downloads_removed_after_import"])
+            if removedAfterImport > 0 {
+                lines.append("Removed from Downloads after import: \(removedAfterImport)")
+            }
             lines.append("GPU renders planned: \(int(stats["probes_total"]))")
             let hist = int(stats["skipped_unchanged_probes"])
             if hist > 0 {

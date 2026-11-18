@@ -656,6 +656,20 @@ def _json_safe_dict(values: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _non_empty_model_list(models: Any) -> List[str]:
+    if not isinstance(models, (list, tuple)):
+        return []
+    return [str(m).strip() for m in models if str(m).strip()]
+
+
+def _merge_nonempty_lora_model_list(prev: List[str], incoming: List[str]) -> List[str]:
+    """Never replace stored model associations with an empty list."""
+    inc = _non_empty_model_list(incoming)
+    if not inc:
+        return list(prev)
+    return inc
+
+
 def _merge_test_loras_create_menu_ids(
     prev_ids: List[str],
     incoming_ids: List[str],
@@ -734,7 +748,9 @@ def save_lora_catalog_state(
                     continue
                 if not isinstance(models, (list, tuple)):
                     continue
-                cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
+                incoming = [str(m) for m in models if str(m) in allowed]
+                prev_list = cleaned.get(lid_s) or []
+                cleaned[lid_s] = _merge_nonempty_lora_model_list(prev_list, incoming)
             lc["model_support"] = cleaned
 
         if cross_family_models is not None:
@@ -753,7 +769,9 @@ def save_lora_catalog_state(
                     continue
                 if not isinstance(models, (list, tuple)):
                     continue
-                cleaned_cf[lid_s] = [str(m) for m in models if str(m) in allowed]
+                incoming = [str(m) for m in models if str(m) in allowed]
+                prev_list = cleaned_cf.get(lid_s) or []
+                cleaned_cf[lid_s] = _merge_nonempty_lora_model_list(prev_list, incoming)
             lc[CROSS_FAMILY_MODELS_KEY] = cleaned_cf
 
         ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}

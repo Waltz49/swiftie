@@ -58,6 +58,7 @@ struct CheckLorasOptionsView: View {
     @State private var probePrompt: String
     @State private var skipUnchanged: Bool
     @State private var checkCrossFamilies: Bool
+    @State private var removeDownloadsAfterImport: Bool
     init(
         choices: [CheckLorasProbeChoice],
         installedModels: [CheckLorasInstalledModel],
@@ -91,6 +92,7 @@ struct CheckLorasOptionsView: View {
         _probePrompt = State(initialValue: local.probePrompt)
         _skipUnchanged = State(initialValue: local.skipUnchanged)
         _checkCrossFamilies = State(initialValue: local.checkCrossFamilies)
+        _removeDownloadsAfterImport = State(initialValue: options.wrappedValue.removeDownloadsAfterImport)
         _validationMessage = State(initialValue: nil)
         _showClearHistoryConfirm = State(initialValue: false)
         _clearHistoryCount = State(initialValue: 0)
@@ -109,6 +111,7 @@ struct CheckLorasOptionsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     probePromptSection
                     registrationSection
+                    downloadsLibrarySection
                     Toggle("Re-probe changed files only (skip unchanged weights)", isOn: $skipUnchanged)
                     Toggle(
                         "Test on other base model families",
@@ -252,6 +255,8 @@ struct CheckLorasOptionsView: View {
                     .disabled(allLoras || choices.isEmpty || allLorasSelected)
                 Button("Clear all") { selectedLoraKeys = [] }
                     .disabled(allLoras || choices.isEmpty || selectedLoraKeys.isEmpty)
+                Button("Select Downloads only") { selectDownloadsOnly() }
+                    .disabled(choices.isEmpty || downloadsChoiceKeys.isEmpty)
             }
             .padding(.leading, 20)
             if choices.isEmpty {
@@ -275,7 +280,7 @@ struct CheckLorasOptionsView: View {
                             .toggleStyle(.checkbox)
                             .disabled(allLoras)
                             .help(choice.fromDownloads
-                                ? "Unregistered .safetensors (cache or Downloads)"
+                                ? "Top-level ~/Downloads — passing probe copies into the LoRA library"
                                 : "")
                         }
                     }
@@ -289,6 +294,44 @@ struct CheckLorasOptionsView: View {
                 .padding(.leading, 20)
             }
         }
+    }
+
+    private var downloadsChoiceKeys: Set<String> {
+        Set(choices.filter(\.fromDownloads).map(\.key))
+    }
+
+    @ViewBuilder
+    private var downloadsLibrarySection: some View {
+        if downloadsChoiceKeys.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Downloads and library").font(.headline)
+                let count = downloadsChoiceKeys.count
+                let suffix = count == 1 ? "" : "s"
+                Text(
+                    "\(count) top-level Downloads file\(suffix) in this scan. "
+                        + "Passing probes copy weights into the LoRA cache; duplicates of "
+                        + "files already in the library may be removed from Downloads before probing."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                Toggle(
+                    "Remove from Downloads after successful copy to library",
+                    isOn: $removeDownloadsAfterImport
+                )
+                .help(
+                    "After a passing probe registers an orphan from Downloads, delete the "
+                        + "original top-level .safetensors once a copy is saved in the LoRA library."
+                )
+            }
+        }
+    }
+
+    private func selectDownloadsOnly() {
+        allLoras = false
+        selectedLoraKeys = downloadsChoiceKeys
     }
 
     private var registrationSection: some View {
@@ -331,6 +374,7 @@ struct CheckLorasOptionsView: View {
         var probePrompt: String
         var skipUnchanged: Bool
         var checkCrossFamilies: Bool
+        var removeDownloadsAfterImport: Bool
     }
 
     private static func localState(
@@ -359,7 +403,8 @@ struct CheckLorasOptionsView: View {
                 registrationMode: options.registrationMode,
                 probePrompt: CheckLorasOptions.normalizedProbePrompt(options.probePrompt),
                 skipUnchanged: options.skipUnchanged,
-                checkCrossFamilies: options.checkCrossFamilies
+                checkCrossFamilies: options.checkCrossFamilies,
+                removeDownloadsAfterImport: options.removeDownloadsAfterImport
             )
         }
         return LocalState(
@@ -370,7 +415,8 @@ struct CheckLorasOptionsView: View {
             registrationMode: options.registrationMode,
             probePrompt: CheckLorasOptions.normalizedProbePrompt(options.probePrompt),
             skipUnchanged: options.skipUnchanged,
-            checkCrossFamilies: options.checkCrossFamilies
+            checkCrossFamilies: options.checkCrossFamilies,
+            removeDownloadsAfterImport: options.removeDownloadsAfterImport
         )
     }
 
@@ -384,6 +430,7 @@ struct CheckLorasOptionsView: View {
         probePrompt = local.probePrompt
         skipUnchanged = local.skipUnchanged
         checkCrossFamilies = local.checkCrossFamilies
+        removeDownloadsAfterImport = local.removeDownloadsAfterImport
     }
 
     private func resolvedLoraKeysForScope() -> [String] {
@@ -422,7 +469,8 @@ struct CheckLorasOptionsView: View {
             registrationMode: registrationMode,
             probePrompt: CheckLorasOptions.normalizedProbePrompt(probePrompt),
             skipUnchanged: skipUnchanged,
-            checkCrossFamilies: checkCrossFamilies
+            checkCrossFamilies: checkCrossFamilies,
+            removeDownloadsAfterImport: removeDownloadsAfterImport
         )
     }
 

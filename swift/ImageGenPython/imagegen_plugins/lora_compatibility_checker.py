@@ -86,6 +86,7 @@ class CheckLorasOptions:
     probe_prompt: str = "test"
     skip_unchanged: bool = True
     check_cross_families: bool = True
+    remove_downloads_after_import: bool = False
 
     def resolved_model_keys(self) -> List[str]:
         installed = installed_probeable_models()
@@ -166,6 +167,7 @@ class LoraCheckStats:
     downloads_deduped: int = 0
     downloads_registered: int = 0
     downloads_failed: int = 0
+    downloads_removed_after_import: int = 0
     skipped_registered_probes: int = 0
     files_discovered: int = 0
     files_deduped: int = 0
@@ -236,7 +238,7 @@ class PreparedLoraProbePlan:
 
 @dataclass
 class LoraCheckChange:
-    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | passed | skipped_not_on_disk | downloads_deduped | downloads_registered | downloads_failed
+    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | passed | skipped_not_on_disk | downloads_deduped | downloads_registered | downloads_failed | downloads_source_removed
     lora_id: str
     lora_label: str
     model_key: str = ""
@@ -256,6 +258,7 @@ class LoraCheckResult:
     probe_history: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     previous_support: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     registration_mode: str = REGISTRATION_IGNORE_PREVIOUS
+    remove_downloads_after_import: bool = False
     probe_effect_threshold_lines: List[str] = field(default_factory=list)
     probe_effect_outcome_lines: List[str] = field(default_factory=list)
     probe_cnn_environment_lines: List[str] = field(default_factory=list)
@@ -316,6 +319,7 @@ def check_loras_options_from_settings(
     probe_prompt = normalize_check_loras_probe_prompt(raw.get("probe_prompt"))
     skip_unchanged = bool(raw.get("skip_unchanged", True))
     check_cross_families = bool(raw.get("check_cross_families", True))
+    remove_downloads_after_import = bool(raw.get("remove_downloads_after_import", False))
 
     lora_scope = str(raw.get("lora_scope") or LORA_SCOPE_ALL)
     if lora_scope not in (LORA_SCOPE_ALL, LORA_SCOPE_SELECTED):
@@ -333,6 +337,7 @@ def check_loras_options_from_settings(
         probe_prompt=probe_prompt,
         skip_unchanged=skip_unchanged,
         check_cross_families=check_cross_families,
+        remove_downloads_after_import=remove_downloads_after_import,
     )
 
 
@@ -350,6 +355,7 @@ def persist_check_loras_options(options: CheckLorasOptions) -> None:
         "probe_prompt": options.probe_prompt,
         "skip_unchanged": bool(options.skip_unchanged),
         "check_cross_families": bool(options.check_cross_families),
+        "remove_downloads_after_import": bool(options.remove_downloads_after_import),
     }
     settings["imagegen"] = imagegen
     get_config().save_settings(settings)
@@ -817,6 +823,39 @@ def dedupe_downloads_loras(
         except OSError as exc:
             print(f"[Check LoRAs] Could not delete duplicate download {path}: {exc}")
     return len(paths), deleted
+
+
+def _remove_downloads_source_after_import(source: Path, dest: Path) -> bool:
+    """Remove a top-level Downloads .safetensors after a successful cache copy."""
+    try:
+        src = source.expanduser().resolve()
+        dst = dest.expanduser().resolve()
+    except OSError:
+        return False
+    if src == dst:
+        return False
+    if not dst.is_file():
+        return False
+    downloads_root = DOWNLOADS_LORA_DIR.expanduser().resolve()
+    try:
+        if src.parent != downloads_root or not src.is_file():
+            return False
+    except OSError:
+        return False
+    if src.suffix.lower() != ".safetensors":
+        return False
+    try:
+        if src.stat().st_size != dst.stat().st_size:
+            return False
+    except OSError:
+        return False
+    try:
+        src.unlink()
+        print(f"[Check LoRAs] Removed imported Downloads file: {src}")
+        return True
+    except OSError as exc:
+        print(f"[Check LoRAs] Could not remove Downloads source {src}: {exc}")
+        return False
 
 
 def _downloads_probe_candidates(
@@ -2624,7 +2663,10 @@ def _persist_lora_probe_progress(
     by_model_enabled: Dict[str, List[str]],
     by_model_hidden: Dict[str, List[str]],
     model_support: Dict[str, List[str]],
+    cancelled: bool = False,
 ) -> None:
+    if cancelled:
+        return
     from imagegen_plugins.check_loras_debug import persist_lora_check_catalog_slice
     from imagegen_plugins.lora_catalog import get_lora_entry
     from imagegen_plugins.lora_model_registry import same_host_supported_models
@@ -2645,8 +2687,10 @@ def _persist_lora_probe_progress(
             )
             model_support[lora_id] = same_host
             result.cross_family_models[lora_id] = cross
-            ms_slice = {lora_id: same_host}
-            cf_slice = {lora_id: cross}
+            if same_host:
+                ms_slice = {lora_id: same_host}
+            if cross:
+                cf_slice = {lora_id: cross}
 
     hist_slice: Dict[str, Any] = {}
     for key in (state.history_key, lora_id):
@@ -2688,6 +2732,7 @@ def _after_probe_model_completed(
         by_model_enabled=by_model_enabled,
         by_model_hidden=by_model_hidden,
         model_support=model_support,
+        cancelled=cancelled,
     )
     if (
         state.plan_item.from_downloads
@@ -2722,6 +2767,7 @@ def _after_probe_model_completed(
             by_model_enabled=by_model_enabled,
             by_model_hidden=by_model_hidden,
             model_support=model_support,
+            cancelled=cancelled,
         )
 
 
@@ -2949,6 +2995,20 @@ def _finalize_lora_probe_state(
                         enabled.append(registered_lora_id)
                         stats.newly_enabled_count += 1
                 stats.newly_supported_count += len(supported)
+                if result.remove_downloads_after_import:
+                    dest_path = Path(new_entry.local_path or "")
+                    if _remove_downloads_source_after_import(
+                        Path(plan_item.weights_path),
+                        dest_path,
+                    ):
+                        stats.downloads_removed_after_import += 1
+                        result.changes.append(
+                            LoraCheckChange(
+                                kind="downloads_source_removed",
+                                lora_id=registered_lora_id,
+                                lora_label=new_entry.display_name,
+                            )
+                        )
             except Exception as exc:
                 print(
                     f"[Check LoRAs] could not register download {lora_label!r}: {exc}"
@@ -3120,6 +3180,7 @@ def run_lora_compatibility_check(
     previous_support = lora_model_support(settings)
     result.previous_support = previous_support
     result.registration_mode = opts.registration_mode
+    result.remove_downloads_after_import = bool(opts.remove_downloads_after_import)
     model_support: Dict[str, List[str]] = {}
     # Accumulated enables per model (start from current settings; merge new).
     by_model_enabled: Dict[str, List[str]] = {}
@@ -3530,12 +3591,12 @@ def run_lora_compatibility_check(
     result.model_support = {
         str(lid): list(models)
         for lid, models in model_support.items()
-        if str(lid) in active_lora_ids
+        if str(lid) in active_lora_ids and list(models)
     }
     result.cross_family_models = {
         str(lid): list(models)
         for lid, models in result.cross_family_models.items()
-        if str(lid) in active_lora_ids
+        if str(lid) in active_lora_ids and list(models)
     }
     result.probe_history = {
         str(key): slice_

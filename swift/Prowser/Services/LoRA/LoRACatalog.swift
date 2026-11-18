@@ -108,22 +108,32 @@ enum LoRACatalog {
         modelKey: String,
         draftByModel: [String: LoRAModelDraftSlice]?
     ) -> [LoRAEntry] {
-        catalogEntriesSorted(lc: lc).filter {
+        return catalogEntriesSorted(lc: lc).filter {
             entryVisibleInSettings(entry: $0, modelKey: modelKey, lc: lc, draftByModel: draftByModel)
         }
     }
 
     static func choicesForPlugin(plugin: ImageGenPluginDescriptor, lc: [String: Any]) -> [(label: String, id: String)] {
         guard let hostID = plugin.loraHostID else { return [("None", "none")] }
-        let modelKey = plugin.hfModelID
-        let enabled = Set(LoRACatalogSettings.enabledIDs(lc: lc, modelKey: modelKey))
+        let probeModelKey = LoRAModelRegistry.loraProbeModelKey(forPlugin: plugin)
+        var enabled = Set<String>()
+        for modelKey in LoRAModelRegistry.loraCatalogModelKeys(forPlugin: plugin) {
+            enabled.formUnion(LoRACatalogSettings.enabledIDs(lc: lc, modelKey: modelKey))
+        }
         let ms = LoRACatalogSettings.modelSupportDict(lc)
         var choices: [(String, String)] = [("None", "none")]
         if enabled.isEmpty { return choices }
         for entry in catalogEntriesSorted(lc: lc) {
             guard enabled.contains(entry.loraID) else { continue }
-            if visibleForRun(entry: entry, modelKey: modelKey, hostID: hostID, lc: lc, enabled: enabled, modelSupport: ms) {
-                choices.append((choiceLabel(entry: entry, modelKey: modelKey), entry.loraID))
+            if visibleForRun(
+                entry: entry,
+                modelKey: probeModelKey,
+                hostID: hostID,
+                lc: lc,
+                enabled: enabled,
+                modelSupport: ms
+            ) {
+                choices.append((choiceLabel(entry: entry, modelKey: probeModelKey), entry.loraID))
             }
         }
         return sortRunDialogChoices(choices)
@@ -148,22 +158,29 @@ enum LoRACatalog {
         ) {
             return false
         }
-        return LoRAPathResolver.localWeightsPath(loraID: entry.loraID, entry: entry) != nil
+        return LoRAPathResolver.fastLocalWeightsPath(loraID: entry.loraID, entry: entry) != nil
     }
 
     static func lifecycleState(
         loraID: String,
         modelKey: String,
         lc: [String: Any],
-        draftByModel: [String: LoRAModelDraftSlice]?
+        draftByModel: [String: LoRAModelDraftSlice]?,
+        installed: Bool? = nil
     ) -> String {
         let deleted = LoRACatalogSettings.deletedIDs(for: modelKey, lc: lc, draftByModel: draftByModel)
         if deleted.contains(loraID) { return "deleted" }
         let enabled = Set(LoRACatalogSettings.enabledIDList(for: modelKey, lc: lc, draftByModel: draftByModel))
         if enabled.contains(loraID) { return "active" }
-        if LoRAPathResolver.localWeightsPath(loraID: loraID, entry: getEntry(loraID: loraID, lc: lc)) != nil {
-            return "installed"
+        let hasWeights: Bool
+        if let installed {
+            hasWeights = installed
+        } else if let entry = getEntry(loraID: loraID, lc: lc) {
+            hasWeights = LoRAPathResolver.fastLocalWeightsPath(loraID: loraID, entry: entry) != nil
+        } else {
+            hasWeights = false
         }
+        if hasWeights { return "installed" }
         return "uninstalled"
     }
 
@@ -185,6 +202,17 @@ enum LoRACatalog {
     static func compatibleLoraIDsForSettingsModel(lc: [String: Any], modelKey: String) -> [String] {
         settingsEntries(lc: lc, modelKey: modelKey, draftByModel: nil)
             .filter { probeStateForModel(entry: $0, modelKey: modelKey, lc: lc) == "pass" }
+            .map(\.loraID)
+            .sorted()
+    }
+
+    /// Probe-pass LoRAs with weights on disk — the only IDs that may be enabled for Create.
+    static func enableableLoraIDsForSettingsModel(lc: [String: Any], modelKey: String) -> [String] {
+        settingsEntries(lc: lc, modelKey: modelKey, draftByModel: nil)
+            .filter { entry in
+                probeStateForModel(entry: entry, modelKey: modelKey, lc: lc) == "pass"
+                    && LoRAPathResolver.localWeightsPath(loraID: entry.loraID, entry: entry) != nil
+            }
             .map(\.loraID)
             .sorted()
     }

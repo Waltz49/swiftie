@@ -11,9 +11,6 @@ from typing import Any, List, Optional
 _retained_probe_temps: List[str] = []
 _retained_lock = threading.Lock()
 
-_cnn_sorter = None
-_cnn_sorter_lock = threading.Lock()
-
 _headless_resnet = None
 _headless_resnet_lock = threading.Lock()
 
@@ -22,10 +19,8 @@ _headless_resnet_lock = threading.Lock()
 class _ProbeCnnEnvironment:
     """Per Check LoRAs run (see ``reset_probe_cnn_environment``)."""
 
-    compare_mode: str = ""  # full | headless | unavailable
-    sorter_error: str = ""
+    compare_mode: str = ""  # headless | unavailable
     headless_error: str = ""
-    headless_fallback_logged: bool = False
     user_warning: str = ""
 
 
@@ -149,9 +144,7 @@ def _probe_cnn_env_snapshot() -> _ProbeCnnEnvironment:
     with _probe_cnn_env_lock:
         return _ProbeCnnEnvironment(
             compare_mode=_probe_cnn_env.compare_mode,
-            sorter_error=_probe_cnn_env.sorter_error,
             headless_error=_probe_cnn_env.headless_error,
-            headless_fallback_logged=_probe_cnn_env.headless_fallback_logged,
             user_warning=_probe_cnn_env.user_warning,
         )
 
@@ -160,33 +153,12 @@ def _set_probe_cnn_compare_mode(mode: str) -> None:
     with _probe_cnn_env_lock:
         if mode == "unavailable":
             _probe_cnn_env.compare_mode = "unavailable"
-        elif _probe_cnn_env.compare_mode != "unavailable":
-            if mode == "full" and not _probe_cnn_env.compare_mode:
-                _probe_cnn_env.compare_mode = "full"
-            elif mode == "headless":
-                _probe_cnn_env.compare_mode = "headless"
-
-
-def note_probe_cnn_sorter_unavailable(exc: BaseException) -> None:
-    msg = f"{type(exc).__name__}: {exc}"
-    with _probe_cnn_env_lock:
-        if not _probe_cnn_env.sorter_error:
-            _probe_cnn_env.sorter_error = msg
+        elif _probe_cnn_env.compare_mode != "unavailable" and mode == "headless":
+            _probe_cnn_env.compare_mode = "headless"
 
 
 def note_probe_cnn_headless_active() -> None:
     _set_probe_cnn_compare_mode("headless")
-    with _probe_cnn_env_lock:
-        if _probe_cnn_env.headless_fallback_logged:
-            return
-        _probe_cnn_env.headless_fallback_logged = True
-    snap = _probe_cnn_env_snapshot()
-    reason = snap.sorter_error or "unknown"
-    line = (
-        "[Check LoRAs] Probe CNN: using headless ResNet in the imagegen venv "
-        f"(full similarity stack unavailable: {reason})."
-    )
-    print(line)
 
 
 def note_probe_cnn_fully_unavailable(exc: BaseException) -> None:
@@ -195,10 +167,6 @@ def note_probe_cnn_fully_unavailable(exc: BaseException) -> None:
         _probe_cnn_env.headless_error = msg
         _probe_cnn_env.compare_mode = "unavailable"
     print(f"[Check LoRAs] Probe CNN unavailable: {msg}")
-
-
-def note_probe_cnn_full_stack() -> None:
-    _set_probe_cnn_compare_mode("full")
 
 
 def build_probe_cnn_environment_user_warning() -> str:
@@ -214,9 +182,7 @@ def build_probe_cnn_environment_user_warning() -> str:
         "",
     ]
     if snap.headless_error:
-        parts.append(f"Headless ResNet error: {snap.headless_error}")
-    if snap.sorter_error:
-        parts.append(f"Full similarity stack error: {snap.sorter_error}")
+        parts.append(f"ResNet probe error: {snap.headless_error}")
     parts.extend(
         [
             "",
@@ -233,18 +199,12 @@ def build_probe_cnn_environment_report_lines() -> List[str]:
     if not snap.compare_mode:
         return []
     lines = ["=== Probe CNN environment ==="]
-    if snap.compare_mode == "full":
-        lines.append("Mode: full (search.cnn_image_similarity_sorter)")
-    elif snap.compare_mode == "headless":
-        lines.append("Mode: headless ResNet (imagegen venv)")
-        if snap.sorter_error:
-            lines.append(f"Full stack unavailable: {snap.sorter_error}")
+    if snap.compare_mode == "headless":
+        lines.append("Mode: ResNet (imagegen venv, torchvision)")
     else:
         lines.append("Mode: unavailable — CNN compare did not run")
-        if snap.sorter_error:
-            lines.append(f"Full stack error: {snap.sorter_error}")
         if snap.headless_error:
-            lines.append(f"Headless ResNet error: {snap.headless_error}")
+            lines.append(f"ResNet error: {snap.headless_error}")
     warning = build_probe_cnn_environment_user_warning()
     if warning:
         lines.append("")
@@ -255,16 +215,10 @@ def build_probe_cnn_environment_report_lines() -> List[str]:
 
 def build_probe_cnn_environment_summary_line() -> str:
     snap = _probe_cnn_env_snapshot()
-    if snap.compare_mode == "full":
-        return "Probe CNN: full similarity stack"
     if snap.compare_mode == "headless":
-        return (
-            "Probe CNN: headless ResNet (full stack unavailable"
-            + (f": {snap.sorter_error}" if snap.sorter_error else "")
-            + ")"
-        )
+        return "Probe CNN: ResNet (imagegen venv)"
     if snap.compare_mode == "unavailable":
-        detail = snap.headless_error or snap.sorter_error or "unknown error"
+        detail = snap.headless_error or "unknown error"
         return f"Probe CNN: unavailable ({detail})"
     return ""
 
@@ -339,31 +293,9 @@ def _configured_resnet_model_name() -> str:
     return str(settings.get("resnet_model") or "resnet18")
 
 
-def _probe_cnn_sorter():
-    """Lazy ResNet feature extractor (same stack as ⌘K similarity search)."""
-    global _cnn_sorter
-    with _cnn_sorter_lock:
-        if _cnn_sorter is not None:
-            return _cnn_sorter
-        from config import get_config
-
-        resnet_model = _configured_resnet_model_name()
-        cache_dir = str(get_config().image_recognition_cache_dir)
-        from search.cnn_image_similarity_sorter import CNNImageSimilaritySorter
-
-        _cnn_sorter = CNNImageSimilaritySorter(
-            similarity_metric="cosine",
-            cache_dir=cache_dir,
-            resnet_model=resnet_model,
-        )
-        return _cnn_sorter
-
-
 def _headless_probe_resnet():
     """
-    Headless ResNet features for Check LoRAs (imagegen venv: no PySide6 / search package).
-
-    Uses the same torchvision ResNet + preprocessing as ``CNNImageSimilaritySorter``.
+    ResNet features for Check LoRAs probe compare (torchvision in the imagegen venv).
     """
     global _headless_resnet
     with _headless_resnet_lock:
@@ -442,15 +374,6 @@ def _headless_probe_feature(path: str):
     return feat
 
 
-def _measure_probe_cnn_cosine_via_sorter(path_a: str, path_b: str) -> Optional[float]:
-    sorter = _probe_cnn_sorter()
-    feat_a = sorter._get_feature(path_a)
-    feat_b = sorter._get_feature(path_b)
-    if feat_a is None or feat_b is None:
-        return None
-    return float(sorter._compute_similarity(feat_a, feat_b))
-
-
 def _measure_probe_cnn_cosine_headless(path_a: str, path_b: str) -> Optional[float]:
     feat_a = _headless_probe_feature(path_a)
     feat_b = _headless_probe_feature(path_b)
@@ -474,17 +397,6 @@ def measure_probe_cnn_cosine(path_a: str, path_b: str) -> Optional[float]:
     if not os.path.isfile(path_a) or not os.path.isfile(path_b):
         return None
     try:
-        value = _measure_probe_cnn_cosine_via_sorter(path_a, path_b)
-        note_probe_cnn_full_stack()
-        sync_probe_cnn_environment_to_run_stats()
-        return value
-    except Exception as exc:
-        note_probe_cnn_sorter_unavailable(exc)
-        print(
-            f"[Check LoRAs] CNN probe compare (similarity sorter) unavailable: {exc}; "
-            "using headless ResNet"
-        )
-    try:
         value = _measure_probe_cnn_cosine_headless(path_a, path_b)
         note_probe_cnn_headless_active()
         sync_probe_cnn_environment_to_run_stats()
@@ -501,7 +413,7 @@ def measure_probe_image_delta(
     *,
     use_cnn: bool = True,
 ) -> ProbeImageDelta:
-    """Pixel/phash delta plus optional CNN cosine (ResNet, same as ⌘K search)."""
+    """Pixel/phash delta plus optional CNN cosine (torchvision ResNet in imagegen venv)."""
     from PIL import Image, ImageChops, ImageStat
 
     with Image.open(path_a) as img_a, Image.open(path_b) as img_b:

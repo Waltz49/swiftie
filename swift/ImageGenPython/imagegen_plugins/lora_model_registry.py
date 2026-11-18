@@ -351,7 +351,7 @@ def entry_matches_lora_model(
         expected_host = host_id_for_lora_model(model_key)
         if expected_host and entry.host_id != expected_host:
             return False
-        return False
+        return True
     entry_models = lora_models_for_entry(entry)
     return any(m in entry_models for m in klein_lora_model_aliases(model_key))
 

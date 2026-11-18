@@ -12,6 +12,7 @@ enum LoRACatalogSettings {
     static let legacyHiddenKey = "hidden_ids"
     static let catalogSchemaKey = "catalog_schema"
     static let diskFirstSchema = "disk_first_v1"
+    static let catalogDedupeMergedKey = "catalog_dedupe_merged_v1"
 
     struct ModelSlice: Equatable {
         var enabledIDs: [String]
@@ -55,6 +56,10 @@ enum LoRACatalogSettings {
 
     private static func canonicalJSONData(_ dict: [String: Any]) -> Data {
         (try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])) ?? Data()
+    }
+
+    static func canonicalJSONFingerprint(_ dict: [String: Any]) -> Data {
+        canonicalJSONData(dict)
     }
 
     static func userEntries(from lc: [String: Any]) -> [String: LoRAEntry] {

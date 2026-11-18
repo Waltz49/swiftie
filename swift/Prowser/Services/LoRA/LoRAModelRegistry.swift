@@ -96,6 +96,51 @@ enum LoRAModelRegistry {
         return mk.isEmpty ? [] : [mk]
     }
 
+    /// Z-Image 4-bit weights vs Tongyi full weights share one LoRA catalog slice (Python ``Z_IMAGE_TURBO`` on both plugins).
+    static func zImageLoraModelKeys() -> [String] {
+        [LoRAHFModelIDs.zImageTurbo, LoRAHFModelIDs.zImageTurboMflux4Bit]
+    }
+
+    /// Every Settings → LoRA row that shares the ``flux2_klein`` host (enabled flags can differ per row).
+    static func flux2KleinLoraCatalogModelKeys() -> [String] {
+        [
+            LoRAHFModelIDs.flux2Klein4B,
+            LoRAHFModelIDs.flux2Klein9B,
+            LoRAHFModelIDs.flux2Klein9BKV,
+            LoRAHFModelIDs.sceneworksFlux2Klein9BKVMLX,
+        ]
+    }
+
+    /// Keys to load merged ``by_model.enabled_ids`` for run-dialog LoRA choices.
+    static func loraCatalogModelKeys(forPlugin plugin: ImageGenPluginDescriptor) -> [String] {
+        let hf = plugin.hfModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hf == LoRAHFModelIDs.zImageTurboMflux4Bit || hf == LoRAHFModelIDs.zImageTurbo {
+            return zImageLoraModelKeys()
+        }
+        if plugin.loraHostID == LoRAHostRegistry.flux2Klein {
+            return flux2KleinLoraCatalogModelKeys()
+        }
+        return hf.isEmpty ? [] : [hf]
+    }
+
+    /// Model key for probe results / Check LoRAs when plugin reports the 4-bit HF id.
+    static func loraProbeModelKey(forModelKey modelKey: String) -> String {
+        let mk = modelKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if mk == LoRAHFModelIDs.zImageTurboMflux4Bit {
+            return LoRAHFModelIDs.zImageTurbo
+        }
+        return mk
+    }
+
+    static func loraProbeModelKey(forPlugin plugin: ImageGenPluginDescriptor) -> String {
+        loraProbeModelKey(forModelKey: plugin.hfModelID)
+    }
+
+    /// Shared storage key for Settings → LoRA enablement (both Z-Image picker rows).
+    static func canonicalSettingsModelKey(_ modelKey: String) -> String {
+        loraProbeModelKey(forModelKey: modelKey)
+    }
+
     static func entryMatchesModel(
         _ entry: LoRAEntry,
         modelKey: String,
@@ -107,7 +152,7 @@ enum LoRAModelRegistry {
         if LoRAEntry.isUserLoraID(entry.loraID) {
             let expected = hostID(forModelKey: modelKey)
             if let expected, entry.hostID != expected { return false }
-            return false
+            return true
         }
         let entryModels = modelsForEntry(entry)
         let aliases = kleinAliases(for: modelKey)
@@ -122,7 +167,16 @@ enum LoRAModelRegistry {
         let supported = modelSupport[entry.loraID] ?? []
         if supported.isEmpty { return false }
         let supportedSet = Set(supported)
-        return kleinAliases(for: modelKey).contains(where: { supportedSet.contains($0) })
+        if kleinAliases(for: modelKey).contains(where: { supportedSet.contains($0) }) {
+            return true
+        }
+        // Check LoRAs on one Klein settings row (e.g. SceneWorks MLX) applies to every ``flux2_klein`` row.
+        if hostID(forModelKey: modelKey) == LoRAHostRegistry.flux2Klein,
+           entry.hostID == LoRAHostRegistry.flux2Klein {
+            let family = Set(flux2KleinLoraCatalogModelKeys())
+            return supported.contains(where: { family.contains($0) })
+        }
+        return false
     }
 
     static func isCrossFamily(entry: LoRAEntry, modelKey: String) -> Bool {

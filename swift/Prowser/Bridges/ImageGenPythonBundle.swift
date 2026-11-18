@@ -38,9 +38,9 @@ enum ImageGenPythonBundle {
     /// Colon-separated ``PYTHONPATH`` for worker subprocesses.
     ///
     /// Always includes ``bundleRoot`` (``imagegen_plugins``, ``config``, …).
-    /// LoRA probe CNN compare imports ``search.cnn_image_similarity_sorter`` (same stack as ⌘K).
-    /// When ``bundleRoot/search`` is vendored (sync script), that alone is enough; otherwise
-    /// append the monorepo root (``swift/ImageGenPython`` → parent ``swift`` → repo root).
+    /// Check LoRAs probe CNN uses headless torchvision ResNet in ``imagegen_plugins`` (no Qt).
+    /// ``search`` may still be on the path for other imagegen plugins; when not vendored under
+    /// ``bundleRoot``, append the monorepo root (``swift/ImageGenPython`` → parent ``swift`` → repo root).
     nonisolated static func pythonPath(forBundleRoot bundleRoot: URL) -> String {
         var entries = [bundleRoot.path]
         let vendoredSearch = bundleRoot.appendingPathComponent("search", isDirectory: true)

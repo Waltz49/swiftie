@@ -20,3 +20,4 @@ safetensors
 pillow>=12,<13
 piexif
 huggingface-hub
+certifi

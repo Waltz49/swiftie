@@ -54,6 +54,9 @@ enum PythonLocator {
         ["-u", "-m", module]
     }
 
+    private nonisolated(unsafe) static let certifiCacheLock = NSLock()
+    private nonisolated(unsafe) static var certifiCacheByExecutable: [String: String] = [:]
+
     nonisolated static func processEnvironment(
         for environment: Environment,
         extra: [String: String] = [:]
@@ -64,10 +67,60 @@ enum PythonLocator {
             bundleRoot: environment.bundleRoot,
             profilePath: environment.profilePath
         )
+        applyCertifiTLSIfNeeded(executable: environment.executable, env: &env)
         for (key, value) in extra {
             env[key] = value
         }
         return env
+    }
+
+    /// Use certifi's CA bundle for HTTPS in imagegen venv workers (torchvision, huggingface_hub, etc.).
+    nonisolated static func applyCertifiTLSIfNeeded(executable: String, env: inout [String: String]) {
+        let existing = (env["SSL_CERT_FILE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !existing.isEmpty {
+            return
+        }
+        guard let path = certifiCAPath(forPython: executable) else { return }
+        env["SSL_CERT_FILE"] = path
+        let requestsCA = (env["REQUESTS_CA_BUNDLE"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if requestsCA.isEmpty {
+            env["REQUESTS_CA_BUNDLE"] = path
+        }
+    }
+
+    nonisolated private static func certifiCAPath(forPython executable: String) -> String? {
+        certifiCacheLock.lock()
+        if let cached = certifiCacheByExecutable[executable] {
+            certifiCacheLock.unlock()
+            return cached
+        }
+        certifiCacheLock.unlock()
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: executable)
+        proc.arguments = ["-c", "import certifi; print(certifi.where())"]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        proc.environment = ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"]
+        do {
+            try proc.run()
+        } catch {
+            return nil
+        }
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty
+        else {
+            return nil
+        }
+        certifiCacheLock.lock()
+        certifiCacheByExecutable[executable] = text
+        certifiCacheLock.unlock()
+        return text
     }
 
     /// Kill orphaned worker subprocesses left behind when a prior app instance exited uncleanly.

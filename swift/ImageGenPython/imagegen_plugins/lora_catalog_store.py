@@ -6,7 +6,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -81,6 +83,39 @@ def load_lora_catalog_file() -> Dict[str, Any]:
         _lora_catalog_cache_mtime = mtime
         _lora_catalog_cache_data = migrated
         return copy.deepcopy(migrated)
+
+
+_CHECK_LORAS_BACKUP_PREFIX = "lora_catalog.json.pre-check-loras-"
+_MAX_CHECK_LORAS_BACKUPS = 8
+
+
+def backup_lora_catalog_for_check_loras() -> Optional[Path]:
+    """Timestamped copy before Test LoRAs mutates ``lora_catalog.json``."""
+    path = lora_catalog_file_path()
+    if not path.is_file():
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = path.with_name(f"{_CHECK_LORAS_BACKUP_PREFIX}{stamp}")
+    with _lora_catalog_file_lock:
+        try:
+            shutil.copy2(path, dest)
+        except OSError:
+            return None
+        _prune_check_loras_backups(path.parent)
+    return dest
+
+
+def _prune_check_loras_backups(data_dir: Path) -> None:
+    backups = sorted(
+        data_dir.glob(f"{_CHECK_LORAS_BACKUP_PREFIX}*"),
+        key=lambda p: p.stat().st_mtime if p.is_file() else 0,
+        reverse=True,
+    )
+    for old in backups[_MAX_CHECK_LORAS_BACKUPS:]:
+        try:
+            old.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def save_lora_catalog_file(lc: Dict[str, Any]) -> None:

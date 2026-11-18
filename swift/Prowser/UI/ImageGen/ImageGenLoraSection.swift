@@ -59,9 +59,14 @@ struct ImageGenLoraSection: View {
 
     private func loraModelKeyForPlugin() -> String? {
         if let descriptor = ImageGenPluginCatalog.plugin(pluginID: pluginID) {
-            return descriptor.hfModelID.isEmpty ? nil : descriptor.hfModelID
+            let key = LoRAModelRegistry.canonicalSettingsModelKey(descriptor.hfModelID)
+            return key.isEmpty ? nil : key
         }
-        return plugin["hf_model_id"] as? String
+        if let raw = plugin["hf_model_id"] as? String {
+            let key = LoRAModelRegistry.canonicalSettingsModelKey(raw)
+            return key.isEmpty ? nil : key
+        }
+        return nil
     }
 
     private func clearLoras() {

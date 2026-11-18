@@ -93,20 +93,44 @@ final class LoRASettingsViewModel {
 
     func reloadEntries() async {
         guard let bridge, !selectedModelKey.isEmpty else { return }
+        let storageKey = catalogStorageModelKey(for: selectedModelKey)
         do {
+            var draftsForBridge = draftByModel
+            if storageKey != selectedModelKey, let slice = draftByModel[storageKey] {
+                draftsForBridge[selectedModelKey] = slice
+            }
             let result = try await bridge.settingsEntries(
                 modelKey: selectedModelKey,
                 hideUninstalled: hideUninstalled,
-                draftByModel: draftByModel
+                draftByModel: draftsForBridge
             )
             entries = result.entries
-            discoveredEntries = result.discoveredEntries
-            enabledIDs = Set(result.enabledIDs)
-            draftByModel[selectedModelKey] = LoRAModelDraftSlice(
-                enabledIDs: result.enabledIDs,
+            discoveredEntries = []
+            let installedIDs = Set(entries.filter(\.installed).map(\.loraID))
+            let prunedEnabled = result.enabledIDs.filter { installedIDs.contains($0) }
+            enabledIDs = Set(prunedEnabled)
+            draftByModel[storageKey] = LoRAModelDraftSlice(
+                enabledIDs: prunedEnabled,
                 deletedIDs: result.deletedIDs
             )
             rebuildRows()
+            let modelKey = selectedModelKey
+            let savedSnapshot = entries
+            let catalogSnapshot = result.catalog
+            Task { [weak self] in
+                guard let self, let bridge = self.bridge else { return }
+                do {
+                    let discovered = try await bridge.settingsDownloadedEntries(
+                        savedEntries: savedSnapshot,
+                        catalog: catalogSnapshot
+                    )
+                    guard self.selectedModelKey == modelKey else { return }
+                    self.discoveredEntries = discovered
+                    self.rebuildRows()
+                } catch {
+                    // Non-fatal: catalog rows are already visible.
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -241,7 +265,25 @@ final class LoRASettingsViewModel {
         return models.first?.modelKey ?? ""
     }
 
+    func canEnableInCreateMenu(_ row: LoRASettingsRow) -> Bool {
+        row.kind == .saved && row.compatibility == .works && row.entry.installed
+    }
+
+    func showsEnabledInUI(loraID: String) -> Bool {
+        guard entries.first(where: { $0.loraID == loraID })?.installed == true else { return false }
+        return enabledIDs.contains(loraID)
+    }
+
+    func enableCheckboxHelp(for row: LoRASettingsRow) -> String {
+        if canEnableInCreateMenu(row) { return "In Create menu" }
+        if row.compatibility == .works, !row.entry.installed {
+            return "Install weights before adding to Create menu"
+        }
+        return "Works with this model before enabling"
+    }
+
     func toggleEnabled(_ loraID: String, enabled: Bool) {
+        guard entries.first(where: { $0.loraID == loraID })?.installed == true else { return }
         if enabled {
             enabledIDs.insert(loraID)
         } else {
@@ -253,11 +295,16 @@ final class LoRASettingsViewModel {
 
     func persistCurrentModelDraft() {
         guard !selectedModelKey.isEmpty else { return }
-        let slice = draftByModel[selectedModelKey] ?? LoRAModelDraftSlice(enabledIDs: [], deletedIDs: [])
-        draftByModel[selectedModelKey] = LoRAModelDraftSlice(
+        let storageKey = catalogStorageModelKey(for: selectedModelKey)
+        let slice = draftByModel[storageKey] ?? LoRAModelDraftSlice(enabledIDs: [], deletedIDs: [])
+        draftByModel[storageKey] = LoRAModelDraftSlice(
             enabledIDs: Array(enabledIDs).sorted(),
             deletedIDs: slice.deletedIDs
         )
+    }
+
+    private func catalogStorageModelKey(for settingsModelKey: String) -> String {
+        LoRAModelRegistry.canonicalSettingsModelKey(settingsModelKey)
     }
 
     func commitToDisk() async throws {

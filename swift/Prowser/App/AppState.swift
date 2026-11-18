@@ -2113,6 +2113,7 @@ final class AppState {
                 guard let self else { return }
                 let pending = self.checkLorasFlow.takePendingRun()
                 self.checkLorasFlow.optionsPrescan = nil
+                self.checkLorasFlow.seededOptions = nil
                 if let pending {
                     Task {
                         await CheckLorasController.executeRun(
@@ -2125,7 +2126,10 @@ final class AppState {
             }
         ) {
             if let prescan = checkLorasFlow.optionsPrescan {
-                CheckLorasOptionsDialogHost(prescan: prescan)
+                CheckLorasOptionsDialogHost(
+                    prescan: prescan,
+                    initialOptions: checkLorasFlow.seededOptions ?? prescan.savedOptions
+                )
             }
         }
         syncDialog(

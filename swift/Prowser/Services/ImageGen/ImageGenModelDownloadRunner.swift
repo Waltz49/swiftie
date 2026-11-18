@@ -201,6 +201,14 @@ enum ImageGenModelDownloadRunner {
     /// Embedded headless downloader (JSON progress lines on stdout).
     private static let downloadPythonScript = """
     import json, os, sys
+    try:
+        import certifi
+        if not (os.environ.get("SSL_CERT_FILE") or "").strip():
+            ca = certifi.where()
+            os.environ["SSL_CERT_FILE"] = ca
+            os.environ.setdefault("REQUESTS_CA_BUNDLE", ca)
+    except ImportError:
+        pass
 
     def emit(obj):
         print(json.dumps(obj), flush=True)

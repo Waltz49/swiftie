@@ -219,18 +219,18 @@ struct LoRASettingsTab: View {
 
     private func entryRow(_ row: LoRASettingsRow) -> some View {
         let entry = row.entry
-        let canEnable = row.compatibility == .works
+        let canEnable = viewModel.canEnableInCreateMenu(row)
         return HStack(alignment: .top, spacing: 8) {
             Toggle(
                 "",
                 isOn: Binding(
-                    get: { viewModel.enabledIDs.contains(entry.loraID) },
+                    get: { viewModel.showsEnabledInUI(loraID: entry.loraID) },
                     set: { viewModel.toggleEnabled(entry.loraID, enabled: $0) }
                 )
             )
             .labelsHidden()
             .disabled(!canEnable)
-            .help(canEnable ? "In Create menu" : "Works with this model before enabling")
+            .help(viewModel.enableCheckboxHelp(for: row))
             VStack(alignment: .leading, spacing: 2) {
                 Button(entry.label) { editTarget = LoRAEditTarget(loraID: entry.loraID) }
                     .buttonStyle(.plain)

@@ -37,7 +37,14 @@ struct LoRAImportSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(modeTitle).font(.title2)
             Form {
-                TextField("Safetensors path", text: $sourcePath)
+                LabeledContent("LoRA location") {
+                    HStack(spacing: 6) {
+                        TextField("Path to .safetensors", text: $sourcePath)
+                        Button("Choose…") {
+                            chooseSafetensorsFile()
+                        }
+                    }
+                }
                 TextField("Display name", text: $displayName)
                 TextField("Trigger word", text: $triggerWord)
                     .imageGenPromptTriggerSentenceCaseOnBlur($triggerWord)
@@ -157,11 +164,21 @@ struct LoRAImportSheet: View {
             return [
                 DialogButton("Cancel", isCancel: true) { dismiss() },
                 DialogButton("Find…") { showFindSheet = true },
-                DialogButton("Save", isDefault: true) {
+                DialogButton(
+                    "Save",
+                    help: "Save metadata without a GPU compatibility test."
+                ) {
+                    Task { await importAdd(skipCompatibilityProbe: true) }
+                },
+                DialogButton("Test & Save", isDefault: true) {
                     Task { await importAdd(skipCompatibilityProbe: false) }
                 },
             ]
         }
+    }
+
+    private func chooseSafetensorsFile() {
+        SettingsSupport.pickFile(into: $sourcePath, allowedTypes: ["safetensors"])
     }
 
     private func loadEditIfNeeded() async {
@@ -336,7 +353,7 @@ struct LoRAImportSheet: View {
         // Persist only when the user confirms Save / Test & Save; Cancel and Esc dismiss without this path.
         LoraAddReferencePromptSettings.save(referencePrompt, config: appState.config)
 
-        if case .edit(let loraID) = mode {
+        if case .edit(let loraID) = mode, skipCompatibilityProbe {
             do {
                 try await appState.workers.lora.saveMetadata(
                     loraID: loraID,
@@ -359,6 +376,11 @@ struct LoRAImportSheet: View {
             return
         }
 
+        guard appState.workers.lora.pythonOpsAvailable else {
+            errorMessage = "Image generation Python environment is not ready."
+            return
+        }
+
         isImporting = true
         var payload: [String: Any] = [
             "model_key": modelKey,
@@ -370,13 +392,29 @@ struct LoRAImportSheet: View {
             "reference_prompt": referencePrompt,
             "safetensors_origin": safetensorsOrigin,
             "web_page_url": webPageURL,
+            "recovery_source_path": path,
         ]
-        if let reuseLoraID { payload["reuse_lora_id"] = reuseLoraID }
+        if case .edit(let loraID) = mode {
+            payload["reuse_lora_id"] = loraID
+        } else if let reuseLoraID {
+            payload["reuse_lora_id"] = reuseLoraID
+        }
         if skipCompatibilityProbe {
             payload["skip_compatibility_probe"] = true
         }
 
-        let title = skipCompatibilityProbe ? "Add LoRA — Saving" : "Add LoRA"
+        let isEditImport: Bool
+        if case .edit = mode {
+            isEditImport = true
+        } else {
+            isEditImport = false
+        }
+        let title: String = {
+            if isEditImport {
+                return skipCompatibilityProbe ? "Edit LoRA — Saving" : "Edit LoRA"
+            }
+            return skipCompatibilityProbe ? "Add LoRA — Saving" : "Add LoRA"
+        }()
         let progress = CancellableProgressPanelController(
             title: title,
             labelText: skipCompatibilityProbe ? "Saving…" : "Starting…",

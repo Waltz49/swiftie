@@ -10,8 +10,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from workers.ipc_json import configure_profile_from_env
+from workers.ipc_json import bootstrap_tls_certifi, configure_profile_from_env
 
+bootstrap_tls_certifi()
 configure_profile_from_env()
 
 from workers.model_tasks_process_registry import register_worker_pid, unregister_worker_pid

@@ -11,10 +11,18 @@ enum LoRAPathResolver {
         return dir.appendingPathComponent(entry.filename)
     }
 
+    /// Stat-only check for settings lists and dedupe keys (no file open).
+    static func weightsLikelyOnDisk(at path: URL) -> Bool {
+        let resolved = URL(fileURLWithPath: (path.path as NSString).expandingTildeInPath).standardizedFileURL
+        guard let values = try? resolved.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true,
+              let size = values.fileSize,
+              size >= 1024 else { return false }
+        return true
+    }
+
     static func weightsFileIsValid(_ path: URL) -> Bool {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path.path),
-              let size = attrs[.size] as? NSNumber,
-              size.intValue >= 1024 else { return false }
+        guard weightsLikelyOnDisk(at: path) else { return false }
         if path.pathExtension.lowercased() != "safetensors" { return true }
         guard let handle = try? FileHandle(forReadingFrom: path) else { return false }
         defer { try? handle.close() }
@@ -23,19 +31,115 @@ enum LoRAPathResolver {
     }
 
     static func localWeightsPath(loraID: String, entry: LoRAEntry?) -> URL? {
+        discoverLocalWeightsPath(loraID: loraID, entry: entry)
+    }
+
+    /// Settings / catalog grid: Python ``local_lora_weights_path`` (no hub tree walk).
+    static func fastLocalWeightsPath(loraID: String, entry: LoRAEntry?) -> URL? {
+        guard let entry else { return nil }
+        if let local = entry.localPath, !local.isEmpty {
+            let url = URL(fileURLWithPath: (local as NSString).expandingTildeInPath)
+            if weightsLikelyOnDisk(at: url) { return url.standardizedFileURL }
+        }
+        if let cache = catalogCachePath(entry: entry), weightsLikelyOnDisk(at: cache) {
+            return cache.standardizedFileURL
+        }
+        if LoRAEntry.isUserLoraID(loraID) {
+            let dir = LoRACachePaths.userCacheRoot.appendingPathComponent(loraID, isDirectory: true)
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return nil }
+            for name in names.filter({ $0.lowercased().hasSuffix(".safetensors") }).sorted() {
+                let url = dir.appendingPathComponent(name)
+                if weightsLikelyOnDisk(at: url) { return url.standardizedFileURL }
+            }
+        }
+        return nil
+    }
+
+    /// Find on-disk weights without downloading (includes fallbacks for stale ``local_path``).
+    static func discoverLocalWeightsPath(loraID: String, entry: LoRAEntry?) -> URL? {
         guard let entry else { return nil }
         if let local = entry.localPath, !local.isEmpty {
             let url = URL(fileURLWithPath: (local as NSString).expandingTildeInPath)
             if weightsFileIsValid(url) { return url.standardizedFileURL }
         }
-        if let cache = catalogCachePath(entry: entry), weightsFileIsValid(cache) {
-            return cache.standardizedFileURL
+        if !entry.repoID.isEmpty, !entry.filename.isEmpty {
+            let repoKey = entry.repoID.replacingOccurrences(of: "/", with: "__")
+            for cacheRoot in [LoRACachePaths.defaultCache, LoRACachePaths.altCache] {
+                let dir = cacheRoot.appendingPathComponent(repoKey, isDirectory: true)
+                let hub = dir.appendingPathComponent(entry.filename)
+                if weightsFileIsValid(hub) { return hub.standardizedFileURL }
+                if let found = hubRepoWeightsPath(repoRoot: dir, preferredFilename: entry.filename) {
+                    return found
+                }
+            }
         }
-        let alt = LoRACachePaths.altCache
-            .appendingPathComponent(entry.repoID.replacingOccurrences(of: "/", with: "__"), isDirectory: true)
-            .appendingPathComponent(entry.filename)
-        if weightsFileIsValid(alt) { return alt.standardizedFileURL }
+        if LoRAEntry.isUserLoraID(loraID) {
+            if let userCache = userCacheWeightsPath(loraID: loraID) { return userCache }
+            if let prefixed = userCacheWeightsPathByIDPrefix(loraID: loraID) { return prefixed }
+        }
         return nil
+    }
+
+    private static func hubRepoWeightsPath(repoRoot: URL, preferredFilename: String) -> URL? {
+        guard FileManager.default.fileExists(atPath: repoRoot.path) else { return nil }
+        let preferredLeaf = (preferredFilename as NSString).lastPathComponent.lowercased()
+        var files: [URL] = []
+        guard let enumerator = FileManager.default.enumerator(
+            at: repoRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        for case let url as URL in enumerator {
+            guard url.pathExtension.lowercased() == "safetensors" else { continue }
+            guard weightsFileIsValid(url) else { continue }
+            files.append(url.standardizedFileURL)
+        }
+        guard !files.isEmpty else { return nil }
+        if !preferredLeaf.isEmpty, let match = files.first(where: { $0.lastPathComponent.lowercased() == preferredLeaf }) {
+            return match
+        }
+        return files.count == 1 ? files[0] : nil
+    }
+
+    /// ``…/mflux_loras/user/<lora_id>/`` when ``local_path`` in the catalog is stale.
+    private static func userCacheWeightsPath(loraID: String) -> URL? {
+        let dir = LoRACachePaths.userCacheRoot.appendingPathComponent(loraID, isDirectory: true)
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return nil }
+        let sorted = names.filter { $0.lowercased().hasSuffix(".safetensors") }.sorted()
+        for name in sorted {
+            let url = dir.appendingPathComponent(name)
+            if weightsFileIsValid(url) { return url.standardizedFileURL }
+        }
+        return nil
+    }
+
+    /// ``user_<id>_…/`` sibling folders after dedupe imports.
+    private static func userCacheWeightsPathByIDPrefix(loraID: String) -> URL? {
+        let root = LoRACachePaths.userCacheRoot
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return nil }
+        var matches: [URL] = []
+        for name in names.sorted() {
+            guard name == loraID || name.hasPrefix("\(loraID)_") else { continue }
+            let dir = root.appendingPathComponent(name, isDirectory: true)
+            if let url = userCacheWeightsPath(loraID: name) {
+                matches.append(url)
+            } else if let picked = pickWeights(inUserDirectory: dir) {
+                matches.append(picked)
+            }
+        }
+        guard matches.count == 1 else { return nil }
+        return matches[0]
+    }
+
+    private static func pickWeights(inUserDirectory dir: URL) -> URL? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return nil }
+        let sorted = names.filter { $0.lowercased().hasSuffix(".safetensors") }.sorted()
+        var hits: [URL] = []
+        for name in sorted {
+            let url = dir.appendingPathComponent(name)
+            if weightsFileIsValid(url) { hits.append(url.standardizedFileURL) }
+        }
+        return hits.count == 1 ? hits[0] : hits.first
     }
 
     /// Resolve path for job execution; HF download uses venv `hf` when needed.

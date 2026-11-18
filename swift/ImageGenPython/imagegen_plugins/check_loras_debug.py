@@ -65,13 +65,14 @@ def _registration_mode_label(mode: str) -> str:
     return "Ignore previous registrations"
 
 
-def _list_lines(items: List[str], *, limit: int = 40) -> List[str]:
+def _list_lines(items: List[str], *, limit: Optional[int] = 40) -> List[str]:
     if not items:
         return ["    (none)"]
     lines: List[str] = []
-    for label in items[:limit]:
+    shown = items if limit is None else items[:limit]
+    for label in shown:
         lines.append(f"    • {label}")
-    if len(items) > limit:
+    if limit is not None and len(items) > limit:
         lines.append(f"    … and {len(items) - limit} more")
     return lines
 
@@ -100,10 +101,10 @@ def format_run_scope_lines(
 
     lines: List[str] = []
     lines.append(f"Models ({len(model_labels)}):")
-    lines.extend(_list_lines(model_labels))
+    lines.extend(_list_lines(model_labels, limit=None))
     lines.append("")
     lines.append(f"LoRAs ({len(lora_labels)}):")
-    lines.extend(_list_lines(lora_labels))
+    lines.extend(_list_lines(lora_labels, limit=None))
     lines.append("")
     lines.append("Options:")
     lines.extend(
@@ -133,22 +134,23 @@ def format_compact_summary_lines(result: LoraCheckResult) -> List[str]:
 
     st = result.stats
     pairs_total = max(1, lora_check_work_total(st))
-    pairs_done = st.probes_done
+    pairs_tested = st.passed_probe_count + st.failed_probe_count
     lines = ["Summary"]
-    lines.append(f"  LoRA–model pairs tested: {pairs_done} of {pairs_total}")
+    lines.append(f"  LoRA–model pairs tested: {pairs_tested} of {pairs_total}")
+    lines.append(f"  Newly enabled: {st.newly_enabled_count}")
+    lines.append(f"  Newly compatible: {st.newly_supported_count}")
     lines.append(f"  Passed: {st.passed_probe_count}")
     lines.append(f"  Failed: {st.failed_probe_count}")
-    lines.append(f"  Newly enabled: {st.newly_enabled_count}")
-    if st.newly_supported_count:
-        lines.append(f"  Newly compatible: {st.newly_supported_count}")
     if st.skipped_unchanged_probes:
         lines.append(f"  Skipped unchanged (history): {st.skipped_unchanged_probes}")
     if st.skipped_registered_probes:
         lines.append(f"  Skipped already registered: {st.skipped_registered_probes}")
     if st.downloads_registered:
         lines.append(f"  New LoRAs added from Downloads: {st.downloads_registered}")
-    if st.probe_cnn_environment_summary:
-        lines.append(f"  {st.probe_cnn_environment_summary}")
+    if st.downloads_removed_after_import:
+        lines.append(
+            f"  Removed from Downloads after import: {st.downloads_removed_after_import}"
+        )
     if st.probe_cnn_user_warning:
         lines.append("")
         lines.append("Probe compare environment")
@@ -167,14 +169,7 @@ def format_results_text_sections(
     options: Optional[CheckLorasOptions] = None,
 ) -> List[str]:
     """User-facing results summary (Test LoRAs results dialog)."""
-    ts = datetime.now().isoformat(timespec="seconds")
-    headline = (
-        "Test LoRAs cancelled (partial results saved)."
-        if result.cancelled
-        else "Test LoRAs finished."
-    )
-    lines = [f"Test LoRAs — {ts}", headline, ""]
-    lines.extend(format_compact_summary_lines(result))
+    lines = list(format_compact_summary_lines(result))
     if options is not None:
         lines.extend(["", *format_run_scope_lines(options)])
     return lines
@@ -192,6 +187,37 @@ def format_check_loras_results_text(
     return text
 
 
+_check_loras_catalog_backed_up = False
+
+
+def reset_check_loras_catalog_backup_state() -> None:
+    global _check_loras_catalog_backed_up
+    _check_loras_catalog_backed_up = False
+
+
+def _ensure_check_loras_catalog_backup() -> None:
+    global _check_loras_catalog_backed_up
+    if _check_loras_catalog_backed_up:
+        return
+    from imagegen_plugins.lora_catalog_store import backup_lora_catalog_for_check_loras
+
+    backup_lora_catalog_for_check_loras()
+    _check_loras_catalog_backed_up = True
+
+
+def _non_empty_mapping_slice(
+    raw: Optional[Dict[str, List[str]]],
+) -> Optional[Dict[str, List[str]]]:
+    if not raw:
+        return None
+    out = {
+        str(k): list(v)
+        for k, v in raw.items()
+        if v and isinstance(v, (list, tuple))
+    }
+    return out or None
+
+
 def persist_lora_check_catalog_slice(
     *,
     model_support: Optional[Dict[str, List[str]]] = None,
@@ -199,8 +225,13 @@ def persist_lora_check_catalog_slice(
     by_model: Optional[Dict[str, Dict[str, list]]] = None,
     probe_history: Optional[Dict[str, Dict[str, Any]]] = None,
     probed_lora_ids: Optional[Iterable[str]] = None,
+    run_cancelled: bool = False,
 ) -> None:
     """Merge one incremental Test LoRAs slice into ``lora_catalog.json``."""
+    if run_cancelled:
+        return
+    model_support = _non_empty_mapping_slice(model_support)
+    cross_family_models = _non_empty_mapping_slice(cross_family_models)
     if not (
         model_support
         or cross_family_models
@@ -208,6 +239,7 @@ def persist_lora_check_catalog_slice(
         or probe_history
     ):
         return
+    _ensure_check_loras_catalog_backup()
     from imagegen_plugins.image_gen_persistence import save_lora_catalog_state
 
     save_lora_catalog_state(
@@ -224,7 +256,12 @@ def apply_lora_check_result(result: LoraCheckResult) -> List[str]:
     from config import get_config
 
     settings_before = get_config().load_settings()
-    if (
+    if result.cancelled:
+        print(
+            "[Check LoRAs] Cancelled: skipping catalog persist "
+            "(model_support, enables, and cross-family left as before this run's final save)."
+        )
+    elif (
         result.model_support
         or result.cross_family_models
         or result.by_model
@@ -233,7 +270,7 @@ def apply_lora_check_result(result: LoraCheckResult) -> List[str]:
         persist_lora_check_catalog_slice(
             model_support=result.model_support or None,
             cross_family_models=result.cross_family_models or None,
-            by_model=None if result.cancelled else (result.by_model or None),
+            by_model=result.by_model or None,
             probe_history=result.probe_history or None,
             probed_lora_ids=result.probed_lora_ids or None,
         )

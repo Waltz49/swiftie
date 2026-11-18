@@ -83,10 +83,17 @@ struct LoRACatalogEntry: Identifiable, Equatable {
         _ entry: LoRAEntry,
         modelKey: String,
         lc: [String: Any],
-        draftByModel: [String: LoRAModelDraftSlice]? = nil
+        draftByModel: [String: LoRAModelDraftSlice]? = nil,
+        precomputedWeights: URL? = nil
     ) -> LoRACatalogEntry {
-        let lifecycle = LoRACatalog.lifecycleState(loraID: entry.loraID, modelKey: modelKey, lc: lc, draftByModel: draftByModel)
-        let weights = LoRAPathResolver.localWeightsPath(loraID: entry.loraID, entry: entry)
+        let weights = precomputedWeights ?? LoRAPathResolver.fastLocalWeightsPath(loraID: entry.loraID, entry: entry)
+        let lifecycle = LoRACatalog.lifecycleState(
+            loraID: entry.loraID,
+            modelKey: modelKey,
+            lc: lc,
+            draftByModel: draftByModel,
+            installed: weights != nil
+        )
         let trigger = (entry.triggerWord ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         var label = LoRACatalog.baseDisplayName(entry: entry, modelKey: modelKey)
         if LoRAModelRegistry.isCrossFamily(entry: entry, modelKey: modelKey) {
@@ -116,7 +123,7 @@ struct LoRACatalogEntry: Identifiable, Equatable {
             referencePrompt: entry.referencePrompt ?? "",
             repoID: entry.repoID,
             filename: entry.filename,
-            localPath: entry.localPath ?? "",
+            localPath: weights?.path ?? entry.localPath ?? "",
             sourcePath: entry.sourcePath ?? "",
             safetensorsOrigin: origin,
             webPageURL: webPage,
@@ -201,6 +208,7 @@ struct CheckLorasOptions: Equatable {
     var probePrompt: String
     var skipUnchanged: Bool
     var checkCrossFamilies: Bool
+    var removeDownloadsAfterImport: Bool
 
     static func fromDictionary(_ dict: [String: Any]) -> CheckLorasOptions {
         var loraScope = dict["lora_scope"] as? String ?? loraScopeAll
@@ -216,7 +224,8 @@ struct CheckLorasOptions: Equatable {
             registrationMode: dict["registration_mode"] as? String ?? registrationIgnorePrevious,
             probePrompt: normalizedProbePrompt(dict["probe_prompt"] as? String ?? ""),
             skipUnchanged: dict["skip_unchanged"] as? Bool ?? true,
-            checkCrossFamilies: dict["check_cross_families"] as? Bool ?? true
+            checkCrossFamilies: dict["check_cross_families"] as? Bool ?? true,
+            removeDownloadsAfterImport: dict["remove_downloads_after_import"] as? Bool ?? false
         )
     }
 
@@ -230,7 +239,27 @@ struct CheckLorasOptions: Equatable {
             "probe_prompt": Self.normalizedProbePrompt(probePrompt),
             "skip_unchanged": skipUnchanged,
             "check_cross_families": checkCrossFamilies,
+            "remove_downloads_after_import": removeDownloadsAfterImport,
         ]
+    }
+
+    /// Scoped Test LoRAs run for top-level Downloads safetensors (Settings → Import into library).
+    static func optionsForDownloadsImport(paths: [String], base: CheckLorasOptions) -> CheckLorasOptions {
+        let keys = paths.map { path -> String in
+            let standardized = (path as NSString).standardizingPath
+            return "path:\(standardized)"
+        }
+        return CheckLorasOptions(
+            modelScope: modelScopeAll,
+            selectedModelKeys: base.selectedModelKeys,
+            loraScope: loraScopeSelected,
+            selectedLoraKeys: keys,
+            registrationMode: base.registrationMode,
+            probePrompt: base.probePrompt,
+            skipUnchanged: base.skipUnchanged,
+            checkCrossFamilies: base.checkCrossFamilies,
+            removeDownloadsAfterImport: true
+        )
     }
 }
 
@@ -361,18 +390,48 @@ final class LoRAService {
         entries: [LoRACatalogEntry],
         discoveredEntries: [LoRACatalogEntry],
         enabledIDs: [String],
-        deletedIDs: [String]
+        deletedIDs: [String],
+        catalog: [String: Any]
     ) {
         let lc = try await loadCatalog()
         let slice = modelSlice(modelKey: modelKey, lc: lc, draftByModel: draftByModel)
-        let entries = LoRACatalog.settingsEntries(lc: lc, modelKey: modelKey, draftByModel: draftByModel)
-            .map { LoRACatalogEntry.fromEntry($0, modelKey: modelKey, lc: lc, draftByModel: draftByModel) }
-            .filter { !hideUninstalled || $0.lifecycle != "uninstalled" }
-        let profilePaths = config?.profilePaths ?? ProfilePaths(profilePath: nil)
-        let discovered = await Task.detached(priority: .utility) {
-            Self.discoverDiskEntries(lc: lc, savedPaths: entries, profilePaths: profilePaths)
+        return await Task.detached(priority: .userInitiated) {
+            let settingsEntries = LoRACatalog.settingsEntries(lc: lc, modelKey: modelKey, draftByModel: draftByModel)
+            var weightsByID: [String: URL] = [:]
+            for entry in settingsEntries {
+                if weightsByID[entry.loraID] == nil,
+                   let url = LoRAPathResolver.fastLocalWeightsPath(loraID: entry.loraID, entry: entry) {
+                    weightsByID[entry.loraID] = url
+                }
+            }
+            let entries = settingsEntries
+                .map {
+                    LoRACatalogEntry.fromEntry(
+                        $0,
+                        modelKey: modelKey,
+                        lc: lc,
+                        draftByModel: draftByModel,
+                        precomputedWeights: weightsByID[$0.loraID]
+                    )
+                }
+                .filter { !hideUninstalled || $0.lifecycle != "uninstalled" }
+            return (entries, [], slice.enabledIDs, slice.deletedIDs, lc)
         }.value
-        return (entries, discovered, slice.enabledIDs, slice.deletedIDs)
+    }
+
+    func settingsDownloadedEntries(
+        savedEntries: [LoRACatalogEntry],
+        catalog: [String: Any]? = nil
+    ) async throws -> [LoRACatalogEntry] {
+        let lc: [String: Any]
+        if let catalog {
+            lc = catalog
+        } else {
+            lc = try await loadCatalog()
+        }
+        return await Task.detached(priority: .utility) {
+            Self.discoverDiskEntries(lc: lc, savedPaths: savedEntries)
+        }.value
     }
 
     private func modelSlice(
@@ -408,7 +467,7 @@ final class LoRAService {
             let modelKey = model.modelKey
             let slice = LoRACatalogSettings.modelState(lc: lc, modelKey: modelKey)
             let deleted = Set(slice.deletedIDs)
-            let compatible = LoRACatalog.compatibleLoraIDsForSettingsModel(lc: lc, modelKey: modelKey)
+            let compatible = LoRACatalog.enableableLoraIDsForSettingsModel(lc: lc, modelKey: modelKey)
                 .filter { !deleted.contains($0) }
             let previous = Set(slice.enabledIDs)
             newlyEnabled += Set(compatible).subtracting(previous).count
@@ -612,17 +671,23 @@ final class LoRAService {
         let store = try store()
         var lc = try await loadCatalog()
         guard let raw = (lc[LoRACatalogSettings.userEntriesKey] as? [String: Any])?[loraID] as? [String: Any],
-              var entry = LoRAEntry.fromDictionary(raw) else { return }
+              var entry = LoRAEntry.fromDictionary(raw) else {
+            throw BridgeError.workerMessage("LoRA \"\(loraID)\" was not found.")
+        }
         entry.displayName = displayName
         entry.triggerWord = tw.isEmpty ? nil : tw
         entry.bestGuess = bestGuess
         entry.comment = c.isEmpty ? nil : c
         entry.referencePrompt = r.isEmpty ? nil : r
-        entry.repoID = repoID
-        entry.filename = filename
-        entry.sourcePath = sourcePath.isEmpty ? nil : sourcePath
         entry.safetensorsOrigin = originNorm
         entry.webPageURL = webNorm
+        if !repoID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            entry.repoID = repoID
+        }
+        if !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            entry.filename = filename
+        }
+        try applyLoRALocationField(sourcePath, to: &entry)
         var users = lc[LoRACatalogSettings.userEntriesKey] as? [String: Any] ?? [:]
         var merged = LoRAEntry.mergedUserEntryDictionary(entry: entry, preserving: raw)
         // Optional fields omitted from `toDictionary()` when nil; persist clears like Python updates.
@@ -631,12 +696,47 @@ final class LoRAService {
         merged["reference_prompt"] = r
         merged["safetensors_origin"] = originNorm ?? ""
         merged["web_page_url"] = webNorm ?? ""
-        if sourcePath.isEmpty {
+        if let local = entry.localPath, !local.isEmpty {
+            merged["local_path"] = local
+        }
+        if let source = entry.sourcePath, !source.isEmpty {
+            merged["source_path"] = source
+        } else if sourcePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             merged["source_path"] = ""
+        }
+        if !entry.filename.isEmpty {
+            merged["filename"] = entry.filename
         }
         users[loraID] = merged
         lc[LoRACatalogSettings.userEntriesKey] = users
         store.save(lc)
+    }
+
+    private func applyLoRALocationField(_ location: String, to entry: inout LoRAEntry) throws {
+        let trimmed = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            entry.sourcePath = nil
+            return
+        }
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            entry.sourcePath = trimmed
+            return
+        }
+        let expanded = SettingsPathValidation.expandedPath(trimmed)
+        guard !expanded.isEmpty else {
+            throw BridgeError.workerMessage("Enter a valid path to .safetensors weights.")
+        }
+        let url = URL(fileURLWithPath: expanded).standardizedFileURL
+        guard LoRAPathResolver.weightsFileIsValid(url) else {
+            throw BridgeError.workerMessage("LoRA weights file was not found or is not a valid .safetensors file.")
+        }
+        entry.localPath = url.path
+        entry.sourcePath = url.path
+        let leaf = url.lastPathComponent
+        if !leaf.isEmpty {
+            entry.filename = leaf
+        }
     }
 
     func importLora(
@@ -808,13 +908,15 @@ final class LoRAService {
 
     private nonisolated static func discoverDiskEntries(
         lc: [String: Any],
-        savedPaths: [LoRACatalogEntry],
-        profilePaths: ProfilePaths
+        savedPaths: [LoRACatalogEntry]
     ) -> [LoRACatalogEntry] {
-        let saved = Set(savedPaths.map(\.localPath))
-        let orphans = LoRAFindChoicesDiscovery.discover(lc: lc, profilePaths: profilePaths)
-            .filter { $0.key.hasPrefix("path:") }
-            .filter { !saved.contains($0.weightsPath) }
+        var registered = LoRAWeightsIdentity.registeredWeightPaths(lc: lc)
+        for entry in savedPaths {
+            let path = entry.localPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else { continue }
+            registered.insert(URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.path)
+        }
+        let orphans = LoRAFindChoicesDiscovery.downloadsOrphanChoices(registeredPaths: registered)
         return orphans.map { choice in
             let path = choice.weightsPath
             let name = choice.displayName

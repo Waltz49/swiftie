@@ -9,6 +9,20 @@ import sys
 from typing import Any, Callable, Dict, Iterable, Optional
 
 
+def bootstrap_tls_certifi() -> None:
+    """Point stdlib HTTPS at certifi (macOS python.org / minimal venv CA bundles)."""
+    if os.environ.get("SSL_CERT_FILE", "").strip():
+        return
+    try:
+        import certifi
+
+        ca = certifi.where()
+        os.environ["SSL_CERT_FILE"] = ca
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", ca)
+    except ImportError:
+        pass
+
+
 def configure_profile_from_env() -> None:
     """Apply PROWSER_PROFILE for Swift-spawned headless workers."""
     profile = os.environ.get("PROWSER_PROFILE", "").strip()
@@ -19,6 +33,7 @@ def configure_profile_from_env() -> None:
     get_config(profile_dir=profile)
 
 
+bootstrap_tls_certifi()
 configure_profile_from_env()
 
 

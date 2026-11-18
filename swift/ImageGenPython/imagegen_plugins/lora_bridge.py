@@ -822,6 +822,7 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                 raise ValueError(
                     "This LoRA file is already imported for a different model family."
                 )
+            recovery_for_meta = recovery_source_path or source_path
             update_lora_entry_metadata(
                 entry.lora_id,
                 display_name=display_name,
@@ -831,13 +832,26 @@ def _run_import_worker(cmd: Dict[str, Any], job_id: str) -> None:
                 reference_prompt=reference_prompt,
                 repo_id=repo_id,
                 filename=filename,
-                source_path=recovery_source_path or None,
+                source_path=recovery_for_meta or None,
                 safetensors_origin=safetensors_origin or None,
                 web_page_url=web_page_url or None,
             )
             entry = get_lora_entry(entry.lora_id)
             if entry is None:
                 raise ValueError(f"LoRA {reuse_lora_id!r} was not found.")
+            from imagegen_plugins.image_gen_persistence import update_user_lora_local_path
+            from imagegen_plugins.lora_user_entries import copy_lora_to_user_cache
+
+            try:
+                src_resolved = source.resolve()
+            except OSError:
+                src_resolved = source
+            if src_resolved.is_file():
+                dest = copy_lora_to_user_cache(source, entry.lora_id)
+                update_user_lora_local_path(entry.lora_id, str(dest))
+                entry = get_lora_entry(entry.lora_id)
+                if entry is None:
+                    raise ValueError(f"LoRA {reuse_lora_id!r} was not found.")
         else:
             existing = find_user_lora_for_source(source, host_id=host_id)
             if existing is not None:
@@ -1110,6 +1124,7 @@ def _check_loras_options_from_dict(raw: Dict[str, Any]):
         probe_prompt=normalize_check_loras_probe_prompt(raw.get("probe_prompt")),
         skip_unchanged=bool(raw.get("skip_unchanged", True)),
         check_cross_families=bool(raw.get("check_cross_families", True)),
+        remove_downloads_after_import=bool(raw.get("remove_downloads_after_import", False)),
     )
 
 
@@ -1123,6 +1138,7 @@ def _check_loras_options_to_dict(options) -> Dict[str, Any]:
         "probe_prompt": options.probe_prompt,
         "skip_unchanged": bool(options.skip_unchanged),
         "check_cross_families": bool(options.check_cross_families),
+        "remove_downloads_after_import": bool(options.remove_downloads_after_import),
     }
 
 
@@ -1345,6 +1361,7 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
     from imagegen_plugins.check_loras_debug import (
         apply_lora_check_result,
         format_check_loras_results_text,
+        reset_check_loras_catalog_backup_state,
     )
     from imagegen_plugins.lora_compatibility_checker import (
         lora_check_work_total,
@@ -1353,6 +1370,7 @@ def _run_check_loras_worker(cmd: Dict[str, Any], job_id: str) -> None:
 
     options = _check_loras_options_from_dict(cmd.get("options") or {})
     settings = get_config().load_settings()
+    reset_check_loras_catalog_backup_state()
 
     def progress_callback(
         probe_index: int,
