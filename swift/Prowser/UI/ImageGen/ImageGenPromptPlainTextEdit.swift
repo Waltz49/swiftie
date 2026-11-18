@@ -189,7 +189,12 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
                 perLine: sentenceCasePerLine
             )
             if normalized != textView.string {
-                textView.string = normalized
+                let selected = textView.selectedRange()
+                ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                    normalized,
+                    on: textView,
+                    preservingSelectionFrom: selected
+                )
                 text = normalized
             }
             host?.refreshHeightAndScrollPolicy()
@@ -282,13 +287,11 @@ struct ImageGenPromptPlainTextEdit: NSViewRepresentable {
 
         private func preserveSelectionSetString(_ newText: String, on textView: NSTextView) {
             let selected = textView.selectedRange()
-            textView.string = newText
-            let len = ImageGenPromptTextEncoding.utf16Length(of: newText)
-            if selected.location <= len {
-                textView.setSelectedRange(selected)
-            } else {
-                textView.setSelectedRange(NSRange(location: len, length: 0))
-            }
+            ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                newText,
+                on: textView,
+                preservingSelectionFrom: selected
+            )
         }
     }
 }
@@ -409,7 +412,11 @@ final class ImageGenPromptPlainTextHostView: NSView {
         self.coordinator = coordinator
         self.minLines = minLines
         self.maxLines = maxLines
-        textView.string = text
+        ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+            text,
+            on: textView,
+            preservingSelectionFrom: NSRange(location: 0, length: 0)
+        )
         refreshHeightAndScrollPolicy()
     }
 

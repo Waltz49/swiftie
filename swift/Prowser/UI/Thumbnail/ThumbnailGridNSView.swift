@@ -499,12 +499,18 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 continue
             }
 
-            let missingIndices = visibleIndices.filter { thumbnails[imagePaths[$0]] == nil }
+            let missingIndices = visibleIndices.filter { idx in
+                guard imagePaths.indices.contains(idx) else { return false }
+                return thumbnails[imagePaths[idx]] == nil
+            }
             if missingIndices.isEmpty {
                 return
             }
 
-            let anyInFlight = missingIndices.contains { loadingPaths.contains(imagePaths[$0]) }
+            let anyInFlight = missingIndices.contains { idx in
+                guard imagePaths.indices.contains(idx) else { return false }
+                return loadingPaths.contains(imagePaths[idx])
+            }
             if anyInFlight {
                 scheduledVisibleLoadPass = false
                 await Task.yield()
@@ -550,8 +556,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
             return
         }
         if let graph = referenceGraph {
-            reloadReferenceGraphLayout(graph: graph, viewportWidth: viewportWidth)
+            // Drop grid layout before recomputing reference nodes so visible-index scans
+            // do not return stale canvas indices after displayedImages shrinks (reference graph).
             canvasLayoutResult = nil
+            reloadReferenceGraphLayout(graph: graph, viewportWidth: viewportWidth)
             return
         }
         referenceLayout = nil
@@ -2147,9 +2155,10 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 for row in rows {
                     guard let indices = canvasLayoutResult.rowLayout.rowToIndices[row] else { continue }
                     if canvasLayoutResult.usesUniformRowHeights {
-                        result.append(contentsOf: indices)
+                        result.append(contentsOf: indices.filter { imagePaths.indices.contains($0) })
                     } else {
                         for index in indices {
+                            guard imagePaths.indices.contains(index) else { continue }
                             if canvasLayoutResult.itemFrames[index]?.intersects(query) == true {
                                 result.append(index)
                             }
@@ -2159,7 +2168,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 ThumbnailGridPerfDiagnostics.recordIntersectionScan(count: result.count)
                 return result
             }
-            let scanned = (0..<imagePaths.count).filter { index in
+            let scanned = imagePaths.indices.filter { index in
                 guard let frame = canvasLayoutResult.itemFrames[index] else { return false }
                 return frame.intersects(query)
             }
@@ -2402,6 +2411,13 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         )
     }
 
+    private func pathsForThumbnailIndices(_ indices: [Int]) -> [String] {
+        indices.compactMap { idx in
+            guard imagePaths.indices.contains(idx) else { return nil }
+            return imagePaths[idx]
+        }
+    }
+
     private func loadVisibleThumbnails(scheduleBackground: Bool = true, allowBackgroundSweep: Bool = true) {
         guard thumbnailLoadingActive else { return }
         guard let scrollView = enclosingScrollView else { return }
@@ -2419,8 +2435,8 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let orderedNear = thumbnailIndicesInVisualOrder(nearVisible)
 
         guard let appState else { return }
-        let visiblePaths = orderedVisible.map { imagePaths[$0] }
-        let nearPaths = orderedNear.map { imagePaths[$0] }
+        let visiblePaths = pathsForThumbnailIndices(orderedVisible)
+        let nearPaths = pathsForThumbnailIndices(orderedNear)
         let scheduleBackgroundAfterLoad = scheduleBackground
         let excluded = visibleSet.union(nearVisible)
         let needsBackgroundSweep = offscreenPathsNeedLoading(excluded: excluded)

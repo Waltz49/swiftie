@@ -226,12 +226,11 @@ struct ChatMessageEditTextView: NSViewRepresentable {
             return
         }
         if host.textView.string != text {
-            let selected = host.textView.selectedRange()
-            host.textView.string = text
-            let length = (text as NSString).length
-            if selected.location <= length {
-                host.textView.setSelectedRange(selected)
-            }
+            ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                text,
+                on: host.textView,
+                preservingSelectionFrom: host.textView.selectedRange()
+            )
         }
         host.refreshDocumentLayout()
         context.coordinator.maintainKeyboardFocus(on: host)

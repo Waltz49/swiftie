@@ -98,4 +98,43 @@ final class LoRACatalogPathRepairTests: XCTestCase {
         let slice = (lc[LoRACatalogSettings.byModelKey] as? [String: Any])?[LoRAHFModelIDs.flux2Klein9BKV] as? [String: Any]
         XCTAssertEqual(slice?["enabled_ids"] as? [String], [])
     }
+
+    func testPruneKeepsEnabledWhenWeightsFoundViaDiscoverPath() throws {
+        let loraID = "user_prune_discover_keep"
+        let sibling = "user_prune_discover_keep_v2"
+        let root = LoRACachePaths.userCacheRoot
+        let siblingDir = root.appendingPathComponent(sibling, isDirectory: true)
+        try FileManager.default.createDirectory(at: siblingDir, withIntermediateDirectories: true)
+        var fileData = Data(repeating: 0, count: 1024)
+        fileData[0] = 0x20
+        let weights = siblingDir.appendingPathComponent("weights.safetensors")
+        try fileData.write(to: weights)
+        defer { try? FileManager.default.removeItem(at: siblingDir) }
+
+        var lc: [String: Any] = [
+            LoRACatalogSettings.userEntriesKey: [
+                loraID: [
+                    "host_id": LoRAHostRegistry.flux2Klein,
+                    "lora_id": loraID,
+                    "display_name": "X",
+                    "repo_id": "",
+                    "filename": "",
+                    "scale": 1,
+                    "best_guess": 1,
+                    "local_path": "/no/such/file.safetensors",
+                    "base_hf_model_id": LoRAHFModelIDs.flux2Klein9BKV,
+                    "min_steps": 2,
+                ],
+            ],
+            LoRACatalogSettings.byModelKey: [
+                LoRAHFModelIDs.flux2Klein9BKV: [
+                    "enabled_ids": [loraID],
+                    LoRACatalogSettings.deletedIDsKey: [],
+                ],
+            ],
+        ]
+        XCTAssertEqual(LoRACatalogPathRepair.pruneUninstalledEnabledIDs(in: &lc), 0)
+        let slice = (lc[LoRACatalogSettings.byModelKey] as? [String: Any])?[LoRAHFModelIDs.flux2Klein9BKV] as? [String: Any]
+        XCTAssertEqual(slice?["enabled_ids"] as? [String], [loraID])
+    }
 }

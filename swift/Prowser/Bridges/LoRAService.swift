@@ -243,23 +243,11 @@ struct CheckLorasOptions: Equatable {
         ]
     }
 
-    /// Scoped Test LoRAs run for top-level Downloads safetensors (Settings → Import into library).
-    static func optionsForDownloadsImport(paths: [String], base: CheckLorasOptions) -> CheckLorasOptions {
-        let keys = paths.map { path -> String in
-            let standardized = (path as NSString).standardizingPath
-            return "path:\(standardized)"
+    /// Probe plan keys for on-disk weights paths (``path:<standardized>``), matching prescan choices.
+    static func selectedLoraKeys(forWeightPaths paths: [String]) -> [String] {
+        paths.map { path in
+            "path:\((path as NSString).standardizingPath)"
         }
-        return CheckLorasOptions(
-            modelScope: modelScopeAll,
-            selectedModelKeys: base.selectedModelKeys,
-            loraScope: loraScopeSelected,
-            selectedLoraKeys: keys,
-            registrationMode: base.registrationMode,
-            probePrompt: base.probePrompt,
-            skipUnchanged: base.skipUnchanged,
-            checkCrossFamilies: base.checkCrossFamilies,
-            removeDownloadsAfterImport: true
-        )
     }
 }
 
@@ -698,6 +686,8 @@ final class LoRAService {
         merged["web_page_url"] = webNorm ?? ""
         if let local = entry.localPath, !local.isEmpty {
             merged["local_path"] = local
+        } else if sourcePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            merged["local_path"] = ""
         }
         if let source = entry.sourcePath, !source.isEmpty {
             merged["source_path"] = source
@@ -716,6 +706,7 @@ final class LoRAService {
         let trimmed = location.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             entry.sourcePath = nil
+            entry.localPath = nil
             return
         }
         let lower = trimmed.lowercased()

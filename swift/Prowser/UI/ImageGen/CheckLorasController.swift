@@ -10,7 +10,6 @@ enum CheckLorasController {
             )
             return
         }
-        appState.checkLorasFlow.seededOptions = nil
         Task { await begin(from: appState) }
     }
 
@@ -59,7 +58,6 @@ enum CheckLorasController {
                 )
                 return
             }
-            appState.checkLorasFlow.seededOptions = nil
             appState.checkLorasFlow.optionsPrescan = prescan
             appState.presentCheckLorasOptionsDialog()
         } catch {

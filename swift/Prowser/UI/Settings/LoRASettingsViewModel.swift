@@ -106,13 +106,9 @@ final class LoRASettingsViewModel {
             )
             entries = result.entries
             discoveredEntries = []
-            let installedIDs = Set(entries.filter(\.installed).map(\.loraID))
-            let prunedEnabled = result.enabledIDs.filter { installedIDs.contains($0) }
-            enabledIDs = Set(prunedEnabled)
-            draftByModel[storageKey] = LoRAModelDraftSlice(
-                enabledIDs: prunedEnabled,
-                deletedIDs: result.deletedIDs
-            )
+            // Do not shrink draft enablement on reload (catalog notifications, hide-uninstalled, etc.).
+            // Checkbox display already requires installed weights via showsEnabledInUI / canEnableInCreateMenu.
+            enabledIDs = Set(result.enabledIDs)
             rebuildRows()
             let modelKey = selectedModelKey
             let savedSnapshot = entries

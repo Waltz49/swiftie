@@ -19,10 +19,7 @@ struct CheckLorasOptionsDialogHost: View {
             options: $options,
             appConfig: appState.config,
             loraBridge: appState.workers.lora,
-            onCancel: {
-                appState.checkLorasFlow.seededOptions = nil
-                closeDialog()
-            },
+            onCancel: { closeDialog() },
             onRun: { committed in
                 appState.checkLorasFlow.pendingRun = CheckLorasFlowState.PendingRun(
                     prescan: prescan,

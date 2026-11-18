@@ -40,7 +40,7 @@ enum LoRACatalogPathRepair {
             let enabled = (slice["enabled_ids"] as? [String]) ?? []
             let kept = enabled.filter { lid in
                 guard let entry = catalog[lid] else { return false }
-                return LoRAPathResolver.fastLocalWeightsPath(loraID: lid, entry: entry) != nil
+                return LoRAPathResolver.localWeightsPath(loraID: lid, entry: entry) != nil
             }
             dropped += enabled.count - kept.count
             if kept.count != enabled.count {

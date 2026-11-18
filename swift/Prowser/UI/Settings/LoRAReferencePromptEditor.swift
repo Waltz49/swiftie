@@ -46,7 +46,11 @@ struct LoRAReferencePromptEditor: NSViewRepresentable {
         if context.coordinator.isUpdatingFromView { return }
         if textView.hasMarkedText() { return }
         if textView.string != text {
-            textView.string = text
+            ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                text,
+                on: textView,
+                preservingSelectionFrom: textView.selectedRange()
+            )
         }
     }
 
@@ -95,7 +99,11 @@ struct LoRAReferencePromptEditor: NSViewRepresentable {
             let normalized = ImageGenPromptSentenceCase.normalized(textView.string, perLine: true)
             guard normalized != textView.string else { return }
             isUpdatingFromView = true
-            textView.string = normalized
+            ImageGenPromptPlainTextFieldSettings.replaceProgrammaticFullText(
+                normalized,
+                on: textView,
+                preservingSelectionFrom: textView.selectedRange()
+            )
             text = normalized
             isUpdatingFromView = false
         }

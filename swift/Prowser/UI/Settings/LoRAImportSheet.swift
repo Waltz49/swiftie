@@ -78,7 +78,7 @@ struct LoRAImportSheet: View {
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
-            DialogButtonRow(addModeButtons)
+            DialogButtonRow(sheetButtons)
                 .disabled(isImporting)
         }
         .padding(20)
@@ -144,7 +144,7 @@ struct LoRAImportSheet: View {
         }
     }
 
-    private var addModeButtons: [DialogButton] {
+    private var sheetButtons: [DialogButton] {
         switch mode {
         case .add:
             return [
@@ -482,15 +482,19 @@ struct LoRAFindSheet: View {
     let onPick: (LoRAFindChoice) -> Void
 
     @State private var choices: [LoRAFindChoice] = []
+    @State private var displayedChoices: [LoRAFindChoice] = []
     @State private var filterText = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    private var filteredChoices: [LoRAFindChoice] {
+    private func applyDisplayedChoices() {
         let needle = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return choices }
-        return choices.filter {
-            $0.label.lowercased().contains(needle) || $0.path.lowercased().contains(needle)
+        if needle.isEmpty {
+            displayedChoices = choices
+        } else {
+            displayedChoices = choices.filter {
+                $0.label.localizedCaseInsensitiveContains(needle)
+            }
         }
     }
 
@@ -509,17 +513,22 @@ struct LoRAFindSheet: View {
                     Text(errorMessage).foregroundStyle(.red).font(.caption)
                 } else if choices.isEmpty {
                     Text("No LoRA weights found on disk.").foregroundStyle(.secondary)
-                } else if filteredChoices.isEmpty {
+                } else if displayedChoices.isEmpty {
                     Text("No names match your search.").foregroundStyle(.secondary)
                 } else {
-                    List(filteredChoices) { choice in
-                        Button(choice.label) {
-                            onPick(choice)
-                            dismiss()
+                    // ScrollView avoids AppKit NSTableView (SwiftUI List) reentrant delegate updates while filtering.
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(displayedChoices) { choice in
+                                LoRAFindNameRow(choice: choice) {
+                                    onPick(choice)
+                                    dismiss()
+                                }
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .help(choice.path)
+                        .padding(.vertical, 2)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             DialogButtonRow([DialogButton("Close", isCancel: true) { dismiss() }])
@@ -536,6 +545,7 @@ struct LoRAFindSheet: View {
             onlyWhenSheet: true
         )
         .task { await load() }
+        .onChange(of: filterText) { _, _ in applyDisplayedChoices() }
     }
 
     private func load() async {
@@ -557,6 +567,23 @@ struct LoRAFindSheet: View {
             choices = []
             errorMessage = error.localizedDescription
         }
+        applyDisplayedChoices()
         isLoading = false
+    }
+}
+
+private struct LoRAFindNameRow: View {
+    let choice: LoRAFindChoice
+    let onActivate: () -> Void
+
+    var body: some View {
+        Text(choice.label)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2, perform: onActivate)
+            .help(choice.path)
     }
 }
