@@ -1,36 +1,7 @@
 import SwiftUI
 
-/// Filter menu (separate type — `ProwserCommands` is at the ten-entry `CommandsBuilder` limit).
-struct ProwserFilterCommands: Commands {
-    @Bindable var appState: AppState
-
-    private var allowBrowserMenuCommands: Bool {
-        MainActor.assumeIsolated {
-            _ = appState.menuCommandsRevision
-            return appState.menuRefresh.browserMenuCommandsEnabled
-        }
-    }
-
-    private var filterMenuEnabled: Bool {
-        MainActor.assumeIsolated {
-            _ = appState.fileData.currentViewMode
-            let mode = appState.fileData.currentViewMode
-            return mode == .thumbnail || mode == .list
-        }
-    }
-
-    var body: some Commands {
-        CommandMenu("Filter") {
-            FilterMenuCommandsContent(
-                appState: appState,
-                commandsEnabled: allowBrowserMenuCommands && filterMenuEnabled
-            )
-        }
-    }
-}
-
 @MainActor
-private struct FilterMenuCommandsContent: View {
+struct FilterMenuCommandsContent: View {
     @Bindable var appState: AppState
     let commandsEnabled: Bool
 

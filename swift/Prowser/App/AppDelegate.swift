@@ -311,7 +311,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         MenuBarTitles.removeDuplicateStandardMenus()
-        MenuBarTitles.placeFilterMenuAfterSearch()
         MenuBarTitles.placeImageMenuBeforeTools()
         rewireStandardAboutMenuItems()
     }

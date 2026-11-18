@@ -19,6 +19,14 @@ struct ProwserCommands: Commands {
         }
     }
 
+    private var filterMenuEnabled: Bool {
+        MainActor.assumeIsolated {
+            _ = appState.fileData.currentViewMode
+            let mode = appState.fileData.currentViewMode
+            return mode == .thumbnail || mode == .list
+        }
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) { }
 
@@ -138,6 +146,10 @@ struct ProwserCommands: Commands {
 
                 Divider()
 
+                Menu(moveDestinationsMenuTitle) {
+                    MoveDestinationsMenuContent(appState: appState)
+                }
+
                 UndoMenuButton(appState: appState)
 
                 Divider()
@@ -229,6 +241,13 @@ struct ProwserCommands: Commands {
                     SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode, shortcutKey: "c")
                 }
 
+                Menu("Filter") {
+                    FilterMenuCommandsContent(
+                        appState: appState,
+                        commandsEnabled: allowBrowserMenuCommands && filterMenuEnabled
+                    )
+                }
+
                 ActualSizeToggleButton(appState: appState)
 
                 Button("Cycle Thumbnail Overlay") {
@@ -306,13 +325,6 @@ struct ProwserCommands: Commands {
                     Task { @MainActor in appState.showImageInDirectory() }
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
-            }
-            .disabled(!allowBrowserMenuCommands)
-        }
-
-        CommandMenu(moveDestinationsMenuTitle) {
-            Group {
-                MoveDestinationsMenuContent(appState: appState)
             }
             .disabled(!allowBrowserMenuCommands)
         }
