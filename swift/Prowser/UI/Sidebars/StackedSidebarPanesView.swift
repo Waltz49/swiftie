@@ -117,6 +117,10 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
         )
         let paneHeight = effectivePaneBlockHeight(descriptor: descriptor, allocatedHeight: height)
 
+        let fileTreeTitlebarFocused = model.side == .left
+            && descriptor.contextMenuKind == .fileTree
+            && appState.fileTreeKeyboardFocused
+
         let section = SidebarPaneSection(
             title: descriptor.title,
             isExpanded: expanded,
@@ -134,6 +138,7 @@ struct StackedSidebarPanesView<Pane0: View, Pane1: View, Pane2: View>: View {
             onFlyout: descriptor.showsFlyoutButton ? { appState.showJobsPanel() } : nil,
             contextMenuKind: descriptor.contextMenuKind,
             showsTitlebar: !(descriptor.isJobsPane && appState.jobsPaneMiniChromeActive),
+            titlebarFocused: fileTreeTitlebarFocused,
             keepContentMountedWhenCollapsed: descriptor.keepContentMountedWhenCollapsed
         ) {
             SidebarPaneBody(kind: descriptor.contextMenuKind) {

@@ -17,6 +17,7 @@ struct SidebarPaneTitlebar: View {
     var showsFlyoutButton: Bool = false
     var onFlyout: (() -> Void)? = nil
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
+    var titlebarFocused: Bool = false
 
     @State private var suppressTitleClick = false
 
@@ -72,7 +73,7 @@ struct SidebarPaneTitlebar: View {
                 )
             }
         }
-        .background(colors.sidebarHeaderBackground)
+        .background(titlebarFocused ? colors.sidebarHeaderFocusBackground : colors.sidebarHeaderBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(colors.sidebarHeaderBorder)
@@ -161,6 +162,7 @@ struct SidebarPaneSection<Content: View>: View {
     var contextMenuKind: SidebarPaneContextMenuKind? = nil
     /// When false (e.g. Mini ⌥[ Mode), the titlebar is omitted while expanded; collapsed panes still show the bar so the pane can be expanded again.
     var showsTitlebar: Bool = true
+    var titlebarFocused: Bool = false
     /// When true, content stays mounted at zero size while collapsed (file tree T toggle).
     var keepContentMountedWhenCollapsed: Bool = false
     @ViewBuilder let content: () -> Content
@@ -195,7 +197,8 @@ struct SidebarPaneSection<Content: View>: View {
                     omitLeftBorder: omitLeftBorder,
                     showsFlyoutButton: showsFlyoutButton,
                     onFlyout: onFlyout,
-                    contextMenuKind: contextMenuKind
+                    contextMenuKind: contextMenuKind,
+                    titlebarFocused: titlebarFocused
                 )
             }
 
