@@ -53,7 +53,7 @@ enum MenuBarTitles {
         }
     }
 
-    /// SwiftUI registers ``ProwserImageCommands`` after ``ProwserCommands`` (Tools lives there).
+    /// SwiftUI registers ``ProwserToolsCommands`` / ``ProwserImageCommands`` after ``ProwserCommands``.
     /// Python ``menu_manager.setup_actions`` adds Image before Tools when imagegen UI is enabled.
     @MainActor
     static func placeImageMenuBeforeTools() {

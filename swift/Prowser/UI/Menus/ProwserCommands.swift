@@ -146,10 +146,6 @@ struct ProwserCommands: Commands {
 
                 Divider()
 
-                Menu(moveDestinationsMenuTitle) {
-                    MoveDestinationsMenuContent(appState: appState)
-                }
-
                 UndoMenuButton(appState: appState)
 
                 Divider()
@@ -241,13 +237,6 @@ struct ProwserCommands: Commands {
                     SortMenuButton(appState: appState, title: "Custom Sort", mode: .custom, reversed: false, apply: applySortMode, shortcutKey: "c")
                 }
 
-                Menu("Filter") {
-                    FilterMenuCommandsContent(
-                        appState: appState,
-                        commandsEnabled: allowBrowserMenuCommands && filterMenuEnabled
-                    )
-                }
-
                 ActualSizeToggleButton(appState: appState)
 
                 Button("Cycle Thumbnail Overlay") {
@@ -329,164 +318,18 @@ struct ProwserCommands: Commands {
             .disabled(!allowBrowserMenuCommands)
         }
 
-        CommandMenu("Tools") {
+        CommandMenu(moveDestinationsMenuTitle) {
             Group {
-                QuickMassRenameMenuButton(appState: appState)
-
-                Button("Backup Custom Sort") {
-                    Task { @MainActor in appState.backupCustomSort() }
-                }
-
-                Button("Restore Custom Sort") {
-                    Task { @MainActor in appState.restoreCustomSort() }
-                }
-
-                LockUnlockMenuButtons(appState: appState)
-
-                Menu("EXIF and Dates") {
-                    Button("Reset File Date to EXIF Timestamp…") {
-                        Task { @MainActor in appState.exifOperations.resetFileDateToExifForSelection() }
-                    }
-                    Button("Reset EXIF Timestamp to File Date…") {
-                        Task { @MainActor in appState.exifOperations.resetExifDateToFileDateForSelection() }
-                    }
-
-                    DeleteExifDateMenuButton(appState: appState)
-
-                    Divider()
-
-                    EditExifUserCommentMenuButton(appState: appState)
-
-                    Button("Delete User Comment from File…") {
-                        Task { @MainActor in appState.exifOperations.deleteUserCommentForSelection() }
-                    }
-
-                    Divider()
-
-                    FindReferencesMenuButton(appState: appState)
-                }
-
-                MapLocationButton(appState: appState)
-
-                Menu("Slideshows") {
-                    Button("Multiple Images Slideshow") {
-                        Task { @MainActor in appState.startSlideshow(.slideshow) }
-                    }
-                    .keyboardShortcut("s", modifiers: [])
-
-                    Button("Panning Slideshow") {
-                        Task { @MainActor in appState.startSlideshow(.slideshow2) }
-                    }
-                    .keyboardShortcut("s", modifiers: .shift)
-
-                    Button("Floating Frames Slideshow") {
-                        Task { @MainActor in appState.startSlideshow(.slideshow3) }
-                    }
-                    .keyboardShortcut("s", modifiers: [.shift, .control])
-                }
-
-                WallpaperMenuContents(appState: appState, setWallpaperLastUsed: setWallpaperLastUsed, setWallpaper: setWallpaper)
-
-                Menu("Create Screen Size Copy...") {
-                    Button("Create Screen Size Copy (Last Used)") {
-                        Task { @MainActor in appState.createScreenSizeCopy() }
-                    }
-                    .keyboardShortcut("u", modifiers: [.command, .shift])
-
-                    Divider()
-
-                    ScreenSizeCopyFitMenuButton(appState: appState, method: .contain, title: "Fit (Contain)")
-                    ScreenSizeCopyFitMenuButton(appState: appState, method: .cover, title: "Fill (Cover)")
-                    ScreenSizeCopyFitMenuButton(appState: appState, method: .width, title: "Fit to Width")
-                    ScreenSizeCopyFitMenuButton(appState: appState, method: .height, title: "Fit to Height")
-                }
-
-                Button("Open Home Directory") {
-                    Task { @MainActor in appState.openHomeDirectory() }
-                }
-                .keyboardShortcut("h", modifiers: .control)
-
-                if BundleCapabilities.chatUIEnabled {
-                    Divider()
-                    Button("Favorite prompts…") {
-                        Task { @MainActor in appState.chat.openFavoriteUserPrompts() }
-                    }
-                    Button("Prefix and Postfix text…") {
-                        Task { @MainActor in appState.chat.openPrefixPostfixLibrary() }
-                    }
-                }
-
-                Button("Cache Subdirectories' Thumbnails") {
-                    Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
-                }
-                .keyboardShortcut("c", modifiers: [.command, .shift])
-
-                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                    Button("Cache Subdirectories' Faces") {
-                        Task { @MainActor in appState.searchOperations.cacheFaces() }
-                    }
-                    .keyboardShortcut("=", modifiers: .command)
-                }
-
-                ExcludeThumbsFromViewMenuButton(appState: appState)
-
-                Menu("Debug") {
-                    Button("Random Images") {
-                        Task { @MainActor in appState.loadRandomImagesFromRecents() }
-                    }
-
-                    Button("View log") {
-                        Task { @MainActor in appState.openLiveLog() }
-                    }
-                    .keyboardShortcut("l", modifiers: .control)
-
-                    Button("Show EXIF API Structure") {
-                        Task { @MainActor in appState.openExifAPIStructureDebug() }
-                    }
-
-                    Button("Documentation screencaps") {
-                        Task { @MainActor in appState.runDocumentationScreencaps() }
-                    }
-
-                    Divider()
-
-                    Button("Print Cache Status") {
-                        Task { @MainActor in appState.printCacheStatus() }
-                    }
-
-                    Button("Reset window geometries…") {
-                        Task { @MainActor in appState.resetPersistedWindowGeometriesToDefaults() }
-                    }
-
-                    if BundleCapabilities.imageGenUIEnabled {
-                        Button("Enable Compatible LoRAs") {
-                            Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
-                        }
-
-                        Button("Import Lora Defaults") {
-                            Task { @MainActor in appState.importLoraDefaults() }
-                        }
-                        .disabled(AppAssets.url(name: "lorablob", fileExtension: "") == nil)
-                    }
-
-                    Button("Toggle Debug Mode") {
-                        Task { @MainActor in appState.toggleDebugMode() }
-                    }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
-
-                    Button("Toggle Number Overlay") {
-                        Task { @MainActor in appState.toggleNumberOverlay() }
-                    }
-                    .keyboardShortcut("i", modifiers: [.command, .shift])
-
-                    if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
-                        Button("Remove Facial Rec Models") {
-                            Task { @MainActor in appState.removeFacialRecognitionModels() }
-                        }
-                    }
-                }
+                MoveDestinationsMenuContent(appState: appState)
             }
             .disabled(!allowBrowserMenuCommands)
+        }
+
+        CommandMenu("Filter") {
+            FilterMenuCommandsContent(
+                appState: appState,
+                commandsEnabled: allowBrowserMenuCommands && filterMenuEnabled
+            )
         }
     }
 
@@ -534,41 +377,6 @@ struct ProwserCommands: Commands {
         let paths = appState.pathsForCopyPathCommand()
         if !paths.isEmpty { return paths }
         return []
-    }
-
-    @MainActor
-    private func wallpaperSourcePath() -> String? {
-        if let current = appState.fileData.currentImagePath {
-            return current
-        }
-        return selectedPaths().first
-    }
-
-    @MainActor
-    private func setWallpaperLastUsed() {
-        let method = WallpaperManager.FitMethod(
-            configValue: appState.config.string(forKey: "last_used_wallpaper_fit_method", default: "contain")
-        )
-        setWallpaper(fitMethod: method, persist: false)
-    }
-
-    @MainActor
-    private func setWallpaper(fitMethod: WallpaperManager.FitMethod, persist: Bool) {
-        guard let path = wallpaperSourcePath() else {
-            appState.status.show("No image selected")
-            return
-        }
-        do {
-            try appState.wallpaperManager.setImageAsDesktopBackground(imagePath: path, fitMethod: fitMethod)
-            if persist {
-                appState.config.updateSetting("last_used_wallpaper_fit_method", value: fitMethod.configValue)
-            }
-        } catch {
-            StyledMessageDialog.showWarning(
-                title: "Cannot Set Wallpaper",
-                message: error.localizedDescription
-            )
-        }
     }
 
 }
@@ -1152,7 +960,207 @@ private struct ThemeMenuContent: View {
     }
 }
 
-/// Image generation menu (separate type — `ProwserCommands` is at the ten-entry `CommandsBuilder` limit).
+/// Tools menu (separate type — `ProwserCommands` is at the ten-entry `CommandsBuilder` limit).
+struct ProwserToolsCommands: Commands {
+    @Bindable var appState: AppState
+
+    private var allowBrowserMenuCommands: Bool {
+        MainActor.assumeIsolated {
+            _ = appState.menuCommandsRevision
+            return appState.menuRefresh.browserMenuCommandsEnabled
+        }
+    }
+
+    var body: some Commands {
+        CommandMenu("Tools") {
+            Group {
+                QuickMassRenameMenuButton(appState: appState)
+
+                Button("Backup Custom Sort") {
+                    Task { @MainActor in appState.backupCustomSort() }
+                }
+
+                Button("Restore Custom Sort") {
+                    Task { @MainActor in appState.restoreCustomSort() }
+                }
+
+                LockUnlockMenuButtons(appState: appState)
+
+                Menu("EXIF and Dates") {
+                    Button("Reset File Date to EXIF Timestamp…") {
+                        Task { @MainActor in appState.exifOperations.resetFileDateToExifForSelection() }
+                    }
+                    Button("Reset EXIF Timestamp to File Date…") {
+                        Task { @MainActor in appState.exifOperations.resetExifDateToFileDateForSelection() }
+                    }
+
+                    DeleteExifDateMenuButton(appState: appState)
+
+                    Divider()
+
+                    EditExifUserCommentMenuButton(appState: appState)
+
+                    Button("Delete User Comment from File…") {
+                        Task { @MainActor in appState.exifOperations.deleteUserCommentForSelection() }
+                    }
+
+                    Divider()
+
+                    FindReferencesMenuButton(appState: appState)
+                }
+
+                MapLocationButton(appState: appState)
+
+                Menu("Slideshows") {
+                    Button("Multiple Images Slideshow") {
+                        Task { @MainActor in appState.startSlideshow(.slideshow) }
+                    }
+                    .keyboardShortcut("s", modifiers: [])
+
+                    Button("Panning Slideshow") {
+                        Task { @MainActor in appState.startSlideshow(.slideshow2) }
+                    }
+                    .keyboardShortcut("s", modifiers: .shift)
+
+                    Button("Floating Frames Slideshow") {
+                        Task { @MainActor in appState.startSlideshow(.slideshow3) }
+                    }
+                    .keyboardShortcut("s", modifiers: [.shift, .control])
+                }
+
+                WallpaperMenuContents(appState: appState, setWallpaperLastUsed: setWallpaperLastUsed, setWallpaper: setWallpaper)
+
+                Menu("Create Screen Size Copy...") {
+                    Button("Create Screen Size Copy (Last Used)") {
+                        Task { @MainActor in appState.createScreenSizeCopy() }
+                    }
+                    .keyboardShortcut("u", modifiers: [.command, .shift])
+
+                    Divider()
+
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .contain, title: "Fit (Contain)")
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .cover, title: "Fill (Cover)")
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .width, title: "Fit to Width")
+                    ScreenSizeCopyFitMenuButton(appState: appState, method: .height, title: "Fit to Height")
+                }
+
+                Button("Open Home Directory") {
+                    Task { @MainActor in appState.openHomeDirectory() }
+                }
+                .keyboardShortcut("h", modifiers: .control)
+
+                if BundleCapabilities.chatUIEnabled {
+                    Divider()
+                    Button("Favorite prompts…") {
+                        Task { @MainActor in appState.chat.openFavoriteUserPrompts() }
+                    }
+                    Button("Prefix and Postfix text…") {
+                        Task { @MainActor in appState.chat.openPrefixPostfixLibrary() }
+                    }
+                }
+
+                Button("Cache Subdirectories' Thumbnails") {
+                    Task { @MainActor in appState.prepopulateSubdirectoryThumbnails() }
+                }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+
+                if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                    Button("Cache Subdirectories' Faces") {
+                        Task { @MainActor in appState.searchOperations.cacheFaces() }
+                    }
+                    .keyboardShortcut("=", modifiers: .command)
+                }
+
+                ExcludeThumbsFromViewMenuButton(appState: appState)
+
+                Menu("Debug") {
+                    Button("Random Images") {
+                        Task { @MainActor in appState.loadRandomImagesFromRecents() }
+                    }
+
+                    Button("View log") {
+                        Task { @MainActor in appState.openLiveLog() }
+                    }
+                    .keyboardShortcut("l", modifiers: .control)
+
+                    Button("Show EXIF API Structure") {
+                        Task { @MainActor in appState.openExifAPIStructureDebug() }
+                    }
+
+                    Button("Documentation screencaps") {
+                        Task { @MainActor in appState.runDocumentationScreencaps() }
+                    }
+
+                    Divider()
+
+                    Button("Reset window geometries…") {
+                        Task { @MainActor in appState.resetPersistedWindowGeometriesToDefaults() }
+                    }
+
+                    if BundleCapabilities.imageGenUIEnabled {
+                        Button("Enable Compatible LoRAs") {
+                            Task { @MainActor in appState.enableCompatibleLorasForAllModels() }
+                        }
+
+                        Button("Import Lora Defaults") {
+                            Task { @MainActor in appState.importLoraDefaults() }
+                        }
+                        .disabled(AppAssets.url(name: "lorablob", fileExtension: "") == nil)
+                    }
+
+                    Button("Toggle Debug Mode") {
+                        Task { @MainActor in appState.toggleDebugMode() }
+                    }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                    if FaceRecognitionCapabilities.facesUIEnabled(launchOptions: appState.launchOptions) {
+                        Button("Remove Facial Rec Models") {
+                            Task { @MainActor in appState.removeFacialRecognitionModels() }
+                        }
+                    }
+                }
+            }
+            .disabled(!allowBrowserMenuCommands)
+        }
+    }
+
+    @MainActor
+    private func wallpaperSourcePath() -> String? {
+        if let current = appState.fileData.currentImagePath {
+            return current
+        }
+        return appState.pathsForCopyPathCommand().first
+    }
+
+    @MainActor
+    private func setWallpaperLastUsed() {
+        let method = WallpaperManager.FitMethod(
+            configValue: appState.config.string(forKey: "last_used_wallpaper_fit_method", default: "contain")
+        )
+        setWallpaper(fitMethod: method, persist: false)
+    }
+
+    @MainActor
+    private func setWallpaper(fitMethod: WallpaperManager.FitMethod, persist: Bool) {
+        guard let path = wallpaperSourcePath() else {
+            appState.status.show("No image selected")
+            return
+        }
+        do {
+            try appState.wallpaperManager.setImageAsDesktopBackground(imagePath: path, fitMethod: fitMethod)
+            if persist {
+                appState.config.updateSetting("last_used_wallpaper_fit_method", value: fitMethod.configValue)
+            }
+        } catch {
+            StyledMessageDialog.showWarning(
+                title: "Cannot Set Wallpaper",
+                message: error.localizedDescription
+            )
+        }
+    }
+}
+
+/// Image generation menu (separate `Commands` type — registered after ``ProwserToolsCommands``).
 struct ProwserImageCommands: Commands {
     @Bindable var appState: AppState
 

@@ -186,6 +186,20 @@ foreach ($settings_sim_tabs as $tab) {
 
 '''
 
+MENU_SIM_MOVE_DESTINATIONS = '''$menu_sim_move_destinations_items = [
+    menu_sim_item('Move to Directory…'),
+    menu_sim_divider(),
+    menu_sim_item('Move to Destination 1', '⌘1'),
+    menu_sim_item('… more destinations …'),
+    menu_sim_item('Move to Destination 9', '⌘9'),
+    menu_sim_divider(),
+    menu_sim_item('Move to Last Drop Location', '⌘0'),
+    menu_sim_item('Move Work Files…'),
+    menu_sim_divider(),
+    menu_sim_item('Edit Destinations…'),
+];
+'''
+
 MENU_SIM_SORT = '''$menu_sim_sort_items = [
     menu_sim_item('Date (Newest First)', 'D'),
     menu_sim_item('Date (Oldest First)', '⇧D'),
@@ -290,7 +304,6 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
             menu_sim_item('Search for Known Person…', '⌘P'),
             menu_sim_item('Search for Person in Current Image…', '⌃⌘P'),
             menu_sim_item('Identify Faces in Current Image…', '⇧⌘P'),
-            menu_sim_divider(),
             menu_sim_submenu('Find Duplicate Image Files', [
                 menu_sim_item('Find in This Directory'),
                 menu_sim_item('Find in This and Subdirectories'),
@@ -299,34 +312,16 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
                 menu_sim_item('Find in This Directory'),
                 menu_sim_item('Find in This and Subdirectories'),
             ]),
-            menu_sim_divider(),
             menu_sim_item('Show Image in Directory', '⇧⌘H'),
         ],
     ],
     [
-        'title' => 'Filter',
-        'items' => [
-            menu_sim_item('No Filter (*)'),
-            menu_sim_divider(),
-            menu_sim_item('Saved filter presets'),
-            menu_sim_divider(),
-            menu_sim_item('Edit…'),
-        ],
+        'title' => 'Move to',
+        'items' => $menu_sim_move_destinations_items,
     ],
     [
-        'title' => 'Move to',
-        'items' => [
-            menu_sim_section('User Defined Destinations'),
-            menu_sim_item('Move to Destination 1', '⌘1'),
-            menu_sim_item('… more destinations …'),
-            menu_sim_item('Move to Destination 9', '⌘9'),
-            menu_sim_section('Dynamic Destination'),
-            menu_sim_item('Move to Last Drop Location', '⌘0'),
-            menu_sim_section('Move Work Files'),
-            menu_sim_item('Move Work Files…'),
-            menu_sim_section('Settings'),
-            menu_sim_item('Edit Destinations…'),
-        ],
+        'title' => 'Filter',
+        'items' => $menu_sim_filter_items,
     ],
     [
         'title' => 'Image',
@@ -362,6 +357,8 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
                 menu_sim_divider(),
                 menu_sim_item('Edit EXIF User Comment…', '⇧⌘E'),
                 menu_sim_item('Delete User Comment from File…'),
+                menu_sim_divider(),
+                menu_sim_item('Find References to This Image…'),
             ]),
             menu_sim_item('Show GPS Location on Map', '⌘G'),
             menu_sim_submenu('Slideshows', [
@@ -378,6 +375,7 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
             ]),
             menu_sim_submenu('Create Screen Size Copy…', [
                 menu_sim_item('Create Screen Size Copy (Last Used)', '⇧⌘U'),
+                menu_sim_divider(),
                 menu_sim_item('Fit (Contain)'),
                 menu_sim_item('Fill (Cover)'),
                 menu_sim_item('Fit to Width'),
@@ -395,11 +393,10 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
                 menu_sim_item('Show EXIF API Structure'),
                 menu_sim_item('Documentation screencaps'),
                 menu_sim_divider(),
-                menu_sim_item('Print Cache Status'),
                 menu_sim_item('Reset window geometries…'),
                 menu_sim_item('Enable Compatible LoRAs'),
+                menu_sim_item('Import Lora Defaults'),
                 menu_sim_item('Toggle Debug Mode', '⇧⌘D'),
-                menu_sim_item('Toggle Number Overlay', '⇧⌘I'),
                 menu_sim_item('Remove Facial Rec Models'),
             ]),
         ],
@@ -409,6 +406,7 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
         'items' => [
             menu_sim_item('Keyboard Shortcuts', '/'),
             menu_sim_item('Hidden Gems…'),
+            menu_sim_item('Downloading AI Models…'),
             menu_sim_item('Image Search (Native)…'),
         ],
     ],
@@ -436,6 +434,21 @@ def main() -> None:
         count=1,
         flags=re.S,
     )
+
+    if re.search(r"\$menu_sim_move_destinations_items = \[", text):
+        text = re.sub(
+            r"\$menu_sim_move_destinations_items = \[.*?\];",
+            MENU_SIM_MOVE_DESTINATIONS.strip(),
+            text,
+            count=1,
+            flags=re.S,
+        )
+    else:
+        text = text.replace(
+            "$menu_sim_menus = [",
+            MENU_SIM_MOVE_DESTINATIONS.strip() + "\n\n$menu_sim_menus = [",
+            1,
+        )
 
     text = re.sub(
         r"\$menu_sim_menus = \[.*?\n\];\r?\n\r?\n// SEO:",

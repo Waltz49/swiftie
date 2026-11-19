@@ -16,6 +16,7 @@ struct ProwserApp: App {
         .commands {
             if let appState = appDelegate.appState, appDelegate.isPrimary {
                 ProwserCommands(appState: appState)
+                ProwserToolsCommands(appState: appState)
                 if BundleCapabilities.imageGenUIEnabled {
                     ProwserImageCommands(appState: appState)
                 }

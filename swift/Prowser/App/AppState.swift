@@ -1056,16 +1056,6 @@ final class AppState {
         browseImageHost?.needsDisplay = true
     }
 
-    func printCacheStatus() {
-        Task {
-            let thumbStats = await thumbnailCache.statistics()
-            let metaCount = metadataCache.entryCount
-            let message = "Cache: \(thumbStats.diskCount) thumbnails on disk, "
-                + "\(thumbStats.memoryCount) in memory, \(metaCount) metadata entries"
-            status.show(message)
-        }
-    }
-
     func importLoraDefaults() {
         guard LoRADefaultsImportService.bundledBlobURL() != nil else {
             StyledMessageDialog.showWarning(
