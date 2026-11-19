@@ -140,8 +140,9 @@ enum ExifService {
         let lensModel = exif[kCGImagePropertyExifLensModel] as? String
         if let lensModel, !lensModel.isEmpty { record.lens = lensModel }
 
-        record.description = userDescription(exif: exif, tiff: tiff)
-            ?? ExifEmbeddedTIFFReader.userComment(fromFile: path)
+        // Prefer raw UserComment bytes (piexif / eXIf chunk). ImageIO mis-decodes UNICODE tags.
+        record.description = exifUserCommentText(path: path)
+            ?? userDescription(exif: exif, tiff: tiff)
 
         if let exposure = exif[kCGImagePropertyExifExposureTime] as? Double {
             record.exposure = formatExposureTime(exposure)
@@ -197,22 +198,24 @@ enum ExifService {
     }
 
     static func userComment(path: String) -> String? {
-        let record = loadRecord(for: path)
-        if let description = record.description, !description.isEmpty {
-            return description
-        }
-        if detectedRasterExtension(path: path) == "webp",
-           let fileData = try? Data(contentsOf: URL(fileURLWithPath: path)),
-           let tiff = WebPImageWriter.extractExifChunk(from: fileData),
-           let comment = ExifEmbeddedTIFFReader.userComment(fromEmbeddedTIFF: tiff) {
-            return comment
-        }
-        return ExifEmbeddedTIFFReader.userComment(fromFile: path)
+        nonEmptyCommentText(exifUserCommentText(path: path))
     }
 
     /// Raw UserComment tag bytes for restore (Python ``get_usercomment_from_path``); not TIFF ImageDescription.
     static func userCommentRawPayload(path: String) -> Data? {
         let url = URL(fileURLWithPath: path)
+        if detectedRasterExtension(path: path) == "webp",
+           let fileData = try? Data(contentsOf: url),
+           let tiff = WebPImageWriter.extractExifChunk(from: fileData),
+           let payload = ExifEmbeddedTIFFReader.userCommentPayload(fromEmbeddedTIFF: tiff),
+           !payload.isEmpty {
+            return payload
+        }
+        if let fileData = try? Data(contentsOf: url),
+           let payload = ExifEmbeddedTIFFReader.userCommentPayload(fromImageData: fileData),
+           !payload.isEmpty {
+            return payload
+        }
         if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
            let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
             let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
@@ -222,19 +225,7 @@ enum ExifService {
                 return payload
             }
         }
-        if detectedRasterExtension(path: path) == "webp",
-           let fileData = try? Data(contentsOf: url),
-           let tiff = WebPImageWriter.extractExifChunk(from: fileData),
-           let payload = ExifEmbeddedTIFFReader.userCommentPayload(fromEmbeddedTIFF: tiff),
-           !payload.isEmpty {
-            return payload
-        }
-        guard let fileData = try? Data(contentsOf: url),
-              let payload = ExifEmbeddedTIFFReader.userCommentPayload(fromImageData: fileData),
-              !payload.isEmpty else {
-            return nil
-        }
-        return payload
+        return nil
     }
 
     private static func userCommentPayloadFromImageIOValue(_ raw: Any) -> Data? {
@@ -265,17 +256,8 @@ enum ExifService {
     /// EXIF ``UserComment`` only (Python ``get_usercomment_from_path``); not TIFF ``ImageDescription``.
     private static func exifUserCommentText(path: String) -> String? {
         let url = URL(fileURLWithPath: path)
-        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
-            let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
-            if let raw = exif[kCGImagePropertyExifUserComment],
-               let decoded = decodeUserCommentValue(raw) {
-                let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { return decoded }
-            }
-        }
         if detectedRasterExtension(path: path) == "webp",
-           let fileData = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let fileData = try? Data(contentsOf: url),
            let tiff = WebPImageWriter.extractExifChunk(from: fileData),
            let comment = ExifEmbeddedTIFFReader.userComment(fromEmbeddedTIFF: tiff) {
             let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -284,6 +266,15 @@ enum ExifService {
         if let comment = ExifEmbeddedTIFFReader.userComment(fromFile: path) {
             let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return comment }
+        }
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+            if let raw = exif[kCGImagePropertyExifUserComment],
+               let decoded = decodeUserCommentValue(raw) {
+                let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return decoded }
+            }
         }
         return nil
     }

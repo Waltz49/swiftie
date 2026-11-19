@@ -16,7 +16,6 @@ enum DebugAgentLog {
             "location": location,
             "message": message,
             "timestamp": Int(Date().timeIntervalSince1970 * 1000),
-            "runId": "post-fix",
         ]
         if !data.isEmpty {
             payload["data"] = data.mapValues(\.description)

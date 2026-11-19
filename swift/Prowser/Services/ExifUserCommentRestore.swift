@@ -66,8 +66,9 @@ enum ExifUserCommentRestore {
     /// Subprocess Python for EXIF restore (no ``AppConfig`` / profile; avoids MainActor-only ``PythonLocator.resolve``).
     private static func exifPythonEnvironment() -> PythonLocator.Environment? {
         guard let bundleRoot = ImageGenPythonBundle.rootURL() else { return nil }
-        let fallbacks = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
-        guard let executable = fallbacks.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+        let fallbacks = ["/usr/local/bin/python3", "/opt/homebrew/bin/python3", "/usr/bin/python3"]
+        guard let executable = fallbacks.first(where: { canImportPiexif(executable: $0, bundleRoot: bundleRoot) })
+        else {
             return nil
         }
         return PythonLocator.Environment(executable: executable, bundleRoot: bundleRoot, profilePath: nil)

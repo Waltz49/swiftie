@@ -9,6 +9,7 @@ final class ImageGenPromptUnicodeRoundTripTests: XCTestCase {
         "café — naïve \"quotes\" and 'apostrophe'",
         "👨‍👩‍👧‍👦 family scene",
         "Mixed: Hello 世界 🌍",
+        "В темной, влажной камерке — кириллица",
     ]
 
     func testFormattedExifCommentExtractsUnicodePrompt() {
@@ -263,6 +264,89 @@ final class ImageGenPromptUnicodeRoundTripTests: XCTestCase {
         XCTAssertEqual(extracted, prompt.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// Production uses Python piexif (XCTest skips it in ``ExifUserCommentRestore``).
+    @MainActor
+    func testPythonPiexifRestoreCyrillicReadableViaImageIO() throws {
+        let prompt = "В темной камере тест кириллицы"
+        let fm = FileManager.default
+        let path = fm.temporaryDirectory
+            .appendingPathComponent("cyrillic-python-piexif-\(UUID().uuidString).png").path
+        try writeMinimalPNG(at: path)
+        defer { try? fm.removeItem(atPath: path) }
+
+        let comment = ImageGenExifCommentFormatting.formatImageExifPrompt(
+            modelName: "Test Model",
+            promptText: prompt,
+            seed: 1
+        )
+        let payload = ExifService.encodeUserCommentData(comment)
+        guard let bundleRoot = ImageGenPythonBundle.rootURL() else {
+            throw XCTSkip("ImageGenPython bundle missing")
+        }
+        guard let executable = Self.pythonWithPiexif() else {
+            throw XCTSkip("No python3 with piexif")
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.currentDirectoryURL = bundleRoot
+        var env = ProcessInfo.processInfo.environment
+        ImageGenPythonBundle.applyPythonEnvironment(&env, bundleRoot: bundleRoot, profilePath: nil)
+        process.environment = env
+        process.arguments = [
+            "-c",
+            """
+            import base64, sys
+            from exif.exif_utils import restore_usercomment_to_file
+            path = sys.argv[1]
+            payload = base64.b64decode(sys.stdin.buffer.read())
+            sys.exit(0 if restore_usercomment_to_file(path, payload) else 2)
+            """,
+            path,
+        ]
+        let stdin = Pipe()
+        process.standardInput = stdin
+        process.standardError = Pipe()
+        try process.run()
+        stdin.fileHandleForWriting.write(payload.base64EncodedData())
+        try stdin.fileHandleForWriting.close()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+
+        let imageIO = ExifService.loadRecord(for: path).description ?? ""
+        let embedded = ExifEmbeddedTIFFReader.userComment(fromFile: path) ?? ""
+        let extractedImageIO = ImageGenExifCommentFormatting.extractedPromptText(from: imageIO)
+        let extractedEmbedded = ImageGenExifCommentFormatting.extractedPromptText(from: embedded)
+        XCTAssertEqual(extractedEmbedded, prompt, embedded)
+        XCTAssertEqual(extractedImageIO, prompt, imageIO)
+    }
+
+    @MainActor
+    func testImageIODescriptionMatchesEmbeddedForCyrillicExif() async throws {
+        let prompt = "В темной камере тест кириллицы"
+        let fm = FileManager.default
+        let path = fm.temporaryDirectory
+            .appendingPathComponent("cyrillic-imageio-\(UUID().uuidString).png").path
+        try writeMinimalPNG(at: path)
+        defer { try? fm.removeItem(atPath: path) }
+
+        let comment = ImageGenExifCommentFormatting.formatImageExifPrompt(
+            modelName: "Test Model",
+            promptText: prompt,
+            seed: 1,
+            steps: 9
+        )
+        try await ExifService.writeUserComment(path: path, text: comment)
+
+        let imageIO = ExifService.loadRecord(for: path).description ?? ""
+        let embedded = ExifEmbeddedTIFFReader.userComment(fromFile: path) ?? ""
+        let extractedImageIO = ImageGenExifCommentFormatting.extractedPromptText(from: imageIO)
+        let extractedEmbedded = ImageGenExifCommentFormatting.extractedPromptText(from: embedded)
+        XCTAssertEqual(embedded, comment)
+        XCTAssertEqual(extractedEmbedded, prompt)
+        XCTAssertEqual(extractedImageIO, prompt, "ImageIO path: \(imageIO.prefix(120))")
+    }
+
     @MainActor
     func testWriteReadExifFilePreservesUnicodePrompt() async throws {
         let fm = FileManager.default
@@ -320,6 +404,22 @@ final class ImageGenPromptUnicodeRoundTripTests: XCTestCase {
         Data(base64Encoded: """
         iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
         """)!
+    }
+
+  private static func pythonWithPiexif() -> String? {
+        for candidate in ["/usr/local/bin/python3", "/opt/homebrew/bin/python3", "/usr/bin/python3"] {
+            guard FileManager.default.isExecutableFile(atPath: candidate) else { continue }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: candidate)
+            process.arguments = ["-c", "import piexif"]
+            let stderr = Pipe()
+            process.standardError = stderr
+            process.standardOutput = Pipe()
+            guard (try? process.run()) != nil else { continue }
+            process.waitUntilExit()
+            if process.terminationStatus == 0 { return candidate }
+        }
+        return nil
     }
 
     private func writeMinimalPNG(at path: String) throws {
