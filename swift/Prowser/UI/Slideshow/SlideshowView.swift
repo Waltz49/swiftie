@@ -82,11 +82,12 @@ struct SlideshowView: View {
             }
         }
         .onChange(of: appState.fileData.currentIndex) { _, newIndex in
-            slideIndex = newIndex
             guard !isTransitioning else { return }
             let images = slideshowImages()
-            guard !images.isEmpty, newIndex >= 0, newIndex < images.count else { return }
-            let path = images[newIndex]
+            guard !images.isEmpty else { return }
+            let resolved = resolveSlideIndex(in: images, fallback: newIndex)
+            slideIndex = resolved
+            let path = images[resolved]
             guard path != displayedPath else { return }
             runTransition(toPath: path)
         }
@@ -116,6 +117,19 @@ struct SlideshowView: View {
             .rotationEffect(.degrees(rotation))
             .offset(x: offset.width, y: offset.height)
             .opacity(opacity)
+    }
+
+    @MainActor
+    private func resolveSlideIndex(in images: [String], fallback: Int) -> Int {
+        guard !images.isEmpty else { return 0 }
+        if let path = appState.fileData.currentImagePath,
+           let idx = FileDataModel.indexOfPath(path, in: images) {
+            return idx
+        }
+        if fallback >= 0, fallback < images.count {
+            return fallback
+        }
+        return max(0, min(slideIndex, images.count - 1))
     }
 
     @MainActor
@@ -308,9 +322,11 @@ struct SlideshowView: View {
     }
 
     @MainActor
-    private func advance(images: [String]) {
+    private func advance() {
+        let images = slideshowImages()
         guard images.count > 1 else { return }
         guard !isTransitioning else { return }
+        slideIndex = resolveSlideIndex(in: images, fallback: slideIndex)
         let backAndForth = appState.config.bool(forKey: "slideshow_back_and_forth", default: false)
         let nextIndex: Int
         if backAndForth {
@@ -321,6 +337,7 @@ struct SlideshowView: View {
         } else {
             nextIndex = (slideIndex + 1) % images.count
         }
+        guard nextIndex >= 0, nextIndex < images.count else { return }
 
         let path = images[nextIndex]
         slideIndex = nextIndex
@@ -335,7 +352,7 @@ struct SlideshowView: View {
         let fireInterval = interval > 0 ? interval : 0.000_1
         timer = Timer.scheduledTimer(withTimeInterval: fireInterval, repeats: true) { _ in
             Task { @MainActor in
-                advance(images: images)
+                advance()
             }
         }
     }
