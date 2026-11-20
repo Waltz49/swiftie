@@ -1074,7 +1074,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
                 isSelected: isSelected
             )
             if let image = thumbnails[path] {
-                drawThumbnail(image, in: contentRect)
+                drawThumbnail(image, in: contentRect, path: path)
             } else {
                 NSColor.quaternaryLabelColor.setFill()
                 contentRect.fill()
@@ -2541,22 +2541,38 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         }
     }
 
-    private func drawThumbnail(_ image: NSImage, in rect: NSRect) {
+    private func drawThumbnail(_ image: NSImage, in rect: NSRect, path: String) {
         guard rect.width > 0, rect.height > 0 else { return }
         let imageSize = pixelSize(of: image)
         guard imageSize.width > 0, imageSize.height > 0 else { return }
 
-        let scale = min(rect.width / imageSize.width, rect.height / imageSize.height)
-        let drawSize = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let transform = appState?.browseImageTransforms.transform(for: path) ?? BrowseImageSessionTransform.identity
+        let layoutSize = BrowseImageSessionTransform.layoutSize(for: imageSize, transform: transform)
+        let scale = min(rect.width / layoutSize.width, rect.height / layoutSize.height)
+        let layoutDraw = NSSize(width: layoutSize.width * scale, height: layoutSize.height * scale)
+        let contentDraw = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let drawRect = NSRect(
-            x: rect.midX - drawSize.width / 2,
-            y: rect.midY - drawSize.height / 2,
-            width: drawSize.width,
-            height: drawSize.height
+            x: rect.midX - layoutDraw.width / 2,
+            y: rect.midY - layoutDraw.height / 2,
+            width: layoutDraw.width,
+            height: layoutDraw.height
         )
 
         NSGraphicsContext.current?.imageInterpolation = .high
-        ImageDisplayLoader.draw(image, in: drawRect)
+        if transform.isIdentity {
+            ImageDisplayLoader.draw(image, in: drawRect)
+            return
+        }
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            ImageDisplayLoader.draw(image, in: drawRect)
+            return
+        }
+        let contentRect = BrowseImageSessionTransform.localContentRect(contentSize: contentDraw)
+        context.saveGState()
+        context.translateBy(x: drawRect.midX, y: drawRect.midY)
+        BrowseImageSessionTransform.applyVisualTransform(to: context, transform: transform)
+        ImageDisplayLoader.draw(image, in: contentRect)
+        context.restoreGState()
     }
 
     private func pixelSize(of image: NSImage) -> NSSize {

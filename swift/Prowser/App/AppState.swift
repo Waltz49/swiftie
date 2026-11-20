@@ -249,6 +249,7 @@ final class AppState {
     weak var thumbnailGridHost: ThumbnailGridNSView?
     weak var fileTreeOutlineView: FileTreeOutlineView?
     weak var browseImageHost: BrowseImageNSView?
+    let browseImageTransforms = BrowseImageSessionTransformStore()
     weak var listViewHost: ImageListNSView?
     weak var mainWindowTreeTabStop: MainWindowTabFocusStopView?
     weak var mainWindowCanvasTabStop: MainWindowTabFocusStopView?

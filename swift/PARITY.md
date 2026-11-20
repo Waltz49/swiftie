@@ -25,7 +25,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 
 - [~] Thumbnail grid (`ThumbnailGridNSView` — cache-backed, selection, arrow/return keyboard nav + wrap-around + menu sync + drag-reorder → `.prsort`, browse-exit scroll restore; ⌘X session filter via `exclude_directories` + `ThumbnailExcludeService`; filename overlay wraps full basename with variable row heights in standard/duplicate/EXIF/reference-graph layouts)
 - [~] List view (`ImageListView` with thumbnails)
-- [~] Browse (`BrowseImageNSView` — zoom, pan, pinch, checkerboard, actual size toggle A + persist across images). **Trackpad pinch:** Python `QGestureEvent` on the main widget (`browse_view_handler.handle_gesture_event`). Swift implements zoom in `BrowseImageNSView.magnify(with:)` but **must** forward events via `BrowseView` (`NSEvent.addLocalMonitorForEvents(.magnify)` → `browseImageHost`); `NSHostingView` in the center stack does not deliver `.magnify` to the representable (scroll wheel still reaches the view). Two-finger scroll pans only when zoomed in (`canPan()` / Python `can_pan_image()`); ⌃/⌘ scroll zooms when fitted.
+- [~] Browse (`BrowseImageNSView` — zoom, pan, pinch, checkerboard, actual size toggle A + persist across images). **Session rotate/flip (⇧←→↑↓):** matches Python in-memory `image_transformations` per path (`BrowseImageSessionTransformStore`); checkerboard/transparency composited inside the transform (Python `apply_transformations_to_pixmap` + `_apply_transparency_color_to_pixmap`); layout uses post-rotation bounds; thumbnail grid repaints at draw time (no cache rewrite, no file I/O). **Gap:** left preview pane does not yet apply session transform (Python `preview_widget.update_preview(force=True)`). **Trackpad pinch:** Python `QGestureEvent` on the main widget (`browse_view_handler.handle_gesture_event`). Swift implements zoom in `BrowseImageNSView.magnify(with:)` but **must** forward events via `BrowseView` (`NSEvent.addLocalMonitorForEvents(.magnify)` → `browseImageHost`); `NSHostingView` in the center stack does not deliver `.magnify` to the representable (scroll wheel still reaches the view). Two-finger scroll pans only when zoomed in (`canPan()` / Python `can_pan_image()`); ⌃/⌘ scroll zooms when fitted.
 - [~] Slideshow (multiple images — `SlideshowView`, Tools → Slideshow / S key)
 - [~] Slideshow2 (panning — `Slideshow2View`, ⇧S)
 - [~] Slideshow3 (floating frames — `Slideshow3View` MVP; full Qt parity deferred)
@@ -33,7 +33,7 @@ Python references: `menu_manager.py`, `thumbnail_context_menu.py`, `tree_tools_m
 ## Left sidebar panes
 
 - [~] File tree (`FileTreeView` — lazy NSOutlineView, root dirs from settings; filtered-tree disclosure + discovery batching perf pass; expansion preserved across settings-driven reload)
-- [~] Preview (`PreviewPaneView` — click opens browse)
+- [~] Preview (`PreviewPaneView` — click opens browse; does not reflect browse session rotate/flip yet)
 - [~] Chat (`ChatPaneView` + `ChatController` via `ChatBridge`; persistence when preserve enabled)
 - [x] Jobs — N/A on left; Python jobs pane is on the right sidebar only (Swift: `RightSidebarView` / `JobQueuePanelView`)
 
@@ -368,6 +368,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `thumbnail_cell_size`, `manual_thumbnail_size` | done | done |
 | `list_view_row_height` | done | done |
 | `browse_view_actual_size` | done | done |
+| Session browse rotate/flip per image (`image_transformations` dict) | done (in-memory only; not in `settings.json`) | done (`BrowseImageSessionTransformStore`; ⇧ arrows; reset shortcut clears current image) |
 | `browse_preserve_zoom_on_image_change` | done | pending |
 | `sort_mode`, `sort_reversed`, `use_exif_date`, `ignore_exif_rotation` | done | done |
 | `filter_pattern`, `filtered_tree`, `saved_filters` | done | done |
@@ -457,7 +458,8 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 ## Keyboard shortcuts
 
 - [~] `KeyboardHandlerController` — core navigation, sort keys, sidebars, F/F12/F5/F10, Home/End
-- [~] Browse zoom, transforms, actual size, overlay, ⌘+arrow pan, ^W fit width
+- [~] Browse zoom, actual size, overlay, ⌘+arrow pan, ^W fit width
+- [x] Browse session rotate/flip — ⇧←/⇧→ rotate, ⇧↑/⇧↓ flip (`BrowseImageSessionTransformStore`); thumbnails show transform; no save prompt / no disk write
 - [~] ⌘1–9 destinations, ^1–^9 favorites, / help, ⌘K similar search
 - [~] ⌘+arrow multiselect, ⇧-range select, ⇧Home/End range
 - [~] Thumbnail cell size +/- / 0; list row height +/- / 0; Page Up/Down
@@ -528,6 +530,7 @@ Source: `thumbnails/information_sidebar.py`, `information_action_nav.py`.
 - Image-gen submit still delegates final dim alignment to Python `buildPayload`; Swift UI now mirrors live limit math.
 - Preferences window uses **Prowser Preferences** title; app menu item **Preferences…** (⌘,).
 - `exclude_directories` rules filter the **current** thumbnail list (session `displayed_images`); they do not remove paths from disk or from tree scans (`ignore_directories` is separate).
+- Browse combined rotate **and** flip uses CG draw order flip-then-rotate (legacy Swift). Python bakes with `QTransform.rotate` then flip scales on the pixmap; pure 90° rotates and single flips match; exotic flip+rotate combos may differ slightly.
 
 ## Remaining gate items (manual sign-off)
 

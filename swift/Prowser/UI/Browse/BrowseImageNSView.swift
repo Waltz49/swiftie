@@ -38,9 +38,10 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
     private let fileDragThreshold: CGFloat = 5
     /// Pinch zoom anchor (Python `zoom_center_point` at gesture start).
     private var magnifyAnchor: CGPoint?
-    private var rotationDegrees: CGFloat = 0
-    private var isFlippedHorizontally = false
-    private var isFlippedVertically = false
+    private var sessionTransform: BrowseImageSessionTransform.State {
+        guard let path = imagePath, let appState else { return BrowseImageSessionTransform.identity }
+        return appState.browseImageTransforms.transform(for: path)
+    }
     private var themeColors = ThemeColors.dark
     private var loadTask: Task<Void, Never>?
     private var emptyStateMessage = "No image selected"
@@ -246,31 +247,49 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
         return bounds.center
     }
 
-    func rotateClockwise() {
-        rotationDegrees = (rotationDegrees + 90).truncatingRemainder(dividingBy: 360)
+    func noteSessionTransformChanged() {
+        clampScroll()
         needsDisplay = true
+    }
+
+    func rotateClockwise() {
+        applySessionTransformMutation { $0.rotate(by: 90) }
+        appState?.status.show("Rotated 90° clockwise", duration: 1.5)
     }
 
     func rotateCounterclockwise() {
-        rotationDegrees = (rotationDegrees - 90).truncatingRemainder(dividingBy: 360)
-        needsDisplay = true
+        applySessionTransformMutation { $0.rotate(by: -90) }
+        appState?.status.show("Rotated 90° counter-clockwise", duration: 1.5)
     }
 
     func flipHorizontal() {
-        isFlippedHorizontally.toggle()
-        needsDisplay = true
+        applySessionTransformMutation { $0.toggleFlipHorizontal() }
+        appState?.status.show("Flipped horizontally", duration: 1.5)
     }
 
     func flipVertical() {
-        isFlippedVertically.toggle()
-        needsDisplay = true
+        applySessionTransformMutation { $0.toggleFlipVertical() }
+        appState?.status.show("Flipped vertically", duration: 1.5)
     }
 
     func resetTransforms() {
-        rotationDegrees = 0
-        isFlippedHorizontally = false
-        isFlippedVertically = false
-        needsDisplay = true
+        guard let appState, let path = imagePath else {
+            needsDisplay = true
+            return
+        }
+        appState.browseImageTransforms.clear(path: path)
+        scaleFactor = 1.0
+        scrollOffset = .zero
+        appState.refreshBrowseImageTransformDisplay(for: path)
+        appState.status.show("Image transformations reset", duration: 1.5)
+    }
+
+    private func applySessionTransformMutation(
+        _ body: (inout BrowseImageSessionTransform.State) -> Void
+    ) {
+        guard let appState, let path = imagePath else { return }
+        appState.browseImageTransforms.mutate(path: path, body)
+        appState.refreshBrowseImageTransformDisplay(for: path)
     }
 
     func panBy(dx: CGFloat, dy: CGFloat) {
@@ -284,12 +303,12 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
     /// Fit image width to the browse canvas and scroll to the top (Python ^W).
     func fitToCanvasWidth() {
         guard let image = sourceImage else { return }
-        let imageSize = image.size
-        guard imageSize.width > 0, imageSize.height > 0, bounds.width > 0 else { return }
+        let layoutSize = layoutSize(for: image)
+        guard layoutSize.width > 0, layoutSize.height > 0, bounds.width > 0 else { return }
         preferredActualSize = false
         isActualSize = false
         onActualSizeModeChanged?(false)
-        scaleFactor = bounds.width / imageSize.width
+        scaleFactor = bounds.width / layoutSize.width
         scrollOffset = CGPoint(x: 0, y: 0)
         zoomPinned = true
         needsDisplay = true
@@ -299,12 +318,12 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
     /// Fit image height to the browse viewport (Swift-only ⌥=).
     func fitToCanvasHeight() {
         guard let image = sourceImage else { return }
-        let imageSize = image.size
-        guard imageSize.width > 0, imageSize.height > 0, bounds.height > 0 else { return }
+        let layoutSize = layoutSize(for: image)
+        guard layoutSize.width > 0, layoutSize.height > 0, bounds.height > 0 else { return }
         preferredActualSize = false
         isActualSize = false
         onActualSizeModeChanged?(false)
-        scaleFactor = bounds.height / imageSize.height
+        scaleFactor = bounds.height / layoutSize.height
         scrollOffset = CGPoint(x: 0, y: 0)
         zoomPinned = true
         needsDisplay = true
@@ -313,7 +332,6 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
 
     private func loadImage() {
         loadTask?.cancel()
-        resetTransforms()
         guard let imagePath else {
             sourceImage = nil
             pendingPreservedView = nil
@@ -384,9 +402,9 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
 
     private func fitToWindow() {
         guard let image = sourceImage else { return }
-        let imageSize = image.size
-        guard imageSize.width > 0, imageSize.height > 0 else { return }
-        let fit = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+        let layoutSize = layoutSize(for: image)
+        guard layoutSize.width > 0, layoutSize.height > 0 else { return }
+        let fit = min(bounds.width / layoutSize.width, bounds.height / layoutSize.height)
         scaleFactor = fit
         scrollOffset = .zero
         isActualSize = false
@@ -417,32 +435,30 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
 
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let drawRect = imageDrawRect(for: image)
-
-        if themeColors.browseUseCheckerboard {
-            drawCheckerboard(in: drawRect)
-        } else {
-            NSColor(themeColors.browseTransparencyColor).setFill()
-            drawRect.fill()
-        }
+        let transform = sessionTransform
+        let layoutScale = drawRect.width / max(layoutSize(for: image).width, 1)
+        let contentSize = NSSize(
+            width: image.size.width * layoutScale,
+            height: image.size.height * layoutScale
+        )
+        let contentRect = BrowseImageSessionTransform.localContentRect(contentSize: contentSize)
 
         context.saveGState()
         context.translateBy(x: drawRect.midX, y: drawRect.midY)
-        if isFlippedHorizontally { context.scaleBy(x: -1, y: 1) }
-        if isFlippedVertically { context.scaleBy(x: 1, y: -1) }
-        if rotationDegrees != 0 {
-            context.rotate(by: rotationDegrees * .pi / 180)
+        BrowseImageSessionTransform.applyVisualTransform(to: context, transform: transform)
+
+        if themeColors.browseUseCheckerboard {
+            drawCheckerboard(in: contentRect)
+        } else {
+            NSColor(themeColors.browseTransparencyColor).setFill()
+            contentRect.fill()
         }
-        let centered = NSRect(
-            x: -drawRect.width / 2,
-            y: -drawRect.height / 2,
-            width: drawRect.width,
-            height: drawRect.height
-        )
+
         let zoomSharpen = appState?.config.bool(forKey: "browse_zoom_sharpen", default: false) == true
         let drewSharpened = zoomSharpen && scaleFactor > 1.0
-            && drawSharpenedZoomedImage(image, in: centered, context: context)
+            && drawSharpenedZoomedImage(image, in: contentRect, context: context)
         if !drewSharpened {
-            image.draw(in: centered, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+            image.draw(in: contentRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
         }
         context.restoreGState()
 
@@ -806,8 +822,12 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
         return true
     }
 
+    private func layoutSize(for image: NSImage) -> NSSize {
+        BrowseImageSessionTransform.layoutSize(for: image.size, transform: sessionTransform)
+    }
+
     private func imageDrawRect(for image: NSImage) -> NSRect {
-        let imageSize = image.size
+        let imageSize = layoutSize(for: image)
         let width = imageSize.width * scaleFactor
         let height = imageSize.height * scaleFactor
         let x = (bounds.width - width) / 2 - scrollOffset.x
@@ -837,7 +857,7 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
         image: NSImage
     ) {
         scaleFactor = min(max(scale, 0.05), 20.0)
-        let imageSize = image.size
+        let imageSize = layoutSize(for: image)
         let afterW = imageSize.width * scaleFactor
         let afterH = imageSize.height * scaleFactor
         scrollOffset.x = (bounds.width - afterW) / 2 - (anchor.x - nx * afterW)
