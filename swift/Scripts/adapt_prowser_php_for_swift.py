@@ -534,11 +534,36 @@ def main() -> None:
 
     text = re.sub(
         r"<section class=\"card intro-card\"[^>]*>.*?<h2 id=\"about-prowser-heading\">About Prowser</h2>\s*.*?</section>",
-        '<section class="card intro-card" aria-labelledby="about-prowser-heading">\n'
-        '                    <h2 id="about-prowser-heading">About Prowser</h2>\n' + intro_html + '\n                </section>',
+        '<section class="card intro-card">\n' + intro_html + "\n                </section>",
         text,
         count=1,
         flags=re.S,
+    )
+
+    text = re.sub(
+        r'<section class="card download-card" aria-labelledby="download-heading">\s*'
+        r"<h2 id=\"download-heading\">Download</h2>\s*",
+        '<section class="card download-card">\n                    ',
+        text,
+        count=1,
+    )
+
+    text = re.sub(
+        r'<details class="download-min-details">\s*'
+        r'<summary class="download-min-summary">\s*'
+        r'<span class="expand-arrow" aria-hidden="true"><span class="when-closed">▶</span><span class="when-open">▼</span></span>\s*',
+        '<div class="download-option-header download-min-summary download-min-summary--static">\n                                        ',
+        text,
+        flags=re.S,
+    )
+    text = text.replace(
+        "</summary>\n                                    <div class=\"download-option download-option-inner\">",
+        "</div>\n                                    <div class=\"download-option download-option-inner\">",
+    )
+    text = re.sub(
+        r"(\s*</div>\s*)</details>(\s*<\?php \} \?>)",
+        r"\1\2",
+        text,
     )
 
     text = text.replace(
@@ -602,6 +627,64 @@ def main() -> None:
         "// --- Menu bar simulation (mirrors swift/Prowser/UI/Menus/ProwserCommands.swift) ---",
     )
 
+    text = text.replace(
+        """        .features-card ul {
+            margin: 0;
+            padding: 0 0 0 1.15rem;
+            list-style: disc;
+        }""",
+        """        .features-card ul {
+            margin: 0;
+            padding: 0 0 0 1.15rem;
+            list-style: disc;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }""",
+        1,
+    )
+
+    text = text.replace(
+        """        .download-min-summary {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.35rem 0.75rem;
+            padding: 0.85rem 1.25rem;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+        }""",
+        """        .download-min-summary--static {
+            cursor: default;
+            margin: 0;
+            padding: 0 0 0.65rem;
+        }
+
+        .download-option-header {
+            border-bottom: none;
+        }
+
+        .download-min-summary {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.35rem 0.75rem;
+            padding: 0.85rem 1.25rem;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+        }""",
+        1,
+    )
+
+    text = re.sub(
+        r"(\.download-meta \.meta-row \{\s*display: flex;\s*flex-wrap: wrap;\s*)gap: 0\.35rem 0\.5rem;\s*"
+        r"margin-bottom: 0\.35rem;\s*font-size: 0\.8125rem;",
+        r"\1gap: 0.15rem 0.5rem;\n            margin-bottom: 0.12rem;\n            font-size: 0.8125rem;\n            line-height: 1.2;",
+        text,
+        count=1,
+        flags=re.S,
+    )
     text = re.sub(
         r"(\.meta-row \{\s*display: flex;\s*flex-wrap: wrap;\s*)gap: 0\.35rem 0\.5rem;\s*"
         r"margin-bottom: 0\.35rem;\s*font-size: 0\.8125rem;",
@@ -609,6 +692,50 @@ def main() -> None:
         text,
         count=1,
         flags=re.S,
+    )
+
+    features_scroll_js = r"""
+        (function () {
+            var desktopMq = window.matchMedia('(min-width: 861px)');
+
+            function syncFeaturesListScrollHeight() {
+                var download = document.querySelector('.download-card');
+                var list = document.querySelector('.features-card ul');
+                if (!download || !list) {
+                    return;
+                }
+                if (!desktopMq.matches) {
+                    list.style.maxHeight = '';
+                    return;
+                }
+                var maxPx = download.getBoundingClientRect().bottom - list.getBoundingClientRect().top;
+                if (maxPx < 80) {
+                    maxPx = 80;
+                }
+                list.style.maxHeight = Math.floor(maxPx) + 'px';
+            }
+
+            function scheduleSync() {
+                window.requestAnimationFrame(syncFeaturesListScrollHeight);
+            }
+
+            window.addEventListener('load', scheduleSync);
+            window.addEventListener('resize', scheduleSync);
+            if (typeof ResizeObserver !== 'undefined') {
+                var downloadCard = document.querySelector('.download-card');
+                if (downloadCard) {
+                    new ResizeObserver(scheduleSync).observe(downloadCard);
+                }
+            }
+            document.querySelectorAll('.install-details').forEach(function (el) {
+                el.addEventListener('toggle', scheduleSync);
+            });
+        })();
+"""
+    text = text.replace(
+        "        (function () {\n            var bar = document.querySelector('.menu-sim-bar');",
+        features_scroll_js + "\n        (function () {\n            var bar = document.querySelector('.menu-sim-bar');",
+        1,
     )
 
     download_meta_version = '''                                            <div class="download-meta">
