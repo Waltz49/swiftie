@@ -8,8 +8,10 @@
 #   ./Scripts/build_app.sh -o ~/Desktop/Prowser.app
 #   ./Scripts/build_app.sh --debug
 #   ./Scripts/build_app.sh --dmg
-#   ./Scripts/build_app.sh --dmg /tmp/Prowser-swift-<version>.dmg
-#     (--dmg needs Finder + SetFile for background/layout; see Scripts/create_styled_dmg.sh)
+#   ./Scripts/build_app.sh --dmg /tmp/prowser-swift-<version>.dmg
+#     (--dmg bumps patch version, regenerates prowser.php, builds DMG; needs Finder + SetFile)
+#   ./Scripts/build_app.sh --dmg --upload
+#     (also scp DMG as prowser-swift-X.Y.Z.dmg + prowser-swift-latest.dmg and prowser.php)
 #   ./Scripts/build_app.sh --nerb          # embed -p /tmp/nerb (PROWSER_PROFILE)
 #   ./Scripts/build_app.sh --reg           # default opener for jpg/jpeg/png/webp
 #   ./Scripts/build_app.sh --skip-dlib     # skip Vendor/dlib-install (face stub only)
@@ -33,8 +35,9 @@ SKIP_BUILD=0
 BUILD_BENCH=0
 SKIP_DLIB=0
 CREATE_DMG=0
-DMG_OUTPUT="/tmp/Prowser-swift-${APP_VERSION}.dmg"
-DMG_OUTPUT="/tmp/Prowser-swift.dmg"
+DMG_OUTPUT_USER_SET=0
+DMG_OUTPUT="/tmp/prowser-swift-${APP_VERSION}.dmg"
+UPLOAD_SWIFT=0
 NERB_PROFILE=0
 NERB_PROFILE_PATH="/tmp/nerb"
 REGISTER_DEFAULTS=0
@@ -42,12 +45,59 @@ FDA_WALKTHROUGH=0
 INSTALL_APP_PATH=""
 SWIFT_BUILD_VERBOSE=""
 
+bump_short_version_patch() {
+    local plist="$1"
+    local ver prefix patch new_ver
+    ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+    if [[ ! "$ver" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        echo "error: cannot bump CFBundleShortVersionString: $ver" >&2
+        exit 1
+    fi
+    patch="${ver##*.}"
+    prefix="${ver%.*}"
+    if [[ "$prefix" == "$ver" ]]; then
+        prefix="0"
+    fi
+    patch=$((10#$patch + 1))
+    new_ver="${prefix}.${patch}"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $new_ver" "$plist"
+    echo "$new_ver"
+}
+
 create_dmg() {
     local app_path="$1"
     local dmg_path="$2"
     echo "Creating styled installer DMG ..."
     "$SCRIPT_DIR/create_styled_dmg.sh" "$app_path" "$dmg_path"
     open "$dmg_path"
+}
+
+upload_swift_release() {
+    local dmg_path="$1"
+    local version="$2"
+    local remote="${PROWSER_SWIFT_UPLOAD_REMOTE:-pi@rpi:/var/www/waltzremote}"
+    local php_path="$SWIFT_ROOT/../prowser.php"
+
+    if ! command -v scp >/dev/null; then
+        echo "error: scp is required for --upload" >&2
+        exit 1
+    fi
+    if [[ ! -f "$dmg_path" ]]; then
+        echo "error: DMG not found: $dmg_path" >&2
+        exit 1
+    fi
+    if [[ ! -f "$php_path" ]]; then
+        echo "error: prowser.php not found: $php_path" >&2
+        exit 1
+    fi
+
+    echo "Uploading release $version to $remote ..."
+    scp "$dmg_path" "${remote}/prowser-swift-${version}.dmg"
+    scp "$dmg_path" "${remote}/prowser-swift-latest.dmg"
+    scp "$php_path" "${remote}/prowser.php"
+    echo "  prowser-swift-${version}.dmg"
+    echo "  prowser-swift-latest.dmg"
+    echo "  prowser.php"
 }
 
 # SPM copies Prowser/Resources symlinks as-is; relative targets break inside a .app on another Mac.
@@ -300,7 +350,8 @@ Options:
   --skip-build            Package existing .build artifacts (no swift build)
   --bench                 Also build FaceDetectBench CLI (not packaged in .app)
   --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
-  --dmg [PATH]            Also create styled LZMA (ULMO) installer DMG (default: /tmp/Prowser-swift-${APP_VERSION}.dmg)
+  --dmg [PATH]            Create installer DMG (bumps patch version, regenerates prowser.php; default DMG: /tmp/prowser-swift-<version>.dmg)
+  --upload                Implies --dmg; scp DMG (versioned + latest) and prowser.php (PROWSER_SWIFT_UPLOAD_REMOTE)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
   --fda                   After build: reset TCC + open FDA Settings (no clipboard/dialog)
   --install PATH          Copy signed .app to PATH (e.g. /Applications/swift-prowser.app) for a stable FDA target
@@ -336,10 +387,16 @@ while [[ $# -gt 0 ]]; do
             CREATE_DMG=1
             if [[ $# -gt 1 && "$2" != -* ]]; then
                 DMG_OUTPUT="$2"
+                DMG_OUTPUT_USER_SET=1
                 shift 2
             else
                 shift
             fi
+            ;;
+        --upload)
+            UPLOAD_SWIFT=1
+            CREATE_DMG=1
+            shift
             ;;
         --nerb)
             NERB_PROFILE=1
@@ -376,6 +433,15 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$CREATE_DMG" -eq 1 ]]; then
+    APP_VERSION="$(bump_short_version_patch "$INFO_PLIST_SRC")"
+    echo "Release version: $APP_VERSION"
+    if [[ "$DMG_OUTPUT_USER_SET" -eq 0 ]]; then
+        DMG_OUTPUT="/tmp/prowser-swift-${APP_VERSION}.dmg"
+    fi
+    python3 "$SCRIPT_DIR/adapt_prowser_php_for_swift.py"
+fi
 
 OUTPUT="$(cd "$(dirname "$OUTPUT")" && pwd)/$(basename "$OUTPUT")"
 
@@ -539,4 +605,7 @@ fi
 
 if [[ "$CREATE_DMG" -eq 1 ]]; then
     create_dmg "$OUTPUT" "$DMG_OUTPUT"
+    if [[ "$UPLOAD_SWIFT" -eq 1 ]]; then
+        upload_swift_release "$DMG_OUTPUT" "$APP_VERSION"
+    fi
 fi

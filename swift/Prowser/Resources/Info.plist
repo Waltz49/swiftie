@@ -4,38 +4,11 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
-	<key>CFBundleExecutable</key>
-	<string>Prowser</string>
-	<key>CFBundleIdentifier</key>
-	<string>com.prowser.Prowser</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>swift-prowser</string>
 	<key>CFBundleDisplayName</key>
 	<string>swift-prowser</string>
-	<key>CFBundleIconFile</key>
-	<string>Prowser</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>0.9.4</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
-			<key>CFBundleTypeName</key>
-			<string>Image</string>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
-			<key>LSHandlerRank</key>
-			<string>Alternate</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>public.image</string>
-				<string>public.camera-raw-image</string>
-			</array>
 			<key>CFBundleTypeExtensions</key>
 			<array>
 				<string>jpg</string>
@@ -57,8 +30,26 @@
 				<string>pef</string>
 				<string>srw</string>
 			</array>
+			<key>CFBundleTypeName</key>
+			<string>Image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.camera-raw-image</string>
+			</array>
 		</dict>
 		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>jpg</string>
+				<string>jpeg</string>
+				<string>png</string>
+				<string>webp</string>
+			</array>
 			<key>CFBundleTypeName</key>
 			<string>JPEG PNG WebP Image</string>
 			<key>CFBundleTypeRole</key>
@@ -71,13 +62,6 @@
 				<string>public.png</string>
 				<string>org.webmproject.webp</string>
 				<string>public.webp</string>
-			</array>
-			<key>CFBundleTypeExtensions</key>
-			<array>
-				<string>jpg</string>
-				<string>jpeg</string>
-				<string>png</string>
-				<string>webp</string>
 			</array>
 		</dict>
 		<dict>
@@ -93,12 +77,28 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleExecutable</key>
+	<string>Prowser</string>
+	<key>CFBundleIconFile</key>
+	<string>Prowser</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.prowser.Prowser</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>swift-prowser</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.9.5</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>LSMultipleInstancesProhibited</key>
 	<true/>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Prowser displays images that live inside your Photos library when you browse them.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Prowser uses automation to export infill masks from Pixelmator Pro when you choose Refine in Pixelmator.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Prowser displays images that live inside your Photos library when you browse them.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

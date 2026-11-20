@@ -21,6 +21,10 @@ enum BrowserWindowIdentity {
     private static let sceneWindowTitles: Set<String> = ["Job Control", "Image Generation"]
     private static let mainWindowTitle = "Prowser"
 
+    static func versionedMainWindowTitleBase() -> String {
+        "\(mainWindowTitle) \(AboutBuildInfo.packageVersion())"
+    }
+
     static func tagMainBrowserWindow(_ window: NSWindow?) {
         guard let window else { return }
         guard !isAuxiliaryWindow(window) else { return }
@@ -36,7 +40,10 @@ enum BrowserWindowIdentity {
     }
 
     private static func isMainBrowserWindowTitle(_ title: String) -> Bool {
-        title == mainWindowTitle || title.hasPrefix("\(mainWindowTitle) - ")
+        let base = versionedMainWindowTitleBase()
+        if title == base { return true }
+        if title.hasPrefix("\(base) - ") { return true }
+        return title == mainWindowTitle || title.hasPrefix("\(mainWindowTitle) - ")
     }
 
     /// Visible primary browser (shortcuts / menu gating).

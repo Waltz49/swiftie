@@ -101,14 +101,14 @@ struct MainWindowView: View {
 
     @MainActor
     private static func navigationTitle(appState: AppState) -> String {
-        let appName = "Prowser"
+        let base = BrowserWindowIdentity.versionedMainWindowTitleBase()
         if let path = appState.fileData.currentImagePath, !path.isEmpty {
-            return "\(appName) - \((path as NSString).lastPathComponent)"
+            return "\(base) - \((path as NSString).lastPathComponent)"
         }
         if let directory = appState.fileData.currentDirectory, !directory.isEmpty {
-            return "\(appName) - \((directory as NSString).lastPathComponent)"
+            return "\(base) - \((directory as NSString).lastPathComponent)"
         }
-        return appName
+        return base
     }
 }
 

@@ -3,58 +3,49 @@
 
 from __future__ import annotations
 
+import plistlib
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path("/Users/douglasnadel/dev/testchat/image_browser/prowser.php")
 DEST = ROOT / "prowser.php"
+INFO_PLIST = ROOT / "swift" / "Prowser" / "Resources" / "Info.plist"
 
-PHP_HEAD = r'''<?php
-function resolve_swift_dmg_basename(): string
-{
-    $candidates = [
-        __DIR__ . '/Prowser-swift.dmg',
-        __DIR__ . '/prowser_swift.dmg',
-    ];
-    foreach ($candidates as $path) {
-        if (is_file($path)) {
-            return basename($path);
-        }
-    }
-    $best_path = null;
-    $best_mtime = 0;
-    foreach (glob(__DIR__ . '/Prowser-swift*.dmg') ?: [] as $path) {
-        $base = basename($path);
-        if (strpos($base, '-min.dmg') !== false) {
-            continue;
-        }
-        $mtime = @filemtime($path);
-        if ($mtime !== false && $mtime >= $best_mtime) {
-            $best_mtime = $mtime;
-            $best_path = $path;
-        }
-    }
-    return $best_path !== null ? basename($best_path) : 'Prowser-swift.dmg';
-}
+SWIFT_DMG_LATEST = "prowser-swift-latest.dmg"
 
-$swift_dmg_basename = resolve_swift_dmg_basename();
-$seo_app_version = '0.9.4';
-if (preg_match('/Prowser-swift-(\d+\.\d+\.\d+)\.dmg$/', $swift_dmg_basename, $version_match)) {
-    $seo_app_version = $version_match[1];
-} elseif (preg_match('/Prowser-(\d+\.\d+\.\d+)\.dmg$/', $swift_dmg_basename, $version_match)) {
-    $seo_app_version = $version_match[1];
-}
 
-$download_variants = [
-    'swift' => [
-        'path' => './' . $swift_dmg_basename,
-        'filename' => $swift_dmg_basename,
-        'summary' => 'Native Swift build for Apple silicon.',
-        'intro' => 'Native Swift Prowser for macOS (Apple silicon).',
-    ],
-];
+def read_app_version() -> str:
+    with INFO_PLIST.open("rb") as handle:
+        plist = plistlib.load(handle)
+    version = plist.get("CFBundleShortVersionString")
+    if not isinstance(version, str) or not version:
+        raise SystemExit(f"Missing CFBundleShortVersionString in {INFO_PLIST}")
+    return version
 
+
+def php_head(app_version: str) -> str:
+    """PHP preamble: stable latest DMG URL; SEO version from Swift Info.plist at generate time."""
+    safe_version = app_version.replace("\\", "\\\\").replace("'", "\\'")
+    version_lines = (
+        "<?php\n"
+        f"$swift_dmg_basename = '{SWIFT_DMG_LATEST}';\n"
+        f"$seo_app_version = '{safe_version}';\n"
+        "\n"
+        "$download_variants = [\n"
+        "    'swift' => [\n"
+        "        'path' => './' . $swift_dmg_basename,\n"
+        "        'filename' => $swift_dmg_basename,\n"
+        "        'summary' => 'Native Swift build for Apple silicon.',\n"
+        "        'intro' => 'Native Swift Prowser for macOS (Apple silicon).',\n"
+        "    ],\n"
+        "];\n"
+        "\n"
+    )
+    return version_lines + PHP_HEAD_SUFFIX
+
+
+PHP_HEAD_SUFFIX = r'''
 function log_download_invisible()
 {
     $logfile = __DIR__ . '/log.txt';
@@ -83,6 +74,51 @@ function format_time_ago($filetime)
         $ago_parts[] = $minutes . ' min' . ($minutes !== 1 ? 's' : '');
     }
     return implode(', ', $ago_parts) . ' ago';
+}
+
+function resolve_swift_dmg_release_version(string $latestPath): ?string
+{
+    $latestFsPath = $latestPath;
+    if (strncmp($latestPath, './', 2) === 0) {
+        $latestFsPath = __DIR__ . substr($latestPath, 1);
+    } elseif ($latestPath !== '' && $latestPath[0] !== '/') {
+        $latestFsPath = __DIR__ . '/' . $latestPath;
+    }
+    if (!is_file($latestFsPath)) {
+        return null;
+    }
+    $size = filesize($latestFsPath);
+    $mtime = filemtime($latestFsPath);
+    if ($size === false || $mtime === false) {
+        return null;
+    }
+    $patterns = [
+        __DIR__ . '/prowser-swift-*.dmg',
+        __DIR__ . '/Prowser-swift-*.dmg',
+    ];
+    foreach ($patterns as $pattern) {
+        foreach (glob($pattern) ?: [] as $path) {
+            $base = basename($path);
+            if (preg_match('/-latest\.dmg$/i', $base)) {
+                continue;
+            }
+            if (strpos($base, '-min.dmg') !== false) {
+                continue;
+            }
+            if (!preg_match('/^(?:prowser|Prowser)-swift-(\d+\.\d+\.\d+)\.dmg$/i', $base, $match)) {
+                continue;
+            }
+            $candidateSize = @filesize($path);
+            $candidateMtime = @filemtime($path);
+            if ($candidateSize === false || $candidateMtime === false) {
+                continue;
+            }
+            if ((int) $candidateSize === (int) $size && (int) $candidateMtime === (int) $mtime) {
+                return $match[1];
+            }
+        }
+    }
+    return null;
 }
 
 function get_dmg_info($path)
@@ -125,6 +161,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download_dmg'])) {
 
 foreach ($download_variants as $key => $variant) {
     $download_variants[$key] = array_merge($variant, get_dmg_info($variant['path']));
+}
+
+$swift_dmg_release_version = $seo_app_version;
+if (!empty($download_variants['swift']['available'])) {
+    $resolved_swift_version = resolve_swift_dmg_release_version($download_variants['swift']['path']);
+    if ($resolved_swift_version !== null) {
+        $swift_dmg_release_version = $resolved_swift_version;
+        $seo_app_version = $resolved_swift_version;
+    }
 }
 
 $dmg_available = !empty($download_variants['swift']['available']);
@@ -421,11 +466,12 @@ $seo_keywords = 'Prowser, macOS, Apple silicon, image browser, photo viewer, Swi
 
 
 def main() -> None:
+    app_version = read_app_version()
     text = SOURCE.read_text(encoding="utf-8")
 
     marker = "// --- Menu bar simulation"
     idx = text.index(marker)
-    text = PHP_HEAD + "\n" + marker + text[idx + len(marker) :]
+    text = php_head(app_version) + "\n" + marker + text[idx + len(marker) :]
 
     text = re.sub(
         r"\$menu_sim_sort_items = \[.*?\];",
@@ -554,6 +600,34 @@ def main() -> None:
     text = text.replace(
         "// --- Menu bar simulation (mirrors menu_manager.py + image_gen_menu.py) ---",
         "// --- Menu bar simulation (mirrors swift/Prowser/UI/Menus/ProwserCommands.swift) ---",
+    )
+
+    text = re.sub(
+        r"(\.meta-row \{\s*display: flex;\s*flex-wrap: wrap;\s*)gap: 0\.35rem 0\.5rem;\s*"
+        r"margin-bottom: 0\.35rem;\s*font-size: 0\.8125rem;",
+        r"\1gap: 0.15rem 0.5rem;\n            margin-bottom: 0.12rem;\n            font-size: 0.8125rem;\n            line-height: 1.2;",
+        text,
+        count=1,
+        flags=re.S,
+    )
+
+    download_meta_version = '''                                            <div class="download-meta">
+                                                <?php if ($variant_key === 'swift' && !empty($swift_dmg_release_version)) { ?>
+                                                <div class="meta-row">
+                                                    <span class="meta-label">Current version</span>
+                                                    <span
+                                                        class="meta-value"><?php echo htmlspecialchars($swift_dmg_release_version); ?></span>
+                                                </div>
+                                                <?php } ?>
+                                                <div class="meta-row">
+                                                    <span class="meta-label">Last updated</span>'''
+
+    text = text.replace(
+        '''                                            <div class="download-meta">
+                                                <div class="meta-row">
+                                                    <span class="meta-label">Last updated</span>''',
+        download_meta_version,
+        1,
     )
 
     DEST.write_text(text, encoding="utf-8")
