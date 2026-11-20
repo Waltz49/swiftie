@@ -48,7 +48,7 @@ struct MainWindowView: View {
         .overlay {
             CopyFeedbackOverlay()
         }
-        .navigationTitle(appState.fileData.currentDirectory.map { ($0 as NSString).lastPathComponent } ?? "Prowser")
+        .navigationTitle(Self.navigationTitle(appState: appState))
         .preferredColorScheme(appState.theme.preferredColorScheme)
         .environment(\.themeColors, appState.theme.colors)
         .background(appState.theme.colors.background)
@@ -97,6 +97,18 @@ struct MainWindowView: View {
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    @MainActor
+    private static func navigationTitle(appState: AppState) -> String {
+        let appName = "Prowser"
+        if let path = appState.fileData.currentImagePath, !path.isEmpty {
+            return "\(appName) - \((path as NSString).lastPathComponent)"
+        }
+        if let directory = appState.fileData.currentDirectory, !directory.isEmpty {
+            return "\(appName) - \((directory as NSString).lastPathComponent)"
+        }
+        return appName
     }
 }
 

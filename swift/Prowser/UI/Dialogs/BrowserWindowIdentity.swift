@@ -32,7 +32,11 @@ enum BrowserWindowIdentity {
         guard let window else { return false }
         if isAuxiliaryWindow(window) { return false }
         if window.identifier?.rawValue == main { return true }
-        return window.title == mainWindowTitle
+        return isMainBrowserWindowTitle(window.title)
+    }
+
+    private static func isMainBrowserWindowTitle(_ title: String) -> Bool {
+        title == mainWindowTitle || title.hasPrefix("\(mainWindowTitle) - ")
     }
 
     /// Visible primary browser (shortcuts / menu gating).
