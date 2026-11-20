@@ -30,6 +30,8 @@ enum ExifUserCommentRestore {
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             return false
         }
+        // Stepwise previews often hold PNG bytes at the final .webp path; piexif WebP insert fails on those files.
+        guard ExifService.imageBytesMatchPathExtension(path: path) else { return false }
         guard let env = exifPythonEnvironment() else { return false }
         guard canImportPiexif(executable: env.executable, bundleRoot: env.bundleRoot) else { return false }
 
