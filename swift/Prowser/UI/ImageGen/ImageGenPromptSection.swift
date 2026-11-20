@@ -85,9 +85,9 @@ struct ImageGenPromptSection: View {
 
     private var shouldShowImportButtons: Bool {
         switch function {
-        case "create":
+        case "create", "edit":
             return true
-        case "edit", "expand", "infill":
+        case "expand", "infill":
             return sourcePath != nil
         default:
             return false
@@ -158,7 +158,7 @@ struct ImageGenPromptSection: View {
     }
 
     private func importPrompt() {
-        if function == "create", !isBrowseOrThumbnail {
+        if function == "create" || function == "edit", !isBrowseOrThumbnail {
             ImageGenExifImport.showWarning(
                 title: "Import Text",
                 message: "Select an image in browse view, or select a single thumbnail, before importing."
@@ -186,7 +186,7 @@ struct ImageGenPromptSection: View {
     }
 
     private func importRest() {
-        if function == "create", !isBrowseOrThumbnail {
+        if function == "create" || function == "edit", !isBrowseOrThumbnail {
             ImageGenExifImport.showWarning(
                 title: "Import Rest",
                 message: "Select an image in browse view, or select a single thumbnail, before importing."

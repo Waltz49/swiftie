@@ -132,9 +132,11 @@ enum ImageGenExifImport {
         appState: AppState
     ) -> String? {
         switch function {
-        case "edit", "expand", "infill":
-            // Python edit/expand/infill panels: EXIF import from dialog ``source_path`` (canvas),
-            // not the browse-list active image.
+        case "edit":
+            guard isBrowseOrThumbnail(appState) else { return nil }
+            guard let path = activeImagePath(appState) else { return nil }
+            return exifImportablePath(path)
+        case "expand", "infill":
             guard let sourcePath, FileManager.default.isReadableFile(atPath: sourcePath) else { return nil }
             return exifImportablePath(sourcePath)
         default:
@@ -152,7 +154,25 @@ enum ImageGenExifImport {
         presentWarning: Bool = true
     ) -> String? {
         switch function {
-        case "edit", "expand", "infill":
+        case "edit":
+            guard isBrowseOrThumbnail(appState) else {
+                if presentWarning {
+                    Self.showWarning(
+                        title: "Import Size",
+                        message: "Select an image in browse view, or select a single thumbnail, "
+                            + "before importing."
+                    )
+                }
+                return nil
+            }
+            guard let path = activeImagePathForBrowseOrThumbnail(appState: appState) else {
+                if presentWarning {
+                    Self.showWarning(title: "Import Size", message: "No image selected.")
+                }
+                return nil
+            }
+            return path
+        case "expand", "infill":
             guard let sourcePath, FileManager.default.isReadableFile(atPath: sourcePath) else {
                 if presentWarning {
                     Self.showWarning(title: "Import Size", message: "No image selected.")
@@ -267,8 +287,8 @@ enum ImageGenExifImport {
         }
 
         var sourcePaths: [String]?
-        if function == "edit", let sourcePath {
-            let references = await ReferenceGraphService.validExifReferencePathsForImage(sourcePath)
+        if function == "edit" {
+            let references = await ReferenceGraphService.validExifReferencePathsForImage(path)
             sourcePaths = ImageGenEditSourcePaths.mergeImportedPaths(
                 existing: existingSourcePaths,
                 imported: references

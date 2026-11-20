@@ -55,8 +55,8 @@ struct ImageGenPanelShell: View {
         selectedPlugin?["pipeline_id"] as? String ?? ""
     }
 
-    /// Edit: the leftmost source image is the single source of truth for imports and
-    /// ``source_image_path`` (Python ``_edit_first_source_path`` / ``job_values_snapshot``).
+    /// Edit: canvas leftmost source drives ``source_image_path``; EXIF import buttons use the active
+    /// browse/thumbnail image, not the edit preview canvas.
     private var effectiveSourcePath: String? {
         if function == "edit" {
             return effectiveSourcePaths.first
