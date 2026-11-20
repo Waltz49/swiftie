@@ -343,7 +343,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
     private var dropInsertionIndex: Int?
     private var dropIndicatorRect: NSRect?
     private var externalDragStarted = false
-    /// Plain click on an already-selected thumb in multiselect is deferred to mouse up (Python delayed single-click) so drag keeps the batch.
+    /// Past drag threshold for this press (Python ``_dragging``); deferred selection is skipped until the next press.
+    private var thumbnailPressDragging = false
+    /// Thumbnail selection is deferred to mouse up (Python ``mouseReleaseEvent``) so drag/drop does not sync the file tree on press.
     private var deferredThumbnailClick: (
         index: Int,
         path: String,
@@ -351,7 +353,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         cmdPressed: Bool,
         ctrlPressed: Bool
     )?
-    /// Set when the pointer moves past the drag threshold (Python ``_dragging``); survives ``resetDragState`` until mouse up.
+    /// Blocks browse open on mouse up after a drag gesture or inline-rename pill press.
     private var suppressBrowseActivation = false
     private var draggingPaths: [String] = []
     private let dragThreshold: CGFloat = 6
@@ -1239,6 +1241,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         dragSourcePath = path
         dragStartPoint = point
         externalDragStarted = false
+        thumbnailPressDragging = false
         suppressBrowseActivation = false
         draggingPaths = []
         dropInsertionIndex = nil
@@ -1246,24 +1249,9 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let shiftPressed = flags.contains(.shift)
         let cmdPressed = flags.contains(.command)
         let ctrlPressed = flags.contains(.control)
-        let preserveMultiSelectForDrag =
-            !shiftPressed && !cmdPressed && !ctrlPressed
-            && (appState?.selection.selectedFiles.count ?? 0) > 1
-            && (appState?.selection.selectedFiles.contains(path) ?? false)
-        if preserveMultiSelectForDrag {
-            deferredThumbnailClick = (
-                index, path, shiftPressed, cmdPressed, ctrlPressed
-            )
-        } else {
-            deferredThumbnailClick = nil
-            gridDelegate?.thumbnailGridDidClick(
-                index: index,
-                path: path,
-                shiftPressed: shiftPressed,
-                cmdPressed: cmdPressed,
-                ctrlPressed: ctrlPressed
-            )
-        }
+        deferredThumbnailClick = (
+            index, path, shiftPressed, cmdPressed, ctrlPressed
+        )
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1281,7 +1269,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         let shiftPressed = flags.contains(.shift)
         let cmdPressed = flags.contains(.command)
         let ctrlPressed = flags.contains(.control)
-        if let deferred = deferredThumbnailClick, !externalDragStarted {
+        if let deferred = deferredThumbnailClick, !thumbnailPressDragging {
             gridDelegate?.thumbnailGridDidClick(
                 index: deferred.index,
                 path: deferred.path,
@@ -1318,6 +1306,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         guard let start = dragStartPoint, let sourcePath = dragSourcePath else { return }
         let distance = hypot(point.x - start.x, point.y - start.y)
         guard distance >= dragThreshold else { return }
+        thumbnailPressDragging = true
         suppressBrowseActivation = true
         guard !externalDragStarted else { return }
         beginExternalDrag(from: sourcePath, event: event)
@@ -1407,6 +1396,7 @@ final class ThumbnailGridNSView: NSView, NSDraggingSource {
         dragStartPoint = nil
         deferredThumbnailClick = nil
         externalDragStarted = false
+        thumbnailPressDragging = false
         draggingPaths = []
         dropInsertionIndex = nil
         dropIndicatorRect = nil
