@@ -27,6 +27,7 @@ _PLUGIN_REGISTRATIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("imagegen_plugins.z_image_turbo_mflux_4bit", ("Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN",)),
     ("imagegen_plugins.z_image_turbo_mflux", ("Z_IMAGE_TURBO_MFLUX_PLUGIN",)),
     ("imagegen_plugins.realistic_vision_v4_sd15", ("REALISTIC_VISION_V4_SD15_PLUGIN",)),
+    ("imagegen_plugins.realistic_vision_v6_sd15", ("REALISTIC_VISION_V6_SD15_PLUGIN",)),
     ("imagegen_plugins.sd15_base_plugin", ("SD15_BASE_V1_5_PLUGIN",)),
     ("imagegen_plugins.anything_furry_sd15", ("ANYTHING_FURRY_SD15_PLUGIN",)),
     ("imagegen_plugins.sdxl_base_plugin", ("SDXL_BASE_1_0_PLUGIN",)),

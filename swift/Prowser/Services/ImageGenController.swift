@@ -2273,6 +2273,11 @@ final class ImageGenController {
                 if suppressTaskFailureUI || queuePersistSuppressed {
                     return
                 }
+                // Worker cancel after the batch already cleared (e.g. skip-copy advanced the queue).
+                if pendingCancelJobID.isEmpty, !copyBatchCancelled,
+                   activeJobID == nil, stepRunning == nil, stepPendingDoc == nil {
+                    return
+                }
                 let shouldContinue = shouldContinueAfterCopyAbort()
                 if shouldContinue {
                     continueAfterAbortedStepSync()

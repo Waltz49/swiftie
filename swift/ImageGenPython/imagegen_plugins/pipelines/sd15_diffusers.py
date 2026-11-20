@@ -19,7 +19,12 @@ from typing import Any, Dict, Optional, Tuple
 
 from prowser_temp_files import prowser_mkstemp_path
 
-from imagegen_plugins.hf_model_ids import REALISTIC_VISION_V4_NOVAE, SD15_DEFAULT_VAE
+from imagegen_plugins.hf_model_ids import (
+    REALISTIC_VISION_V4_NOVAE,
+    SD15_BASE_V1_5,
+    SD15_DEFAULT_VAE,
+    resolve_sd15_checkpoint_path,
+)
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.lora_catalog import lora_weights_file_is_valid
 
@@ -29,7 +34,7 @@ _DEFAULT_VAE_HF_MODEL_ID = SD15_DEFAULT_VAE
 _PROGRESSIVE_PREVIEW_MIN_INTERVAL_S = 2.0 # DGN
 
 _pipe = None
-_loaded_model_key: Optional[Tuple[str, str]] = None
+_loaded_model_key: Optional[Tuple[str, str, str]] = None
 _active_lora_key: Optional[Tuple[str, float]] = None
 _active_lora_peft: bool = False
 
@@ -89,6 +94,16 @@ def _from_pretrained_source(repo_id: str) -> Tuple[str, Dict[str, Any]]:
     if local:
         return local, {"local_files_only": True}
     return repo_id, {}
+
+
+def _sd15_single_file_config_source() -> Tuple[str, Dict[str, Any]]:
+    """Config for ``from_single_file``; partial diffusers-only SD1.5 cache lacks feature_extractor."""
+    local = _cached_hf_snapshot_path(SD15_BASE_V1_5)
+    if local:
+        fe_cfg = os.path.join(local, "feature_extractor", "preprocessor_config.json")
+        if os.path.isfile(fe_cfg):
+            return local, {"local_files_only": True}
+    return SD15_BASE_V1_5, {}
 
 
 def _pick_torch_device() -> Tuple[str, Any]:
@@ -214,9 +229,19 @@ def _resolve_vae_hf_model_id(payload: Dict[str, Any]) -> str:
     return _DEFAULT_VAE_HF_MODEL_ID
 
 
-def _ensure_pipeline(hf_model_id: str, vae_hf_model_id: str) -> Any:
+def _sd15_hf_snapshot_usable(hf_model_id: str) -> bool:
+    from imagegen_plugins.image_gen_model_availability import _hf_repo_snapshot_is_complete
+
+    return _hf_repo_snapshot_is_complete(hf_model_id, ("unet", "text_encoder"))
+
+
+def _ensure_pipeline(
+    hf_model_id: str, vae_hf_model_id: str, *, checkpoint_path: str = ""
+) -> Any:
     global _pipe, _loaded_model_key
-    model_key = (hf_model_id, vae_hf_model_id)
+    resolved_ckpt = resolve_sd15_checkpoint_path(hf_model_id, checkpoint_path or None)
+    ckpt_key = str(resolved_ckpt) if resolved_ckpt else ""
+    model_key = (hf_model_id, vae_hf_model_id, ckpt_key)
     if _pipe is not None and _loaded_model_key == model_key:
         from workers.model_tasks_worker import perf_log_kv
 
@@ -230,24 +255,47 @@ def _ensure_pipeline(hf_model_id: str, vae_hf_model_id: str) -> Any:
     load_t0 = time.perf_counter()
     device, torch_dtype = _pick_torch_device()
     tok_kwargs = _hf_hub_token_kwargs()
-    model_src, model_local_kwargs = _from_pretrained_source(hf_model_id)
-    pipe_kwargs: Dict[str, Any] = {
-        "torch_dtype": torch_dtype,
-        "safety_checker": None,
-        "requires_safety_checker": False,
-        "feature_extractor": None,
-        **tok_kwargs,
-        **model_local_kwargs,
-    }
+    vae_module = None
     if vae_hf_model_id:
         vae_src, vae_local_kwargs = _from_pretrained_source(vae_hf_model_id)
-        pipe_kwargs["vae"] = AutoencoderKL.from_pretrained(
+        vae_module = AutoencoderKL.from_pretrained(
             vae_src,
             torch_dtype=torch_dtype,
             **tok_kwargs,
             **vae_local_kwargs,
         )
-    _pipe = StableDiffusionPipeline.from_pretrained(model_src, **pipe_kwargs)
+    use_single_file = resolved_ckpt is not None and not _sd15_hf_snapshot_usable(hf_model_id)
+    if use_single_file and resolved_ckpt is not None:
+        config_src, config_local = _sd15_single_file_config_source()
+        single_kwargs: Dict[str, Any] = {
+            "torch_dtype": torch_dtype,
+            "config": config_src,
+            "load_safety_checker": False,
+            "safety_checker": None,
+            "requires_safety_checker": False,
+            "feature_extractor": None,
+            **tok_kwargs,
+            **config_local,
+        }
+        if vae_module is not None:
+            single_kwargs["vae"] = vae_module
+        _pipe = StableDiffusionPipeline.from_single_file(
+            str(resolved_ckpt),
+            **single_kwargs,
+        )
+    else:
+        model_src, model_local_kwargs = _from_pretrained_source(hf_model_id)
+        pipe_kwargs: Dict[str, Any] = {
+            "torch_dtype": torch_dtype,
+            "safety_checker": None,
+            "requires_safety_checker": False,
+            "feature_extractor": None,
+            **tok_kwargs,
+            **model_local_kwargs,
+        }
+        if vae_module is not None:
+            pipe_kwargs["vae"] = vae_module
+        _pipe = StableDiffusionPipeline.from_pretrained(model_src, **pipe_kwargs)
     _pipe.to(device)
     if hasattr(_pipe, "enable_attention_slicing"):
         try:
@@ -291,6 +339,18 @@ def _preview_image_from_latents(pipe: Any, latents: Any) -> Any:
     return image
 
 
+def _final_image_for_save(
+    pipe: Any, out: Any, final_latents: Optional[Any]
+) -> Any:
+    """Prefer manual VAE decode when latents are available (matches progressive previews on MPS)."""
+    if final_latents is not None:
+        return _preview_image_from_latents(pipe, final_latents)
+    images = getattr(out, "images", None) or []
+    if images:
+        return images[0]
+    raise RuntimeError("sd15_diffusers: pipeline returned no images")
+
+
 def _write_progressive_preview(pipe: Any, latents: Any, output_path: str) -> bool:
     """Decode latents and atomically update the run's output image for browse preview."""
     from imagegen_plugins.image_gen_output_format import pil_save_kwargs_for_path
@@ -323,6 +383,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     hf_model_id = str(payload.get("hf_model_id") or _DEFAULT_HF_MODEL_ID)
     vae_hf_model_id = _resolve_vae_hf_model_id(payload)
+    checkpoint_path = str(payload.get("checkpoint_path") or "").strip()
     w, h = align_sd15_dims(
         int(payload["width"]),
         int(payload["height"]),
@@ -364,7 +425,9 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     t0 = time.perf_counter()
     with PerfTimer("sd15_pipeline", model=hf_model_id):
-        pipe = _ensure_pipeline(hf_model_id, vae_hf_model_id)
+        pipe = _ensure_pipeline(
+            hf_model_id, vae_hf_model_id, checkpoint_path=checkpoint_path
+        )
     lora_scale = _sync_lora_weights(
         pipe,
         payload.get("sd15_lora_paths"),
@@ -376,6 +439,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     from imagegen_plugins.pipelines.mflux_stepwise_progress import emit_mflux_progress
 
     last_preview_at = time.monotonic()
+    final_latents: Optional[Any] = None
 
     from workers.model_tasks_worker import abort_if_generation_cancelled
 
@@ -383,37 +447,38 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         pipe_obj: Any, step_index: int, timestep: Any, callback_kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
         abort_if_generation_cancelled()
-        nonlocal last_preview_at
+        nonlocal last_preview_at, final_latents
         step_num = step_index + 1
         preview_path: Optional[str] = None
-        if progressive_vae_previews and step_num < steps:
-            latents = callback_kwargs.get("latents")
-            if latents is not None:
-                now = time.monotonic()
-                if now - last_preview_at >= _PROGRESSIVE_PREVIEW_MIN_INTERVAL_S:
-                    try:
-                        if _write_progressive_preview(pipe_obj, latents, output_path):
-                            preview_path = output_path
-                            last_preview_at = now
-                            from imagegen_plugins.pipelines.diffusers_progressive_exif import (
-                                stamp_progressive_preview_exif,
-                            )
-
-                            stamp_progressive_preview_exif(
-                                output_path,
-                                payload,
-                                hf_model_id=hf_model_id,
-                                completed_step=step_num,
-                                total_steps=steps,
-                                elapsed_seconds=time.perf_counter() - t0,
-                                seed=seed if not payload.get("random_seed") else None,
-                            )
-                    except Exception as exc:
-                        print(
-                            f"[sd15_diffusers] progressive preview failed at step {step_num}: {exc}",
-                            file=sys.stderr,
+        latents = callback_kwargs.get("latents")
+        if latents is not None and step_num == steps:
+            final_latents = latents
+        if progressive_vae_previews and step_num < steps and latents is not None:
+            now = time.monotonic()
+            if now - last_preview_at >= _PROGRESSIVE_PREVIEW_MIN_INTERVAL_S:
+                try:
+                    if _write_progressive_preview(pipe_obj, latents, output_path):
+                        preview_path = output_path
+                        last_preview_at = now
+                        from imagegen_plugins.pipelines.diffusers_progressive_exif import (
+                            stamp_progressive_preview_exif,
                         )
-                        preview_path = None
+
+                        stamp_progressive_preview_exif(
+                            output_path,
+                            payload,
+                            hf_model_id=hf_model_id,
+                            completed_step=step_num,
+                            total_steps=steps,
+                            elapsed_seconds=time.perf_counter() - t0,
+                            seed=seed if not payload.get("random_seed") else None,
+                        )
+                except Exception as exc:
+                    print(
+                        f"[sd15_diffusers] progressive preview failed at step {step_num}: {exc}",
+                        file=sys.stderr,
+                    )
+                    preview_path = None
         emit_mflux_progress(
             preview_path,
             step=step_num,
@@ -425,14 +490,15 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Step counter always updates when steps > 1; VAE previews remain gated on show_progressive.
     if steps > 1:
         pipe_kwargs["callback_on_step_end"] = _on_step_end
-        if progressive_vae_previews:
-            pipe_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+        pipe_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
     from imagegen_plugins.diffusers_conditioning import (
         apply_conditioning_to_pipe_kwargs,
         encode_sd15_cached,
     )
 
-    model_key = (hf_model_id, vae_hf_model_id)
+    resolved_ckpt = resolve_sd15_checkpoint_path(hf_model_id, checkpoint_path or None)
+    ckpt_key = str(resolved_ckpt) if resolved_ckpt else ""
+    model_key = (hf_model_id, vae_hf_model_id, ckpt_key)
     lora_key = _active_lora_key
     with PerfTimer("prompt_encode", pipeline="sd15_diffusers"):
         conditioning = encode_sd15_cached(
@@ -455,7 +521,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     with PerfTimer("save_output", pipeline="sd15_diffusers"):
         from imagegen_plugins.image_gen_output_format import save_generation_image
 
-        save_generation_image(out.images[0], output_path)
+        save_generation_image(_final_image_for_save(pipe, out, final_latents), output_path)
     generation_time_seconds = time.perf_counter() - t0
 
     return {

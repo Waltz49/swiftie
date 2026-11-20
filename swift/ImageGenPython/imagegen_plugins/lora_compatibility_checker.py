@@ -21,6 +21,7 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_9B_KV,
     LORA_PROBE_MODEL_ORDER,
     REALISTIC_VISION_V4_NOVAE,
+    REALISTIC_VISION_V6_NOVAE,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     SD15_DEFAULT_VAE,
     SD15_LORA_MODEL_KEYS,
@@ -2433,7 +2434,7 @@ def _probe_lora_on_model_impl(
     if model_key in SD15_LORA_MODEL_KEYS:
         vae = (
             SD15_DEFAULT_VAE
-            if model_key == REALISTIC_VISION_V4_NOVAE
+            if model_key in (REALISTIC_VISION_V4_NOVAE, REALISTIC_VISION_V6_NOVAE)
             else ""
         )
         return _probe_diffusers(

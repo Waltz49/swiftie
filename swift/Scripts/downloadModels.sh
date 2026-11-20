@@ -28,6 +28,7 @@ MODEL_REPOS=(
   "Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers"
   "stablediffusionapi/anythingfurry"
   "SG161222/Realistic_Vision_V4.0_noVAE"
+  "SG161222/Realistic_Vision_V6.0_B1_noVAE"
   "stabilityai/sd-vae-ft-mse"
 )
 

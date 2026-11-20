@@ -23,6 +23,8 @@ final class MfluxGenerationTasks {
     private var runTask: Task<Void, Never>?
     private var stepwiseWatcher: StepwiseProgressWatcher?
     private var cancelled = false
+    /// Escalated kill after skip-copy; cancelled when the skipped run finishes or another job starts.
+    private var seriesCopySkipEscalateTask: Task<Void, Never>?
 
     var isAvailable: Bool { MfluxToolchain.shared.isAvailable }
 
@@ -37,21 +39,26 @@ final class MfluxGenerationTasks {
     /// Cooperative stop at the next diffusion step; kill subprocess only if still busy after the grace window.
     func cancelForSeriesCopySkip(cooperativeEscalateMs: Int = 3_500) {
         guard isBusy else { return }
+        seriesCopySkipEscalateTask?.cancel()
         cancelled = true
         stepwiseWatcher?.stop()
         terminateTrackedProcess(force: false)
         let jobID = activeJobID
-        Task {
-            await generationWorker.requestCancel(
+        seriesCopySkipEscalateTask = Task { [weak self] in
+            guard let self else { return }
+            await self.generationWorker.requestCancel(
                 activeJobID: jobID,
                 terminateWorker: false
             )
             guard cooperativeEscalateMs > 0 else { return }
             try? await Task.sleep(for: .milliseconds(cooperativeEscalateMs))
-            let orphanSubprocess = await generationWorker.workerSubprocessNeedsCleanup()
-            guard isBusy || orphanSubprocess else { return }
-            terminateTrackedProcess(force: true)
-            await generationWorker.requestCancel(
+            if Task.isCancelled { return }
+            // Skip may have finished and advanced the queue; never kill a later job's run.
+            guard self.activeJobID == jobID else { return }
+            let orphanSubprocess = await self.generationWorker.workerSubprocessNeedsCleanup()
+            guard self.isBusy || orphanSubprocess else { return }
+            self.terminateTrackedProcess(force: true)
+            await self.generationWorker.requestCancel(
                 activeJobID: jobID,
                 terminateWorker: true
             )
@@ -217,12 +224,21 @@ final class MfluxGenerationTasks {
                     )
                 }
                 let hfForCheck = hfModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+                let checkpointForCheck = (runPayload["checkpoint_path"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !hfForCheck.isEmpty,
-                   !ImageGenHFModelLocality.modelIsInstalled(pipelineID: pipelineID, repoID: hfForCheck) {
-                    throw MfluxCLIError.processFailed(
-                        "Model weights for \(hfForCheck) are not installed locally. "
-                            + "Use Image → Manage models… to download, then try again."
-                    )
+                   !ImageGenHFModelLocality.modelIsInstalled(
+                       pipelineID: pipelineID,
+                       repoID: hfForCheck,
+                       checkpointPath: checkpointForCheck?.isEmpty == false ? checkpointForCheck : nil
+                   ) {
+                    var message = "Model weights for \(hfForCheck) are not installed locally."
+                    if let hint = ImageGenHFModelLocality.localCheckpointInstallHint(repoID: hfForCheck) {
+                        message += "\n\n" + hint
+                    } else {
+                        message += " Use Image → Manage models… to download, then try again."
+                    }
+                    throw MfluxCLIError.processFailed(message)
                 }
                 progressHandler([
                     "type": "progress",
@@ -393,6 +409,8 @@ final class MfluxGenerationTasks {
 
     private func finishJob(jobID: String, success: Bool, outputPath: String, error: String) {
         guard jobID == activeJobID else { return }
+        seriesCopySkipEscalateTask?.cancel()
+        seriesCopySkipEscalateTask = nil
         let kind = activeKind
         isBusy = false
         activeKind = ""

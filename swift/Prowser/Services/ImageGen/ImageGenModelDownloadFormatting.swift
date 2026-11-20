@@ -23,6 +23,7 @@ enum ImageGenModelDownloadFormatting {
         LoRAHFModelIDs.zImageTurbo: 12_000_000_000,
         LoRAHFModelIDs.anythingFurry: 4_100_000_000,
         LoRAHFModelIDs.realisticVisionV4NoVAE: 4_265_000_000,
+        LoRAHFModelIDs.realisticVisionV6NoVAE: 2_132_000_000,
         LoRAHFModelIDs.sd15BaseV15: 4_400_000_000,
         "stabilityai/sd-vae-ft-mse": 334_000_000,
         LoRAHFModelIDs.sdxlBase10: 14_000_000_000,

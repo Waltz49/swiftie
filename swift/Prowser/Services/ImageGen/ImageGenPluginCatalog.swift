@@ -89,6 +89,15 @@ enum ImageGenPluginCatalog {
             reportsQuantization: false
         ),
         .init(
+            pluginID: "realistic_vision_v6_sd15",
+            pipelineID: "sd15_diffusers",
+            function: "create",
+            displayName: "Realistic Vision V6.0 B1",
+            hfModelID: LoRAHFModelIDs.realisticVisionV6NoVAE,
+            loraHostID: "sd15",
+            reportsQuantization: false
+        ),
+        .init(
             pluginID: "anything_furry_sd15",
             pipelineID: "sd15_diffusers",
             function: "create",

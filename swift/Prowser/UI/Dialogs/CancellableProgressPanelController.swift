@@ -37,6 +37,7 @@ final class CancellableProgressPanelController {
     private let progressFlushTimerTarget = ProgressFlushTimerTarget()
     private let extractionTimeEstimator = ExtractionTimeEstimator()
     private let mutedNoteColor: NSColor
+    private let labelUsesMultilineFlow: Bool
     /// Readable from background extraction tasks (CLIP/CNN).
     nonisolated var cancelRequested: Bool { cancelFlag.isCancelled }
     /// Invoked on the main thread when the user cancels (after the cancel flag is set).
@@ -70,9 +71,10 @@ final class CancellableProgressPanelController {
         self.minimumProgressUpdateInterval = throttleProgressUpdates ? minimumProgressUpdateInterval : nil
         isIndeterminateMode = indeterminate
         self.mutedNoteColor = mutedNoteColor
+        labelUsesMultilineFlow = detailText != nil
         var panelHeight: CGFloat = 120
         if detailText != nil {
-            panelHeight = showETA ? 172 : 156
+            panelHeight = showETA ? 208 : 192
         } else if showETA {
             panelHeight = 156
         }
@@ -109,10 +111,16 @@ final class CancellableProgressPanelController {
         panel.isReleasedWhenClosed = false
         panel.level = .modalPanel
 
-        label = NSTextField(labelWithString: "")
-        label.lineBreakMode = .byClipping
-        label.usesSingleLineMode = false
-        label.maximumNumberOfLines = promptAccessory == nil ? 3 : 8
+        if labelUsesMultilineFlow {
+            label = NSTextField(wrappingLabelWithString: "")
+            label.lineBreakMode = .byWordWrapping
+            label.maximumNumberOfLines = 0
+        } else {
+            label = NSTextField(labelWithString: "")
+            label.lineBreakMode = .byClipping
+            label.usesSingleLineMode = false
+            label.maximumNumberOfLines = promptAccessory == nil ? 3 : 8
+        }
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let timeRemaining: NSTextField?
@@ -244,12 +252,27 @@ final class CancellableProgressPanelController {
         }
         let progressTopSpacing: CGFloat = (timeRemaining == nil && longCompareNote == nil && promptAccessory == nil) ? 10 : 6
 
+        var labelTrailing: NSLayoutConstraint
+        if labelUsesMultilineFlow {
+            labelTrailing = label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
+        } else {
+            labelTrailing = label.trailingAnchor.constraint(
+                lessThanOrEqualTo: content.trailingAnchor,
+                constant: -20
+            )
+        }
         var constraints: [NSLayoutConstraint] = [
             label.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             label.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
-            label.widthAnchor.constraint(lessThanOrEqualToConstant: Self.labelMaxWidth),
+            labelTrailing,
             indicator.topAnchor.constraint(equalTo: progressTopAnchor, constant: progressTopSpacing),
+        ]
+        if !labelUsesMultilineFlow {
+            constraints.append(
+                label.widthAnchor.constraint(lessThanOrEqualToConstant: Self.labelMaxWidth)
+            )
+        }
+        constraints += [
             indicator.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
         ]
         if accessoryButton != nil {
@@ -523,10 +546,15 @@ final class CancellableProgressPanelController {
 
     private func setLabelOnMain(_ text: String) {
         guard !isClosed else { return }
-        let body = text
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { RenamePrefixPlanner.elideMiddle(String($0), maxLen: Self.lineMaxChars) }
-            .joined(separator: "\n")
+        let body: String
+        if labelUsesMultilineFlow {
+            body = text
+        } else {
+            body = text
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { RenamePrefixPlanner.elideMiddle(String($0), maxLen: Self.lineMaxChars) }
+                .joined(separator: "\n")
+        }
         label.stringValue = cancellingPrefixedLabel(body)
     }
 

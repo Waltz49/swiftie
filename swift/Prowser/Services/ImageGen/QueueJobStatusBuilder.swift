@@ -232,7 +232,7 @@ enum QueueJobStatusBuilder {
         }
         let neg = (effective["negative_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !neg.isEmpty {
-            fields.neg = truncate(neg)
+            fields.neg = JobGenerationTooltipText.normalizePromptForDisplay(truncate(neg))
         }
         return fields
     }

@@ -20,6 +20,7 @@ from imagegen_plugins.hf_model_ids import (
     SDXL_LORA_MODEL_KEYS,
     ANYTHING_FURRY,
     REALISTIC_VISION_V4_NOVAE,
+    REALISTIC_VISION_V6_NOVAE,
     Z_IMAGE_TURBO,
     Z_IMAGE_TURBO_MFLUX_4BIT,
 )
@@ -103,6 +104,12 @@ LORA_SETTINGS_MODELS: Tuple[LoraSettingsModel, ...] = (
         REALISTIC_VISION_V4_NOVAE,
         REALISTIC_VISION_V4_NOVAE,
         "Create image dialog when Realistic Vision V4.0 is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        REALISTIC_VISION_V6_NOVAE,
+        REALISTIC_VISION_V6_NOVAE,
+        "Create image dialog when Realistic Vision V6.0 B1 is selected",
         ("create",),
     ),
     LoraSettingsModel(

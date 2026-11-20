@@ -116,6 +116,25 @@ final class JobCardStatusNSView: NSView {
                 rowsStack.addArrangedSubview(wrap)
 
             case .labelValue(let label, let value):
+                if label == "Neg:" {
+                    let normalized = JobGenerationTooltipText.normalizePromptForDisplay(value)
+                    let display = PromptDisplayLayout.clampPromptForDisplay(
+                        normalized,
+                        width: valueWidth,
+                        maxLines: 1
+                    )
+                    if !display.isEmpty {
+                        rowsStack.addArrangedSubview(makeLabelValueRow(
+                            label: label,
+                            value: display,
+                            valueWidth: valueWidth,
+                            width: width,
+                            wrapping: false,
+                            constrainValueWidth: true
+                        ))
+                    }
+                    break
+                }
                 let wrapValue = label == "LoRA:" || label.isEmpty
                 rowsStack.addArrangedSubview(makeLabelValueRow(
                     label: label,
@@ -205,7 +224,8 @@ final class JobCardStatusNSView: NSView {
         value: String,
         valueWidth: CGFloat,
         width: CGFloat,
-        wrapping: Bool = false
+        wrapping: Bool = false,
+        constrainValueWidth: Bool = false
     ) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
@@ -216,9 +236,12 @@ final class JobCardStatusNSView: NSView {
         lbl.widthAnchor.constraint(equalToConstant: JobQueueLayout.labelWidth).isActive = true
         row.addArrangedSubview(lbl)
         let val = makeLabel(value, muted: false, wrapping: wrapping)
-        if wrapping {
+        if wrapping || constrainValueWidth {
             val.preferredMaxLayoutWidth = valueWidth
             val.widthAnchor.constraint(equalToConstant: valueWidth).isActive = true
+            if constrainValueWidth, !wrapping {
+                val.lineBreakMode = .byTruncatingTail
+            }
         }
         row.addArrangedSubview(val)
         row.widthAnchor.constraint(equalToConstant: width).isActive = true

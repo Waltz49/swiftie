@@ -10,6 +10,11 @@ enum ImageGenHFModelLocality {
     private static let sdxlWeightSubdirs = ["unet", "text_encoder", "text_encoder_2", "vae"]
     private static let sd15DefaultVAE = "stabilityai/sd-vae-ft-mse"
 
+    /// Civitai / local .safetensors when HF diffusers layout is not cached (mirrors Python ``SD15_DEFAULT_CHECKPOINT_BY_REPO``).
+    private static let sd15DefaultCheckpointByRepo: [String: String] = [
+        LoRAHFModelIDs.realisticVisionV6NoVAE: "~/Downloads/Realistic_Vision_V6.0_NV_B1_fp16.safetensors",
+    ]
+
     private static var cache: [String: Bool] = [:]
 
     static func invalidateCache(repoID: String? = nil, pipelineID: String? = nil) {
@@ -30,15 +35,40 @@ enum ImageGenHFModelLocality {
     }
 
     static func modelIsInstalled(entry: ImageGenModelDownloadCatalogEntry) -> Bool {
-        modelIsInstalled(pipelineID: entry.pipelineID, repoID: entry.repoID)
+        modelIsInstalled(pipelineID: entry.pipelineID, repoID: entry.repoID, checkpointPath: nil)
     }
 
-    static func modelIsInstalled(pipelineID: String, repoID: String) -> Bool {
-        let key = "\(pipelineID)\u{1f}\(repoID)"
+    static func modelIsInstalled(
+        pipelineID: String,
+        repoID: String,
+        checkpointPath: String? = nil
+    ) -> Bool {
+        let key = "\(pipelineID)\u{1f}\(repoID)\u{1f}\(checkpointPath ?? "")"
         if let cached = cache[key] { return cached }
-        let result = checkLocal(pipelineID: pipelineID, repoID: repoID)
+        let result = checkLocal(pipelineID: pipelineID, repoID: repoID, checkpointPath: checkpointPath)
         cache[key] = result
         return result
+    }
+
+    /// Default local checkpoint path for a repo (expanded when the file exists).
+    static func optionalLocalCheckpointPath(repoID: String, checkpointPath: String? = nil) -> String? {
+        resolveSD15CheckpointPath(repoID: repoID, checkpointPath: checkpointPath)
+    }
+
+    /// User-facing note when a model can skip HF via a local Civitai checkpoint.
+    static func localCheckpointInstallHint(repoID: String) -> String? {
+        guard sd15DefaultCheckpointByRepo[repoID] != nil else { return nil }
+        let vae = sd15DefaultVAE
+        switch repoID {
+        case LoRAHFModelIDs.realisticVisionV6NoVAE:
+            return """
+            Realistic Vision V6.0 B1 can run from a Civitai checkpoint instead of downloading the full Hugging Face repo (~2 GB .safetensors). Put Realistic_Vision_V6.0_NV_B1_fp16.safetensors in ~/Downloads, or set checkpoint path in the Create dialog for this model.
+
+            You still need the SD VAE (\(vae)) — download it from this list if generation says the VAE is missing.
+            """
+        default:
+            return nil
+        }
     }
 
     /// On-disk install root for display (snapshot dir, tier dir, or local path). Nil when not installed.
@@ -58,12 +88,11 @@ enum ImageGenHFModelLocality {
         case "mflux_z_image_turbo":
             return newestCompleteSnapshot(repoID: repoID, subdirs: zImageWeightSubdirs)
         case "sd15_diffusers":
-            guard let main = newestCompleteSnapshot(repoID: repoID, subdirs: sd15WeightSubdirs) else {
-                return nil
+            if let main = newestCompleteSnapshot(repoID: repoID, subdirs: sd15WeightSubdirs) {
+                if hfRepoSnapshotIsComplete(repoID: repoID, subdirs: ["vae"]) { return main }
+                if hfRepoSnapshotHasWeights(repoID: sd15DefaultVAE) { return main }
             }
-            if hfRepoSnapshotIsComplete(repoID: repoID, subdirs: ["vae"]) { return main }
-            if hfRepoSnapshotHasWeights(repoID: sd15DefaultVAE) { return main }
-            return nil
+            return resolveSD15CheckpointPath(repoID: repoID, checkpointPath: nil)
         case "sdxl_diffusers":
             return newestCompleteSnapshot(repoID: repoID, subdirs: sdxlWeightSubdirs)
         default:
@@ -96,7 +125,11 @@ enum ImageGenHFModelLocality {
         return nil
     }
 
-    private static func checkLocal(pipelineID: String, repoID: String) -> Bool {
+    private static func checkLocal(
+        pipelineID: String,
+        repoID: String,
+        checkpointPath: String?
+    ) -> Bool {
         switch pipelineID {
         case "flux_schnell_mflux_play":
             return mfluxFluxWeightsAreLocal(repoID: repoID)
@@ -112,14 +145,53 @@ enum ImageGenHFModelLocality {
         case "mflux_z_image_turbo":
             return hfRepoSnapshotIsComplete(repoID: repoID, subdirs: zImageWeightSubdirs)
         case "sd15_diffusers":
-            if !hfRepoSnapshotIsComplete(repoID: repoID, subdirs: sd15WeightSubdirs) { return false }
-            if hfRepoSnapshotIsComplete(repoID: repoID, subdirs: ["vae"]) { return true }
-            return hfRepoSnapshotHasWeights(repoID: sd15DefaultVAE)
+            return sd15ModelIsInstalled(repoID: repoID, checkpointPath: checkpointPath)
         case "sdxl_diffusers":
             return hfRepoSnapshotIsComplete(repoID: repoID, subdirs: sdxlWeightSubdirs)
         default:
             return true
         }
+    }
+
+    private static func sd15ModelIsInstalled(repoID: String, checkpointPath: String?) -> Bool {
+        if hfRepoSnapshotIsComplete(repoID: repoID, subdirs: sd15WeightSubdirs) {
+            if hfRepoSnapshotIsComplete(repoID: repoID, subdirs: ["vae"]) { return true }
+            return hfRepoSnapshotHasWeights(repoID: sd15DefaultVAE)
+        }
+        guard resolveSD15CheckpointPath(repoID: repoID, checkpointPath: checkpointPath) != nil else {
+            return false
+        }
+        return hfRepoSnapshotHasWeights(repoID: sd15DefaultVAE)
+    }
+
+    private static func resolveSD15CheckpointPath(repoID: String, checkpointPath: String?) -> String? {
+        let candidates: [String]
+        if let override = checkpointPath?.trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty {
+            candidates = [override]
+        } else if let mapped = sd15DefaultCheckpointByRepo[repoID] {
+            candidates = [mapped]
+        } else {
+            return nil
+        }
+        for raw in candidates {
+            let path = (raw as NSString).expandingTildeInPath
+            guard isReadableSafetensorsFile(path) else { continue }
+            return path
+        }
+        return nil
+    }
+
+    private static func isReadableSafetensorsFile(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else {
+            return false
+        }
+        guard path.lowercased().hasSuffix(".safetensors") else { return false }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? NSNumber, size.int64Value > 0 else {
+            return false
+        }
+        return true
     }
 
     private static func mfluxFluxWeightsAreLocal(repoID: String) -> Bool {

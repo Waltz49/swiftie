@@ -33,18 +33,19 @@ enum ImageGenModelDownloadRunner {
             )
         }
 
-        let baseLabel = """
-        Downloading \(entry.repoID).
-
+        let introLabel = "Downloading \(entry.repoID)."
+        let detailText = """
         The download runs in the background so Prowser stays responsive. Progress will update below when Hugging Face reports it.
 
         You can cancel anytime; partial downloads resume later.
         """
         let panel = CancellableProgressPanelController(
             title: "Downloading \(entry.displayName)",
-            labelText: baseLabel,
+            labelText: introLabel,
             maximum: 100,
-            indeterminate: true
+            detailText: detailText,
+            indeterminate: true,
+            showsTimeRemainingEstimate: false
         )
         panel.show()
 
@@ -87,7 +88,7 @@ enum ImageGenModelDownloadRunner {
                         buffer.removeSubrange(0...newline)
                         if let line = String(data: lineData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                            !line.isEmpty {
-                            Self.handleProgressLine(line, panel: panel, baseLabel: baseLabel)
+                            Self.handleProgressLine(line, panel: panel, introLabel: introLabel)
                         }
                     }
                 }
@@ -106,10 +107,12 @@ enum ImageGenModelDownloadRunner {
 
             ImageGenHFModelLocality.invalidateCache(repoID: entry.repoID, pipelineID: entry.pipelineID)
             if !ImageGenHFModelLocality.modelIsInstalled(entry: entry) {
-                throw ImageGenModelDownloadError.downloadFailed(
-                    "Download finished but \(entry.repoID) still appears incomplete. "
-                        + "Check Hugging Face access (model license) and disk space, then try again."
-                )
+                var message = "Download finished but \(entry.repoID) still appears incomplete. "
+                    + "Check Hugging Face access (model license) and disk space, then try again."
+                if let hint = ImageGenHFModelLocality.localCheckpointInstallHint(repoID: entry.repoID) {
+                    message += "\n\n" + hint
+                }
+                throw ImageGenModelDownloadError.downloadFailed(message)
             }
         } catch let error as ImageGenModelDownloadError {
             throw error
@@ -172,7 +175,7 @@ enum ImageGenModelDownloadRunner {
         return (ProcessInfo.processInfo.environment["HF_TOKEN"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    nonisolated private static func handleProgressLine(_ line: String, panel: CancellableProgressPanelController, baseLabel: String) {
+    nonisolated private static func handleProgressLine(_ line: String, panel: CancellableProgressPanelController, introLabel: String) {
         guard let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               json["event"] as? String == "progress" else { return }
@@ -185,9 +188,9 @@ enum ImageGenModelDownloadRunner {
             if !desc.isEmpty, desc != "Downloading (incomplete total...)" {
                 progressLine = "\(desc)\n\(progressLine)"
             }
-            panel.update(value: pct, label: "\(baseLabel)\n\n\(progressLine)")
+            panel.update(value: pct, label: "\(introLabel)\n\n\(progressLine)")
         } else if !desc.isEmpty, desc != "Downloading (incomplete total...)" {
-            panel.updateStatus(label: "\(baseLabel)\n\n\(desc)")
+            panel.updateStatus(label: "\(introLabel)\n\n\(desc)")
         }
     }
 

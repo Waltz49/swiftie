@@ -93,17 +93,25 @@ def _check_z_image_local(hf_model_id: str) -> bool:
 
 
 def _check_sd15_local(hf_model_id: str) -> bool:
-    from imagegen_plugins.hf_model_ids import SD15_DEFAULT_VAE
+    from imagegen_plugins.hf_model_ids import (
+        SD15_DEFAULT_VAE,
+        sd15_default_checkpoint_path,
+    )
     from imagegen_plugins.image_gen_model_availability import (
         _hf_repo_snapshot_has_weights,
         _hf_repo_snapshot_is_complete,
     )
 
-    if not _hf_repo_snapshot_is_complete(hf_model_id, _SD15_WEIGHT_SUBDIRS):
+    has_weights = _hf_repo_snapshot_is_complete(hf_model_id, _SD15_WEIGHT_SUBDIRS)
+    local_ckpt = sd15_default_checkpoint_path(hf_model_id)
+    if not has_weights and local_ckpt is None:
         return False
     if _hf_repo_snapshot_is_complete(hf_model_id, ("vae",)):
         return True
-    return _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
+    if has_weights:
+        return _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
+    # noVAE checkpoint file: require external VAE cached.
+    return local_ckpt is not None and _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
 
 
 def _check_sdxl_local(hf_model_id: str) -> bool:

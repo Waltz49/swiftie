@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 struct ManageModelsDetailView: View {
     @Environment(\.themeColors) private var colors
     @Environment(AppState.self) private var appState
@@ -61,6 +62,16 @@ struct ManageModelsDetailView: View {
             .font(.system(size: 14, weight: .bold))
             .foregroundStyle(Color(red: 0.35, green: 0.78, blue: 0.45))
 
+        if let path = ImageGenHFModelLocality.resolvedInstallPath(
+            pipelineID: entry.pipelineID,
+            repoID: entry.repoID
+        ) {
+            Text(path)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(colors.dialogMutedText)
+                .textSelection(.enabled)
+        }
+
         if entry.gated {
             Text("Gated model — accept the license on Hugging Face and provide a token to reinstall.")
                 .font(.system(size: 12))
@@ -86,7 +97,14 @@ struct ManageModelsDetailView: View {
 
     @ViewBuilder
     private var installPanel: some View {
-        Text("Estimated download size: \(entry.formattedSizeEstimate())")
+        if let hint = ImageGenHFModelLocality.localCheckpointInstallHint(repoID: entry.repoID) {
+            Text(hint)
+                .font(.system(size: 12))
+                .foregroundStyle(colors.dialogMutedText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Text("Estimated Hugging Face download size: \(entry.formattedSizeEstimate())")
             .font(.system(size: 13))
 
         if entry.gated {

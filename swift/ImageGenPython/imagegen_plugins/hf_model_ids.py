@@ -12,6 +12,15 @@ FLUX2_KLEIN_9B_KV = "black-forest-labs/FLUX.2-klein-9b-kv"
 SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX = "SceneWorks/flux2-klein-9b-kv-mlx"
 
 REALISTIC_VISION_V4_NOVAE = "SG161222/Realistic_Vision_V4.0_noVAE"
+REALISTIC_VISION_V6_NOVAE = "SG161222/Realistic_Vision_V6.0_B1_noVAE"
+
+# Default local Civitai/HF single-file checkpoint when HF diffusers cache is absent.
+REALISTIC_VISION_V6_DEFAULT_CHECKPOINT = (
+    "~/Downloads/Realistic_Vision_V6.0_NV_B1_fp16.safetensors"
+)
+SD15_DEFAULT_CHECKPOINT_BY_REPO: dict[str, str] = {
+    REALISTIC_VISION_V6_NOVAE: REALISTIC_VISION_V6_DEFAULT_CHECKPOINT,
+}
 ANYTHING_FURRY = "stablediffusionapi/anythingfurry"
 SD15_BASE_V1_5 = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 SD15_DEFAULT_VAE = "stabilityai/sd-vae-ft-mse"
@@ -57,6 +66,7 @@ Z_IMAGE_TURBO_SDNQ_INT8 = "Disty0/Z-Image-Turbo-SDNQ-int8"
 SD15_LORA_MODEL_KEYS: tuple[str, ...] = (
     SD15_BASE_V1_5,
     REALISTIC_VISION_V4_NOVAE,
+    REALISTIC_VISION_V6_NOVAE,
     ANYTHING_FURRY,
 )
 
@@ -77,6 +87,7 @@ LORA_PROBE_MODEL_ORDER: tuple[str, ...] = (
     Z_IMAGE_TURBO,
     SD15_BASE_V1_5,
     REALISTIC_VISION_V4_NOVAE,
+    REALISTIC_VISION_V6_NOVAE,
     ANYTHING_FURRY,
     SDXL_BASE_1_0,
 )
@@ -91,6 +102,7 @@ LORA_MODEL_DISPLAY_NAMES: dict[str, str] = {
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX: "FLUX.2 Klein 9B KV MLX",
     SD15_BASE_V1_5: "SD 1.5 Base",
     REALISTIC_VISION_V4_NOVAE: "Realistic Vision V4.0",
+    REALISTIC_VISION_V6_NOVAE: "Realistic Vision V6.0 B1",
     ANYTHING_FURRY: "Anything Furry",
     SDXL_BASE_1_0: "SDXL 1.0 Base",
     Z_IMAGE_TURBO_MFLUX_4BIT: "Z-Image Turbo (4-bit)",
@@ -180,6 +192,33 @@ def migrate_legacy_z_image_job_values(values: dict) -> dict:
 
 def lora_model_display_name(hf_model_id: str) -> str:
     return LORA_MODEL_DISPLAY_NAMES.get(hf_model_id, hf_model_id)
+
+
+def sd15_default_checkpoint_path(hf_model_id: str) -> "Path | None":
+    """Repo-specific local .safetensors when HF diffusers layout is not cached."""
+    from pathlib import Path
+
+    raw = SD15_DEFAULT_CHECKPOINT_BY_REPO.get((hf_model_id or "").strip())
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if path.is_file() and path.suffix.lower() == ".safetensors" and path.stat().st_size > 0:
+        return path
+    return None
+
+
+def resolve_sd15_checkpoint_path(
+    hf_model_id: str, checkpoint_path: str | None = None
+) -> "Path | None":
+    """Payload checkpoint_path, else repo default map entry."""
+    from pathlib import Path
+
+    text = str(checkpoint_path or "").strip()
+    if text:
+        path = Path(text).expanduser()
+        if path.is_file() and path.suffix.lower() == ".safetensors" and path.stat().st_size > 0:
+            return path
+    return sd15_default_checkpoint_path(hf_model_id)
 
 
 def hf_repo_snapshot_allow_patterns(
