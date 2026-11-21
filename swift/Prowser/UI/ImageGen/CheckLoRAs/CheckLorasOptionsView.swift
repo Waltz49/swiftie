@@ -1,7 +1,15 @@
+import AppKit
 import SwiftUI
 
 @MainActor
 struct CheckLorasOptionsView: View {
+    /// Visible height for the probe prompt field (scrolls when text exceeds five lines).
+    private static let probePromptEditorHeight: CGFloat = {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let verticalInset: CGFloat = 10
+        return lineHeight * 5 + verticalInset
+    }()
     let choices: [CheckLorasProbeChoice]
     let installedModels: [CheckLorasInstalledModel]
     @Binding var options: CheckLorasOptions
@@ -352,7 +360,8 @@ struct CheckLorasOptionsView: View {
     private var probePromptSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Probe prompt").font(.headline)
-            TextField(CheckLorasOptions.defaultProbePrompt, text: $probePrompt)
+            LoRAReferencePromptEditor(text: $probePrompt)
+                .frame(height: Self.probePromptEditorHeight)
             Text(
                 "Used for every probe render (baseline and each LoRA). "
                     + "All known triggers from the LoRAs in this run are gathered once "

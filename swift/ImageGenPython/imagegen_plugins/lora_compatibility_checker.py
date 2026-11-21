@@ -44,7 +44,6 @@ from imagegen_plugins.lora_catalog import (
 )
 from imagegen_plugins.lora_catalog_settings import model_state
 from imagegen_plugins.lora_entry import DEFAULT_CACHE, _ALT_CACHE
-from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
 
 from imagegen_plugins.lora_model_registry import (
     klein_lora_model_aliases,
@@ -1291,12 +1290,20 @@ def plan_disk_lora_probes(
 
             planned_paths.add(path)
             planned_md5.add(fingerprint.md5)
+            from imagegen_plugins.lora_download_host_guess import (
+                guess_host_and_base_model_for_download,
+            )
+
+            download_host_id, download_base_hf = guess_host_and_base_model_for_download(
+                path
+            )
             pending_entry = FluxLoraEntry(
-                host_id=HOST_FLUX1_T2I,
+                host_id=download_host_id,
                 lora_id=_PENDING_DOWNLOAD_LORA_ID,
                 display_name=display_name_from_path(path),
                 local_path=str(path),
                 source_path=str(path),
+                base_hf_model_id=download_base_hf,
             )
             probe_models = _probe_models_for_entry(
                 pending_entry,
