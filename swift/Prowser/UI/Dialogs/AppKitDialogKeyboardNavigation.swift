@@ -7,9 +7,27 @@ final class FocusableDialogButton: NSButton {
     override var canBecomeKeyView: Bool { isEnabled && !isHidden }
 }
 
+/// Dialog button that only activates via mouse (no Tab / Return focus chain).
+final class MouseOnlyDialogButton: NSButton {
+    override var acceptsFirstResponder: Bool { false }
+    override var canBecomeKeyView: Bool { false }
+}
+
 /// Qt-style ←/→, Tab, Return, and Esc handling for AppKit dialog button rows.
 @MainActor
 enum AppKitDialogKeyboardNavigation {
+    /// Swallows key-down events while the panel is key or modal (mouse-only confirmations).
+    static func installKeySwallowing(on window: NSWindow) -> Any? {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let isModalDialog = NSApp.modalWindow === window
+            let panelIsKey = window.isKeyWindow
+            guard isModalDialog || panelIsKey else { return event }
+            if isModalDialog || event.window === window {
+                return nil
+            }
+            return event
+        }
+    }
     static func install(
         on window: NSWindow,
         buttonsLeftToRight: [NSButton],

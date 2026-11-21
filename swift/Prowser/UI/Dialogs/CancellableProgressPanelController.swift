@@ -42,6 +42,9 @@ final class CancellableProgressPanelController {
     nonisolated var cancelRequested: Bool { cancelFlag.isCancelled }
     /// Invoked on the main thread when the user cancels (after the cancel flag is set).
     var onCancel: (() -> Void)?
+    /// When set, the first Cancel (not “Close now”) runs this; cancellation proceeds only if it returns true.
+    var confirmBeforeCancel: (() -> Bool)?
+    var windowForNestedDialogs: NSWindow { panel }
     /// Optional leading action (e.g. Test LoRAs “Work directory”).
     var onAccessory: (() -> Void)?
 
@@ -205,6 +208,12 @@ final class CancellableProgressPanelController {
             if self.cancelFlag.isCancelled {
                 self.close()
                 return
+            }
+            if let confirmBeforeCancel = self.confirmBeforeCancel {
+                self.hideForNestedModal()
+                let proceed = confirmBeforeCancel()
+                self.restoreAfterNestedModal()
+                guard proceed else { return }
             }
             self.cancelFlag.cancel()
             self.cancelButton.title = "Close now"

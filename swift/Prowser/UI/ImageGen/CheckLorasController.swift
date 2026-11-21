@@ -1,7 +1,19 @@
+import AppKit
 import SwiftUI
 
 @MainActor
 enum CheckLorasController {
+    fileprivate static func confirmCancelTestLoras(parentWindow: NSWindow) -> Bool {
+        StyledMessageDialog.showConfirmRequiringMouseClick(
+            title: "Cancel Test LoRAs?",
+            message:
+                "Test LoRAs will stop. Completed probes are kept; work in progress is discarded.",
+            confirmTitle: "Continue cancellation",
+            cancelTitle: "Keep Running",
+            parentWindow: parentWindow
+        )
+    }
+
     static func present(from appState: AppState) {
         if appState.workers.modelTasks.isBusy {
             StyledMessageDialog.showWarning(
@@ -84,6 +96,9 @@ enum CheckLorasController {
                 showsTimeRemainingEstimate: false,
                 throttleProgressUpdates: false
             )
+            preparing.confirmBeforeCancel = {
+                CheckLorasController.confirmCancelTestLoras(parentWindow: preparing.windowForNestedDialogs)
+            }
             preparing.onCancel = {
                 Task { try? await bridge.checkLorasCancel() }
             }
@@ -131,6 +146,9 @@ enum CheckLorasController {
                 accessoryButtonTitle: "Work directory",
                 promptAccessoryText: baseProbePrompt
             )
+            progress.confirmBeforeCancel = {
+                CheckLorasController.confirmCancelTestLoras(parentWindow: progress.windowForNestedDialogs)
+            }
             progress.onCancel = {
                 Task { try? await bridge.checkLorasCancel() }
             }

@@ -44,7 +44,8 @@ enum StyledMessageDialog {
         initialFirstResponder: NSView? = nil,
         parentWindow: NSWindow? = nil,
         shouldAutoDismiss: (() -> Bool)? = nil,
-        onModalSessionTick: (() -> Void)? = nil
+        onModalSessionTick: (() -> Void)? = nil,
+        keyboardNavigationEnabled: Bool = true
     ) -> Int? {
         let specs = buttons.isEmpty ? [Button("OK")] : buttons
         let leftToRight = visualLeftToRightOrder(specs)
@@ -61,15 +62,21 @@ enum StyledMessageDialog {
             defaultButtonIndex: defaultVisualIndex,
             escapeButtonIndex: escapeVisualIndex,
             accessoryView: accessoryView,
-            initialFirstResponder: initialFirstResponder
+            initialFirstResponder: initialFirstResponder,
+            keyboardNavigationEnabled: keyboardNavigationEnabled
         )
 
-        let monitor = AppKitDialogKeyboardNavigation.install(
-            on: controller.panel,
-            buttonsLeftToRight: controller.buttonsLeftToRight,
-            escapeButton: controller.escapeButton,
-            hasTextAccessory: accessoryView != nil
-        )
+        let monitor: Any?
+        if keyboardNavigationEnabled {
+            monitor = AppKitDialogKeyboardNavigation.install(
+                on: controller.panel,
+                buttonsLeftToRight: controller.buttonsLeftToRight,
+                escapeButton: controller.escapeButton,
+                hasTextAccessory: accessoryView != nil
+            )
+        } else {
+            monitor = AppKitDialogKeyboardNavigation.installKeySwallowing(on: controller.panel)
+        }
         defer {
             if let monitor {
                 NSEvent.removeMonitor(monitor)
@@ -219,6 +226,29 @@ enum StyledMessageDialog {
         return index == 1
     }
 
+    /// Cancel confirmation that ignores the keyboard (user must click the confirm button).
+    @discardableResult
+    static func showConfirmRequiringMouseClick(
+        title: String,
+        message: String,
+        confirmTitle: String,
+        cancelTitle: String,
+        parentWindow: NSWindow? = nil
+    ) -> Bool {
+        let index = present(
+            title: title,
+            message: message,
+            style: .warning,
+            icon: .warning,
+            buttons: [Button(cancelTitle, role: .dismissive), Button(confirmTitle)],
+            defaultButtonIndex: nil,
+            escapeButtonIndex: nil,
+            parentWindow: parentWindow,
+            keyboardNavigationEnabled: false
+        )
+        return index == 1
+    }
+
     /// Password prompt (secure field).
     static func presentPasswordInput(
         title: String,
@@ -353,6 +383,7 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     private var shouldAutoDismissWhileVisible: (() -> Bool)?
     private var onLiveUpdateTick: (() -> Void)?
     private var storedAutoDismissButtonIndex: Int?
+    private let keyboardNavigationEnabled: Bool
 
     init(
         title: String,
@@ -363,8 +394,10 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
         defaultButtonIndex: Int?,
         escapeButtonIndex: Int?,
         accessoryView: NSView?,
-        initialFirstResponder: NSView?
+        initialFirstResponder: NSView?,
+        keyboardNavigationEnabled: Bool = true
     ) {
+        self.keyboardNavigationEnabled = keyboardNavigationEnabled
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 160),
             styleMask: [.titled, .closable],
@@ -445,7 +478,12 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
 
         var builtButtons: [NSButton] = []
         for (index, spec) in buttons.enumerated() {
-            let button = FocusableDialogButton(title: spec.title, target: nil, action: nil)
+            let button: NSButton
+            if keyboardNavigationEnabled {
+                button = FocusableDialogButton(title: spec.title, target: nil, action: nil)
+            } else {
+                button = MouseOnlyDialogButton(title: spec.title, target: nil, action: nil)
+            }
             button.bezelStyle = .rounded
             button.focusRingType = .default
             button.tag = index
@@ -459,16 +497,16 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             }
         }
         buttonsLeftToRight = builtButtons
-        if builtButtons.count >= 2 {
+        if keyboardNavigationEnabled, builtButtons.count >= 2 {
             for index in 0 ..< builtButtons.count - 1 {
                 builtButtons[index].nextKeyView = builtButtons[index + 1]
             }
             builtButtons[builtButtons.count - 1].nextKeyView = builtButtons[0]
         }
-        escapeButton = escapeButtonIndex.flatMap { index in
+        escapeButton = keyboardNavigationEnabled ? escapeButtonIndex.flatMap { index in
             guard index >= 0, index < builtButtons.count else { return nil }
             return builtButtons[index]
-        }
+        } : nil
 
         let buttonRow = NSStackView()
         buttonRow.orientation = .horizontal
@@ -507,12 +545,13 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             button.action = #selector(buttonPressed(_:))
         }
 
-        if let defaultButtonIndex,
+        if keyboardNavigationEnabled,
+           let defaultButtonIndex,
            defaultButtonIndex >= 0,
            defaultButtonIndex < builtButtons.count {
             builtButtons[defaultButtonIndex].keyEquivalent = "\r"
             panel.initialFirstResponder = initialFirstResponder ?? builtButtons[defaultButtonIndex]
-        } else if let initialFirstResponder {
+        } else if keyboardNavigationEnabled, let initialFirstResponder {
             panel.initialFirstResponder = initialFirstResponder
         }
     }
@@ -535,7 +574,8 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             panel.makeKeyAndOrderFront(nil)
             panel.orderFrontRegardless()
         }
-        if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
+        if keyboardNavigationEnabled,
+           let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
             panel.makeFirstResponder(firstResponder)
         }
         // ``runModal(for:)`` blocks default-run-loop sources; pump default + common so
@@ -614,7 +654,8 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
             panel.makeKeyAndOrderFront(nil)
             panel.orderFrontRegardless()
         }
-        if let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
+        if keyboardNavigationEnabled,
+           let firstResponder = panel.initialFirstResponder ?? buttonsLeftToRight.first {
             panel.makeFirstResponder(firstResponder)
         }
     }
@@ -672,6 +713,9 @@ private final class StyledMessagePanelController: NSObject, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if let escapeButton {
             escapeButton.performClick(nil)
+        } else if !keyboardNavigationEnabled, !buttonsLeftToRight.isEmpty {
+            selectedIndex = 0
+            close()
         } else {
             selectedIndex = buttonsLeftToRight.indices.last
             close()
