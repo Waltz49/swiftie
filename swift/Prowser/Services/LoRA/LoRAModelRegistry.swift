@@ -73,10 +73,7 @@ enum LoRAModelRegistry {
         if entry.hostID == LoRAHostRegistry.flux1Fill { return [LoRAHFModelIDs.flux1FillDev] }
         if entry.hostID == LoRAHostRegistry.flux1T2I { return [LoRAHFModelIDs.flux1Schnell, LoRAHFModelIDs.flux1Dev] }
         if entry.hostID == LoRAHostRegistry.flux2Klein {
-            return [
-                LoRAHFModelIDs.flux2Klein4B, LoRAHFModelIDs.flux2Klein9B,
-                LoRAHFModelIDs.flux2Klein9BKV, LoRAHFModelIDs.sceneworksFlux2Klein9BKVMLX,
-            ]
+            return flux2KleinLoraCatalogModelKeys()
         }
         if entry.hostID == LoRAHostRegistry.zImageTurbo {
             return [LoRAHFModelIDs.zImageTurboMflux4Bit, LoRAHFModelIDs.zImageTurbo]
@@ -102,7 +99,7 @@ enum LoRAModelRegistry {
         [LoRAHFModelIDs.zImageTurbo, LoRAHFModelIDs.zImageTurboMflux4Bit]
     }
 
-    /// Every Settings → LoRA row that shares the ``flux2_klein`` host (enabled flags can differ per row).
+    /// All Klein HF ids for catalog entry metadata (includes 4B).
     static func flux2KleinLoraCatalogModelKeys() -> [String] {
         [
             LoRAHFModelIDs.flux2Klein4B,
@@ -112,14 +109,29 @@ enum LoRAModelRegistry {
         ]
     }
 
-    /// Keys to load merged ``by_model.enabled_ids`` for run-dialog LoRA choices.
+    /// Klein 9B-family: shared ``by_model.enabled_ids`` reads and ``model_support`` interpretation (excludes 4B).
+    static func flux2KleinSharedRunDialogModelKeys() -> [String] {
+        [
+            LoRAHFModelIDs.flux2Klein9B,
+            LoRAHFModelIDs.flux2Klein9BKV,
+            LoRAHFModelIDs.sceneworksFlux2Klein9BKVMLX,
+        ]
+    }
+
+    /// Keys for ``by_model.enabled_ids`` in the image-gen run dialog (Z-Image shares one slice; Klein 9B-family shares, not 4B).
     static func loraCatalogModelKeys(forPlugin plugin: ImageGenPluginDescriptor) -> [String] {
         let hf = plugin.hfModelID.trimmingCharacters(in: .whitespacesAndNewlines)
         if hf == LoRAHFModelIDs.zImageTurboMflux4Bit || hf == LoRAHFModelIDs.zImageTurbo {
             return zImageLoraModelKeys()
         }
         if plugin.loraHostID == LoRAHostRegistry.flux2Klein {
-            return flux2KleinLoraCatalogModelKeys()
+            if hf == LoRAHFModelIDs.flux2Klein4B {
+                return [LoRAHFModelIDs.flux2Klein4B]
+            }
+            let klein9BFamily = flux2KleinSharedRunDialogModelKeys()
+            if klein9BFamily.contains(hf) {
+                return klein9BFamily
+            }
         }
         return hf.isEmpty ? [] : [hf]
     }
@@ -171,13 +183,12 @@ enum LoRAModelRegistry {
         if kleinAliases(for: modelKey).contains(where: { supportedSet.contains($0) }) {
             return true
         }
-        // Check LoRAs on one Klein settings row (e.g. SceneWorks MLX) applies to every ``flux2_klein`` row.
-        if hostID(forModelKey: modelKey) == LoRAHostRegistry.flux2Klein,
-           entry.hostID == LoRAHostRegistry.flux2Klein {
-            let family = Set(flux2KleinLoraCatalogModelKeys())
-            return supported.contains(where: { family.contains($0) })
-        }
-        return false
+        guard modelKey != LoRAHFModelIDs.flux2Klein4B,
+              hostID(forModelKey: modelKey) == LoRAHostRegistry.flux2Klein,
+              entry.hostID == LoRAHostRegistry.flux2Klein
+        else { return false }
+        let klein9BFamily = Set(flux2KleinSharedRunDialogModelKeys())
+        return supported.contains(where: { klein9BFamily.contains($0) })
     }
 
     static func isCrossFamily(entry: LoRAEntry, modelKey: String) -> Bool {
