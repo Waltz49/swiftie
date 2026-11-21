@@ -36,8 +36,7 @@ def php_head(app_version: str) -> str:
         "    'swift' => [\n"
         "        'path' => './' . $swift_dmg_basename,\n"
         "        'filename' => $swift_dmg_basename,\n"
-        "        'summary' => 'Native Swift build for Apple silicon.',\n"
-        "        'intro' => 'Native Swift Prowser for macOS (Apple silicon).',\n"
+        "        'summary' => 'Native build for Apple silicon.',\n"
         "    ],\n"
         "];\n"
         "\n"
@@ -459,9 +458,9 @@ MENU_SIM_MENUS = r'''$menu_sim_menus = [
 '''
 
 SEO_BLOCK = '''// SEO: absolute URLs and shared copy
-$seo_title = 'Prowser — macOS Image Browser (Swift)';
-$seo_description = 'Prowser (Personal Image Browser) for Apple silicon Macs: a native Swift app to browse photo folders without importing, with search, organization, and local AI tools.';
-$seo_keywords = 'Prowser, macOS, Apple silicon, image browser, photo viewer, Swift, similarity search, face search, duplicate photos, local AI image editing, photo organization, EXIF, keyboard shortcuts, free Mac software, Doug Nadel';
+$seo_title = 'Prowser — macOS Image Browser';
+$seo_description = 'Prowser (Personal Image Browser) for Apple silicon Macs: a native app to browse photo folders without importing, with search, organization, and local AI tools.';
+$seo_keywords = 'Prowser, macOS, Apple silicon, image browser, photo viewer, similarity search, face search, duplicate photos, local AI image editing, photo organization, EXIF, keyboard shortcuts, free Mac software, Doug Nadel';
 '''
 
 
@@ -516,7 +515,7 @@ def main() -> None:
     text = text.replace("'name' => $is_swift ? 'Prowser (Swift)' : 'Prowser (Python)'", "'name' => 'Prowser'")
     text = text.replace(
         "'description' => $is_swift\n                ? 'Native Swift macOS image browser with robust image search, organization tools, and some local AI image generation.'\n                : 'Python-based macOS image browser with robust image search, organization tools, and some local AI image generation.'",
-        "'description' => 'Native Swift macOS image browser with robust image search, organization tools, and local AI image generation.'",
+        "'description' => 'Native macOS image browser with robust image search, organization tools, and local AI image generation.'",
     )
 
     # Drop unavailable variants in JSON-LD (only swift remains).
@@ -524,7 +523,7 @@ def main() -> None:
     text = text.replace("$software_id = $seo_canonical . '#software-' . $variant_key;", "$software_id = $seo_canonical . '#software';")
 
     intro_html = '''                    <p>
-                        Prowser (<b><u>P</u></b>ersonal Image B<b><u>rowser</u></b>) is a native, <b>open source</b> Swift
+                        Prowser (<b><u>P</u></b>ersonal Image B<b><u>rowser</u></b>) is a native, <b>open source</b>
                         image browser built for macOS on Apple silicon.
                     </p>
                     <p>It reads directly from your existing folders — no import step — and gives you keyboard-driven
@@ -566,6 +565,18 @@ def main() -> None:
         text,
     )
 
+    text = re.sub(
+        r"\s*<\?php if \(!empty\(\$variant\['intro'\]\)\) \{ \?>\s*"
+        r"<p class=\"download-intro download-min-note\">\s*"
+        r"<\?php echo htmlspecialchars\(\$variant\['intro'\]\); \?>\s*"
+        r"</p>\s*"
+        r"<\?php \} \?>\s*",
+        "\n",
+        text,
+        count=1,
+        flags=re.S,
+    )
+
     text = text.replace(
         '$install_app_name = ($variant_key === \'swift\') ? \'swift-prowser\' : \'Prowser\';',
         "$install_app_name = 'swift-prowser';",
@@ -597,11 +608,11 @@ def main() -> None:
 
     text = text.replace(
         '<h2 id="menu-sim-heading">Quick Look (Python Version)</h2>',
-        '<h2 id="menu-sim-heading">Quick Look (Swift)</h2>',
+        '<h2 id="menu-sim-heading">Quick Look - Screenshots</h2>',
     )
     text = text.replace(
-        '<p class="subtitle menu-sim-hint">Note that these screenshots are slightly out of date.</p>',
-        '<p class="subtitle menu-sim-hint">Menu bar reflects the Swift app; screenshots update from Tools → Debug → Documentation screencaps.</p>',
+        '<p class="subtitle menu-sim-hint">Note that these screenshots are slightly out of date.</p>\n',
+        "",
     )
 
     # Scale settings tab hotspots for actual-size WebP captures.
@@ -633,14 +644,79 @@ def main() -> None:
             padding: 0 0 0 1.15rem;
             list-style: disc;
         }""",
-        """        .features-card ul {
+        """        .features-scroll {
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        .features-card ul {
             margin: 0;
             padding: 0 0 0 1.15rem;
             list-style: disc;
-            overflow-y: auto;
-            overscroll-behavior: contain;
+        }
+
+        .features-card .features-note {
+            margin: 0.75rem 0 0;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--text-muted);
         }""",
         1,
+    )
+
+    text = text.replace(
+        """        .page-grid {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 2rem;
+            padding: 2.5rem 0;
+            align-items: start;
+        }""",
+        """        .page-grid {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 2rem;
+            padding: 2.5rem 0 1rem;
+            align-items: start;
+        }
+
+        .page-grid .card:last-child {
+            margin-bottom: 0;
+        }""",
+        1,
+    )
+
+    text = text.replace(
+        """            .page-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+                padding: 1.5rem 0;
+            }""",
+        """            .page-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+                padding: 1.5rem 0 0.75rem;
+            }""",
+        1,
+    )
+
+    text = re.sub(
+        r"(<h2>Features <span style=\"font-size:0\.6em;color:var\(--text-muted\);\">\(Partial List\)</span></h2>\s*)\n\s*<ul>",
+        r'\1\n                <div class="features-scroll">\n                <ul>',
+        text,
+        count=1,
+    )
+    text = re.sub(
+        r"</ul>\s*<hr style=\"color:var\(--text-muted\);\">\s*<p class=\"download-note\">",
+        '</ul>\n                <p class="download-note features-note">',
+        text,
+        count=1,
+    )
+    text = re.sub(
+        r"(<p class=\"download-note features-note\">.*?</p>)\s*\n\s*</section>\s*\n\s*</aside>",
+        r"\1\n                </div>\n\n            </section>\n        </aside>",
+        text,
+        count=1,
+        flags=re.S,
     )
 
     text = text.replace(
@@ -700,19 +776,20 @@ def main() -> None:
 
             function syncFeaturesListScrollHeight() {
                 var download = document.querySelector('.download-card');
-                var list = document.querySelector('.features-card ul');
-                if (!download || !list) {
+                var scroll = document.querySelector('.features-card .features-scroll');
+                if (!download || !scroll) {
                     return;
                 }
                 if (!desktopMq.matches) {
-                    list.style.maxHeight = '';
+                    scroll.style.maxHeight = '';
                     return;
                 }
-                var maxPx = download.getBoundingClientRect().bottom - list.getBoundingClientRect().top;
+                var maxPx = download.getBoundingClientRect().bottom - scroll.getBoundingClientRect().top;
+                maxPx -= 38; /* ~1cm shorter than download block alignment */
                 if (maxPx < 80) {
                     maxPx = 80;
                 }
-                list.style.maxHeight = Math.floor(maxPx) + 'px';
+                scroll.style.maxHeight = Math.floor(maxPx) + 'px';
             }
 
             function scheduleSync() {
@@ -756,6 +833,23 @@ def main() -> None:
         download_meta_version,
         1,
     )
+
+    required_fragments = (
+        'class="features-scroll"',
+        'class="download-note features-note"',
+        "padding: 2.5rem 0 1rem",
+        ".page-grid .card:last-child",
+        'id="menu-sim-heading">Quick Look - Screenshots</h2>',
+        ".features-card .features-scroll",
+        "maxPx -= 38",
+        "$swift_dmg_basename = 'prowser-swift-latest.dmg'",
+    )
+    missing = [frag for frag in required_fragments if frag not in text]
+    if missing:
+        raise SystemExit(
+            "Generated prowser.php is missing Swift-site transforms "
+            f"(update adapt_prowser_php_for_swift.py): {missing!r}"
+        )
 
     DEST.write_text(text, encoding="utf-8")
     print(f"Wrote {DEST}")
