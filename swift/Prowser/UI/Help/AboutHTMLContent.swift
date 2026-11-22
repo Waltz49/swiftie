@@ -24,7 +24,7 @@ enum AboutHTMLContent {
     <p>Doug Nadel, and a myriad of AI zombies who wrote some code in exchange for brains.<br>
     <span style="font-size: 10px; color: __SUBNOTE_COLOR__;">I've said too much.</span><br>
     Contact: <a href="mailto:sillysotsoftware@yahoo.com">sillysotsoftware@yahoo.com</a>
-    <br>GitHub: <a href="https://github.com/waltz49/Prowser">waltz49/Prowser</a>
+    <br>GitHub: <a href="https://github.com/Waltz49/swiftie">Waltz49/swiftie</a>
     <br>Website: <a href="https://waltzremote.com">waltzremote.com</a>
     </p>
     <h3>License</h3>

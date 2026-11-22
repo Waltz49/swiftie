@@ -41,7 +41,7 @@ struct AboutView: View {
                 .foregroundStyle(colors.dialogMutedText)
 
             HStack(spacing: 16) {
-                Link("GitHub", destination: URL(string: "https://github.com/waltz49/Prowser")!)
+                Link("GitHub", destination: URL(string: "https://github.com/Waltz49/swiftie")!)
                 Text("|").foregroundStyle(colors.dialogMutedText)
                 Link("Website", destination: URL(string: "https://waltzremote.com")!)
             }

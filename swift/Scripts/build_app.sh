@@ -10,6 +10,8 @@
 #   ./Scripts/build_app.sh --dmg
 #   ./Scripts/build_app.sh --dmg /tmp/prowser-swift-<version>.dmg
 #     (--dmg bumps patch version, regenerates prowser.php, builds DMG; needs Finder + SetFile)
+#   ./Scripts/build_app.sh --dmg --version 0.9.100
+#     (--version sets x.y.zzz in Info.plist instead of bumping the patch)
 #   ./Scripts/build_app.sh --dmg --upload
 #     (also scp DMG as prowser-swift-X.Y.Z.dmg + prowser-swift-latest.dmg and prowser.php)
 #   ./Scripts/build_app.sh --nerb          # embed -p /tmp/nerb (PROWSER_PROFILE)
@@ -44,6 +46,18 @@ REGISTER_DEFAULTS=0
 FDA_WALKTHROUGH=0
 INSTALL_APP_PATH=""
 SWIFT_BUILD_VERBOSE=""
+SET_VERSION=""
+
+set_short_version() {
+    local plist="$1"
+    local new_ver="$2"
+    if [[ ! "$new_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "error: version must be x.y.zzz (three numeric segments): $new_ver" >&2
+        exit 1
+    fi
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $new_ver" "$plist"
+    echo "$new_ver"
+}
 
 bump_short_version_patch() {
     local plist="$1"
@@ -354,6 +368,7 @@ Options:
   --bench                 Also build FaceDetectBench CLI (not packaged in .app)
   --skip-dlib             Do not build Vendor/dlib-install (face recognition stub only)
   --dmg [PATH]            Create installer DMG (bumps patch version, regenerates prowser.php; default DMG: /tmp/prowser-swift-<version>.dmg)
+  --version X.Y.ZZZ       Set CFBundleShortVersionString (x.y.zzz); with --dmg, skips auto patch bump
   --upload                Implies --dmg; scp DMG (versioned + latest) and prowser.php (PROWSER_SWIFT_UPLOAD_REMOTE)
   --reg                   Register this .app as the default opener for jpg, jpeg, png, webp
   --fda                   After build: reset TCC + open FDA Settings (no clipboard/dialog)
@@ -417,6 +432,14 @@ while [[ $# -gt 0 ]]; do
             INSTALL_APP_PATH="$2"
             shift 2
             ;;
+        --version)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --version requires a value" >&2
+                exit 1
+            fi
+            SET_VERSION="$2"
+            shift 2
+            ;;
         -vv)
             SWIFT_BUILD_VERBOSE=-vv
             shift
@@ -437,9 +460,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -n "$SET_VERSION" ]]; then
+    APP_VERSION="$(set_short_version "$INFO_PLIST_SRC" "$SET_VERSION")"
+    echo "Set version: $APP_VERSION"
+fi
+
 if [[ "$CREATE_DMG" -eq 1 ]]; then
-    APP_VERSION="$(bump_short_version_patch "$INFO_PLIST_SRC")"
-    echo "Release version: $APP_VERSION"
+    if [[ -z "$SET_VERSION" ]]; then
+        APP_VERSION="$(bump_short_version_patch "$INFO_PLIST_SRC")"
+        echo "Release version: $APP_VERSION"
+    fi
     if [[ "$DMG_OUTPUT_USER_SET" -eq 0 ]]; then
         DMG_OUTPUT="/tmp/prowser-swift-${APP_VERSION}.dmg"
     fi

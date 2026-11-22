@@ -604,7 +604,7 @@ def main() -> None:
 
     download_note = '''        <p class="download-note">
             Source code is included in the disk image. Project home:
-            <a href="https://github.com/Waltz49/Prowser" target="_blank" rel="noopener noreferrer">Prowser on GitHub</a>.
+            <a href="https://github.com/Waltz49/swiftie" target="_blank" rel="noopener noreferrer">swiftie on GitHub</a>.
         </p>'''
     text = re.sub(
         r"<p class=\"download-note\">.*?</p>\s*<p> Questions",
