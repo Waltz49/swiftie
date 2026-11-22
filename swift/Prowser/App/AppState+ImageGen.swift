@@ -445,12 +445,17 @@ extension AppState {
         return true
     }
 
+    /// True when the jobs pane or floating panel is on screen (not merely enabled in settings).
+    func isJobsSurfaceActuallyVisible() -> Bool {
+        if showFloatingJobsPanel { return true }
+        guard jobsDisplayMode == .pane else { return false }
+        guard config.bool(forKey: "jobs_visible", default: true) else { return false }
+        return effectiveRightSidebarVisible
+    }
+
     /// Show the last-used jobs surface when both the pane and the floating panel are hidden.
     func ensureJobsSurfaceVisible() {
-        if showFloatingJobsPanel { return }
-        let paneVisible = jobsDisplayMode == .pane
-            && config.bool(forKey: "jobs_visible", default: true)
-        if paneVisible { return }
+        if isJobsSurfaceActuallyVisible() { return }
         if jobsDisplayMode == .panel {
             showJobsPanel()
         } else {
