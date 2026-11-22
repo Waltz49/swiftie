@@ -649,19 +649,23 @@ private struct LoraMapFileLocationsContent: View {
     let imageGenRows: [LoraMapFileLocations.Row]
     let loraRows: [LoraMapFileLocations.Row]
 
+    /// Tighter than default 12pt body (long paths wrap often on this tab).
+    private let listLineSpacing: CGFloat = -3
+    private let entrySeparatorHeight: CGFloat = 8
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            fileLocationSection(
-                title: "Image Generation Models",
-                rows: imageGenRows,
-                emptyMessage: "No image generation models installed locally."
-            )
-            .padding(.bottom, 16)
-
             fileLocationSection(
                 title: "LoRAs",
                 rows: loraRows,
                 emptyMessage: "No LoRA weight files found on disk."
+            )
+            .padding(.bottom, 16)
+
+            fileLocationSection(
+                title: "Image Generation Models",
+                rows: imageGenRows,
+                emptyMessage: "No image generation models installed locally."
             )
         }
     }
@@ -684,16 +688,25 @@ private struct LoraMapFileLocationsContent: View {
         if rows.isEmpty {
             Text(emptyMessage)
                 .font(.system(size: 12))
+                .lineSpacing(listLineSpacing)
                 .foregroundStyle(colors.dialogMutedText)
                 .padding(.bottom, 4)
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(rows) { row in
-                    Text("• \(row.label) : \(row.path)")
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(row.label)
+                        .font(.system(size: 12, weight: .bold))
+                        .lineSpacing(listLineSpacing)
+                    Text("• \(row.path)")
                         .font(.system(size: 12))
+                        .lineSpacing(listLineSpacing)
+                        .padding(.leading, 16)
+                    if index < rows.count - 1 {
+                        Spacer()
+                            .frame(height: entrySeparatorHeight)
+                    }
                 }
             }
-            .padding(.leading, 16)
         }
     }
 }

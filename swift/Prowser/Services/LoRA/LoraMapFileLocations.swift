@@ -24,15 +24,15 @@ enum LoraMapFileLocations {
     static func plainText(imageGenRows: [Row], loraRows: [Row]) -> String {
         var lines: [String] = []
         lines.append(contentsOf: plainTextSection(
-            title: "Image Generation Models",
-            rows: imageGenRows,
-            emptyMessage: "No image generation models installed locally."
-        ))
-        lines.append("")
-        lines.append(contentsOf: plainTextSection(
             title: "LoRAs",
             rows: loraRows,
             emptyMessage: "No LoRA weight files found on disk."
+        ))
+        lines.append("")
+        lines.append(contentsOf: plainTextSection(
+            title: "Image Generation Models",
+            rows: imageGenRows,
+            emptyMessage: "No image generation models installed locally."
         ))
         lines.append("")
         return lines.joined(separator: "\n")
@@ -47,8 +47,12 @@ enum LoraMapFileLocations {
         if rows.isEmpty {
             lines.append(emptyMessage)
         } else {
-            for row in rows {
-                lines.append("  - \(row.label) : \(row.path)")
+            for (index, row) in rows.enumerated() {
+                if index > 0 {
+                    lines.append("")
+                }
+                lines.append(row.label)
+                lines.append("  - \(row.path)")
             }
         }
         return lines
