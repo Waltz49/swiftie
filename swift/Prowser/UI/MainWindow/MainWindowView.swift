@@ -42,17 +42,14 @@ struct MainWindowView: View {
                 StatusBarView()
             }
         }
+        .background(appState.theme.colors.background)
         .overlay(alignment: .bottomLeading) {
             NotificationBubbleOverlay()
         }
         .overlay {
             CopyFeedbackOverlay()
         }
-        .navigationTitle(Self.navigationTitle(appState: appState))
-        .preferredColorScheme(appState.theme.preferredColorScheme)
         .environment(\.themeColors, appState.theme.colors)
-        .background(appState.theme.colors.background)
-        .toolbar(.hidden, for: .windowToolbar)
         .background(MainWindowIdentityAnchor())
         .background(AuxiliaryDialogBridge())
         .background(ImageGenUnifiedWindowPresentationBridge())
@@ -97,18 +94,12 @@ struct MainWindowView: View {
         .onChange(of: appState.settingsOpenRequestToken) { _, _ in
             NSApp.activate(ignoringOtherApps: true)
         }
-    }
-
-    @MainActor
-    private static func navigationTitle(appState: AppState) -> String {
-        let base = BrowserWindowIdentity.versionedMainWindowTitleBase()
-        if let path = appState.fileData.currentImagePath, !path.isEmpty {
-            return "\(base) - \((path as NSString).lastPathComponent)"
+        .onChange(of: appState.fileData.currentImagePath) { _, _ in
+            BrowserWindowIdentity.syncMainBrowserWindowTitle(appState: appState)
         }
-        if let directory = appState.fileData.currentDirectory, !directory.isEmpty {
-            return "\(base) - \((directory as NSString).lastPathComponent)"
+        .onChange(of: appState.fileData.currentDirectory) { _, _ in
+            BrowserWindowIdentity.syncMainBrowserWindowTitle(appState: appState)
         }
-        return base
     }
 }
 

@@ -25,6 +25,41 @@ enum BrowserWindowIdentity {
         "\(mainWindowTitle) \(AboutBuildInfo.packageVersion())"
     }
 
+    @MainActor
+    static func mainWindowTitle(appState: AppState) -> String {
+        let base = versionedMainWindowTitleBase()
+        if let path = appState.fileData.currentImagePath, !path.isEmpty {
+            return "\(base) - \((path as NSString).lastPathComponent)"
+        }
+        if let directory = appState.fileData.currentDirectory, !directory.isEmpty {
+            return "\(base) - \((directory as NSString).lastPathComponent)"
+        }
+        return base
+    }
+
+    /// Native title bar + `window.title` (Qt `setWindowTitle` parity); not SwiftUI unified toolbar chrome.
+    @MainActor
+    static func applyStandardMainWindowChrome(to window: NSWindow) {
+        guard !isAuxiliaryWindow(window) else { return }
+        window.titlebarAppearsTransparent = false
+        window.titleVisibility = .visible
+        window.titlebarSeparatorStyle = .automatic
+        var mask = window.styleMask
+        mask.remove(.fullSizeContentView)
+        window.styleMask = mask
+        window.appearance = nil
+        window.isMovableByWindowBackground = false
+    }
+
+    @MainActor
+    static func syncMainBrowserWindowTitle(appState: AppState) {
+        guard let window = resolveMainBrowserWindow() else { return }
+        let title = mainWindowTitle(appState: appState)
+        if window.title != title {
+            window.title = title
+        }
+    }
+
     static func tagMainBrowserWindow(_ window: NSWindow?) {
         guard let window else { return }
         guard !isAuxiliaryWindow(window) else { return }
@@ -185,14 +220,21 @@ struct MainWindowIdentityAnchor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            BrowserWindowIdentity.tagMainBrowserWindow(view.window)
+            if let window = view.window {
+                BrowserWindowIdentity.tagMainBrowserWindow(window)
+                BrowserWindowIdentity.applyStandardMainWindowChrome(to: window)
+                BrowserWindowIdentity.syncMainBrowserWindowTitle(appState: appState)
+            }
             appState.noteMainBrowserWindowReady()
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        BrowserWindowIdentity.tagMainBrowserWindow(nsView.window)
+        guard let window = nsView.window else { return }
+        BrowserWindowIdentity.tagMainBrowserWindow(window)
+        BrowserWindowIdentity.applyStandardMainWindowChrome(to: window)
+        BrowserWindowIdentity.syncMainBrowserWindowTitle(appState: appState)
     }
 }
 
