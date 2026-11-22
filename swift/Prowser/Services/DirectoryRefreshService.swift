@@ -476,6 +476,25 @@ enum DirectoryRefreshService {
         invalidateThumbnails(appState: appState, paths: modified)
     }
 
+    /// True when ⌘R can refresh thumbnails only (listing matches disk and no stale paths/placeholders).
+    static func manualRefreshCanUseLightPresentation(
+        candidateList: [String],
+        currentDisplayed: [String],
+        diskPaths: [String],
+        deletedPlaceholderPaths: Set<String>
+    ) -> Bool {
+        let diskSet = Set(diskPaths)
+        let hasStalePaths = currentDisplayed.contains { !FileManager.default.fileExists(atPath: $0) }
+        let diskMembershipChanged = diskSet != Set(currentDisplayed)
+        let hasOrphanedPlaceholders = deletedPlaceholderPaths.contains {
+            !FileManager.default.fileExists(atPath: $0)
+        }
+        return candidateList == currentDisplayed
+            && !hasStalePaths
+            && !diskMembershipChanged
+            && !hasOrphanedPlaceholders
+    }
+
     /// Light refresh when directory listing is unchanged (⌘R) — avoid O(n) main-thread stats + full pixmap drop.
     static func refreshThumbnailPresentation(appState: AppState) {
         refreshModifiedDisplayedImagesIfNeeded(appState: appState)

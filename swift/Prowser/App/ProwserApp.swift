@@ -571,37 +571,38 @@ final class DirectoryLoadCoordinator {
             }
         }
 
-        if !entry.displayedImages.isEmpty {
+        if entry.referenceGraphActive, !entry.displayedImages.isEmpty {
             appState.fileData.setDisplayedImages(entry.displayedImages)
-            if entry.referenceGraphActive {
-                appState.setSpecificFilesActive(true)
-            } else if entry.specificFilesActive {
-                appState.setSpecificFilesActive(true)
-            } else if let directory = entry.directory {
-                let scanned = Set(DirectoryScanner.scanDirectory(
-                    at: directory,
-                    extensions: appState.config.imageExtensions,
-                    filterPattern: appState.filterSettings.filterPattern
-                ))
-                appState.setSpecificFilesActive(Set(entry.displayedImages) != scanned)
-            } else {
-                appState.setSpecificFilesActive(true)
-            }
-            // Python `_restore_state_direct`: restore reference_graph presentation for that level.
-            if entry.referenceGraphActive {
-                let paths = entry.displayedImages
-                let focus = entry.referenceGraphFocusPath ?? entry.currentPath
-                Task { @MainActor in
-                    await appState.setReferenceGraphPresentation(paths: paths, focusPath: focus)
-                    appState.scheduleScrollThumbnailGridToActiveImageAfterLayout()
-                }
-            } else {
-                appState.clearReferenceGraphPresentation()
+            appState.setSpecificFilesActive(true)
+            let paths = entry.displayedImages
+            let focus = entry.referenceGraphFocusPath ?? entry.currentPath
+            Task { @MainActor in
+                await appState.setReferenceGraphPresentation(paths: paths, focusPath: focus)
+                appState.scheduleScrollThumbnailGridToActiveImageAfterLayout()
             }
             appState.watchCurrentDirectory()
             finishRestore()
+        } else if entry.specificFilesActive, !entry.displayedImages.isEmpty {
+            appState.fileData.setDisplayedImages(entry.displayedImages)
+            appState.setSpecificFilesActive(true)
+            appState.clearReferenceGraphPresentation()
+            appState.watchCurrentDirectory()
+            finishRestore()
         } else if let directory = entry.directory {
-            loadDirectory(directory, saveHistory: false, onComplete: finishRestore)
+            appState.clearReferenceGraphPresentation()
+            appState.loadDirectory(
+                directory,
+                saveHistory: false,
+                pinnedImagePath: entry.currentPath,
+                showLoadingState: false,
+                onComplete: finishRestore
+            )
+        } else if !entry.displayedImages.isEmpty {
+            appState.fileData.setDisplayedImages(entry.displayedImages)
+            appState.setSpecificFilesActive(entry.specificFilesActive)
+            appState.clearReferenceGraphPresentation()
+            appState.watchCurrentDirectory()
+            finishRestore()
         } else {
             finishRestore()
         }

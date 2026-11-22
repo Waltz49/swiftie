@@ -1447,11 +1447,21 @@ final class AppState {
                     precomputedDuplicateHashGroups: backgroundDuplicateHashGroups
                 )
             }
-            let hasStalePaths = !self.isFormattedListMode()
-                && currentDisplayed.contains { !FileManager.default.fileExists(atPath: $0) }
-            if candidateList == currentDisplayed, !hasStalePaths {
+            let diskSet = Set(images)
+            if DirectoryRefreshService.manualRefreshCanUseLightPresentation(
+                candidateList: candidateList,
+                currentDisplayed: currentDisplayed,
+                diskPaths: images,
+                deletedPlaceholderPaths: deletedFilePlaceholders
+            ) {
                 DirectoryRefreshService.refreshThumbnailPresentation(appState: self)
                 return
+            }
+            let removedPaths = currentDisplayed.filter {
+                !diskSet.contains($0) || !FileManager.default.fileExists(atPath: $0)
+            }
+            if !removedPaths.isEmpty {
+                clearDeletedPlaceholders(for: removedPaths)
             }
             self.directoryLoader.applyDirectoryListing(
                 path: dir,

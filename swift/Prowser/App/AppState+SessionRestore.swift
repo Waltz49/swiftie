@@ -187,25 +187,58 @@ extension AppState {
         let pathAtBrowseExit = fileData.currentImagePath
         config.updateSetting("sort_mode", value: stashed.sortMode)
         config.updateSetting("sort_reversed", value: stashed.sortReversed)
-        if let directory = stashed.currentDirectory {
-            fileData.setCurrentDirectory(directory)
+        config.updateSetting("thumbnail_cell_size", value: stashed.thumbnailCellSize)
+        config.updateSetting("manual_thumbnail_size", value: stashed.manualThumbnailSize)
+
+        let pinnedPath = Self.resolveActiveImagePathAfterBrowseRestore(
+            preferred: pathAtBrowseExit,
+            fallback: stashed.currentImagePath,
+            in: stashed.displayedImages
+        )
+
+        if stashed.specificFilesActive {
+            setSpecificFilesActive(true)
+            if let directory = stashed.currentDirectory {
+                fileData.setCurrentDirectory(directory)
+            }
+            var restoredImages = stashed.displayedImages
+            if !isFormattedListMode() {
+                restoredImages = restoredImages.filter { FileManager.default.fileExists(atPath: $0) }
+            }
+            fileData.setDisplayedImages(restoredImages)
+            if let pinnedPath {
+                fileData.setCurrentImagePath(pinnedPath)
+            }
+            watchCurrentDirectory()
+            config.applySettingsChange(emit: eventBus)
+            return
         }
-        setSpecificFilesActive(stashed.specificFilesActive)
+
+        if let directory = stashed.currentDirectory {
+            clearDeletedPlaceholders()
+            loadDirectory(
+                directory,
+                saveHistory: false,
+                pinnedImagePath: pinnedPath,
+                showLoadingState: false
+            )
+            config.applySettingsChange(emit: eventBus)
+            return
+        }
+
+        setSpecificFilesActive(false)
         var restoredImages = stashed.displayedImages
         if !isFormattedListMode() {
             restoredImages = restoredImages.filter { FileManager.default.fileExists(atPath: $0) }
         }
         fileData.setDisplayedImages(restoredImages)
-        let restoredPath = Self.resolveActiveImagePathAfterBrowseRestore(
-            preferred: pathAtBrowseExit,
-            fallback: stashed.currentImagePath,
-            in: fileData.displayedImages
-        )
-        if let restoredPath {
-            fileData.setCurrentImagePath(restoredPath)
+        if let pinnedPath {
+            fileData.setCurrentImagePath(pinnedPath)
         }
-        config.updateSetting("thumbnail_cell_size", value: stashed.thumbnailCellSize)
-        config.updateSetting("manual_thumbnail_size", value: stashed.manualThumbnailSize)
+        clearDeletedPlaceholders(for: stashed.displayedImages.filter {
+            !FileManager.default.fileExists(atPath: $0)
+        })
+        watchCurrentDirectory()
         config.applySettingsChange(emit: eventBus)
     }
 
