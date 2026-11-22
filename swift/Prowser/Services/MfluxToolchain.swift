@@ -207,7 +207,7 @@ enum MfluxCLIPipeline {
         guard !output.isEmpty else { throw MfluxCLIError.missingField("output_path") }
         let source = payload["source_image_path"] as? String
             ?? (payload["source_image_paths"] as? [String])?.first
-        guard let source, !source.isEmpty else { throw MfluxCLIError.missingField("source_image_path") }
+        guard let source, !source.isEmpty else { throw MfluxCLIError.sourceImageFailure(values: payload) }
         let model = payload["hf_model_id"] as? String ?? "black-forest-labs/FLUX.1-Fill-dev"
         let quantize = intValue(payload["mflux_quantize"], default: 4)
         let steps = intValue(payload["steps"], default: 20)
@@ -261,7 +261,7 @@ enum MfluxCLIPipeline {
         guard !prompt.isEmpty else { throw MfluxCLIError.missingField("prompt") }
         let output = payload["output_path"] as? String ?? ""
         let sources = ImageGenExifReferences.resolveSourceImagePaths(payload)
-        guard !sources.isEmpty else { throw MfluxCLIError.missingField("source_image_path") }
+        guard !sources.isEmpty else { throw MfluxCLIError.sourceImageFailure(values: payload) }
         let params = try MfluxKleinCLI.resolve(payload: payload)
         var args: [String] = []
         MfluxKleinCLI.appendCommonArgs(
@@ -318,6 +318,43 @@ enum MfluxCLIError: LocalizedError {
     case unsupportedPipeline(String)
     case missingField(String)
     case processFailed(String)
+
+    /// User-facing error when edit/expand/fill prep cannot use a queued source image (missing path or file).
+    static func sourceImageFailure(referencedPath: String? = nil, values: [String: Any]? = nil) -> MfluxCLIError {
+        let path = normalizedReferencedPath(referencedPath) ?? firstReferencedSourcePath(in: values)
+        if let path {
+            let display = InformationFormatting.normalizePathForDisplay(absoluteSourcePath(path))
+            return .processFailed(
+                "The source image “\(display)” is missing or could not be opened. "
+                    + "It may have been moved or deleted since this job was queued."
+            )
+        }
+        return .processFailed(
+            "This generation needs a source image. Select an image in the browser and run the job again."
+        )
+    }
+
+    private static func normalizedReferencedPath(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func absoluteSourcePath(_ raw: String) -> String {
+        URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
+    }
+
+    private static func firstReferencedSourcePath(in values: [String: Any]?) -> String? {
+        guard let values else { return nil }
+        var candidates: [String] = []
+        if let p = values["source_image_path"] as? String { candidates.append(p) }
+        if let multi = values["source_image_paths"] as? [String] { candidates.append(contentsOf: multi) }
+        if let canon = values["_canonical_source_image_paths"] as? [String] { candidates.append(contentsOf: canon) }
+        for raw in candidates {
+            if let path = normalizedReferencedPath(raw) { return path }
+        }
+        return nil
+    }
 
     var errorDescription: String? {
         switch self {

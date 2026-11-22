@@ -189,9 +189,12 @@ enum ImageGenMfluxPrep {
     private static func applyFillExpand(_ run: inout [String: Any]) throws {
         let originalSource = run["source_image_path"] as? String
             ?? (run["source_image_paths"] as? [String])?.first
-        guard let originalSource, FileManager.default.isReadableFile(atPath: originalSource),
+        guard let originalSource, !originalSource.isEmpty else {
+            throw MfluxCLIError.sourceImageFailure(values: run)
+        }
+        guard FileManager.default.isReadableFile(atPath: originalSource),
               let cg = loadExpandSourceCGImage(path: originalSource) else {
-            throw MfluxCLIError.missingField("source_image_path")
+            throw MfluxCLIError.sourceImageFailure(referencedPath: originalSource, values: run)
         }
         let maxSide = intValue(run["max_generation_dimension"], default: 1024)
         let (w, h) = ImageGenOutpaintMask.clampOutpaintDims(
@@ -288,7 +291,10 @@ enum ImageGenMfluxPrep {
     private static func applyKleinExpand(_ run: inout [String: Any]) throws {
         let source = run["source_image_path"] as? String ?? ""
         guard let cg = loadExpandSourceCGImage(path: source) else {
-            throw MfluxCLIError.missingField("source_image_path")
+            throw MfluxCLIError.sourceImageFailure(
+                referencedPath: source.isEmpty ? nil : source,
+                values: run
+            )
         }
         let w = intValue(run["width"], default: 1024)
         let h = intValue(run["height"], default: 1024)
@@ -323,7 +329,7 @@ enum ImageGenMfluxPrep {
     private static func applyKleinEdit(_ run: inout [String: Any]) throws {
         let sources = ImageGenExifReferences.resolveSourceImagePaths(run)
         guard let first = sources.first, FileManager.default.isReadableFile(atPath: first) else {
-            throw MfluxCLIError.missingField("source_image_path")
+            throw MfluxCLIError.sourceImageFailure(values: run)
         }
         run["source_image_path"] = first
         run["source_image_paths"] = sources
