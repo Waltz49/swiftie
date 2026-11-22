@@ -327,7 +327,8 @@ These work from most views via the menu bar:
 - **Cmd+Shift+E** — Edit EXIF user comment
 - **Cmd+Shift+U** — Create screen-size copy (last used)
 - **⌃H** — Open home directory
-- **Cmd+Shift+W** — Wallpaper → resize window (last used scaling)
+- **Shift+W** — Wallpaper → resize window
+- **Cmd+Shift+W** — Set desktop wallpaper (last used scaling)
 
 ## Notes
 

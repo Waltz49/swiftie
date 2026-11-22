@@ -15,7 +15,7 @@ final class WallpaperManager {
 
         init(configValue: String) {
             switch configValue {
-            case "cover": self = .cover
+            case "cover", "current_display": self = .cover
             case "width", "fitWidth": self = .width
             case "height", "fitHeight": self = .height
             default: self = .contain
@@ -76,11 +76,25 @@ final class WallpaperManager {
             return
         }
 
-        let ignoreExif = ignoreExifRotation ?? appState?.config.ignoreExifRotation ?? false
+        let isBrowseViewportCapture = (imagePath as NSString).lastPathComponent
+            .hasPrefix("prowser_wallpaper_zoom_")
+        let ignoreExif: Bool
+        if isBrowseViewportCapture {
+            ignoreExif = true
+        } else {
+            ignoreExif = ignoreExifRotation ?? appState?.config.ignoreExifRotation ?? false
+        }
         let wallpaperDir = wallpaperDirectory
         try FileManager.default.createDirectory(at: wallpaperDir, withIntermediateDirectories: true)
 
         backupCurrentWallpaper()
+        let effectiveFit: FitMethod
+        if isBrowseViewportCapture, fitMethod == .contain {
+            // Viewport PNG already matches what the user framed; fill the screen (Python cover for zoomed source).
+            effectiveFit = .cover
+        } else {
+            effectiveFit = fitMethod
+        }
 
         let letterboxedPath: String
         if isFileInWallpaperDirectory(imagePath, wallpaperDir: wallpaperDir) {
@@ -91,7 +105,7 @@ final class WallpaperManager {
         } else {
             letterboxedPath = try createLetterboxedWallpaperFile(
                 imagePath: imagePath,
-                fitMethod: fitMethod,
+                fitMethod: effectiveFit,
                 wallpaperDir: wallpaperDir,
                 ignoreExifRotation: ignoreExif
             )

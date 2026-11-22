@@ -553,6 +553,7 @@ final class AppState {
         }
 
         startNamedPipeListener()
+        migrateWallpaperSettingsIfNeeded()
         refreshMenuState()
     }
 

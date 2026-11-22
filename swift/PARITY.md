@@ -117,7 +117,7 @@ Trigger: **control-click** on thumbnail (not ⌘-click; multiselect uses ⌘). L
 - [~] Show Reference Graph (`ReferenceGraphView` sheet)
 - [~] Find References to This Image…
 - [~] Open in Finder (single)
-- [~] Set as Wallpaper submenu (fit/fill/width/height)
+- [~] Set as Wallpaper submenu (fit/fill/width/height, zoomed display, ⇧W resize window)
 - [~] Multiselect disabled-items note at bottom
 - [~] List view row context menu (`ImageListNSView` → `ThumbnailContextMenu`)
 
@@ -265,7 +265,7 @@ WithGen: gated by `BundleCapabilities.imageGenUIEnabled`, registry bridge, and i
 - [x] EXIF and Dates submenu (reset dates, edit/delete user comment, delete EXIF date)
 - [~] Slideshows submenu (S / ⇧S / ⇧⌃S)
 - [~] Create Screen Size Copy submenu
-- [~] Wallpaper submenu (⇧⌘W last used + fit modes)
+- [~] Wallpaper submenu (⇧⌘W last used, fit modes, zoomed display, ⇧W resize window)
 - [~] Find References to This Image…
 - [ ] LM Studio / voice / transcription tools (when enabled)
 - [~] Debug submenu (⇧⌘D debug, ⌃D view log, ⇧⌘I number overlay, Check LoRAs Swift UI)

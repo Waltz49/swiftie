@@ -24,6 +24,7 @@ final class MenuRefreshState {
     var lockUnlockMenuVisible = false
     var editExifUserCommentEnabled = false
     var wallpaperMenuEnabled = false
+    var wallpaperResizeWindowEnabled = false
     var findReferencesMenuEnabled = false
     var externalEditorMenuEnabled = true
     private var keyWindowObservers: [NSObjectProtocol] = []
@@ -75,6 +76,7 @@ final class MenuRefreshState {
         editExifUserCommentEnabled = appState.canEditExifUserComment
         let mode = appState.fileData.currentViewMode
         wallpaperMenuEnabled = (mode == .thumbnail || mode == .browse) && !appState.selection.multiSelectMode
+        wallpaperResizeWindowEnabled = wallpaperMenuEnabled && mode == .browse
         findReferencesMenuEnabled = !appState.selection.multiSelectMode
             && appState.fileData.currentImagePath != nil
         let editor = appState.config.string(forKey: "image_editor_app", default: "Preview")

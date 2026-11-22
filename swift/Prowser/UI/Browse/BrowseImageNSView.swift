@@ -61,7 +61,6 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
     private var pendingPreservedView: PreservedViewState?
     private var cursorHideTrackingArea: NSTrackingArea?
     private var isRefreshingCursorHideTracking = false
-
     override var isFlipped: Bool { true }
 
     func applyTheme(_ colors: ThemeColors) {
@@ -146,6 +145,62 @@ final class BrowseImageNSView: NSView, NSDraggingSource {
     /// True when browse is showing 1:1 actual size (not fit-to-window or manual zoom).
     var isDisplayingActualSize: Bool {
         preferredActualSize && !zoomPinned
+    }
+
+    var hasLoadedImageForWallpaper: Bool {
+        sourceImage != nil
+    }
+
+    func browseViewportMatchesScreenAspect(
+        screenWidth: CGFloat,
+        screenHeight: CGFloat,
+        tolerance: CGFloat = BrowseWallpaperGeometry.screenAspectMatchTolerance
+    ) -> Bool {
+        BrowseWallpaperGeometry.viewportAspectMatchesScreen(
+            viewportWidth: bounds.width,
+            viewportHeight: bounds.height,
+            screenWidth: screenWidth,
+            screenHeight: screenHeight,
+            tolerance: tolerance
+        )
+    }
+
+    /// Visible region in session layout pixels, then crop from the full-resolution file (not a canvas screenshot).
+    func exportWallpaperHighResolutionCrop(tempDirectory: URL) -> String? {
+        guard let image = sourceImage else { return nil }
+        guard let layoutCrop = wallpaperVisibleLayoutRect(for: image) else { return nil }
+        let transform = sessionTransform
+        return BrowseWallpaperExport.exportCroppedPNG(
+            image: image,
+            transform: transform,
+            layoutCrop: layoutCrop,
+            tempDirectory: tempDirectory
+        )
+    }
+
+    private func wallpaperVisibleLayoutRect(for image: NSImage) -> CGRect? {
+        let layout = layoutSize(for: image)
+        guard bounds.width >= 2, bounds.height >= 2 else { return nil }
+
+        let drawRect = imageDrawRect(for: image)
+        guard let rect = BrowseWallpaperGeometry.visibleSourceRectFromImageDrawRect(
+            viewportWidth: bounds.width,
+            viewportHeight: bounds.height,
+            imageDrawRect: drawRect,
+            scaleFactor: scaleFactor,
+            sourceWidth: layout.width,
+            sourceHeight: layout.height
+        ) else { return nil }
+        return clampLayoutCropRect(rect, layoutSize: layout)
+    }
+
+    private func clampLayoutCropRect(_ rect: CGRect, layoutSize: NSSize) -> CGRect {
+        var r = rect
+        r.origin.x = max(0, min(layoutSize.width - 1, r.origin.x))
+        r.origin.y = max(0, min(layoutSize.height - 1, r.origin.y))
+        r.size.width = max(1, min(layoutSize.width - r.origin.x, r.size.width))
+        r.size.height = max(1, min(layoutSize.height - r.origin.y, r.size.height))
+        return r
     }
 
     func setActualSizeMode(_ enabled: Bool) {

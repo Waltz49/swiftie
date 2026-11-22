@@ -377,10 +377,6 @@ private final class MenuActions: NSObject {
 
     private func setWallpaper(_ sender: NSMenuItem, fitMethod: WallpaperManager.FitMethod) {
         guard let appState, let paths = sender.representedObject as? [String], let path = paths.first else { return }
-        do {
-            try appState.wallpaperManager.setImageAsDesktopBackground(imagePath: path, fitMethod: fitMethod)
-        } catch {
-            appState.status.show("Wallpaper failed: \(error.localizedDescription)")
-        }
+        appState.setCurrentImageAsDesktopBackground(fitMethod: fitMethod, explicitPath: path, persistFitMethod: true)
     }
 }

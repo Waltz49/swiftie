@@ -561,30 +561,56 @@ private struct FindReferencesMenuButton: View {
 @MainActor
 private struct WallpaperMenuContents: View {
     @Bindable var appState: AppState
-    let setWallpaperLastUsed: @MainActor () -> Void
-    let setWallpaper: @MainActor (WallpaperManager.FitMethod, Bool) -> Void
 
     var body: some View {
         Menu("Wallpaper") {
             Button("Set Wallpaper (Last Used)") {
-                Task { @MainActor in setWallpaperLastUsed() }
+                Task { @MainActor in
+                    appState.setCurrentImageAsDesktopBackground()
+                }
             }
             .keyboardShortcut("w", modifiers: [.command, .shift])
 
             Divider()
 
             Button("Fit (Contain)") {
-                Task { @MainActor in setWallpaper(.contain, true) }
+                Task { @MainActor in
+                    appState.setCurrentImageAsDesktopBackground(fitMethod: .contain, persistFitMethod: true)
+                }
             }
             Button("Fill (Cover)") {
-                Task { @MainActor in setWallpaper(.cover, true) }
+                Task { @MainActor in
+                    appState.setCurrentImageAsDesktopBackground(fitMethod: .cover, persistFitMethod: true)
+                }
             }
             Button("Fit to Width") {
-                Task { @MainActor in setWallpaper(.width, true) }
+                Task { @MainActor in
+                    appState.setCurrentImageAsDesktopBackground(fitMethod: .width, persistFitMethod: true)
+                }
             }
             Button("Fit to Height") {
-                Task { @MainActor in setWallpaper(.height, true) }
+                Task { @MainActor in
+                    appState.setCurrentImageAsDesktopBackground(fitMethod: .height, persistFitMethod: true)
+                }
             }
+
+            Divider()
+
+            Toggle(isOn: Binding(
+                get: {
+                    _ = appState.menuCommandsRevision
+                    return appState.wallpaperUseZoomedDisplay
+                },
+                set: { appState.wallpaperUseZoomedDisplay = $0 }
+            )) {
+                Text("Use Current Zoomed Display")
+            }
+
+            Button("Resize Window") {
+                Task { @MainActor in appState.resizeWindowToScreenAspectRatio() }
+            }
+            .keyboardShortcut("w", modifiers: .shift)
+            .disabled(!appState.menuRefresh.wallpaperResizeWindowEnabled)
         }
         .disabled(!appState.menuRefresh.wallpaperMenuEnabled)
     }
@@ -1028,7 +1054,7 @@ struct ProwserToolsCommands: Commands {
                     .keyboardShortcut("s", modifiers: [.shift, .control])
                 }
 
-                WallpaperMenuContents(appState: appState, setWallpaperLastUsed: setWallpaperLastUsed, setWallpaper: setWallpaper)
+                WallpaperMenuContents(appState: appState)
 
                 Menu("Create Screen Size Copy...") {
                     Button("Create Screen Size Copy (Last Used)") {
@@ -1124,40 +1150,6 @@ struct ProwserToolsCommands: Commands {
         }
     }
 
-    @MainActor
-    private func wallpaperSourcePath() -> String? {
-        if let current = appState.fileData.currentImagePath {
-            return current
-        }
-        return appState.pathsForCopyPathCommand().first
-    }
-
-    @MainActor
-    private func setWallpaperLastUsed() {
-        let method = WallpaperManager.FitMethod(
-            configValue: appState.config.string(forKey: "last_used_wallpaper_fit_method", default: "contain")
-        )
-        setWallpaper(fitMethod: method, persist: false)
-    }
-
-    @MainActor
-    private func setWallpaper(fitMethod: WallpaperManager.FitMethod, persist: Bool) {
-        guard let path = wallpaperSourcePath() else {
-            appState.status.show("No image selected")
-            return
-        }
-        do {
-            try appState.wallpaperManager.setImageAsDesktopBackground(imagePath: path, fitMethod: fitMethod)
-            if persist {
-                appState.config.updateSetting("last_used_wallpaper_fit_method", value: fitMethod.configValue)
-            }
-        } catch {
-            StyledMessageDialog.showWarning(
-                title: "Cannot Set Wallpaper",
-                message: error.localizedDescription
-            )
-        }
-    }
 }
 
 /// Image generation menu (separate `Commands` type — registered after ``ProwserToolsCommands``).
