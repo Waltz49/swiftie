@@ -1,10 +1,12 @@
 # Prowser (Swift)
 
-Prowser is a native macOS image browser for Apple Silicon, built with **Swift**, **AppKit**, and **SwiftUI**. Browse, organize, and search images with keyboard-driven workflows, EXIF tools, on-device Core ML search, face recognition (dlib, with models downloaded on first use), and optional local AI image generation when dependencies are installed.
+**Prowser** is a native macOS image browser for Apple Silicon. The UI is **Swift**, **AppKit**, and **SwiftUI**. Browsing, thumbnails, EXIF, themes, slideshows, Core ML–based search, and face recognition (native **dlib** bridge) run in-process. Optional local **Image** menu generation uses Swift for jobs and settings and short-lived **Python** subprocess workers (bundled under `ImageGenPython/`) when you configure a profile venv and backends such as MFLUX.
 
-The latest installable DMG is on the [website](https://waltzremote.com/).
+Install the latest DMG from [waltzremote.com](https://waltzremote.com/).
 
-The first time you use AI-based features (similarity sort, text search, face recognition, or **Image** menu generation), the app downloads and caches models; that pass can be slow, later use is much faster. Some Hugging Face downloads need a [huggingface.co](https://huggingface.co/) account and token.
+The first time you use AI-heavy features (similarity sort, text search, face recognition, or image generation), the app downloads and caches models; that pass can be slow, later use is much faster. Some Hugging Face downloads need a [huggingface.co](https://huggingface.co/) account and token.
+
+Press **F1** or **/** in the app for in-app help. See [KEYBOARD.md](KEYBOARD.md) for shortcuts.
 
 ## Features (partial list)
 
@@ -12,11 +14,9 @@ The first time you use AI-based features (similarity sort, text search, face rec
 - Move, copy, rename, delete (to Trash), lock files, and undo deletes
 - Search by image similarity, image description, duplicates, and face recognition
 - Slideshows, EXIF tools, external editor integration, set desktop wallpaper
-- Optional **Image** menu and Job Control for local generation/manipulation ([SWIFT-PYTHON.md](SWIFT-PYTHON.md))
+- Optional **Image** menu, job queue, LoRA tools, and model management (hidden with `--min` / minimal bundles)
+- Optional chat pane and LM Studio integration (same minimal-build gate)
 - Light, Dark, User, and saved custom themes (**View → Theme**)
-- Chat pane (when enabled) with LM Studio streaming; see [PARITY.md](PARITY.md) for port status
-
-Press **F1** or **/** in the app for in-app help. See [KEYBOARD.md](KEYBOARD.md) for a full shortcut list.
 
 ## Install from the DMG
 
@@ -27,20 +27,20 @@ Press **F1** or **/** in the app for in-app help. See [KEYBOARD.md](KEYBOARD.md)
 ## Requirements
 
 - **macOS 14+** on Apple Silicon (developed on a 16GB M2 class machine)
-- **Xcode Command Line Tools** and **Swift 5.9+** to build from source
-- **cmake** and **git** for the bundled native dlib face encoder (or use `--skip-dlib` when running)
-- Optional image generation: Python **3.12+** venv under the profile (`requirements-imagegen.txt`); see [SWIFT-PYTHON.md](SWIFT-PYTHON.md)
+- **Xcode Command Line Tools** and **Swift 5.9+** to build from source (`Package.swift`, target `Prowser`)
+- **cmake** and **git** to build the vendored native **dlib** face encoder (or use `--skip-dlib` when running)
+- Optional image generation: **Python 3.12+** profile venv (`venvs/imagegen`, packages from bundled `requirements-imagegen.txt`). Configure under **Settings → Image Generation**. Maintainer details: [SWIFT-PYTHON.md](SWIFT-PYTHON.md)
 
 ## Build and run from this folder
 
 ```bash
-./setup.sh          # once: resolve packages, build dlib if needed
+./setup.sh          # once: resolve SwiftPM packages, build dlib if needed
 ./run.sh            # debug build + launch (via open, for keyboard focus)
 ./run.sh ~/Pictures # open a folder
 ./Scripts/test.sh   # unit tests (Swift Package Manager; no Xcode GUI)
 ```
 
-From the `swift/` directory you can also run `swift test` directly. Optional filters: `swift test --filter QueueJobStatusBuilderTests`.
+You can also run `swift test` from this directory. Example filter: `swift test --filter QueueJobStatusBuilderTests`.
 
 Release app bundle:
 
@@ -63,7 +63,7 @@ Pass options to `./run.sh` after the script flags; they are forwarded to the `Pr
 | `--fullscreen` | Launch in macOS Space fullscreen |
 | `--no-fullscreen` | Launch windowed |
 | `--debug` | Enable debug mode |
-| `--min` | Hide image generation and related UI (same as minimal bundle) |
+| `--min` | Hide image generation, chat, and related UI (same as minimal bundle) |
 
 Environment: `PROWSER_PROFILE` (same as `-p`), `PROWSER_FAST_EXIT=1` (immediate exit on SIGTERM/SIGINT).
 
@@ -83,7 +83,7 @@ Some features differ in sandboxed or bundled builds (for example **View Copy of 
 
 ## Settings (profiles)
 
-Settings and caches live under **`~/.swift-prowser/`** by default (separate from the legacy Python app’s `~/.prowser` unless you point both at the same path). Open preferences with **⌘,**.
+Settings and caches live under **`~/.swift-prowser/`** by default. Open preferences with **⌘,**.
 
 ```bash
 ./run.sh -p ~/.swift-prowser-test
@@ -103,7 +103,10 @@ Generated images save to the configured **image creation directory** (default `~
 ├── cache/
 │   ├── image_browser_cache/       # thumbnails, metadata
 │   ├── swift_native/              # Core ML / Vision / dlib model caches
-│   └── image_recognition/         # shared face_cache (Python-compatible subtree)
+│   └── image_recognition/
+│       └── face_cache/            # per-image face embeddings
+├── venvs/
+│   └── imagegen/                  # optional Python venv for generation workers
 ├── tmp/                           # scratch (generation, wallpaper, exports, …)
 ├── logs/                          # Tools → Debug → View log
 └── wallpaper/                     # letterboxed wallpaper files
@@ -111,19 +114,24 @@ Generated images save to the configured **image creation directory** (default `~
 
 Override the work-temp root in **Settings → Temporary files directory**; when blank, the default is `{profile}/tmp/`.
 
+## Optional image generation (summary)
+
+When image generation UI is enabled, Swift owns the job queue, plugin catalog (`ImageGenPluginCatalogSnapshot.json`), and LoRA registry. Pipeline work runs in bundled Python modules (`swift/ImageGenPython/`) with `PYTHONPATH` pointed at that tree and `PROWSER_PROFILE` set to the active profile. Default generation backend is an optimized persistent worker; **Settings → Image Generation** can select MFLUX CLI instead. Sync vendored Python from the monorepo during development with `./Scripts/sync_imagegen_python.sh`.
+
 ## Supported formats
 
-Common formats include JPEG, PNG, GIF, BMP, TIFF, WebP, SVG, HEIC, and HEIF. Not every EXIF or edit operation applies to every format.
+Common formats include JPEG, PNG, GIF, BMP, TIFF, WebP, SVG, HEIC, and HEIF. RAW extensions (CR2, NEF, ARW, DNG, and others) are listed for open-with support. Not every EXIF or edit operation applies to every format.
 
-## Development
+## Repository layout
 
-- **Swift package:** this directory (`Package.swift`, target `Prowser`)
-- **Maintainer scripts:** [Scripts/README.md](Scripts/README.md)
-- **Python ↔ Swift image generation:** [SWIFT-PYTHON.md](SWIFT-PYTHON.md)
-- **Parity checklist:** [PARITY.md](PARITY.md)
-- **Known UI differences vs Python reference:** [INTENTIONAL_DIFFERENCES.md](INTENTIONAL_DIFFERENCES.md)
-
-The Python/Qt reference app lives outside this tree; vendored pipeline code under `ImageGenPython/` is used by subprocess workers only, not for the macOS UI.
+| Path | Role |
+|------|------|
+| `Prowser/` | Application sources (UI, services, bridges) |
+| `ProwserTests/` | Swift unit tests |
+| `ImageGenPython/` | Bundled pipeline and worker Python (subprocess only) |
+| `ProwserDlibBridge/` | Swift ↔ dlib face encoding bridge |
+| `Vendor/` | Built `dlib-install` artifact when present |
+| `Scripts/` | Build, DMG, model, and catalog maintainer scripts — [Scripts/README.md](Scripts/README.md) |
 
 ## License
 
