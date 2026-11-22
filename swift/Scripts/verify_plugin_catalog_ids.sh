@@ -9,6 +9,8 @@ $(basename "$0") — verify Swift ImageGen plugin IDs match the JSON catalog sna
 Compares pluginID entries in ImageGenPluginCatalog.swift against
 Prowser/Resources/ImageGenPluginCatalogSnapshot.json (sorted plugin_id lists).
 
+Used by: command line (CI / maintainer).
+
 Usage: $(basename "$0")
 
 Options:

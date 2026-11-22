@@ -16,6 +16,8 @@ $(basename "$0") — create venv_model_export for Core ML search-model export.
 Uses Python 3.12 or 3.13 (coremltools does not support 3.14). Installs torch,
 transformers, huggingface_hub, and coremltools into repo-root venv_model_export/.
 
+Used by: command line (maintainer); prerequisite for publish_search_models.sh.
+
 Usage: $(basename "$0")
 
 Environment:

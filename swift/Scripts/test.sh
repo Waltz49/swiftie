@@ -9,6 +9,8 @@ $(basename "$0") — build and run Prowser Swift package tests via \`swift test\
 macOS and Xcode Command Line Tools are required. Additional arguments are passed to
 \`swift test\` (e.g. --filter ProwserTests/SomeTest).
 
+Used by: command line (developer / CI).
+
 Usage: $(basename "$0") [swift test options...]
 
 Options:

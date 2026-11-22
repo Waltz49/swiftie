@@ -342,6 +342,9 @@ $(basename "$0") — build Swift Prowser as a macOS .app bundle.
 Compiles via \`swift build --product Prowser\`, packages Mach-O + resources into a bundle,
 and optionally creates a DMG, registers file types, or runs FDA setup.
 
+Used by: command line (developer/maintainer). Invokes adapt_prowser_php_for_swift.py,
+create_styled_dmg.sh, build_dlib_macos.sh, and fda_walkthrough.sh when requested.
+
 Usage: $(basename "$0") [options]
 
 Options:

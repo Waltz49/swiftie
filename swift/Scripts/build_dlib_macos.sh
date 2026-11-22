@@ -23,6 +23,8 @@ $(basename "$0") — build a trimmed static dlib for ProwserDlibBridge (maintain
 Output: swift/Vendor/dlib-install/{include,lib/libdlib.a}
 Fetches dlib v${DLIB_VERSION} under Vendor/dlib-src when needed.
 
+Used by: build_app.sh, run.sh, swift/setup.sh; command line (developer).
+
 Usage: $(basename "$0") [options]
 
 Options:

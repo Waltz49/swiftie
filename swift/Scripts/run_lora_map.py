@@ -7,6 +7,7 @@ This script does not import that module: the image-gen venv has no PySide6.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -72,6 +73,17 @@ def lora_map_rows():
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Emit JSON LoRA→model map rows (same rules as lora_map_dialog._lora_map_rows).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: command line (developer/debug). "
+            "In-app Map LoRAs uses LoRAMapRows.swift.\n\n"
+            "Writes one JSON array to stdout; no arguments."
+        ),
+    )
+    parser.parse_args()
+
     out = []
     for lora_id, lora_label, models in lora_map_rows():
         out.append(

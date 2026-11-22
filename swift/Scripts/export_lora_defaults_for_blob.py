@@ -248,7 +248,14 @@ def export_lora_defaults(lc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Filter lora_catalog.json into a portable defaults payload for lorablob.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: pack_lorablob.sh (maintainer); command line.\n\n"
+            "Writes JSON payload to stdout."
+        ),
+    )
     parser.add_argument(
         "catalog",
         nargs="?",

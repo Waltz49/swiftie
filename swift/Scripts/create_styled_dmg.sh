@@ -22,7 +22,13 @@ $(basename "$0") — create a styled macOS DMG for Swift Prowser (installer layo
 
 Requires: hdiutil, SetFile (Xcode CLT), Finder (AppleScript for icon positions).
 
+Used by: build_app.sh --dmg; swift/build_dmg.sh.
+
 Usage: $(basename "$0") <App.app> <output.dmg>
+
+Arguments:
+  App.app       Built .app bundle to place on the DMG volume
+  output.dmg    Output disk image path
 
 Environment (optional):
   VOLUME_NAME         DMG volume label (default: swift-prowser-<app version>)

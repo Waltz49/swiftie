@@ -50,6 +50,8 @@ Use --foreground to run the binary in the terminal (stderr debug logs).
 Builds Vendor/dlib-install when missing (same as build_app.sh). Passes remaining
 arguments to Prowser (e.g. a folder path, -p profile, --debug).
 
+Used by: command line (developer); swift/run.sh wrapper.
+
 Usage: $(basename "$0") [options] [Prowser arguments...]
 
 Options:

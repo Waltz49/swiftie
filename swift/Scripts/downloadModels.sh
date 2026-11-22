@@ -8,6 +8,37 @@
 # huggingface.co, and either `hf auth login` or: export HF_TOKEN=<your-token>
 set -e
 
+usage() {
+  cat <<EOF
+$(basename "$0") — download Hugging Face image-gen models and selected LoRAs (dev).
+
+Caches full model repos under ~/.cache/huggingface and LoRA weights under
+~/.cache/image_browser/mflux_loras/. Model list is fixed in this script; LoRAs here
+are not part of the app’s models-only bulk download help.
+
+Used by: command line (developer). See in-app Help → Downloading AI Models for catalog models.
+
+Usage: $(basename "$0")
+
+Environment:
+  HF_TOKEN    Hugging Face token when repos are gated (alternative: hf auth login)
+
+Options:
+  -h, --help  Show this help
+EOF
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "error: unknown argument: $arg" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
 HF="./venv_image_browser/bin/hf"
 if [ ! -x "$HF" ]; then
   HF="$(command -v hf 2>/dev/null || true)"

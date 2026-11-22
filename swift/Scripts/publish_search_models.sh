@@ -42,6 +42,8 @@ $(basename "$0") — export Core ML search models and upload to your HTTPS host.
 Uses Python (venv_model_export) to build ModelArtifacts/*.zip from upstream weights,
 then rsyncs to REMOTE (edit at top of this script). Prereq: setup_model_export_venv.sh
 
+Used by: command line (maintainer). Invokes build_image_recognition_models.py.
+
 Usage: $(basename "$0") [options]
 
 Environment:

@@ -2,14 +2,34 @@
 import AppKit
 import Foundation
 
-let args = CommandLine.arguments.dropFirst()
+func printHelp(to stream: UnsafeMutablePointer<FILE>) {
+    let text = """
+    apply_source_folder_icon.swift — set a custom Finder folder icon from an image.
+
+    Used by: setup_source_preblessed.sh, create_styled_dmg.sh.
+
+    Usage: apply_source_folder_icon.swift <folder_path> <image.heic|png>
+
+    Options:
+      -h, --help    Show this help
+
+    """
+    fputs(text, stream)
+}
+
+let args = Array(CommandLine.arguments.dropFirst())
+if args.contains("-h") || args.contains("--help") {
+    printHelp(to: stdout)
+    exit(0)
+}
+
 guard args.count >= 2 else {
-    fputs("usage: apply_source_folder_icon.swift <folder_path> <image.heic|png>\n", stderr)
+    printHelp(to: stderr)
     exit(1)
 }
 
-let folderPath = String(args[args.startIndex])
-let imagePath = String(args[args.index(after: args.startIndex)])
+let folderPath = args[0]
+let imagePath = args[1]
 
 var isDir: ObjCBool = false
 guard FileManager.default.fileExists(atPath: folderPath, isDirectory: &isDir), isDir.boolValue else {

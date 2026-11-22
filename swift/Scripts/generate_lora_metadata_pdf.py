@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import struct
 import subprocess
@@ -176,15 +177,31 @@ def write_pdf(lines: list[str], out_path: Path) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="PDF report of stored and file-retrieved LoRA metadata (maintainer utility).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: command line (maintainer / agent); not invoked by the app.\n\n"
+            f"Catalog: {_catalog_path()}"
+        ),
+    )
+    parser.add_argument(
+        "output",
+        nargs="?",
+        type=Path,
+        default=Path.cwd() / "lora_metadata_report.pdf",
+        help="Output PDF path (default: ./lora_metadata_report.pdf)",
+    )
+    args = parser.parse_args()
+
     catalog_file = _catalog_path()
     if not catalog_file.is_file():
         print(f"No catalog at {catalog_file}", file=sys.stderr)
         return 1
     catalog = json.loads(catalog_file.read_text(encoding="utf-8"))
     lines = build_lines(catalog)
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd() / "lora_metadata_report.pdf"
-    write_pdf(lines, out)
-    print(out)
+    write_pdf(lines, args.output)
+    print(args.output)
     return 0
 
 

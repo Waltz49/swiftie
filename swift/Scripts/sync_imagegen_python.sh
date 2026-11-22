@@ -10,6 +10,8 @@ $(basename "$0") — sync image-generation Python from monorepo root into swift/
 Read-only rsync/cp from the parent repo (imagegen_plugins, workers, config, etc.).
 Does not modify Python sources outside swift/ImageGenPython/.
 
+Used by: command line (maintainer) before generate_imagegen_catalog_snapshot.sh.
+
 Usage: $(basename "$0")
 
 Environment:

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import io
 import os
@@ -140,6 +141,16 @@ def _handle_command(cmd: dict):
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Headless known-faces settings helpers (newline-delimited JSON on stdin/stdout).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: optional Python subprocess helper (dev); Swift Settings uses native/services.\n\n"
+            "Commands: is_available, detect_faces, ensure_thumbnails, shutdown"
+        ),
+    )
+    parser.parse_args()
+
     run_json_command_loop(sys.stdin.readline, emit_message, _handle_command)
     return 0
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import io
 import os
@@ -218,6 +219,16 @@ def _handle_command(cmd: dict):
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Headless quick-person face encoding (newline-delimited JSON on stdin/stdout).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: optional Python subprocess helper (dev); Swift face search uses native/services.\n\n"
+            "Commands: encode_faces, save_quick_person, shutdown"
+        ),
+    )
+    parser.parse_args()
+
     run_json_command_loop(sys.stdin.readline, emit_message, _handle_command)
     return 0
 

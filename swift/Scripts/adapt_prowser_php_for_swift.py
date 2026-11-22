@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import plistlib
 import re
 from pathlib import Path
@@ -465,6 +466,18 @@ $seo_keywords = 'Prowser, macOS, Apple silicon, image browser, photo viewer, sim
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate swiftie/prowser.php from the reference Python prowser.php (Swift-only site).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: build_app.sh (--dmg / release upload).\n\n"
+            f"Reads: {SOURCE}\n"
+            f"Writes: {DEST}\n"
+            f"Version: {INFO_PLIST} CFBundleShortVersionString"
+        ),
+    )
+    parser.parse_args()
+
     app_version = read_app_version()
     text = SOURCE.read_text(encoding="utf-8")
 

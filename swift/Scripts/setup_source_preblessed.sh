@@ -16,6 +16,8 @@ $(basename "$0") — configure Scripts/source_preblessed for DMG source-folder l
 Creates the folder if needed, applies optional custom icon, copies background.png,
 and writes Finder .DS_Store (icon view, 640×480 window) via AppleScript.
 
+Used by: create_styled_dmg.sh (optional template); command line (maintainer, one-time).
+
 Usage: $(basename "$0")
 
 Environment:

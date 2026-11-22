@@ -236,12 +236,22 @@ def _require_working_coremltools() -> None:
 
 def main() -> int:
     _require_working_coremltools()
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser = argparse.ArgumentParser(
+        description="Build Core ML search model zips for the Swift Prowser app.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Used by: publish_search_models.sh; command line (maintainer).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=DEFAULT_OUT,
+        help="Output directory (default: swift/ModelArtifacts).",
+    )
     parser.add_argument(
         "--only",
         choices=["resnet18", "resnet50", "resnet101", "clip_b32", "clip_l14", "all"],
         default="all",
+        help="Which model bundle(s) to export (default: all).",
     )
     parser.add_argument(
         "--skip-existing",

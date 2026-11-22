@@ -14,6 +14,8 @@ download: HF repo/filename, safetensors_origin, or Civitai/HF URLs — including
 legacy catalog IDs referenced in settings), then PackLoraBlob (AES-GCM + PBKDF2).
 Output: Prowser/Resources/Assets/lorablob (gitignored; rebuild app to bundle).
 
+Used by: command line (maintainer). End users: LoRADefaultsImportService (Import Lora Defaults).
+
 Usage:
   $(basename "$0") [OPTIONS] [lora_catalog.json]
 

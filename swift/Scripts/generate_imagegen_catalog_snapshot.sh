@@ -9,6 +9,8 @@ $(basename "$0") — write ImageGenPluginCatalogSnapshot.json from vendored Pyth
 Runs discover_plugins() under swift/ImageGenPython and overwrites
 Prowser/Resources/ImageGenPluginCatalogSnapshot.json (field layouts, defaults, availability).
 
+Used by: command line (maintainer); diff_imagegen_catalog_snapshot.sh.
+
 Usage: $(basename "$0")
 
 Options:

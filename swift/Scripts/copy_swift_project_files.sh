@@ -18,6 +18,8 @@ $(basename "$0") — copy a minimal Swift Prowser source tree (e.g. DMG "source"
 
 Copies package sources, scripts, and assets needed to build Prowser without the full monorepo.
 
+Used by: create_styled_dmg.sh; command line (maintainer).
+
 Usage: $(basename "$0") [-f] <target_directory>
 
 Arguments:

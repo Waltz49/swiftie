@@ -8,12 +8,33 @@
 #   PROFILE=~/.prowser ./reimport-dlds.sh --go
 set -euo pipefail
 
+usage() {
+  cat <<EOF
+$(basename "$0") — restore LoRA weight files into lora_catalog local_path entries.
+
+Copies from each entry’s source_path or ~/Downloads when the target file is missing
+(dry run by default).
+
+Used by: command line (developer or end user) after HF/cache loss.
+
+Usage: $(basename "$0") [options]
+
+Environment:
+  PROFILE   Profile root (default: ~/.swift-prowser)
+  CATALOG   lora_catalog.json path (default: \$PROFILE/data/lora_catalog.json)
+
+Options:
+  --go        Perform copies (default is dry run only)
+  -h, --help  Show this help
+EOF
+}
+
 GO=0
 for arg in "$@"; do
   case "$arg" in
     --go) GO=1 ;;
     -h|--help)
-      sed -n '2,9p' "$0"
+      usage
       exit 0
       ;;
     *)

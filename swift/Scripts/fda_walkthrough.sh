@@ -32,6 +32,8 @@ Automates TCC reset (optional), copies the .app path to the clipboard, opens
 System Settings → Full Disk Access, and shows step-by-step instructions.
 macOS cannot grant FDA from a script; you must toggle the app in Settings.
 
+Used by: command line (developer) after ad-hoc builds; build_app.sh --fda.
+
 Usage: $(basename "$0") [options]
 
 Options:

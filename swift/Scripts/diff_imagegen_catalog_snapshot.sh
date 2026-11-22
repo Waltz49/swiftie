@@ -9,6 +9,8 @@ $(basename "$0") — CI check: ImageGen Python plugins vs Swift catalog snapshot
 Regenerates ImageGenPluginCatalogSnapshot.json from ImageGenPython, then ensures
 plugin_id sets match ImageGenPluginCatalog.swift (no drift between Python and Swift).
 
+Used by: command line (CI / maintainer).
+
 Usage: $(basename "$0")
 
 Options:

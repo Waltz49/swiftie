@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -19,6 +20,18 @@ if _BUNDLE_ROOT and _BUNDLE_ROOT not in sys.path:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Freeze image-gen job values at submit (LoRA paths, etc.).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Used by: command line (developer/tests). "
+            "The app uses ImageGenJobValuesSnapshot (Swift) in normal operation.\n\n"
+            "Stdin: one JSON object {\"plugin_id\": \"...\", \"values\": {...}}\n"
+            "Stdout: frozen values JSON"
+        ),
+    )
+    parser.parse_args()
+
     from imagegen_plugins import plugin_by_id
     from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
 
