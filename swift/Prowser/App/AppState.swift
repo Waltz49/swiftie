@@ -539,7 +539,7 @@ final class AppState {
             guard let self else { return }
             self.browseImageHistory.onCurrentImageChanged(path)
             self.reconcileUserRequestedTreeDirectoryWithActiveImage()
-            if self.userRequestedTreeDirectory != nil, !self.isFileTreeHighlightSyncSuspended {
+            if !self.isFileTreeHighlightSyncSuspended {
                 self.syncFileTreeToActiveImage()
             }
         }

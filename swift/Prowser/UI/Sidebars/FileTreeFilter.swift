@@ -381,13 +381,36 @@ enum FileTreeFilter {
     /// Current thumbnail directory and its ancestors (not stale `priority_paths` from earlier tree clicks).
     private static func isOnNavigationPath(_ path: String, appState: AppState) -> Bool {
         let pathNorm = standardizedPath(path)
-        if expandPriorityBypassActive, priorityPaths.contains(pathNorm) {
-            return true
+        // Python `priority_paths`: keep ancestors of the highlighted path visible in filtered modes.
+        for priority in priorityPaths {
+            if priority == pathNorm || priority.hasPrefix(pathNorm + "/") {
+                return true
+            }
         }
         guard let highlight = highlightDirectory(appState: appState) else { return false }
         let highlightNorm = standardizedPath(highlight)
         if pathNorm == highlightNorm { return true }
         return highlightNorm.hasPrefix(pathNorm + "/")
+    }
+
+    /// Hidden directory entries skipped by `skipsHiddenFiles` but needed to reach the highlight path.
+    static func requiredNavigationChildPaths(under parentPath: String, appState: AppState) -> [String] {
+        guard !appState.config.bool(forKey: "show_hidden_directories", default: false) else { return [] }
+        let parentNorm = standardizedPath(parentPath)
+        var firstComponents: Set<String> = []
+        func collectRouteSegment(to target: String) {
+            let targetNorm = standardizedPath(target)
+            guard targetNorm.hasPrefix(parentNorm + "/") else { return }
+            var rel = String(targetNorm.dropFirst(parentNorm.count))
+            if rel.hasPrefix("/") { rel.removeFirst() }
+            guard let first = rel.split(separator: "/").first, !first.isEmpty else { return }
+            firstComponents.insert(String(first))
+        }
+        for priority in priorityPaths { collectRouteSegment(to: priority) }
+        if let highlight = highlightDirectory(appState: appState) {
+            collectRouteSegment(to: highlight)
+        }
+        return firstComponents.map { parentNorm + "/" + $0 }
     }
 
     private static func navigationDirectories(appState: AppState) -> [String] {

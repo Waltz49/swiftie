@@ -79,6 +79,8 @@ struct FileTreeView: NSViewRepresentable {
     }
 
     func updateNSView(_ tabStop: NSView, context: Context) {
+        // Retrigger sync when the thumbnail/list active image moves (pre–tree-performance `updateNSView` hook).
+        _ = appState.fileData.currentImagePath
         _ = appState.fileTreeSyncActiveImageToken
         let treePaneContentVisible = appState.effectiveLeftSidebarVisible
             && appState.config.bool(forKey: "file_tree_visible", default: true)
@@ -2134,12 +2136,21 @@ final class FileTreeNode: NSObject {
     ) -> [FileTreeNode] {
         let showHidden = appState.config.bool(forKey: "show_hidden_directories", default: false)
         let url = URL(fileURLWithPath: path)
-        guard let entries = try? FileManager.default.contentsOfDirectory(
+        guard var entries = try? FileManager.default.contentsOfDirectory(
             at: url,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: showHidden ? [] : [.skipsHiddenFiles]
         ) else {
             return []
+        }
+        if !showHidden {
+            let existing = Set(entries.map { $0.standardizedFileURL.path })
+            for extra in FileTreeFilter.requiredNavigationChildPaths(under: path, appState: appState) {
+                guard !existing.contains(extra) else { continue }
+                var isDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: extra, isDirectory: &isDir), isDir.boolValue else { continue }
+                entries.append(URL(fileURLWithPath: extra))
+            }
         }
         let normalizedRoots = rootPaths.map {
             URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL.path
