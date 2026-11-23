@@ -1307,7 +1307,7 @@ final class ImageGenController {
             pendingValues["series_prompt_refinement"] = true
             if copiesDone > 0 {
                 let source = copyCycleValues.isEmpty ? pendingValues : copyCycleValues
-                FluxPromptJob.syncFluxPromptAIUserPromptForNextCopy(
+                FluxPromptJobValues.syncFluxPromptAIUserPromptForNextCopy(
                     values: &pendingValues,
                     sourceValues: source
                 )

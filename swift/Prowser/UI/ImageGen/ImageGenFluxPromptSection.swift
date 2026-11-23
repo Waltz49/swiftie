@@ -11,6 +11,8 @@ struct ImageGenFluxPromptSection: View {
     let activeBrowsePath: String?
     var onValuesChanged: (() -> Void)?
     var onQueueJobWithAI: (() -> Void)?
+    /// When true, Job AI checkbox reflects queued job metadata, not the global preference.
+    var editingQueueJob = false
 
     @State private var systemPromptExpanded = true
     @State private var systemPrompt = ""
@@ -30,6 +32,7 @@ struct ImageGenFluxPromptSection: View {
                         .toggleStyle(.checkbox)
                         .font(.caption)
                         .onChange(of: fluxContext.passImage) { _, enabled in
+                            guard !editingQueueJob else { return }
                             ImageGenPersistence.setPassImageToAI(enabled, config: appState.config)
                         }
 
@@ -106,8 +109,10 @@ struct ImageGenFluxPromptSection: View {
                 + "of the image job (queued or immediate)."
         )
         .onChange(of: fluxContext.jobCheckbox) { _, enabled in
-            ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
             values["flux_prompt_job_with_generate"] = enabled
+            if !editingQueueJob {
+                ImageGenPersistence.setFluxPromptJobWithGenerate(enabled, config: appState.config)
+            }
             onValuesChanged?()
         }
     }
@@ -174,14 +179,13 @@ struct ImageGenFluxPromptSection: View {
     }
 
     private func loadSettings() {
-        systemPrompt = ImageGenPersistence.fluxSystemPromptText(config: appState.config)
-        fluxContext.systemPromptOverride = systemPrompt
-        systemPromptExpanded = ImageGenPersistence.fluxSystemPromptEditorExpanded(config: appState.config)
-        fluxContext.passImage = ImageGenPersistence.passImageToAI(config: appState.config)
-        fluxContext.jobCheckbox = ImageGenPersistence.fluxPromptJobWithGenerate(config: appState.config)
-        fluxContext.sectionExpanded = ImageGenPersistence.fluxPromptSectionExpandedOnDialogOpen(
-            jobAIInBatch: fluxContext.jobCheckbox,
-            config: appState.config
+        FluxPromptJob.loadFluxPromptEditorState(
+            values: values,
+            context: fluxContext,
+            systemPrompt: &systemPrompt,
+            systemPromptEditorExpanded: &systemPromptExpanded,
+            config: appState.config,
+            editingQueueJob: editingQueueJob
         )
         fluxContext.taskKind = function
         fluxContext.sourcePaths = sourcePaths
@@ -197,6 +201,7 @@ struct ImageGenFluxPromptSection: View {
     }
 
     private func persistSectionState() {
+        guard !editingQueueJob else { return }
         ImageGenPersistence.saveFluxSystemPromptSettings(
             text: systemPrompt,
             sectionVisible: fluxContext.sectionExpanded,

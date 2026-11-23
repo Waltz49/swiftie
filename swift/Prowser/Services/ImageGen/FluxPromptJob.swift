@@ -105,7 +105,26 @@ enum FluxPromptJob {
             "user_prompt": userPrompt,
             "image_paths": paths,
             "task_kind": context.taskKind,
+            fluxPromptAIJobMetaPassImageKey: context.passImage,
         ]
+    }
+
+    /// Meta keys carried on each job / step for Job AI (snapshot on submit; edit via queue dialog).
+    static let fluxPromptAIJobMetaPassImageKey = "pass_image"
+
+    private static func systemPromptTextFromJobMeta(_ meta: [String: Any], config: AppConfig) -> String {
+        let system = (meta["system_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !system.isEmpty { return system }
+        return ImageGenPersistence.fluxSystemPromptText(config: config)
+    }
+
+    /// Whether Job AI controls participate in submit (Generate / Replace / Update).
+    ///
+    /// The Job AI toggle lives in the section header and stays visible when collapsed; honoring
+    /// ``jobCheckbox`` matches that UX (Python hides the toggle inside collapsed content).
+    static func fluxPromptAIJobUIActive(context: ImageGenFluxPromptSubmitContext) -> Bool {
+        guard context.lmStudioMounted else { return false }
+        return context.sectionExpanded || context.jobCheckbox
     }
 
     @discardableResult
@@ -116,7 +135,7 @@ enum FluxPromptJob {
         force: Bool = false
     ) -> Bool {
         clearFluxPromptAIJob(&values)
-        guard context.lmStudioMounted else {
+        guard fluxPromptAIJobUIActive(context: context) else {
             return false
         }
         if !force, !context.jobCheckbox { return false }
@@ -131,7 +150,7 @@ enum FluxPromptJob {
         values: inout [String: Any],
         force: Bool = false
     ) -> Bool {
-        if !context.lmStudioMounted {
+        if !fluxPromptAIJobUIActive(context: context) {
             if force { return false }
             clearFluxPromptAIJob(&values)
             return true
@@ -147,7 +166,7 @@ enum FluxPromptJob {
         context: ImageGenFluxPromptSubmitContext,
         force: Bool = false
     ) -> Bool {
-        guard context.lmStudioMounted else {
+        guard fluxPromptAIJobUIActive(context: context) else {
             return false
         }
         if force || context.jobCheckbox {
@@ -170,7 +189,7 @@ enum FluxPromptJob {
         context: ImageGenFluxPromptSubmitContext
     ) {
         guard JobStepQueue.hasFluxPromptAIJob(values) else {
-            // Leave `jobCheckbox` as loaded from `flux_prompt_job_with_generate` for normal dialog opens.
+            context.jobCheckbox = false
             return
         }
         if let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any],
@@ -245,7 +264,7 @@ enum FluxPromptJob {
         }
     }
 
-    /// Restore dialog prompt + AI system prompt from queued job AI metadata before edit.
+    /// Restore dialog prompt + AI fields from queued job metadata (``syncJobCheckboxFromValues`` is separate).
     static func restoreFluxPromptAIJobIntoEditor(
         values: inout [String: Any],
         context: ImageGenFluxPromptSubmitContext
@@ -262,7 +281,55 @@ enum FluxPromptJob {
         if !system.isEmpty {
             context.systemPromptOverride = system
         }
-        syncJobCheckboxFromValues(values: values, context: context)
+        if let pass = passImageStoredInJobMeta(meta) {
+            context.passImage = pass
+        }
+    }
+
+    private static func passImageStoredInJobMeta(_ meta: [String: Any]) -> Bool? {
+        if let pass = meta[fluxPromptAIJobMetaPassImageKey] as? Bool { return pass }
+        guard meta["image_paths"] != nil else { return nil }
+        return !(meta["image_paths"] as? [String] ?? []).isEmpty
+    }
+
+    /// Load AI Prompt Enhancement controls from queued job metadata or global preferences.
+    static func loadFluxPromptEditorState(
+        values: [String: Any],
+        context: ImageGenFluxPromptSubmitContext,
+        systemPrompt: inout String,
+        systemPromptEditorExpanded: inout Bool,
+        config: AppConfig,
+        editingQueueJob: Bool
+    ) {
+        if editingQueueJob {
+            syncJobCheckboxFromValues(values: values, context: context)
+            if JobStepQueue.hasFluxPromptAIJob(values),
+               let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] {
+                systemPrompt = systemPromptTextFromJobMeta(meta, config: config)
+                context.systemPromptOverride = systemPrompt
+                context.passImage = passImageStoredInJobMeta(meta)
+                    ?? ImageGenPersistence.passImageToAI(config: config)
+            } else {
+                systemPrompt = ImageGenPersistence.fluxSystemPromptText(config: config)
+                context.systemPromptOverride = systemPrompt
+                context.passImage = ImageGenPersistence.passImageToAI(config: config)
+            }
+            context.sectionExpanded = ImageGenPersistence.fluxPromptSectionExpandedOnDialogOpen(
+                jobAIInBatch: context.jobCheckbox,
+                config: config
+            )
+            systemPromptEditorExpanded = ImageGenPersistence.fluxSystemPromptEditorExpanded(config: config)
+            return
+        }
+        systemPrompt = ImageGenPersistence.fluxSystemPromptText(config: config)
+        context.systemPromptOverride = systemPrompt
+        systemPromptEditorExpanded = ImageGenPersistence.fluxSystemPromptEditorExpanded(config: config)
+        context.passImage = ImageGenPersistence.passImageToAI(config: config)
+        context.jobCheckbox = ImageGenPersistence.fluxPromptJobWithGenerate(config: config)
+        context.sectionExpanded = ImageGenPersistence.fluxPromptSectionExpandedOnDialogOpen(
+            jobAIInBatch: context.jobCheckbox,
+            config: config
+        )
     }
 
     static func buildFluxPromptAIJobMetaFromJob(
@@ -283,11 +350,15 @@ enum FluxPromptJob {
             withImage: !imagePaths.isEmpty,
             imageCount: imagePaths.count
         )
+        let passImage = imagePaths.isEmpty
+            ? ImageGenPersistence.passImageToAI(config: config)
+            : true
         var meta: [String: Any] = [
             "system_prompt": system,
             "user_prompt": userPrompt,
             "image_paths": imagePaths,
             "task_kind": function,
+            fluxPromptAIJobMetaPassImageKey: passImage,
         ]
         if seriesChainOnly {
             meta["series_chain_only"] = true
@@ -329,26 +400,6 @@ enum FluxPromptJob {
         guard let meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any],
               meta["series_chain_only"] as? Bool == true else { return }
         clearFluxPromptAIJob(&values)
-    }
-
-    static func syncFluxPromptAIUserPromptForNextCopy(
-        values: inout [String: Any],
-        sourceValues: [String: Any]? = nil
-    ) {
-        guard var meta = values[JobStepQueue.fluxPromptAIJobKey] as? [String: Any] else { return }
-        let src = sourceValues ?? values
-        let prompt = (src["prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty {
-            meta["user_prompt"] = prompt
-        }
-        if meta["image_paths"] != nil {
-            let refreshed = ImageGenExifReferences.resolveSourceImagePaths(values)
-                .filter { FileManager.default.isReadableFile(atPath: $0) }
-            if !refreshed.isEmpty {
-                meta["image_paths"] = refreshed
-            }
-        }
-        values[JobStepQueue.fluxPromptAIJobKey] = meta
     }
 
     static func multiCopyFixedSeedAllowed(

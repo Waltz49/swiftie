@@ -251,7 +251,8 @@ struct ImageGenPanelShell: View {
                             sourcePaths: effectiveSourcePaths,
                             activeBrowsePath: activeBrowsePath,
                             onValuesChanged: onValuesChanged,
-                            onQueueJobWithAI: onQueueJobWithAI
+                            onQueueJobWithAI: onQueueJobWithAI,
+                            editingQueueJob: editingQueueJob
                         )
                     }
 

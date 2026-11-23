@@ -1314,6 +1314,8 @@ struct ImageGenUnifiedDialog: View {
         ImageGenPromptTextEncoding.repairPromptDictionaryFields(&submitValues)
         syncNormalizedPromptFieldsFromSubmit(into: &values, submitValues: submitValues)
         fluxContext.lmStudioMounted = appState.workers.foregroundModelTasks.isAvailable
+        // ``fluxContext`` owns the Job AI toggle at submit; do not overwrite from stale ``values``.
+        values["flux_prompt_job_with_generate"] = fluxContext.jobCheckbox
         fluxContext.promptText = submitValues["prompt"] as? String ?? ""
         fluxContext.taskKind = selectedFunction
         fluxContext.sourcePaths = selectedFunction == "edit"
