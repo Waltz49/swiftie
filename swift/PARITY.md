@@ -407,6 +407,7 @@ Swift reads/writes the same profile `settings.json` as Python. Items marked **do
 | `imagegen_max_generation_dimension`, `imagegen_low_ram` | done | done (Python worker/registry reads shared settings; Swift UI reclamps dims on change) |
 | `resize_preserve_aspect`, `resize_resample_method`, `resize_delete_original`, `resize_preserve_dates`, `resize_anchor_is_width` | done | done |
 | `imagegen_unload_models_when_queue_held` | done | done (`ModelTasksBridge.unloadImageModel`) |
+| `imagegen_unload_image_models_during_ai_refinement` | — | done (`ImageGenController.runJobAIStage`; Optimized only; default off) |
 | `imagegen_unload_lmstudio_models_before_generation` | always on in worker | done (`LmStudioCaptionService` before `startGenerate`; default on) |
 | `use_prompt_filter_exits`, text/image exit scripts, prefix/postfix | done | partial (runtime on Python bridges for prompts) |
 | `chat_use_rejected_response_phrases`, `chat_rejected_response_phrases.json` | hardcoded phrases in chat worker only | done (settings UI + JSON; matcher/retry helper for chat LM Studio stream, not flux/caption) |

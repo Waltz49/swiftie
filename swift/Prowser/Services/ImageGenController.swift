@@ -1924,7 +1924,18 @@ final class ImageGenController {
         return fluxPromptTasks.isAvailable
     }
 
+    private func unloadImageModelsDuringAIRefinementEnabled() -> Bool {
+        guard ImageGenExecutionBackend.from(config: config) == .optimized else { return false }
+        return config.bool(forKey: "imagegen_unload_image_models_during_ai_refinement", default: false)
+    }
+
+    private func unloadImageModelsDuringAIRefinementIfEnabled() async {
+        guard unloadImageModelsDuringAIRefinementEnabled() else { return }
+        await modelTasks.awaitUnloadImageModel()
+    }
+
     private func runJobAIStage(values: [String: Any]) async {
+        await unloadImageModelsDuringAIRefinementIfEnabled()
         guard await ensureFluxPromptTasksReadyForJobAI() else {
             failJobAIStage(
                 "LM Studio is not available for AI prompt refinement.\n\n"

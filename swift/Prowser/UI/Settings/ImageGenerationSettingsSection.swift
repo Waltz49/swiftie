@@ -103,6 +103,20 @@ struct ImageGenerationSettingsSection: View {
                         .preferencesScanRecordsLabel("Include triggers in final exif data")
                     Toggle("Unload image Models when queue is held", isOn: boolBinding("imagegen_unload_models_when_queue_held"))
                         .preferencesScanRecordsLabel("Unload image Models when queue is held")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle(
+                            "Unload image models during AI prompt refinement",
+                            isOn: boolBinding("imagegen_unload_image_models_during_ai_refinement")
+                        )
+                        .preferencesScanRecordsLabel("Unload image models during AI prompt refinement")
+                        Text(
+                            "Optimized mode only. Releases loaded image weights before a queued job "
+                                + "runs AI prompt refinement; the image model reloads when generation starts."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                     if BundleCapabilities.lmStudioUIEnabled {
                         VStack(alignment: .leading, spacing: 2) {
                             Toggle(

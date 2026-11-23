@@ -127,9 +127,15 @@ final class MfluxGenerationTasks {
         }
     }
 
+    /// Awaits persistent-worker ``unload_image`` when no generate job is in flight.
+    func awaitUnloadImageModel() async {
+        guard !isBusy else { return }
+        await generationWorker.unloadImageModel()
+    }
+
     @discardableResult
     func unloadImageModel() -> Bool {
-        Task { await generationWorker.unloadImageModel() }
+        Task { await awaitUnloadImageModel() }
         return true
     }
 
