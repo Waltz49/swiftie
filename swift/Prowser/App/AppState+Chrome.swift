@@ -339,6 +339,17 @@ extension AppState {
         "Show Panes"
     }
 
+    /// Same end state as F4 hide-all-chrome, without animation (for layout measurement e.g. Shift+W).
+    func hideChromeIfVisibleForLayoutMeasurement() {
+        guard isAnyChromeVisible else { return }
+        ChromeLayoutAnimator.stop()
+        chromeSavedLayout = captureChromeLayout()
+        chromeSuppressed = true
+        chromeLayoutOverride = nil
+        persistChromeVisibilityToConfig()
+        noteSidebarLayoutChanged()
+    }
+
     func toggleChrome() {
         if isAnyChromeVisible {
             chromeSavedLayout = captureChromeLayout()

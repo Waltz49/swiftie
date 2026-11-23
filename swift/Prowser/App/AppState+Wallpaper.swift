@@ -124,6 +124,9 @@ extension AppState {
             pumpLayoutEvents(for: window)
         }
 
+        hideChromeIfVisibleForLayoutMeasurement()
+        pumpLayoutEvents(for: window)
+
         guard let screen = window.screen ?? NSScreen.main else { return }
         let screenFrame = screen.frame
         let screenRatio = screenFrame.width / max(1, screenFrame.height)
