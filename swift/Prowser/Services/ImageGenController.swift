@@ -141,10 +141,13 @@ final class ImageGenController {
 
     /// Port of Python ``can_skip_active_series_copy``: an in-flight ``generate`` copy may be
     /// ended early (single-copy jobs too — skipping the last copy finishes the job).
+    /// Swift also allows skip during queued job AI prompt refinement (LM Studio stream only; no model unload).
     var canSkipActiveSeriesCopy: Bool {
         if skipSeriesCopyRequested { return false }
+        guard cooldownSecondsRemaining == 0 else { return false }
+        if jobAIStageActive, fluxPromptTasks.isBusy { return true }
         guard modelTasks.isBusy, modelTasks.activeKind == "generate" else { return false }
-        return cooldownSecondsRemaining == 0
+        return true
     }
 
     func activeJobRelationHeading(for path: String) -> String? {
@@ -365,8 +368,14 @@ final class ImageGenController {
         // Python defers the worker cancel one tick so the toolbar shows "Skipping copy..." first.
         Task { @MainActor [weak self] in
             guard let self, self.skipSeriesCopyRequested else { return }
+            if self.jobAIStageActive, self.fluxPromptTasks.isBusy {
+                self.fluxPromptTasks.cancel()
+                return
+            }
             // Cooperative cancel keeps the warm Python worker when possible; escalate to kill if stuck in MLX.
-            self.modelTasks.cancelForSeriesCopySkip()
+            if self.modelTasks.isBusy, self.modelTasks.activeKind == "generate" {
+                self.modelTasks.cancelForSeriesCopySkip()
+            }
         }
     }
 
@@ -1996,7 +2005,7 @@ final class ImageGenController {
         fluxPromptTasks.onJobFinished = nil
         if cancelled {
             if suppressTaskFailureUI || queuePersistSuppressed { return }
-            if shouldContinueAfterCopyAbort() {
+            if skipSeriesCopyRequested || shouldContinueAfterCopyAbort() {
                 continueAfterAbortedStepSync()
                 return
             }
