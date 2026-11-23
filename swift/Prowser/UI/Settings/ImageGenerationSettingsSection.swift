@@ -41,8 +41,6 @@ struct ImageGenerationSettingsSection: View {
                         onGear: { appState.chat.openExitScripts() }
                     )
 
-                    jobCardHoverPromptRow()
-
                     gearToggleRow(
                         title: "Use read aloud exit",
                         subtitle: "External script for speak buttons instead of built-in speech.",
@@ -136,6 +134,8 @@ struct ImageGenerationSettingsSection: View {
                         .labelsHidden()
                         .padding(.leading, 40)
                     }
+
+                    jobCardHoverPromptRow()
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("MFLUX generation backend")
@@ -338,42 +338,25 @@ struct ImageGenerationSettingsSection: View {
 
     @ViewBuilder
     private func jobCardHoverPromptRow() -> some View {
-        let selection = stringBinding(
-            JobCardHoverPromptMode.settingsKey,
-            default: JobCardHoverPromptMode.originalValue
-        )
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("Jobcard hover shows:")
-                .preferencesScanRecordsLabel("Jobcard hover shows")
-            HStack(spacing: 16) {
-                jobCardHoverPromptRadio(
-                    "Original Prompt",
-                    tag: JobCardHoverPromptMode.originalValue,
-                    selection: selection
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Job card hover shows")
+                .font(.headline)
+                .preferencesScanRecordsLabel("Job card hover shows")
+            Picker(
+                "Job card hover shows",
+                selection: stringBinding(
+                    JobCardHoverPromptMode.settingsKey,
+                    default: JobCardHoverPromptMode.originalValue
                 )
-                jobCardHoverPromptRadio(
-                    "Modified prompt",
-                    tag: JobCardHoverPromptMode.modifiedValue,
-                    selection: selection
-                )
+            ) {
+                Text("Original Prompt").tag(JobCardHoverPromptMode.originalValue)
+                Text("Modified prompt").tag(JobCardHoverPromptMode.modifiedValue)
             }
-            Spacer(minLength: 0)
+            .preferencesScanRecordsLabel("Job card hover shows")
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+            .padding(.leading, 40)
         }
-        .preferencesScanRecordsLabel("Jobcard hover prompt")
-    }
-
-    private func jobCardHoverPromptRadio(_ title: String, tag: String, selection: Binding<String>) -> some View {
-        let selected = selection.wrappedValue == tag
-        return Button {
-            selection.wrappedValue = tag
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                Text(title)
-            }
-        }
-        .buttonStyle(.plain)
-        .preferencesScanRecordsLabel(title)
     }
 
     @ViewBuilder
