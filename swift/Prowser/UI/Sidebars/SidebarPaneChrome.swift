@@ -26,10 +26,18 @@ struct SidebarPaneTitlebar: View {
         return true
     }
 
+    private var showsJobsQueueSizeLights: Bool {
+        if case .jobs = contextMenuKind { return true }
+        return false
+    }
+
     var body: some View {
         let colors = appState.theme.colors
 
         HStack(spacing: 8) {
+            if showsJobsQueueSizeLights {
+                JobsQueueSizeTrafficLights()
+            }
             titlebarDragRegion(colors: colors)
 
             if let contextMenuKind {

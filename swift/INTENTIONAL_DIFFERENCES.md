@@ -7,6 +7,8 @@ Planning reference only. Python reference: `~/dev/testchat/image_browser`. Each 
 | **`--min`**: no **Image** menu or **Job Control** pane; **Face Recognition** tab hidden in Preferences | **`--min`**: hides image-generation-related UI (frozen bundle / launch flag) |
 | **Image** generation via **bundled ImageGenPython** + profile venv + **MFLUX CLI** / pipeline workers (no long-lived registry; no external repo root) | In-process / worker-based generation with full Python Qt app |
 | **Job Control**: shared action bar pinned below the queue list when a job is selected (keeps the bar inside the SwiftUI-sized pane so its buttons stay clickable) | Action bar embedded at the bottom of the selected job card |
+| **Job Control** titlebar: red / yellow / green traffic lights set strip / one / all (same as ⌥[ ⌥] ⌥\\) | No titlebar size controls; shortcuts only |
+| ⌥[ / ⌥] / ⌥\\ set jobs pane size even when the queue is idle or empty | ⌥] and ⌥\\ require a running job or queued rows (`require_active`) |
 | Swift LoRA Settings use simplified labels (LoRA file, works with model, in Create menu, Test LoRAs); Downloads copy/remove options live in **Test LoRAs — Options**; Check LoRAs probe CNN is headless torchvision only in the imagegen worker (no `search`/PySide6 sorter); sample install pack deferred | Python Qt app uses older library/catalog wording in places; per-file Add LoRA from Settings; in-process probe CNN may use `cnn_image_similarity_sorter` |
 | Flux-prompt **AI queue steps** skipped when AI bridge unavailable | LM Studio / flux-prompt steps run in queue |
 | No **Chat** pane | **Chat** pane in full Python app |

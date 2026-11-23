@@ -19,6 +19,7 @@ struct FloatingJobQueuePanelView: View {
                         WindowDragArea()
                             .frame(maxWidth: .infinity, maxHeight: Self.titlebarHeight)
                         HStack(spacing: 8) {
+                            JobsQueueSizeTrafficLights()
                             Text("Job Control" + appState.imageGen.jobsPaneTitleSuffix())
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(colors.sidebarHeaderText)

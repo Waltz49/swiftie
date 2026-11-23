@@ -431,9 +431,8 @@ extension AppState {
     }
 
     @discardableResult
-    func setJobsQueueSizeMode(_ mode: JobsQueueSizeMode, requireActive: Bool = false) -> Bool {
+    func setJobsQueueSizeMode(_ mode: JobsQueueSizeMode) -> Bool {
         guard BundleCapabilities.imageGenUIEnabled else { return false }
-        if requireActive, !imageGen.isProcessing, imageGen.queue.jobs.isEmpty { return false }
         ensureJobsSurfaceVisible()
         // ⌥\ ALL: keep persisted splitter height; titlebar double-click uses ``cycleJobsPaneSize`` instead.
         if mode == .all {

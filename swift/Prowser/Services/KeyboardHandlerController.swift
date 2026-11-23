@@ -311,13 +311,10 @@ final class KeyboardHandlerController {
             }
         }
 
-        // ⌥[ compact, ⌥] one job, ⌥\ all jobs (Python parity); ⌘[ and ⌘] are not bound.
+        // ⌥[ strip, ⌥] one job, ⌥\ all jobs (any queue state); ⌘[ and ⌘] are not bound.
         if !hasShift, !hasControl, hasOption, !hasCommand,
            let jobsMode = jobsQueueSizeShortcutMode(event) {
-            return appState.setJobsQueueSizeMode(
-                jobsMode,
-                requireActive: jobsMode != .strip
-            )
+            return appState.setJobsQueueSizeMode(jobsMode)
         }
 
         if hasOption, !hasCommand, !hasShift, !hasControl {
