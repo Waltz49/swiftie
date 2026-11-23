@@ -194,7 +194,10 @@ verify_portable_resource_bundle() {
         exit 1
     fi
 
-    if [[ -r "$embedded/Assets/lorablob" ]]; then
+    # SPM .process(Resources/Assets) flattens into the resource bundle root (no Assets/ subfolder).
+    if [[ -r "$embedded/lorablob" ]]; then
+        echo "Bundled lorablob: $embedded/lorablob"
+    elif [[ -r "$embedded/Assets/lorablob" ]]; then
         echo "Bundled lorablob: $embedded/Assets/lorablob"
     else
         echo "warning: lorablob not in bundle (Tools → Debug → Import Lora Defaults will be unavailable)" >&2
