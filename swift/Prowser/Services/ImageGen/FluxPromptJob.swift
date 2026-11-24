@@ -158,7 +158,15 @@ enum FluxPromptJob {
         if force {
             return attachFluxPromptAIJobToValues(context: context, config: config, values: &values, force: true)
         }
-        attachFluxPromptAIJobToValues(context: context, config: config, values: &values, force: false)
+        let attached = attachFluxPromptAIJobToValues(
+            context: context,
+            config: config,
+            values: &values,
+            force: false
+        )
+        if context.jobCheckbox, !attached {
+            return false
+        }
         return true
     }
 

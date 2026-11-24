@@ -70,6 +70,43 @@ final class FluxPromptJobTests: XCTestCase {
         XCTAssertEqual(meta["pass_image"] as? Bool, false)
     }
 
+    func testPrepareRunValuesFailsWhenJobCheckboxOnButAttachFails() {
+        let context = ImageGenFluxPromptSubmitContext()
+        context.lmStudioMounted = true
+        context.sectionExpanded = false
+        context.jobCheckbox = true
+        context.passImage = true
+        context.promptText = ""
+        context.taskKind = "create"
+        var values: [String: Any] = [
+            "prompt": "",
+            JobStepQueue.fluxPromptAIJobKey: ["user_prompt": "prior"],
+        ]
+        let config = ProwserTestSupport.ephemeralAppConfig()
+        let ok = FluxPromptJob.applyFluxPromptJobToPrepareRunValues(
+            context: context,
+            config: config,
+            values: &values,
+            force: false
+        )
+        XCTAssertFalse(ok)
+        XCTAssertFalse(JobStepQueue.hasFluxPromptAIJob(values))
+    }
+
+    func testSyncJobCheckboxOnWhenJobHasAIMeta() {
+        let context = ImageGenFluxPromptSubmitContext()
+        context.jobCheckbox = false
+        let values: [String: Any] = [
+            JobStepQueue.fluxPromptAIJobKey: [
+                "user_prompt": "hello",
+                "system_prompt": "sys",
+                "pass_image": false,
+            ],
+        ]
+        FluxPromptJob.syncJobCheckboxFromValues(values: values, context: context)
+        XCTAssertTrue(context.jobCheckbox)
+    }
+
     func testPrepareRunValuesAttachesAIWhenSectionExpandedAndCheckboxOn() {
         let context = ImageGenFluxPromptSubmitContext()
         context.lmStudioMounted = true

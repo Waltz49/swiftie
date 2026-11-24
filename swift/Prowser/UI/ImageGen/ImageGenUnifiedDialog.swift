@@ -1119,6 +1119,17 @@ struct ImageGenUnifiedDialog: View {
         }
     }
 
+    /// Keep queue-job editor ``values`` aligned with the payload just written to the queue (AI meta is job-owned).
+    private func adoptSubmittedFluxPromptAIJobIntoEditorValues(from submitValues: [String: Any]) {
+        let key = JobStepQueue.fluxPromptAIJobKey
+        if let meta = submitValues[key] {
+            values[key] = meta
+        } else {
+            values.removeValue(forKey: key)
+        }
+        values["flux_prompt_job_with_generate"] = fluxContext.jobCheckbox
+    }
+
     /// Queue-job load and Replace/Update: normalize editor chrome after job values load (Python ``_after_successful_submit`` for replace).
     private func adoptQueueJobEditorBaseline() {
         ImageGenJobValuesSnapshot.normalizeReplacedJobValues(&values)
@@ -1529,6 +1540,7 @@ struct ImageGenUnifiedDialog: View {
                 values[key] = val
             }
             if replace {
+                adoptSubmittedFluxPromptAIJobIntoEditorValues(from: submitValues)
                 adoptQueueJobEditorBaseline()
             }
             session.setValues(values, for: selectedFunction)
